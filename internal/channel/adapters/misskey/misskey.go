@@ -439,6 +439,10 @@ func (*MisskeyAdapter) buildInboundMessage(me *meResponse, note misskeyNote) (ch
 			}
 		}
 	}
+	// Replying to the bot's own note is directed at the bot even without an
+	// explicit @-mention; without this flag, plain-text ask_user replies in
+	// non-private visibility are silently dropped by isDirectedAtBot.
+	isReplyToBot := me != nil && note.Reply != nil && strings.TrimSpace(note.Reply.UserID) == me.ID
 
 	return channel.InboundMessage{
 		Channel: Type,
@@ -462,9 +466,10 @@ func (*MisskeyAdapter) buildInboundMessage(me *meResponse, note misskeyNote) (ch
 		ReceivedAt: receivedAt,
 		Source:     "misskey",
 		Metadata: map[string]any{
-			"is_mentioned": isMentioned,
-			"visibility":   note.Visibility,
-			"note_id":      note.ID,
+			"is_mentioned":    isMentioned,
+			"is_reply_to_bot": isReplyToBot,
+			"visibility":      note.Visibility,
+			"note_id":         note.ID,
 		},
 	}, true
 }

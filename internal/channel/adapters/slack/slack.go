@@ -452,6 +452,11 @@ func (a *SlackAdapter) handleMessageEvent(
 	if ev.Message != nil {
 		parentUserID = strings.TrimSpace(ev.Message.ParentUserId)
 	}
+	// Slack reply semantics are thread-level: ParentUserId is the author of
+	// the thread's root message. A reply inside a thread the bot started is
+	// directed at the bot; without this flag, plain-text ask_user replies in
+	// channels are silently dropped by isDirectedAtBot.
+	isReplyToBot := parentUserID != "" && parentUserID == strings.TrimSpace(selfUserID)
 	replyRef := buildSlackReplyRef(ev.Channel, ev.TimeStamp, threadID, parentUserID)
 	conversationName, _ := a.lookupConversationInfo(ctx, conn.api, cfg.ID, ev.Channel)
 
@@ -480,12 +485,13 @@ func (a *SlackAdapter) handleMessageEvent(
 		ReceivedAt: time.Now().UTC(),
 		Source:     "slack",
 		Metadata: map[string]any{
-			"bot_alias":    strings.TrimSpace(selfUserID),
-			"channel_type": ev.ChannelType,
-			"channel_name": conversationName,
-			"is_mentioned": isMentioned,
-			"thread_ts":    threadID,
-			"subtype":      ev.SubType,
+			"bot_alias":       strings.TrimSpace(selfUserID),
+			"channel_type":    ev.ChannelType,
+			"channel_name":    conversationName,
+			"is_mentioned":    isMentioned,
+			"is_reply_to_bot": isReplyToBot,
+			"thread_ts":       threadID,
+			"subtype":         ev.SubType,
 		},
 	}
 

@@ -135,6 +135,43 @@ func TestBuildInboundMessageReplyKeepsTextClean(t *testing.T) {
 	}
 }
 
+func TestBuildInboundMessageMarksReplyToBot(t *testing.T) {
+	t.Parallel()
+
+	adapter := &MisskeyAdapter{}
+	me := &meResponse{ID: "bot-1", Username: "bot"}
+	// Reply to the bot's own note (no @-mention): must be flagged so
+	// isDirectedAtBot lets plain-text ask_user replies through.
+	inbound, ok := adapter.buildInboundMessage(me, misskeyNote{
+		ID:     "note-2",
+		Text:   "my answer",
+		UserID: "user-1",
+		User:   misskeyUser{Username: "sender"},
+		Reply:  &misskeyNote{ID: "bot-note", UserID: "bot-1", Text: "question"},
+	})
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if replyToBot, _ := inbound.Metadata["is_reply_to_bot"].(bool); !replyToBot {
+		t.Fatalf("metadata = %#v, want is_reply_to_bot", inbound.Metadata)
+	}
+
+	// Reply to someone else's note must NOT be flagged.
+	inbound, ok = adapter.buildInboundMessage(me, misskeyNote{
+		ID:     "note-3",
+		Text:   "side chatter",
+		UserID: "user-1",
+		User:   misskeyUser{Username: "sender"},
+		Reply:  &misskeyNote{ID: "other-note", UserID: "user-2", Text: "hi"},
+	})
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if replyToBot, _ := inbound.Metadata["is_reply_to_bot"].(bool); replyToBot {
+		t.Fatalf("metadata = %#v, reply to another user must not be flagged", inbound.Metadata)
+	}
+}
+
 func TestBuildInboundMessageRenoteMapsForward(t *testing.T) {
 	t.Parallel()
 

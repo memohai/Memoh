@@ -2159,7 +2159,7 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 			"status":        strings.TrimSpace(envelope.Status),
 			"payload":       parseRawJSON(payload),
 		}
-		actions := userInputActions(userInputID, payload)
+		actions := userInputActions(userInputID)
 		return []channel.StreamEvent{
 			{
 				Type: channel.StreamEventToolCallStart,
@@ -2280,71 +2280,18 @@ func canonicalUserInputPayload(metadata, fallback json.RawMessage) json.RawMessa
 	return fallback
 }
 
-func userInputActions(userInputID string, raw json.RawMessage) []channel.Action {
+// userInputActions emits the single marker action for a pending ask_user
+// request. The marker's Type ("user_input") is what keeps the tool-call
+// filter from dropping the prompt; its Value is only ever consumed by the
+// Telegram legacy respond: parser as a silent no-op. Adapters with native
+// controls (Telegram) rebuild the real interactive UI from the payload —
+// the shared layer must not fabricate per-option keyboards here, because no
+// other adapter renders user_input buttons and Telegram replaces them anyway.
+func userInputActions(userInputID string) []channel.Action {
 	userInputID = strings.TrimSpace(userInputID)
 	if userInputID == "" {
 		return nil
 	}
-	type option struct {
-		ID    string `json:"id"`
-		Label string `json:"label"`
-	}
-	type question struct {
-		ID          string   `json:"id"`
-		Kind        string   `json:"kind"`
-		Options     []option `json:"options"`
-		AllowCustom bool     `json:"allow_custom"`
-	}
-	var payload struct {
-		Questions []question `json:"questions"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil || len(payload.Questions) == 0 {
-		// Keep a bare user_input action so tool-call dropping still forwards
-		// the prompt when payload parse fails. Adapters rebuild the real UI.
-		return []channel.Action{{Type: "user_input", Label: "Reply", Value: "respond:" + userInputID}}
-	}
-
-	// Interactive IM adapters (Telegram) rebuild multi-step UX from the
-	// payload. Channel still emits at least one user_input action so the
-	// show_tool_calls_in_im filter never drops a pending prompt, and so
-	// single-question single_select keeps working on simple button paths.
-	first := payload.Questions[0]
-	if first.Kind == "single_select" {
-		actions := make([]channel.Action, 0, len(first.Options)+2)
-		for idx, item := range first.Options {
-			if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.Label) == "" {
-				continue
-			}
-			actions = append(actions, channel.Action{
-				Type:  "user_input",
-				Label: strings.TrimSpace(item.Label),
-				Value: "respond:" + userInputID + ":" + strings.TrimSpace(item.ID),
-				Row:   idx / 2,
-			})
-		}
-		if len(actions) > 0 {
-			if first.AllowCustom {
-				actions = append(actions, channel.Action{
-					Type:  "user_input",
-					Label: "Other...",
-					Value: "respond:" + userInputID,
-					Row:   len(actions) / 2,
-				})
-			}
-			// Multi-question: a Next marker keeps the card interactive even
-			// before the adapter rewrites the keyboard into a paged wizard.
-			if len(payload.Questions) > 1 {
-				actions = append(actions, channel.Action{
-					Type:  "user_input",
-					Label: "Next ›",
-					Value: "respond:" + userInputID,
-					Row:   (len(actions) + 1) / 2,
-				})
-			}
-			return actions
-		}
-	}
-	// multi_select / text / multi-question without single_select page-0 options.
 	return []channel.Action{{Type: "user_input", Label: "Reply", Value: "respond:" + userInputID}}
 }
 

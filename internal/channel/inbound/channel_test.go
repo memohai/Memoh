@@ -3368,7 +3368,9 @@ func TestMapStreamChunkToChannelEvents_UserInputRequest(t *testing.T) {
 	if !ok || len(questions) != 1 || questions[0].(map[string]any)["text"] != "Pick one" {
 		t.Fatalf("payload questions = %#v", payload["questions"])
 	}
-	if len(tc.Actions) != 2 || tc.Actions[0].Type != "user_input" || tc.Actions[0].Label != "Alpha" || tc.Actions[0].Value != "respond:input-1:q1.o1" || tc.Actions[1].Value != "respond:input-1:q1.o2" {
+	// The shared layer emits a single filter-keepalive marker; adapters with
+	// native controls (Telegram) rebuild the real keyboard from the payload.
+	if len(tc.Actions) != 1 || tc.Actions[0].Type != "user_input" || tc.Actions[0].Label != "Reply" || tc.Actions[0].Value != "respond:input-1" {
 		t.Fatalf("actions = %#v", tc.Actions)
 	}
 }
@@ -3399,7 +3401,7 @@ func TestMapStreamChunkToChannelEvents_UserInputCustomOptionFallback(t *testing.
 		t.Fatalf("unexpected error: %v", err)
 	}
 	actions := events[0].ToolCall.Actions
-	if len(actions) != 3 || actions[0].Label != "Alpha" || actions[1].Label != "Beta" || actions[2].Label != "Other..." || actions[2].Value != "respond:input-1" {
+	if len(actions) != 1 || actions[0].Label != "Reply" || actions[0].Value != "respond:input-1" {
 		t.Fatalf("actions = %#v", actions)
 	}
 }
