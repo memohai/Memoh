@@ -1,14 +1,16 @@
 package telegram
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
-	"hash/fnv"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -46,6 +48,7 @@ type askUserDraft struct {
 type askUserWizard struct {
 	Token        string
 	UserInputID  string
+	Locale       string
 	Questions    []askUserQuestion
 	Page         int
 	Drafts       map[string]*askUserDraft
@@ -168,9 +171,8 @@ func textPromptKey(chatID int64, msgID int) string {
 }
 
 func askUserToken(userInputID string) string {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(strings.TrimSpace(userInputID)))
-	return fmt.Sprintf("%08x", h.Sum32())
+	sum := sha256.Sum256([]byte(strings.TrimSpace(userInputID)))
+	return base64.RawURLEncoding.EncodeToString(sum[:12])
 }
 
 func parseAskUserCallback(data string) (askUserCallback, bool) {
@@ -339,6 +341,13 @@ func newAskUserWizard(userInputID string, questions []askUserQuestion) *askUserW
 	return w
 }
 
+func (w *askUserWizard) localizer() *i18n.Localizer {
+	if w == nil {
+		return i18n.New("")
+	}
+	return i18n.New(w.Locale)
+}
+
 func (w *askUserWizard) questionAt(page int) (askUserQuestion, bool) {
 	if w == nil || page < 0 || page >= len(w.Questions) {
 		return askUserQuestion{}, false
@@ -393,8 +402,9 @@ func (w *askUserWizard) collectAnswers() []map[string]any {
 // always explicit so users can review, change, or skip any question. The card
 // only renders the current question and its current answer.
 func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
+	loc := w.localizer()
 	if w == nil || len(w.Questions) == 0 {
-		return "Input requested", nil
+		return loc.T("cmd.userInput.inputRequested"), nil
 	}
 	if w.Page < 0 {
 		w.Page = 0
@@ -404,14 +414,14 @@ func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
 	}
 	q, ok := w.questionAt(w.Page)
 	if !ok {
-		return "Input requested", nil
+		return loc.T("cmd.userInput.inputRequested"), nil
 	}
 	var b strings.Builder
 	b.WriteString(q.Text)
 	d := w.draftFor(q.ID)
 	// Choice buttons already show their selection state. Free text and custom
 	// values stay in the body because they cannot fit in a button label.
-	if ans := formatAskUserBodyAnswer(q, d); ans != "" {
+	if ans := formatAskUserBodyAnswer(q, d, loc); ans != "" {
 		b.WriteString("\n\n")
 		b.WriteString(ans)
 	}
@@ -438,9 +448,9 @@ func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
 			row++
 		}
 		if q.AllowCustom {
-			label := "其他…"
+			label := loc.T("cmd.userInput.otherOption")
 			if d.Answered && strings.TrimSpace(d.CustomText) != "" {
-				label = "✓ 其他…"
+				label = "✓ " + label
 			}
 			actions = append(actions, channel.Action{
 				Type:  "user_input",
@@ -470,9 +480,9 @@ func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
 			row++
 		}
 		if q.AllowCustom {
-			label := "其他…"
+			label := loc.T("cmd.userInput.otherOption")
 			if strings.TrimSpace(d.CustomText) != "" {
-				label = "✓ 其他…"
+				label = "✓ " + label
 			}
 			actions = append(actions, channel.Action{
 				Type:  "user_input",
@@ -483,9 +493,9 @@ func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
 			row++
 		}
 	default: // text
-		label := "填写答案"
+		label := loc.T("cmd.userInput.fillAnswer")
 		if d.Answered {
-			label = "重新填写"
+			label = loc.T("cmd.userInput.refillAnswer")
 		}
 		actions = append(actions, channel.Action{
 			Type:  "user_input",
@@ -497,9 +507,9 @@ func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
 	}
 
 	if len(w.Questions) == 1 {
-		label := "提交"
+		label := loc.T("cmd.userInput.submit")
 		if !d.Answered {
-			label = "跳过"
+			label = loc.T("cmd.userInput.skip")
 		}
 		actions = append(actions, channel.Action{
 			Type:  "user_input",
@@ -525,9 +535,9 @@ func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
 		Row:   row,
 	})
 	if w.Page < len(w.Questions)-1 {
-		label := "下一题 →"
+		label := loc.T("cmd.userInput.next") + " →"
 		if !d.Answered {
-			label = "跳过 →"
+			label = loc.T("cmd.userInput.skip") + " →"
 		}
 		actions = append(actions, channel.Action{
 			Type:  "user_input",
@@ -536,9 +546,9 @@ func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
 			Row:   row,
 		})
 	} else {
-		label := "提交"
+		label := loc.T("cmd.userInput.submit")
 		if !d.Answered {
-			label = "跳过并提交"
+			label = loc.T("cmd.userInput.skipAndSubmit")
 		}
 		actions = append(actions, channel.Action{
 			Type:  "user_input",
@@ -551,7 +561,7 @@ func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
 	return b.String(), actions
 }
 
-func formatAskUserBodyAnswer(q askUserQuestion, d *askUserDraft) string {
+func formatAskUserBodyAnswer(q askUserQuestion, d *askUserDraft, loc *i18n.Localizer) string {
 	if d == nil || !d.Answered {
 		return ""
 	}
@@ -559,7 +569,7 @@ func formatAskUserBodyAnswer(q askUserQuestion, d *askUserDraft) string {
 		return strings.TrimSpace(d.Text)
 	}
 	if custom := strings.TrimSpace(d.CustomText); custom != "" {
-		return "其他：" + custom
+		return loc.T("cmd.userInput.customAnswerLabel") + ": " + custom
 	}
 	return ""
 }
@@ -651,8 +661,9 @@ func toggleString(list []string, target string) []string {
 // callback answer shown as a Telegram alert/toast.
 func applyAskUserCallback(w *askUserWizard, cb askUserCallback) (ready, needText bool, toast string) {
 	if w == nil {
-		return false, false, "已过期"
+		return false, false, i18n.New("").T("cmd.userInput.expired")
 	}
+	loc := w.localizer()
 	switch cb.Op {
 	case "n":
 		if cb.Page < 0 || cb.Page >= len(w.Questions) {
@@ -663,7 +674,7 @@ func applyAskUserCallback(w *askUserWizard, cb askUserCallback) (ready, needText
 	case "s":
 		q, ok := w.questionAt(cb.QIndex)
 		if !ok || cb.OIndex < 0 || cb.OIndex >= len(q.Options) {
-			return false, false, "无效操作"
+			return false, false, loc.T("cmd.userInput.invalidOperation")
 		}
 		if w.Page != cb.QIndex {
 			w.Page = cb.QIndex
@@ -687,7 +698,7 @@ func applyAskUserCallback(w *askUserWizard, cb askUserCallback) (ready, needText
 	case "t":
 		q, ok := w.questionAt(cb.QIndex)
 		if !ok || cb.OIndex < 0 || cb.OIndex >= len(q.Options) {
-			return false, false, "无效操作"
+			return false, false, loc.T("cmd.userInput.invalidOperation")
 		}
 		if w.Page != cb.QIndex {
 			w.Page = cb.QIndex
@@ -699,7 +710,7 @@ func applyAskUserCallback(w *askUserWizard, cb askUserCallback) (ready, needText
 	case "x":
 		q, ok := w.questionAt(cb.QIndex)
 		if !ok {
-			return false, false, "无效操作"
+			return false, false, loc.T("cmd.userInput.invalidOperation")
 		}
 		if w.Page != cb.QIndex {
 			w.Page = cb.QIndex
@@ -709,17 +720,18 @@ func applyAskUserCallback(w *askUserWizard, cb askUserCallback) (ready, needText
 	case "go":
 		return true, false, ""
 	default:
-		return false, false, "未知操作"
+		return false, false, loc.T("cmd.userInput.unknownOperation")
 	}
 }
 
 func applyAskUserTextAnswer(w *askUserWizard, text string) (ready bool, toast string) {
 	if w == nil {
-		return false, "已过期"
+		return false, i18n.New("").T("cmd.userInput.expired")
 	}
+	loc := w.localizer()
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return false, "答案不能为空"
+		return false, loc.T("cmd.userInput.answerRequired")
 	}
 	qID := strings.TrimSpace(w.TextPromptQ)
 	if qID == "" {
@@ -739,7 +751,7 @@ func applyAskUserTextAnswer(w *askUserWizard, text string) (ready bool, toast st
 		}
 	}
 	if !found {
-		return false, "无效操作"
+		return false, loc.T("cmd.userInput.invalidOperation")
 	}
 	d := w.draftFor(q.ID)
 	switch q.Kind {
@@ -750,7 +762,7 @@ func applyAskUserTextAnswer(w *askUserWizard, text string) (ready bool, toast st
 		d.Answered = true
 	case userinput.QuestionKindSingleSelect:
 		if !q.AllowCustom {
-			return false, "本题不支持自定义"
+			return false, loc.T("cmd.userInput.customNotAllowed")
 		}
 		d.CustomText = text
 		d.OptionIDs = nil
@@ -758,7 +770,7 @@ func applyAskUserTextAnswer(w *askUserWizard, text string) (ready bool, toast st
 		d.Answered = true
 	case userinput.QuestionKindMultiSelect:
 		if !q.AllowCustom {
-			return false, "本题不支持自定义"
+			return false, loc.T("cmd.userInput.customNotAllowed")
 		}
 		d.CustomText = text
 		// Custom alone (or with toggled options) is a complete multi answer.
@@ -790,6 +802,7 @@ func (a *TelegramAdapter) prepareTelegramAskUser(tc *channel.StreamToolCall) (te
 		return "", nil, "", false
 	}
 	w := newAskUserWizard(userInputID, questions)
+	w.Locale = tc.Locale
 	// Single-question single_select without multi-step needs still benefits
 	// from wizard (Other → force-reply, no /respond). Always use wizard.
 	text, actions = w.renderPage()

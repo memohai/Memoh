@@ -689,7 +689,7 @@ func (a *TelegramAdapter) handleAskUserWizardCallback(ctx context.Context, cfg c
 	}
 	w := a.askUserStore().get(parsed.Token)
 	if w == nil {
-		_ = bot.Respond(cb, &tele.CallbackResponse{Text: "Expired", ShowAlert: true})
+		_ = bot.Respond(cb, &tele.CallbackResponse{Text: i18n.New("").T("cmd.userInput.expired"), ShowAlert: true})
 		return true
 	}
 	// Bind the originating message so later edits hit the same card.
@@ -727,11 +727,12 @@ func (a *TelegramAdapter) promptAskUserText(bot *tele.Bot, w *askUserWizard) {
 		return
 	}
 	q, _ := w.questionAt(w.Page)
-	prompt := "请直接回复这条消息填写答案"
+	loc := w.localizer()
+	prompt := loc.T("cmd.userInput.replyTextPrompt")
 	if ph := strings.TrimSpace(q.Placeholder); ph != "" {
 		prompt = ph
 	} else if q.Kind != userinput.QuestionKindText {
-		prompt = "请直接回复这条消息填写自定义答案"
+		prompt = loc.T("cmd.userInput.replyCustomPrompt")
 	}
 	// Bind which question the next reply belongs to.
 	if q.ID != "" {
@@ -811,8 +812,9 @@ func (a *TelegramAdapter) submitAskUserWizard(ctx context.Context, cfg channel.C
 }
 
 func formatAskUserSubmittedSummary(w *askUserWizard) string {
+	loc := w.localizer()
 	if w == nil || len(w.Questions) == 0 {
-		return "Input requested"
+		return loc.T("cmd.userInput.inputRequested")
 	}
 	var b strings.Builder
 	for i, q := range w.Questions {
@@ -825,7 +827,7 @@ func formatAskUserSubmittedSummary(w *askUserWizard) string {
 		b.WriteString("\n")
 		answer := formatDraftAnswer(q, w.draftFor(q.ID))
 		if answer == "" {
-			answer = "跳过"
+			answer = loc.T("cmd.userInput.skipped")
 		}
 		b.WriteString(answer)
 	}

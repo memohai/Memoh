@@ -700,8 +700,12 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if isUserInputResponseCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
 		return p.handleUserInputResponseCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, *invocation)
 	}
-	if handled, err := p.handlePlainTextUserInput(ctx, msg, sender, identity, resolved.RouteID, sessionID, text); handled || err != nil {
-		return err
+	// Mode and skill commands remain control-plane messages even while an
+	// ask_user request is pending; they must not become text-question answers.
+	if pendingSkillIntent == nil && !isModeCommand {
+		if handled, err := p.handlePlainTextUserInput(ctx, msg, sender, identity, resolved.RouteID, sessionID, text); handled || err != nil {
+			return err
+		}
 	}
 	if pendingSkillIntent != nil && p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
 		if p.dispatcher.IsActive(strings.TrimSpace(resolved.RouteID)) {

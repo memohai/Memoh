@@ -835,6 +835,26 @@ func TestChannelInboundProcessorNativeUserInputBypassesTextFallback(t *testing.T
 	}
 }
 
+func TestChannelInboundProcessorModeCommandBypassesTextFallback(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{resp: conversation.ChatResponse{Messages: []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("normal reply")}}}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+	msg := channel.InboundMessage{
+		BotID: "bot-1", Channel: channel.ChannelType("weixin"), ReplyTarget: "target-id",
+		Message: channel.Message{Text: "/btw side question"}, Sender: channel.Identity{SubjectID: "ext-1"},
+		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+	}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: msg.Channel}, msg, &fakeReplySender{}); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if gateway.advanceCalls != 0 {
+		t.Fatalf("mode command advanced user input %d times", gateway.advanceCalls)
+	}
+}
+
 func TestChannelInboundProcessorPlainTextUserInputIgnoresUndirectedGroupMessage(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}

@@ -38,6 +38,11 @@ func (s *Service) AdvanceText(ctx context.Context, input AdvanceTextInput) (Adva
 		if err != nil {
 			return AdvanceTextResult{}, err
 		}
+		// Once selected, retries must stay on this request. Otherwise another
+		// pending ask_user created between CAS attempts could consume the reply.
+		if strings.TrimSpace(resolve.ExplicitID) == "" {
+			resolve.ExplicitID = req.ID
+		}
 		state, invalid, changed, err := advanceTextState(req.UIPayload, req.Interaction, input.Text)
 		if err != nil {
 			return AdvanceTextResult{}, err

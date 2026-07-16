@@ -95,7 +95,12 @@ func chatResolvedRequest() userinput.Request {
 	}
 }
 
-func TestPrepareUserInputContinuationHistoryClosesOlderPendingCall(t *testing.T) {
+// The continuation path (prepareContinuationRunConfig) builds its outgoing
+// messages via repairToolCallClosures(nonNilModelMessages(sanitizeMessages(...))).
+// This asserts that composition closes an orphaned older ask_user call while
+// preserving the current call's real result — the reason a process restart
+// mid-ask_user no longer breaks strict assistant-tool adjacency.
+func TestUserInputContinuationHistoryClosesOlderPendingCall(t *testing.T) {
 	t.Parallel()
 
 	oldCall := sdkMessagesToModelMessages([]sdk.Message{{
@@ -118,12 +123,13 @@ func TestPrepareUserInputContinuationHistoryClosesOlderPendingCall(t *testing.T)
 		Result:     map[string]any{"status": userinput.StatusSubmitted},
 	})})[0]
 
-	got := prepareUserInputContinuationHistory([]conversation.ModelMessage{
+	input := nonNilModelMessages(sanitizeMessages([]conversation.ModelMessage{
 		oldCall,
 		{Role: "user", Content: conversation.NewTextContent("start another ask_user")},
 		currentCall,
 		currentResult,
-	})
+	}))
+	got := repairToolCallClosures(input, syntheticToolClosureError)
 	if len(got) != 5 {
 		t.Fatalf("history length = %d, want 5: %#v", len(got), got)
 	}

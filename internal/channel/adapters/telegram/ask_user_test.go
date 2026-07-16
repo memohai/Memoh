@@ -31,6 +31,25 @@ func TestParseAskUserCallback(t *testing.T) {
 	}
 }
 
+func TestAskUserTokenIsStableAndCollisionResistant(t *testing.T) {
+	t.Parallel()
+
+	first := askUserToken("request-1")
+	if first != askUserToken(" request-1 ") {
+		t.Fatal("token must be stable after trimming")
+	}
+	if first == askUserToken("request-2") {
+		t.Fatal("distinct request IDs must not share a token")
+	}
+	if len(first) != 16 {
+		t.Fatalf("token length = %d, want 16", len(first))
+	}
+	callback := encodeAskUserCallback("s", first, "999", "999")
+	if len(callback) > telegramMaxCallbackDataBytes {
+		t.Fatalf("callback length = %d, exceeds Telegram limit", len(callback))
+	}
+}
+
 func TestAskUserTextPromptKeepsQuestionBinding(t *testing.T) {
 	t.Parallel()
 
@@ -75,7 +94,7 @@ func TestAskUserWizardMultiQuestionFlow(t *testing.T) {
 	if text != "你平时主要用哪些编程语言？" {
 		t.Fatalf("page 1 text = %q", text)
 	}
-	if !navRowEquals(actions, "1/2", "跳过 →") {
+	if !navRowEquals(actions, "1/2", "Skip →") {
 		t.Fatalf("first-page nav = %v", actionLabels(actions))
 	}
 	if actionLabelsContain(actions, "多选") || actionLabelsContain(actions, "确认") {
@@ -91,7 +110,7 @@ func TestAskUserWizardMultiQuestionFlow(t *testing.T) {
 	if strings.Contains(text, "Go") {
 		t.Fatalf("button selection must not be duplicated in body: %q", text)
 	}
-	if !actionLabelsContain(actions, "✓ Go") || !navRowEquals(actions, "1/2", "下一题 →") {
+	if !actionLabelsContain(actions, "✓ Go") || !navRowEquals(actions, "1/2", "Next →") {
 		t.Fatalf("selected page actions = %v", actionLabels(actions))
 	}
 
@@ -104,10 +123,10 @@ func TestAskUserWizardMultiQuestionFlow(t *testing.T) {
 	if text != "有没有最近在做的项目想聊聊？" {
 		t.Fatalf("page 2 text = %q", text)
 	}
-	if !actionLabelsContain(actions, "填写答案") {
+	if !actionLabelsContain(actions, "Enter answer") {
 		t.Fatalf("text input button missing: %#v", actions)
 	}
-	if !navRowEquals(actions, "←", "2/2", "跳过并提交") {
+	if !navRowEquals(actions, "←", "2/2", "Skip and submit") {
 		t.Fatalf("last-page nav = %v", actionLabels(actions))
 	}
 
@@ -143,7 +162,7 @@ func TestAskUserWizardSingleSelectAutoAdvances(t *testing.T) {
 	})
 
 	text, actions := w.renderPage()
-	if text != "速度？" || !navRowEquals(actions, "1/2", "跳过 →") {
+	if text != "速度？" || !navRowEquals(actions, "1/2", "Skip →") {
 		t.Fatalf("initial page: text=%q actions=%v", text, actionLabels(actions))
 	}
 
@@ -152,7 +171,7 @@ func TestAskUserWizardSingleSelectAutoAdvances(t *testing.T) {
 		t.Fatalf("single select: ready=%v needText=%v page=%d toast=%q", ready, needText, w.Page, toast)
 	}
 	text, actions = w.renderPage()
-	if text != "备注？" || !navRowEquals(actions, "←", "2/2", "跳过并提交") {
+	if text != "备注？" || !navRowEquals(actions, "←", "2/2", "Skip and submit") {
 		t.Fatalf("next page: text=%q actions=%v", text, actionLabels(actions))
 	}
 
@@ -160,7 +179,7 @@ func TestAskUserWizardSingleSelectAutoAdvances(t *testing.T) {
 	_, _, _ = applyAskUserCallback(w, askUserCallback{Op: "n", Token: w.Token, Page: 0})
 	_, _, _ = applyAskUserCallback(w, askUserCallback{Op: "s", Token: w.Token, QIndex: 0, OIndex: 0})
 	_, actions = w.renderPage()
-	if !navRowEquals(actions, "1/2", "跳过 →") {
+	if !navRowEquals(actions, "1/2", "Skip →") {
 		t.Fatalf("cleared actions = %v", actionLabels(actions))
 	}
 }
@@ -301,7 +320,7 @@ func TestAskUserSubmittedSummaryMarksSkippedQuestions(t *testing.T) {
 	})
 	w.draftFor("q2").Text = "Answer"
 	w.draftFor("q2").Answered = true
-	if got, want := formatAskUserSubmittedSummary(w), "1. First?\n跳过\n\n2. Second?\nAnswer"; got != want {
+	if got, want := formatAskUserSubmittedSummary(w), "1. First?\nSkipped\n\n2. Second?\nAnswer"; got != want {
 		t.Fatalf("summary = %q, want %q", got, want)
 	}
 }
@@ -311,7 +330,7 @@ func TestPrepareTelegramAskUserBuildsWizardActions(t *testing.T) {
 
 	adapter := NewTelegramAdapter(nil)
 	tc := &channel.StreamToolCall{
-		Name: "ask_user",
+		Name: "ask_user", Locale: "zh",
 		Input: map[string]any{
 			"user_input_id": "input-9",
 			"payload": map[string]any{
@@ -449,7 +468,7 @@ func TestAskUserWizardNavChromeLayout(t *testing.T) {
 	// first
 	w.Page = 0
 	_, actions := w.renderPage()
-	if !navRowEquals(actions, "1/3", "跳过 →") {
+	if !navRowEquals(actions, "1/3", "Skip →") {
 		t.Fatalf("first = %v", actionLabels(actions))
 	}
 
@@ -458,7 +477,7 @@ func TestAskUserWizardNavChromeLayout(t *testing.T) {
 	w.draftFor("q1").Text = "a"
 	w.draftFor("q1").Answered = true
 	_, actions = w.renderPage()
-	if !navRowEquals(actions, "←", "2/3", "跳过 →") {
+	if !navRowEquals(actions, "←", "2/3", "Skip →") {
 		t.Fatalf("middle = %v", actionLabels(actions))
 	}
 
@@ -467,7 +486,7 @@ func TestAskUserWizardNavChromeLayout(t *testing.T) {
 	w.draftFor("q2").Text = "b"
 	w.draftFor("q2").Answered = true
 	_, actions = w.renderPage()
-	if !navRowEquals(actions, "←", "3/3", "跳过并提交") {
+	if !navRowEquals(actions, "←", "3/3", "Skip and submit") {
 		t.Fatalf("last = %v", actionLabels(actions))
 	}
 }

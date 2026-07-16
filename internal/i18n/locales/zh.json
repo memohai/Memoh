@@ -477,7 +477,22 @@
       "skipHint": "发送“跳过”跳过本题。",
       "backHint": "发送“返回”回到上一题。",
       "answerLabel": "答案",
-      "skipped": "已跳过"
+      "skipped": "已跳过",
+      "otherOption": "其他…",
+      "fillAnswer": "填写答案",
+      "refillAnswer": "重新填写",
+      "submit": "提交",
+      "skip": "跳过",
+      "next": "下一题",
+      "skipAndSubmit": "跳过并提交",
+      "customAnswerLabel": "其他",
+      "replyTextPrompt": "请直接回复这条消息填写答案。",
+      "replyCustomPrompt": "请直接回复这条消息填写自定义答案。",
+      "expired": "这道题已过期。",
+      "invalidOperation": "这个操作已失效。",
+      "unknownOperation": "未知操作。",
+      "answerRequired": "答案不能为空。",
+      "customNotAllowed": "本题不支持自定义答案。"
     },
     "fallback": {
       "switch": "切换：{command}",
