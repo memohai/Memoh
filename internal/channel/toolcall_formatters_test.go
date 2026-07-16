@@ -64,6 +64,104 @@ func TestFormatListIncludesEntries(t *testing.T) {
 	if strings.Contains(rendered, "\"entries\"") || strings.Contains(rendered, "{\"") {
 		t.Fatalf("rendered output leaked raw JSON result:\n%s", rendered)
 	}
+	if strings.Contains(rendered, "ask_user") || strings.Contains(rendered, "waiting") {
+		t.Fatalf("rendered output exposed tool lifecycle:\n%s", rendered)
+	}
+}
+
+func TestFormatAskUserRendersQuestionsWithoutMetadata(t *testing.T) {
+	t.Parallel()
+
+	tc := &StreamToolCall{
+		Name:    "ask_user",
+		ShortID: 7,
+		Input: map[string]any{
+			"user_input_id": "input-1",
+			"short_id":      7,
+			"status":        "pending",
+			"payload": map[string]any{
+				"questions": []any{
+					map[string]any{
+						"id":   "q1",
+						"text": "Pick one",
+						"kind": "single_select",
+						"options": []any{
+							map[string]any{"id": "q1.o1", "label": "Alpha", "description": "First choice"},
+							map[string]any{"id": "q1.o2", "label": "Beta"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	p := BuildToolCallStart(tc)
+	if p.Status != ToolCallStatusWaiting || p.Header != "Pick one" {
+		t.Fatalf("presentation = %#v", p)
+	}
+	rendered := RenderToolCallMessage(p)
+	for _, want := range []string{"Pick one", "1) Alpha - First choice", "2) Beta", "Reply with an option number or its text.", "skip"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered output missing %q:\n%s", want, rendered)
+		}
+	}
+	for _, leaked := range []string{"/respond", "Memoh Web"} {
+		if strings.Contains(rendered, leaked) {
+			t.Fatalf("rendered output leaked command/web fallback %q:\n%s", leaked, rendered)
+		}
+	}
+	for _, leaked := range []string{"user_input_id", "short_id", "status\":", "payload\":"} {
+		if strings.Contains(rendered, leaked) {
+			t.Fatalf("rendered output leaked %q:\n%s", leaked, rendered)
+		}
+	}
+}
+
+func TestFormatAskUserOnlyRendersFirstQuestionForTextFallback(t *testing.T) {
+	t.Parallel()
+
+	tc := &StreamToolCall{Name: "ask_user", Input: map[string]any{
+		"payload": map[string]any{"questions": []any{
+			map[string]any{"text": "First question", "kind": "single_select", "options": []any{
+				map[string]any{"label": "Alpha"}, map[string]any{"label": "Beta"},
+			}},
+			map[string]any{"text": "Second question", "kind": "text"},
+		}},
+	}}
+	rendered := RenderToolCallMessage(BuildToolCallStart(tc))
+	if !strings.Contains(rendered, "1/2") || !strings.Contains(rendered, "First question") || strings.Contains(rendered, "Second question") {
+		t.Fatalf("plain-text prompt must show only the current question:\n%s", rendered)
+	}
+}
+
+func TestFormatAskUserUsesRequestedLocale(t *testing.T) {
+	t.Parallel()
+
+	tc := &StreamToolCall{Name: "ask_user", Locale: "zh", Input: map[string]any{
+		"payload": map[string]any{"questions": []any{map[string]any{
+			"text": "选一个", "kind": "single_select", "options": []any{map[string]any{"label": "甲"}, map[string]any{"label": "乙"}},
+		}}},
+	}}
+	rendered := RenderToolCallMessage(BuildToolCallStart(tc))
+	for _, want := range []string{"回复选项序号或选项文字。", "发送“跳过”跳过本题。"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("localized prompt missing %q:\n%s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "Reply with") || strings.Contains(rendered, "Send \"skip\"") {
+		t.Fatalf("localized prompt leaked English chrome:\n%s", rendered)
+	}
+}
+
+func TestFormatAskUserCompletionIsSilent(t *testing.T) {
+	t.Parallel()
+
+	tc := &StreamToolCall{Name: "ask_user", Input: map[string]any{
+		"payload": map[string]any{"questions": []any{map[string]any{"text": "Old question", "kind": "text"}}},
+	}, Result: map[string]any{"status": "submitted"}}
+	if rendered := RenderToolCallMessage(BuildToolCallEnd(tc)); rendered != "" {
+		t.Fatalf("completed ask_user repeated its prompt: %q", rendered)
+	}
 }
 
 func TestFormatExecForeground(t *testing.T) {

@@ -9,6 +9,7 @@ type ToolCallStatus string
 
 const (
 	ToolCallStatusRunning          ToolCallStatus = "running"
+	ToolCallStatusWaiting          ToolCallStatus = "waiting"
 	ToolCallStatusApprovalRequired ToolCallStatus = "approval_required"
 	ToolCallStatusCompleted        ToolCallStatus = "completed"
 	ToolCallStatusFailed           ToolCallStatus = "failed"
@@ -63,6 +64,7 @@ var builtinToolCallEmoji = map[string]string{
 	"generate_image":   "🖼️",
 	"speak":            "🔊",
 	"transcribe_audio": "🎧",
+	"ask_user":         "❓",
 }
 
 // ToolCallEmoji returns the emoji mapped for a tool name. Unknown / external
@@ -106,6 +108,9 @@ type ToolCallPresentation struct {
 	Emoji    string
 	ToolName string
 	Status   ToolCallStatus
+	// HideToolHeader is for user-facing interactions whose implementation as
+	// a tool is not meaningful to the recipient, such as ask_user prompts.
+	HideToolHeader bool
 
 	Header string
 	Body   []ToolCallBlock
@@ -252,20 +257,22 @@ func renderToolCall(p ToolCallPresentation, markdown bool) string {
 	}
 	var b strings.Builder
 
-	emoji := p.Emoji
-	if emoji == "" {
-		emoji = ExternalToolCallEmoji
-	}
-	b.WriteString(emoji)
-	b.WriteString(" ")
-	if p.ToolName != "" {
-		b.WriteString(p.ToolName)
-	} else {
-		b.WriteString("tool")
-	}
-	if p.Status != "" {
-		b.WriteString(" · ")
-		b.WriteString(string(p.Status))
+	if !p.HideToolHeader {
+		emoji := p.Emoji
+		if emoji == "" {
+			emoji = ExternalToolCallEmoji
+		}
+		b.WriteString(emoji)
+		b.WriteString(" ")
+		if p.ToolName != "" {
+			b.WriteString(p.ToolName)
+		} else {
+			b.WriteString("tool")
+		}
+		if p.Status != "" {
+			b.WriteString(" · ")
+			b.WriteString(string(p.Status))
+		}
 	}
 
 	header := strings.TrimSpace(p.Header)
@@ -273,7 +280,9 @@ func renderToolCall(p ToolCallPresentation, markdown bool) string {
 		header = strings.TrimSpace(p.InputSummary)
 	}
 	if header != "" {
-		b.WriteString("\n")
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
 		b.WriteString(header)
 	}
 
@@ -282,7 +291,9 @@ func renderToolCall(p ToolCallPresentation, markdown bool) string {
 		if rendered == "" {
 			continue
 		}
-		b.WriteString("\n")
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
 		b.WriteString(rendered)
 	}
 
@@ -291,7 +302,9 @@ func renderToolCall(p ToolCallPresentation, markdown bool) string {
 		footer = strings.TrimSpace(p.ResultSummary)
 	}
 	if footer != "" {
-		b.WriteString("\n")
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
 		b.WriteString(footer)
 	}
 

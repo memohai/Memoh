@@ -23,9 +23,17 @@ import (
 type userInputService interface {
 	CreatePending(ctx context.Context, input userinput.CreatePendingInput) (userinput.Request, error)
 	ResolveTarget(ctx context.Context, input userinput.ResolveInput) (userinput.Request, error)
+	AdvanceText(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error)
 	Submit(ctx context.Context, input userinput.SubmitInput) (userinput.Request, error)
 	Cancel(ctx context.Context, input userinput.CancelInput) (userinput.Request, error)
 	CanRespond(req userinput.Request) bool
+}
+
+func (r *Resolver) AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error) {
+	if r.userInput == nil {
+		return userinput.AdvanceTextResult{}, errors.New("user input service not configured")
+	}
+	return r.userInput.AdvanceText(ctx, input)
 }
 
 type UserInputResponseInput struct {

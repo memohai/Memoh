@@ -578,7 +578,7 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 
 	got := provider.Usage(context.Background(), SessionContext{CanRequestUserInput: true}, availableToolsForTest(ToolAskUser()))
 	assertUsageItemsAreBulleted(t, got)
-	for _, want := range []string{"`ask_user`", "multiple-choice question", "allow_custom"} {
+	for _, want := range []string{"`ask_user`", "multiple-choice question", "allow_custom", "`multi_select`", "（多选）"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with ask_user should contain %q, got:\n%s", want, got)
 		}
@@ -591,7 +591,7 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 
 	got = provider.Usage(context.Background(), SessionContext{SessionType: sessionmode.ACPAgent, CanListUserInput: true}, availableToolsForTest(ToolAskUser()))
 	assertUsageItemsAreBulleted(t, got)
-	for _, want := range []string{"`ask_user`", "multiple-choice question", "allow_custom"} {
+	for _, want := range []string{"`ask_user`", "multiple-choice question", "allow_custom", "`multi_select`", "（多选）"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with ACP list-only discovery should contain %q, got:\n%s", want, got)
 		}
@@ -618,6 +618,9 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 	}
 	if len(chatTools) != 1 || chatTools[0].Name != ToolAskUser().String() {
 		t.Fatalf("chat tools = %#v, want ask_user", chatTools)
+	}
+	if !strings.Contains(chatTools[0].Description, "（多选）") {
+		t.Fatalf("ask_user description must tell the model to label multi-select questions: %q", chatTools[0].Description)
 	}
 
 	noDeliveryTools, err := provider.Tools(context.Background(), SessionContext{SessionType: sessionmode.Chat})

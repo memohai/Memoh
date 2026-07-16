@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -428,7 +429,16 @@ func (s *telegramOutboundStream) pushToolCallEnd(ctx context.Context, tc *channe
 // renderToolCallPresentation renders a tool-call presentation to IM-ready
 // text and parseMode. It prefers Markdown→HTML; falls back to plain text when
 // Markdown conversion yields an empty parseMode.
-func renderToolCallPresentation(p channel.ToolCallPresentation) (string, string) {
+//
+// For ask_user, Telegram owns the interaction surface (paged questions +
+// inline buttons + force-reply). The shared tool-call formatter still builds a
+// generic body for other channels; here we strip numbered options / /respond
+// footers and prefer the wizard page body when available.
+func renderToolCallPresentation(tc *channel.StreamToolCall, p channel.ToolCallPresentation) (string, string) {
+	if isTelegramAskUser(tc) {
+		p.Body = nil
+		p.Footer = ""
+	}
 	rendered := strings.TrimSpace(channel.RenderToolCallMessageMarkdown(p))
 	if rendered == "" {
 		return "", ""
@@ -438,6 +448,10 @@ func renderToolCallPresentation(p channel.ToolCallPresentation) (string, string)
 		text = strings.TrimSpace(channel.RenderToolCallMessage(p))
 	}
 	return text, parseMode
+}
+
+func isTelegramAskUser(tc *channel.StreamToolCall) bool {
+	return tc != nil && strings.EqualFold(strings.TrimSpace(tc.Name), "ask_user")
 }
 
 // sendToolCallMessage renders the tool-call presentation. For tool_call_start
@@ -450,7 +464,20 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 	tc *channel.StreamToolCall,
 	p channel.ToolCallPresentation,
 ) error {
-	text, parseMode := renderToolCallPresentation(p)
+	text, parseMode := renderToolCallPresentation(tc, p)
+	actions := tcActions(tc)
+	var askUserRequestID string
+	// formatAskUser sets Status=waiting (user-facing pause), not running.
+	// Card rebuild must key off that, or we silently fall back to legacy
+	// respond: option buttons and never attach the paged aui keyboard.
+	if isTelegramAskUserStart(p) && isTelegramAskUser(tc) {
+		if pageText, pageActions, requestID, ok := prepareTelegramAskUser(tc); ok {
+			text = pageText
+			actions = pageActions
+			askUserRequestID = requestID
+			parseMode = ""
+		}
+	}
 	if text == "" {
 		return nil
 	}
@@ -458,7 +485,9 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 	if tc != nil {
 		callID = strings.TrimSpace(tc.CallID)
 	}
-	if p.Status != channel.ToolCallStatusRunning && callID != "" {
+	// Only terminal / approval updates edit an existing tool-call card.
+	// waiting is a start state for ask_user and must post a new message.
+	if isTelegramToolCallEndStatus(p.Status) && callID != "" {
 		if existing, ok := s.lookupToolCallMessage(callID); ok {
 			if err := s.adapter.waitStreamLimit(ctx); err != nil {
 				return err
@@ -469,8 +498,8 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 			}
 			editErr := error(nil)
 			switch {
-			case p.Status == channel.ToolCallStatusApprovalRequired && len(tcActions(tc)) > 0 && testEditFunc == nil:
-				editErr = editTelegramMessageTextWithActions(bot, existing.chatID, existing.msgID, text, parseMode, tcActions(tc))
+			case p.Status == channel.ToolCallStatusApprovalRequired && len(actions) > 0 && testEditFunc == nil:
+				editErr = editTelegramMessageTextWithActions(bot, existing.chatID, existing.msgID, text, parseMode, actions)
 			case (p.Status == channel.ToolCallStatusCompleted || p.Status == channel.ToolCallStatusFailed) && existing.hasActions && testEditFunc == nil:
 				editErr = editTelegramMessageTextWithActions(bot, existing.chatID, existing.msgID, text, parseMode, nil)
 			case testEditFunc != nil:
@@ -481,7 +510,7 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 			if editErr == nil {
 				if p.Status != channel.ToolCallStatusApprovalRequired {
 					s.forgetToolCallMessage(callID)
-				} else if len(tcActions(tc)) > 0 {
+				} else if len(actions) > 0 {
 					existing.hasActions = true
 					s.storeToolCallMessage(callID, existing)
 				}
@@ -508,18 +537,43 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 		msgID   int
 		sendErr error
 	)
-	if len(tcActions(tc)) > 0 {
-		chatID, msgID, sendErr = sendTelegramTextWithActionsReturnMessage(bot, s.target, text, replyTo, parseMode, tcActions(tc))
+	if len(actions) > 0 {
+		chatID, msgID, sendErr = sendTelegramTextWithActionsReturnMessage(bot, s.target, text, replyTo, parseMode, actions)
 	} else {
 		chatID, msgID, sendErr = sendTelegramTextReturnMessage(bot, s.target, text, replyTo, parseMode)
 	}
 	if sendErr != nil {
 		return sendErr
 	}
-	if p.Status == channel.ToolCallStatusRunning && callID != "" {
-		s.storeToolCallMessage(callID, telegramToolCallMessage{chatID: chatID, msgID: msgID, hasActions: len(tcActions(tc)) > 0})
+	if askUserRequestID != "" && s.adapter != nil && s.adapter.userInput != nil {
+		// Persist the card's Telegram message id so callbacks, plain-text
+		// replies, and post-restart rehydration all resolve the same request
+		// via prompt_external_message_id.
+		if _, err := s.adapter.userInput.UpdatePromptMessage(ctx, askUserRequestID, "", strconv.Itoa(msgID)); err != nil && s.adapter.logger != nil {
+			s.adapter.logger.Warn("telegram: ask_user prompt message bind failed", slog.Any("error", err))
+		}
+	}
+	if isTelegramToolCallStartStatus(p.Status) && callID != "" {
+		s.storeToolCallMessage(callID, telegramToolCallMessage{chatID: chatID, msgID: msgID, hasActions: len(actions) > 0})
 	}
 	return nil
+}
+
+func isTelegramAskUserStart(p channel.ToolCallPresentation) bool {
+	return p.Status == channel.ToolCallStatusRunning || p.Status == channel.ToolCallStatusWaiting
+}
+
+func isTelegramToolCallStartStatus(status channel.ToolCallStatus) bool {
+	return status == channel.ToolCallStatusRunning || status == channel.ToolCallStatusWaiting
+}
+
+func isTelegramToolCallEndStatus(status channel.ToolCallStatus) bool {
+	switch status {
+	case channel.ToolCallStatusCompleted, channel.ToolCallStatusFailed, channel.ToolCallStatusApprovalRequired:
+		return true
+	default:
+		return false
+	}
 }
 
 func tcActions(tc *channel.StreamToolCall) []channel.Action {

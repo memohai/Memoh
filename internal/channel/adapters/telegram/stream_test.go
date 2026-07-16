@@ -596,6 +596,8 @@ func TestDraftMode_PhaseEndTextIsNoOp(t *testing.T) {
 	}
 }
 
+// Render stripping is covered in ask_user_test.go (TestRenderAskUserChoiceShowsOnlyQuestion).
+
 // TestToolCallFlow_ThreeMessagesPerCall verifies that a single tool call
 // combined with pre-existing streamed text produces three distinct messages:
 // (1) flush of buffered pre-text, (2) running state for the tool call,

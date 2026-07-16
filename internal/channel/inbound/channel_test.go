@@ -32,6 +32,7 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/slash"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 type fakeChatGateway struct {
@@ -44,6 +45,24 @@ type fakeChatGateway struct {
 	userInputErr     error
 	userInputStarted chan struct{}
 	userInputRelease chan struct{}
+	advanceCalls     int
+	advanceInput     userinput.AdvanceTextInput
+	advanceResult    userinput.AdvanceTextResult
+	advanceErr       error
+}
+
+func (f *fakeChatGateway) AdvancePlainTextUserInput(_ context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error) {
+	f.advanceCalls++
+	f.advanceInput = input
+	return f.advanceResult, f.advanceErr
+}
+
+type nativeUserInputTestAdapter struct{ typ channel.ChannelType }
+
+func (a *nativeUserInputTestAdapter) Type() channel.ChannelType { return a.typ }
+
+func (a *nativeUserInputTestAdapter) Descriptor() channel.Descriptor {
+	return channel.Descriptor{Type: a.typ, Capabilities: channel.ChannelCapabilities{Text: true, NativeUserInput: true}}
 }
 
 func TestRejectReservedSkillMetadataInInboundMessage(t *testing.T) {
@@ -702,6 +721,186 @@ func TestChannelInboundProcessorRespondCommandRoutesUserInput(t *testing.T) {
 	}
 }
 
+func TestChannelInboundProcessorPlainTextUserInputShowsOnlyNextQuestion(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{advanceResult: userinput.AdvanceTextResult{
+		Handled: true,
+		Request: userinput.Request{
+			ID: "input-1",
+			UIPayload: userinput.UIPayload{Questions: []userinput.UIQuestion{
+				{ID: "q1", Text: "Previous question", Kind: userinput.QuestionKindText},
+				{ID: "q2", Text: "Choose topics", Kind: userinput.QuestionKindMultiSelect, Options: []userinput.UIOption{
+					{ID: "q2.o1", Label: "Go"}, {ID: "q2.o2", Label: "Rust"},
+				}},
+			}},
+			Interaction: userinput.TextInteractionState{
+				QuestionIndex: 1,
+				Answers:       []userinput.QuestionAnswer{{QuestionID: "q1", Text: "hidden answer"}},
+			},
+		},
+	}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+	sender := &fakeReplySender{}
+	msg := channel.InboundMessage{
+		BotID: "bot-1", Channel: channel.ChannelType("weixin"), ReplyTarget: "target-id",
+		Message:      channel.Message{ID: "msg-2", Text: "first answer"},
+		Sender:       channel.Identity{SubjectID: "ext-1"},
+		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+	}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: msg.Channel}, msg, sender); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if gateway.advanceCalls != 1 || gateway.userInputCalls != 0 || gateway.gotReq.BotID != "" {
+		t.Fatalf("unexpected routing: advance=%d respond=%d chat=%#v", gateway.advanceCalls, gateway.userInputCalls, gateway.gotReq)
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("sent messages = %d, want 1", len(sender.sent))
+	}
+	rendered := sender.sent[0].Message.PlainText()
+	for _, want := range []string{"2/2", "Choose topics", "1. Go", "2. Rust", "multiple numbers", "back"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("next prompt missing %q:\n%s", want, rendered)
+		}
+	}
+	for _, hidden := range []string{"Previous question", "hidden answer"} {
+		if strings.Contains(rendered, hidden) {
+			t.Fatalf("next prompt leaked %q:\n%s", hidden, rendered)
+		}
+	}
+}
+
+func TestChannelInboundProcessorPlainTextUserInputCompletesWithFullSummary(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	request := userinput.Request{
+		ID: "input-1",
+		UIPayload: userinput.UIPayload{Questions: []userinput.UIQuestion{
+			{ID: "q1", Text: "Plan?", Kind: userinput.QuestionKindSingleSelect, Options: []userinput.UIOption{{ID: "q1.o1", Label: "Alpha"}, {ID: "q1.o2", Label: "Beta"}}},
+			{ID: "q2", Text: "Notes?", Kind: userinput.QuestionKindText},
+		}},
+		Interaction: userinput.TextInteractionState{QuestionIndex: 1, Completed: true, Answers: []userinput.QuestionAnswer{
+			{QuestionID: "q1", OptionIDs: []string{"q1.o2"}}, {QuestionID: "q2", Text: "Ship today"},
+		}},
+	}
+	gateway := &fakeChatGateway{advanceResult: userinput.AdvanceTextResult{Handled: true, Request: request}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+	sender := &fakeReplySender{}
+	msg := channel.InboundMessage{
+		BotID: "bot-1", Channel: channel.ChannelType("weixin"), ReplyTarget: "target-id",
+		Message: channel.Message{ID: "msg-2", Text: "Ship today"}, Sender: channel.Identity{SubjectID: "ext-1"},
+		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+	}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: msg.Channel}, msg, sender); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if gateway.userInputCalls != 1 || gateway.userInputInput.ExplicitID != "input-1" || len(gateway.userInputInput.Answers) != 2 {
+		t.Fatalf("response routing = calls:%d input:%#v", gateway.userInputCalls, gateway.userInputInput)
+	}
+	if len(sender.sent) == 0 {
+		t.Fatal("completion summary was not sent")
+	}
+	summary := sender.sent[0].Message.PlainText()
+	for _, want := range []string{"1. Plan?", "Answer: Beta", "2. Notes?", "Answer: Ship today"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary missing %q:\n%s", want, summary)
+		}
+	}
+}
+
+func TestChannelInboundProcessorNativeUserInputBypassesTextFallback(t *testing.T) {
+	registry := channel.NewRegistry()
+	registry.MustRegister(&nativeUserInputTestAdapter{typ: channel.ChannelType("native-test")})
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{resp: conversation.ChatResponse{Messages: []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("normal reply")}}}}
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+	sender := &fakeReplySender{}
+	msg := channel.InboundMessage{
+		BotID: "bot-1", Channel: channel.ChannelType("native-test"), ReplyTarget: "target-id",
+		Message: channel.Message{Text: "normal chat"}, Sender: channel.Identity{SubjectID: "ext-1"},
+		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+	}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: msg.Channel}, msg, sender); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if gateway.advanceCalls != 0 || gateway.gotReq.Query != "normal chat" {
+		t.Fatalf("native channel routing: advance=%d query=%q", gateway.advanceCalls, gateway.gotReq.Query)
+	}
+}
+
+func TestChannelInboundProcessorModeCommandBypassesTextFallback(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{resp: conversation.ChatResponse{Messages: []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("normal reply")}}}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+	msg := channel.InboundMessage{
+		BotID: "bot-1", Channel: channel.ChannelType("weixin"), ReplyTarget: "target-id",
+		Message: channel.Message{Text: "/btw side question"}, Sender: channel.Identity{SubjectID: "ext-1"},
+		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+	}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: msg.Channel}, msg, &fakeReplySender{}); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if gateway.advanceCalls != 0 {
+		t.Fatalf("mode command advanced user input %d times", gateway.advanceCalls)
+	}
+}
+
+func TestChannelInboundProcessorPlainTextUserInputIgnoresUndirectedGroupMessage(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{advanceResult: userinput.AdvanceTextResult{Handled: true}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+	msg := channel.InboundMessage{
+		BotID: "bot-1", Channel: channel.ChannelType("wecom"), ReplyTarget: "group-id",
+		Message: channel.Message{Text: "1"}, Sender: channel.Identity{SubjectID: "ext-1"},
+		Conversation: channel.Conversation{ID: "group-1", Type: channel.ConversationTypeGroup},
+	}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: msg.Channel}, msg, &fakeReplySender{}); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if gateway.advanceCalls != 0 {
+		t.Fatalf("undirected group message advanced user input %d times", gateway.advanceCalls)
+	}
+}
+
+// A group message that is directed at the bot (is_mentioned) must reach the
+// plain-text ask_user fallback. Guards the DingTalk/WeCom P1 fix: those
+// adapters mark @-gated group messages so group answers are not silently
+// dropped. Kept as the mirror of the undirected case above.
+func TestChannelInboundProcessorPlainTextUserInputHandlesDirectedGroupMessage(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{advanceResult: userinput.AdvanceTextResult{Handled: true}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+	msg := channel.InboundMessage{
+		BotID: "bot-1", Channel: channel.ChannelType("wecom"), ReplyTarget: "group-id",
+		Message:      channel.Message{Text: "1"},
+		Sender:       channel.Identity{SubjectID: "ext-1"},
+		Conversation: channel.Conversation{ID: "group-1", Type: channel.ConversationTypeGroup},
+		Metadata:     map[string]any{"is_mentioned": true},
+	}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: msg.Channel}, msg, &fakeReplySender{}); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if gateway.advanceCalls != 1 {
+		t.Fatalf("directed group message advanced user input %d times, want 1", gateway.advanceCalls)
+	}
+}
+
 func TestChannelInboundProcessorRespondReplyUsesReplyTargetAndPreservesAnswer(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
 		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"},
@@ -741,6 +940,88 @@ func TestChannelInboundProcessorRespondReplyUsesReplyTargetAndPreservesAnswer(t 
 	}
 	if got.TextAnswer != "Plan B" {
 		t.Fatalf("TextAnswer = %q, want original-case answer", got.TextAnswer)
+	}
+}
+
+func TestChannelInboundProcessorRespondCallbackUsesBoundRequest(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"},
+		linkedUserIDs:   map[string][]string{"channelIdentity-1": {"user-1"}},
+	}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat}})
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("telegram"),
+		Message:     channel.Message{ID: "ask-msg-1", Text: "/respond q1.o2", Reply: &channel.ReplyRef{MessageID: "ask-msg-1"}},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
+		Metadata: map[string]any{"is_mentioned": true, "user_input_id": "input-1"},
+	}
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	got := gateway.userInputInput
+	if got.ExplicitID != "input-1" || got.TextAnswer != "q1.o2" {
+		t.Fatalf("user input input = %#v", got)
+	}
+}
+
+func TestChannelInboundProcessorRespondStructuredAnswersFromWizard(t *testing.T) {
+	// Telegram multi-step wizard submits fully structured Answers so multi-
+	// question prompts never depend on free-text /respond parsing.
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"},
+		linkedUserIDs:   map[string][]string{"channelIdentity-1": {"user-1"}},
+	}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat}})
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("telegram"),
+		Message:     channel.Message{ID: "ask-msg-1", Text: "/respond", Reply: &channel.ReplyRef{MessageID: "ask-msg-1"}},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
+		Metadata: map[string]any{
+			"is_mentioned":  true,
+			"user_input_id": "input-1",
+			"user_input_answers": []any{
+				map[string]any{"question_id": "q1", "text": "写个脚本"},
+				map[string]any{"question_id": "q2", "skipped": true},
+			},
+		},
+	}
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	got := gateway.userInputInput
+	if got.ExplicitID != "input-1" {
+		t.Fatalf("ExplicitID = %q", got.ExplicitID)
+	}
+	if len(got.Answers) != 2 || got.Answers[0].Text != "写个脚本" || !got.Answers[1].Skipped {
+		t.Fatalf("Answers = %#v", got.Answers)
 	}
 }
 
@@ -3057,7 +3338,7 @@ func TestMapStreamChunkToChannelEvents_ToolCallFields(t *testing.T) {
 func TestMapStreamChunkToChannelEvents_UserInputRequest(t *testing.T) {
 	t.Parallel()
 
-	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","input":{"questions":[{"text":"Pick one"}]}}`
+	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","input":{"questions":[{"text":"Original model input","kind":"single_select","options":[{"label":"Alpha"},{"label":"Beta"}]}]},"metadata":{"ui_payload":{"version":2,"questions":[{"id":"q1","text":"Pick one","kind":"single_select","options":[{"id":"q1.o1","label":"Alpha"},{"id":"q1.o2","label":"Beta"}]}]}}}`
 	events, _, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(chunk)))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3079,8 +3360,106 @@ func TestMapStreamChunkToChannelEvents_UserInputRequest(t *testing.T) {
 	if input["user_input_id"] != "input-1" || input["status"] != "pending" {
 		t.Fatalf("input = %#v", input)
 	}
-	if len(tc.Actions) != 1 || tc.Actions[0].Type != "user_input" || tc.Actions[0].Value != "respond:input-1" {
+	payload, ok := input["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %#v", input["payload"])
+	}
+	questions, ok := payload["questions"].([]any)
+	if !ok || len(questions) != 1 || questions[0].(map[string]any)["text"] != "Pick one" {
+		t.Fatalf("payload questions = %#v", payload["questions"])
+	}
+	// The shared layer emits a single filter-keepalive marker; adapters with
+	// native controls (Telegram) rebuild the real keyboard from the payload.
+	if len(tc.Actions) != 1 || tc.Actions[0].Type != "user_input" || tc.Actions[0].Label != "Reply" || tc.Actions[0].Value != "respond:input-1" {
 		t.Fatalf("actions = %#v", tc.Actions)
+	}
+}
+
+func TestMapStreamChunkToChannelEvents_UserInputTextFallback(t *testing.T) {
+	t.Parallel()
+
+	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","input":{"questions":[{"id":"q1","text":"Explain","kind":"text"}]}}`
+	events, _, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(chunk)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 || events[0].ToolCall == nil {
+		t.Fatalf("events = %#v", events)
+	}
+	actions := events[0].ToolCall.Actions
+	if len(actions) != 1 || actions[0].Label != "Reply" || actions[0].Value != "respond:input-1" {
+		t.Fatalf("actions = %#v", actions)
+	}
+}
+
+func TestMapStreamChunkToChannelEvents_UserInputCustomOptionFallback(t *testing.T) {
+	t.Parallel()
+
+	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","metadata":{"ui_payload":{"version":2,"questions":[{"id":"q1","text":"Pick one","kind":"single_select","allow_custom":true,"options":[{"id":"q1.o1","label":"Alpha"},{"id":"q1.o2","label":"Beta"}]}]}}}`
+	events, _, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(chunk)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	actions := events[0].ToolCall.Actions
+	if len(actions) != 1 || actions[0].Label != "Reply" || actions[0].Value != "respond:input-1" {
+		t.Fatalf("actions = %#v", actions)
+	}
+}
+
+func TestMapStreamChunkToChannelEvents_UserInputMultiQuestionKeepsActions(t *testing.T) {
+	t.Parallel()
+
+	// Multi-question prompts must still emit a user_input action so the
+	// show_tool_calls_in_im filter does not drop the pending card. Telegram
+	// rebuilds the paged keyboard from the payload.
+	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","metadata":{"ui_payload":{"version":2,"questions":[{"id":"q1","text":"What?","kind":"text"},{"id":"q2","text":"How fast?","kind":"single_select","options":[{"id":"q2.o1","label":"Fast"},{"id":"q2.o2","label":"Slow"}]}]}}}`
+	events, _, err := mapStreamChunkToChannelEvents(conversation.StreamChunk([]byte(chunk)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 || events[0].ToolCall == nil {
+		t.Fatalf("events = %#v", events)
+	}
+	actions := events[0].ToolCall.Actions
+	if len(actions) == 0 || actions[0].Type != "user_input" {
+		t.Fatalf("multi-question must keep user_input actions, got %#v", actions)
+	}
+	// Filter must keep the event when tool calls are hidden in IM.
+	sink := &recordingOutboundForUserInput{}
+	stream := channel.NewToolCallDroppingStream(sink)
+	if err := stream.Push(context.Background(), events[0]); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("filter dropped multi-question ask_user: %#v", sink.events)
+	}
+}
+
+type recordingOutboundForUserInput struct {
+	events []channel.StreamEvent
+}
+
+func (r *recordingOutboundForUserInput) Push(_ context.Context, event channel.StreamEvent) error {
+	r.events = append(r.events, event)
+	return nil
+}
+
+func (*recordingOutboundForUserInput) Close(context.Context) error { return nil }
+
+func TestUserInputAnswersFromMetadata(t *testing.T) {
+	t.Parallel()
+
+	got := userInputAnswersFromMetadata(map[string]any{
+		"user_input_answers": []any{
+			map[string]any{"question_id": "q1", "text": "hello"},
+			map[string]any{"question_id": "q2", "option_ids": []any{"q2.o1", "q2.o2"}},
+		},
+	})
+	if len(got) != 2 || got[0].Text != "hello" || strings.Join(got[1].OptionIDs, ",") != "q2.o1,q2.o2" {
+		t.Fatalf("answers = %#v", got)
+	}
+	if userInputAnswersFromMetadata(nil) != nil {
+		t.Fatal("empty metadata should yield nil")
 	}
 }
 

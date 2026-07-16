@@ -781,6 +781,67 @@ func TestPushFinalWithChunking_ShortText(t *testing.T) {
 	}
 }
 
+func TestManagerStreamSendsPlainTextUserInputAfterBufferedPreamble(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("plain-user-input")
+	registry := NewRegistry()
+	registry.MustRegister(&streamValidationAdapter{
+		channelType: channelType,
+		dynamicCaps: &ChannelCapabilities{Text: true, BlockStreaming: true},
+	})
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	first := &recordingStream{}
+	second := &recordingStream{}
+	var sent []OutboundMessage
+	reopenCalls := 0
+	stream := &managerOutboundStream{
+		manager: manager, config: ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+		stream: first, channelType: channelType, target: "target-1",
+		reply:  &ReplyRef{MessageID: "source-1"},
+		policy: manager.resolveOutboundPolicy(channelType),
+		send: func(_ context.Context, msg OutboundMessage) error {
+			sent = append(sent, msg)
+			return nil
+		},
+		reopen: func(context.Context) (PreparedOutboundStream, error) {
+			reopenCalls++
+			return second, nil
+		},
+	}
+	ctx := context.Background()
+	if err := stream.Push(ctx, StreamEvent{Type: StreamEventDelta, Delta: "先说一句。", Phase: StreamPhaseText}); err != nil {
+		t.Fatalf("push preamble: %v", err)
+	}
+	if err := stream.Push(ctx, StreamEvent{Type: StreamEventToolCallStart, ToolCall: &StreamToolCall{
+		Name: "ask_user", Locale: "zh", Actions: []Action{{Type: "user_input", Value: "respond:input-1"}},
+		Input: map[string]any{"payload": map[string]any{"questions": []any{map[string]any{
+			"text": "请选择", "kind": "single_select", "options": []any{map[string]any{"label": "甲"}, map[string]any{"label": "乙"}},
+		}}}},
+	}}); err != nil {
+		t.Fatalf("push user input: %v", err)
+	}
+	firstEvents := first.Events()
+	if len(firstEvents) != 2 || firstEvents[1].Type != StreamEventFinal || reopenCalls != 1 {
+		t.Fatalf("preamble stream was not split: events=%#v reopen=%d", firstEvents, reopenCalls)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("plain prompt sends = %d, want 1", len(sent))
+	}
+	if sent[0].Message.Reply == nil || sent[0].Message.Reply.MessageID != "source-1" {
+		t.Fatalf("plain prompt reply = %#v, want source-1", sent[0].Message.Reply)
+	}
+	prompt := sent[0].Message.PlainText()
+	for _, want := range []string{"请选择", "1) 甲", "回复选项序号或选项文字。"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("plain prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if len(second.Events()) != 1 || second.Events()[0].Type != StreamEventStatus {
+		t.Fatalf("reopened stream events = %#v", second.Events())
+	}
+}
+
 func TestManagerStreamFinalUsesDynamicOutboundCapabilities(t *testing.T) {
 	t.Parallel()
 

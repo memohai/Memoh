@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/textutil"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 // toolFormatter produces a structured presentation for a specific built-in
@@ -61,6 +63,7 @@ var toolFormatters = map[string]toolFormatter{
 	"generate_image":   formatGenerateImage,
 	"speak":            formatSpeak,
 	"transcribe_audio": formatTranscribeAudio,
+	"ask_user":         formatAskUser,
 }
 
 func lookupToolFormatter(name string) toolFormatter {
@@ -132,6 +135,67 @@ func asSliceOfMaps(v any) []map[string]any {
 		return arr
 	}
 	return nil
+}
+
+func formatAskUser(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
+	p := ToolCallPresentation{HideToolHeader: true}
+	loc := i18n.New(tc.Locale)
+	if status == ToolCallStatusFailed {
+		if failed, done := errorPresentation(p, status, tc); done {
+			return failed
+		}
+	}
+	// The interaction surface has already been replaced with the complete
+	// question/answer summary before the deferred tool result resumes. A second
+	// terminal card would repeat the first question and confuse the handoff.
+	if status == ToolCallStatusCompleted {
+		return p
+	}
+
+	in := inputMap(tc)
+	payload, _ := normalizeToMap(in["payload"])
+	questions := asSliceOfMaps(payload["questions"])
+	if len(questions) == 0 {
+		p.Header = loc.T("cmd.userInput.inputRequested")
+	} else {
+		p.Header = pickStringField(questions[0], "text")
+		if len(questions) > 1 {
+			p.Header = fmt.Sprintf("1/%d\n\n%s", len(questions), p.Header)
+		}
+		// Plain-text channels collect one durable page at a time. Native
+		// adapters strip this body and render their own controls.
+		appendAskUserOptions(&p, questions[0])
+	}
+
+	if status == ToolCallStatusRunning {
+		p.Status = ToolCallStatusWaiting
+		if len(questions) > 0 {
+			switch pickStringField(questions[0], "kind") {
+			case userinput.QuestionKindMultiSelect:
+				p.Footer = loc.T("cmd.userInput.multiHint") + "\n" + loc.T("cmd.userInput.skipHint")
+			case userinput.QuestionKindText:
+				p.Footer = loc.T("cmd.userInput.textHint") + "\n" + loc.T("cmd.userInput.skipHint")
+			default:
+				p.Footer = loc.T("cmd.userInput.selectHint") + "\n" + loc.T("cmd.userInput.skipHint")
+			}
+		}
+	}
+	return p
+}
+
+func appendAskUserOptions(p *ToolCallPresentation, question map[string]any) {
+	options := asSliceOfMaps(question["options"])
+	for idx, option := range options {
+		label := pickStringField(option, "label")
+		if label == "" {
+			continue
+		}
+		line := fmt.Sprintf("%d) %s", idx+1, label)
+		if description := pickStringField(option, "description"); description != "" {
+			line += " - " + description
+		}
+		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: line})
+	}
 }
 
 // --- file tools ---------------------------------------------------------

@@ -526,11 +526,13 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 	return resolver
 }
 
-func provideChannelRegistry(log *slog.Logger, cfg config.Config, hub *local.RouteHub, mediaService *media.Service, tunnelManager *webhooktunnel.Manager) *channel.Registry {
+func provideChannelRegistry(log *slog.Logger, cfg config.Config, hub *local.RouteHub, mediaService *media.Service, tunnelManager *webhooktunnel.Manager, userInput *userinput.Service) *channel.Registry {
 	registry := channel.NewRegistry()
 
 	tgAdapter := telegram.NewTelegramAdapter(log)
 	tgAdapter.SetAssetOpener(mediaService)
+	// Telegram's ask_user buttons drive the durable interaction state.
+	tgAdapter.SetUserInputService(userInput)
 	registry.MustRegister(tgAdapter)
 
 	discordAdapter := discord.NewDiscordAdapter(log)

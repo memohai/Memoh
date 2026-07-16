@@ -36,6 +36,7 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/slash"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 var base64Std = base64.StdEncoding
@@ -107,6 +108,10 @@ type ToolApprovalRunner interface {
 
 type UserInputRunner interface {
 	RespondUserInput(ctx context.Context, input flow.UserInputResponseInput, eventCh chan<- flow.WSStreamEvent) error
+}
+
+type PlainTextUserInputRunner interface {
+	AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error)
 }
 
 // IMDisplayOptionsReader exposes bot-level IM display preferences.
@@ -695,6 +700,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if isUserInputResponseCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
 		return p.handleUserInputResponseCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, *invocation)
 	}
+	// Mode and skill commands remain control-plane messages even while an
+	// ask_user request is pending; they must not become text-question answers.
+	if pendingSkillIntent == nil && !isModeCommand {
+		if handled, err := p.handlePlainTextUserInput(ctx, msg, sender, identity, resolved.RouteID, sessionID, text); handled || err != nil {
+			return err
+		}
+	}
 	if pendingSkillIntent != nil && p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
 		if p.dispatcher.IsActive(strings.TrimSpace(resolved.RouteID)) {
 			return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
@@ -1212,6 +1224,9 @@ startStream:
 				continue
 			}
 			for i, event := range events {
+				if isUserInputEvent(&events[i]) {
+					events[i].ToolCall.Locale = p.localizer(ctx, identity.BotID).Locale()
+				}
 				if event.Type == channel.StreamEventAttachment && len(event.Attachments) > 0 {
 					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Attachments)
 					events[i].Attachments = ingested
@@ -2052,6 +2067,7 @@ type agentStreamEnvelope struct {
 	Status      string          `json:"status"`
 	Input       json.RawMessage `json:"input"`
 	Result      json.RawMessage `json:"result"`
+	Metadata    json.RawMessage `json:"metadata"`
 	Attachments json.RawMessage `json:"attachments"`
 	Reactions   json.RawMessage `json:"reactions"`
 	Speeches    json.RawMessage `json:"speeches"`
@@ -2136,12 +2152,14 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 		if userInputID == "" {
 			userInputID = strings.TrimSpace(envelope.ApprovalID)
 		}
+		payload := canonicalUserInputPayload(envelope.Metadata, envelope.Input)
 		input := map[string]any{
 			"user_input_id": userInputID,
 			"short_id":      envelope.ShortID,
 			"status":        strings.TrimSpace(envelope.Status),
-			"payload":       parseRawJSON(envelope.Input),
+			"payload":       parseRawJSON(payload),
 		}
+		actions := userInputActions(userInputID)
 		return []channel.StreamEvent{
 			{
 				Type: channel.StreamEventToolCallStart,
@@ -2150,9 +2168,7 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 					CallID:  strings.TrimSpace(envelope.ToolCallID),
 					Input:   input,
 					ShortID: envelope.ShortID,
-					Actions: []channel.Action{
-						{Type: "user_input", Label: "Respond", Value: "respond:" + userInputID},
-					},
+					Actions: actions,
 				},
 			},
 		}, finalMessages, nil
@@ -2252,6 +2268,31 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 	default:
 		return nil, finalMessages, nil
 	}
+}
+
+func canonicalUserInputPayload(metadata, fallback json.RawMessage) json.RawMessage {
+	var deferred struct {
+		UIPayload json.RawMessage `json:"ui_payload"`
+	}
+	if err := json.Unmarshal(metadata, &deferred); err == nil && len(deferred.UIPayload) > 0 && string(deferred.UIPayload) != "null" {
+		return deferred.UIPayload
+	}
+	return fallback
+}
+
+// userInputActions emits the single marker action for a pending ask_user
+// request. The marker's Type ("user_input") is what keeps the tool-call
+// filter from dropping the prompt; its Value is only ever consumed by the
+// Telegram legacy respond: parser as a silent no-op. Adapters with native
+// controls (Telegram) rebuild the real interactive UI from the payload —
+// the shared layer must not fabricate per-option keyboards here, because no
+// other adapter renders user_input buttons and Telegram replaces them anyway.
+func userInputActions(userInputID string) []channel.Action {
+	userInputID = strings.TrimSpace(userInputID)
+	if userInputID == "" {
+		return nil
+	}
+	return []channel.Action{{Type: "user_input", Label: "Reply", Value: "respond:" + userInputID}}
 }
 
 func normalizeContentPartType(raw string) channel.MessagePartType {
@@ -3465,6 +3506,13 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 			Message: applyMessageFormat(channel.Message{Text: loc.T("cmd.userInput.parseFailed")}, caps),
 		})
 	}
+	if callbackID, _ := msg.Metadata["user_input_id"].(string); strings.TrimSpace(callbackID) != "" {
+		explicitID = strings.TrimSpace(callbackID)
+	}
+	// Platform adapters (Telegram multi-step wizard) may attach fully structured
+	// answers after collecting every question. Prefer those over free-text
+	// parsing so multi-question replies do not depend on resolver text limits.
+	answers := userInputAnswersFromMetadata(msg.Metadata)
 	return p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, userInputRunner, flow.UserInputResponseInput{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		SessionID:              strings.TrimSpace(sessionID),
@@ -3472,9 +3520,83 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 		ActorUserID:            strings.TrimSpace(identity.UserID),
 		ExplicitID:             explicitID,
 		ReplyExternalMessageID: replyExternalID,
+		Answers:                answers,
 		TextAnswer:             answerText,
 		ChatToken:              p.issueChatToken(identity, routeID, msg),
 	})
+}
+
+// userInputAnswersFromMetadata extracts structured ask_user answers attached by
+// platform adapters (e.g. Telegram's multi-step wizard). Returns nil when the
+// metadata has no usable answers so the resolver can fall back to TextAnswer.
+func userInputAnswersFromMetadata(meta map[string]any) []userinput.QuestionAnswer {
+	if len(meta) == 0 {
+		return nil
+	}
+	raw, ok := meta["user_input_answers"]
+	if !ok || raw == nil {
+		return nil
+	}
+	// Accept both []map[string]any (from adapters) and JSON-shaped []any.
+	var entries []any
+	switch v := raw.(type) {
+	case []any:
+		entries = v
+	case []map[string]any:
+		for _, item := range v {
+			entries = append(entries, item)
+		}
+	default:
+		// Best-effort JSON round-trip for unexpected concrete types.
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return nil
+		}
+		if err := json.Unmarshal(data, &entries); err != nil {
+			return nil
+		}
+	}
+	out := make([]userinput.QuestionAnswer, 0, len(entries))
+	for _, entry := range entries {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			// After JSON round-trip keys are still map[string]any.
+			if typed, ok := entry.(map[string]interface{}); ok {
+				m = typed
+			} else {
+				continue
+			}
+		}
+		qID := strings.TrimSpace(fmt.Sprint(m["question_id"]))
+		if qID == "" || qID == "<nil>" {
+			continue
+		}
+		answer := userinput.QuestionAnswer{QuestionID: qID}
+		if skipped, ok := m["skipped"].(bool); ok {
+			answer.Skipped = skipped
+		}
+		if text, ok := m["text"].(string); ok {
+			answer.Text = strings.TrimSpace(text)
+		}
+		if custom, ok := m["custom_text"].(string); ok {
+			answer.CustomText = strings.TrimSpace(custom)
+		}
+		switch ids := m["option_ids"].(type) {
+		case []string:
+			answer.OptionIDs = append([]string{}, ids...)
+		case []any:
+			for _, id := range ids {
+				if s, ok := id.(string); ok && strings.TrimSpace(s) != "" {
+					answer.OptionIDs = append(answer.OptionIDs, strings.TrimSpace(s))
+				}
+			}
+		}
+		out = append(out, answer)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func parseUserInputResponseInvocation(invocation command.Invocation, hasReplyTarget bool) (explicitID, answerText string, err error) {
@@ -3581,6 +3703,9 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 				finalMessages = messages
 			}
 			for _, event := range events {
+				if isUserInputEvent(&event) {
+					event.ToolCall.Locale = p.localizer(ctx, identity.BotID).Locale()
+				}
 				// Approval continuations should not flash transient "running"
 				// tool messages in IM. If tool visibility is enabled, the
 				// completed tool state may still be shown on tool_call_end.

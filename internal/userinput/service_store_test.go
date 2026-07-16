@@ -102,6 +102,7 @@ func (q *fakeUserInputQueries) CreateUserInputRequest(_ context.Context, arg sql
 		Status:                       StatusPending,
 		InputJson:                    arg.InputJson,
 		UiPayloadJson:                arg.UiPayloadJson,
+		InteractionJson:              []byte("{}"),
 		ResultJson:                   []byte("{}"),
 		ProviderMetadata:             arg.ProviderMetadata,
 		RequestedByChannelIdentityID: arg.RequestedByChannelIdentityID,
@@ -114,6 +115,20 @@ func (q *fakeUserInputQueries) CreateUserInputRequest(_ context.Context, arg sql
 	}
 	q.rows[storeUUIDKey(row.ID)] = row
 	q.byCall[storeCallKey(arg.SessionID, arg.ToolCallID)] = storeUUIDKey(row.ID)
+	return *row, nil
+}
+
+func (q *fakeUserInputQueries) UpdateUserInputInteraction(_ context.Context, arg sqlc.UpdateUserInputInteractionParams) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := time.Now()
+	row, ok := q.rows[storeUUIDKey(arg.ID)]
+	if !ok || !storeRowIsLivePending(row, now) || row.InteractionRevision != arg.InteractionRevision {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	row.InteractionJson = arg.InteractionJson
+	row.InteractionRevision++
+	row.UpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}
 	return *row, nil
 }
 
@@ -599,5 +614,78 @@ func TestServiceACPMCPMarkerRoundtrip(t *testing.T) {
 	}
 	if IsACPMCPRequest(gotPlain) {
 		t.Fatalf("native request misclassified as ACP/MCP: %#v", gotPlain.ProviderMetadata)
+	}
+}
+
+func TestServiceAdvanceTextPersistsWizardState(t *testing.T) {
+	t.Parallel()
+
+	svc := newStoreUserInputService(t)
+	req, err := svc.CreatePending(context.Background(), CreatePendingInput{
+		BotID:      storeTestBotID,
+		SessionID:  storeTestSessionID,
+		ToolCallID: "plain-text-wizard",
+		Input: map[string]any{"questions": []any{
+			map[string]any{"text": "Plan?", "kind": QuestionKindSingleSelect, "options": []any{
+				map[string]any{"label": "A"}, map[string]any{"label": "B"},
+			}},
+			map[string]any{"text": "Topics?", "kind": QuestionKindMultiSelect, "options": []any{
+				map[string]any{"label": "Go"}, map[string]any{"label": "Rust"}, map[string]any{"label": "Vue"},
+			}},
+			map[string]any{"text": "Notes?", "kind": QuestionKindText},
+			map[string]any{"text": "Ship?", "kind": QuestionKindSingleSelect, "options": []any{
+				map[string]any{"label": "Yes"}, map[string]any{"label": "No"},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create wizard: %v", err)
+	}
+
+	advance := func(text string) AdvanceTextResult {
+		t.Helper()
+		result, err := svc.AdvanceText(context.Background(), AdvanceTextInput{
+			BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID, Text: text,
+		})
+		if err != nil {
+			t.Fatalf("advance %q: %v", text, err)
+		}
+		if !result.Handled {
+			t.Fatalf("advance %q was not handled", text)
+		}
+		return result
+	}
+
+	if got := advance("2"); got.Request.Interaction.QuestionIndex != 1 || got.Request.Interaction.Answers[0].OptionIDs[0] != "q1.o2" {
+		t.Fatalf("single-select state = %#v", got.Request.Interaction)
+	}
+	if got := advance("1, 3"); got.Request.Interaction.QuestionIndex != 2 || len(got.Request.Interaction.Answers[1].OptionIDs) != 2 {
+		t.Fatalf("multi-select state = %#v", got.Request.Interaction)
+	}
+	if got := advance("research"); got.Request.Interaction.QuestionIndex != 3 {
+		t.Fatalf("text state = %#v", got.Request.Interaction)
+	}
+	if got := advance("back"); got.Request.Interaction.QuestionIndex != 2 {
+		t.Fatalf("back state = %#v", got.Request.Interaction)
+	}
+	_ = advance("updated notes")
+	invalid := advance("maybe")
+	if !invalid.Invalid || invalid.Request.Interaction.QuestionIndex != 3 || invalid.Request.Interaction.Completed {
+		t.Fatalf("invalid state = %#v", invalid)
+	}
+	completed := advance("跳过")
+	if !completed.Request.Interaction.Completed || completed.Request.Interaction.Answers[3].Skipped != true {
+		t.Fatalf("completed state = %#v", completed.Request.Interaction)
+	}
+
+	reloaded, err := svc.Get(context.Background(), req.ID)
+	if err != nil {
+		t.Fatalf("reload wizard: %v", err)
+	}
+	if !reloaded.Interaction.Completed || reloaded.InteractionRevision != 6 {
+		t.Fatalf("persisted state = %#v revision=%d", reloaded.Interaction, reloaded.InteractionRevision)
+	}
+	if _, err := svc.Submit(context.Background(), SubmitInput{RequestID: req.ID, Answers: reloaded.Interaction.Answers}); err != nil {
+		t.Fatalf("submit persisted answers: %v", err)
 	}
 }

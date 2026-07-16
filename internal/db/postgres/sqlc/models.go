@@ -751,6 +751,8 @@ type UserInputRequest struct {
 	Status                       string             `json:"status"`
 	InputJson                    []byte             `json:"input_json"`
 	UiPayloadJson                []byte             `json:"ui_payload_json"`
+	InteractionJson              []byte             `json:"interaction_json"`
+	InteractionRevision          int32              `json:"interaction_revision"`
 	ResultJson                   []byte             `json:"result_json"`
 	ProviderMetadata             []byte             `json:"provider_metadata"`
 	RequestedByChannelIdentityID pgtype.UUID        `json:"requested_by_channel_identity_id"`

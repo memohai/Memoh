@@ -147,31 +147,26 @@ func TestTelegramDescriptorIncludesStreaming(t *testing.T) {
 func TestParseTelegramUserInputCallback(t *testing.T) {
 	t.Parallel()
 
-	id, ok := parseTelegramUserInputCallback("respond:input-1")
-	if !ok || id != "input-1" {
-		t.Fatalf("parseTelegramUserInputCallback() = %q, %v", id, ok)
+	id, answer, ok := parseTelegramUserInputCallback("respond:input-1")
+	if !ok || id != "input-1" || answer != "" {
+		t.Fatalf("parseTelegramUserInputCallback() = %q, %q, %v", id, answer, ok)
 	}
-	if _, ok := parseTelegramUserInputCallback("approve:input-1"); ok {
+	id, answer, ok = parseTelegramUserInputCallback("respond:input-1:q1.o2")
+	if !ok || id != "input-1" || answer != "q1.o2" {
+		t.Fatalf("selected option callback = %q, %q, %v", id, answer, ok)
+	}
+	if _, _, ok := parseTelegramUserInputCallback("approve:input-1"); ok {
 		t.Fatal("approval callback should not parse as user input")
 	}
-	if _, ok := parseTelegramUserInputCallback("respond: "); ok {
+	if _, _, ok := parseTelegramUserInputCallback("respond: "); ok {
 		t.Fatal("empty user input id should not parse")
 	}
-}
-
-func TestTelegramUserInputCallbackHintUsesReplyMode(t *testing.T) {
-	t.Parallel()
-
-	hint := telegramUserInputCallbackHint("input-1")
-	if !strings.Contains(hint, "/respond <answer>") {
-		t.Fatalf("hint = %q, want reply-mode respond usage", hint)
-	}
-	if strings.Contains(hint, "input-1") {
-		t.Fatalf("hint = %q, should not include request id when asking the user to reply to the request message", hint)
+	if _, _, ok := parseTelegramUserInputCallback("respond:input-1: "); ok {
+		t.Fatal("empty selected option should not parse")
 	}
 }
 
-func TestHandleTelegramUserInputCallbackShowsHintWithoutDispatch(t *testing.T) {
+func TestHandleTelegramUserInputCallbackBareRespondDoesNotDispatch(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewTelegramAdapter(nil)
@@ -196,6 +191,8 @@ func TestHandleTelegramUserInputCallbackShowsHintWithoutDispatch(t *testing.T) {
 		return nil
 	}, bot, update)
 	if dispatched {
+		// Bare respond:id used to dump a /respond command hint. Native text
+		// capture is force-reply via the wizard; bare callbacks stay silent.
 		t.Fatal("respond callback without answer text should not dispatch an inbound /respond command")
 	}
 }
@@ -208,7 +205,7 @@ func TestBuildTelegramRespondCallbackInboundMessageMarksDirected(t *testing.T) {
 		ID: 100,
 		Callback: &tele.Callback{
 			ID:     "callback-2",
-			Data:   "respond:input-1",
+			Data:   "respond:input-1:q1.o2",
 			Sender: &tele.User{ID: 123, Username: "alice"},
 			Message: &tele.Message{
 				ID:   456,
@@ -222,7 +219,47 @@ func TestBuildTelegramRespondCallbackInboundMessageMarksDirected(t *testing.T) {
 	if !ok {
 		t.Fatal("expected callback inbound message")
 	}
-	if got := msg.Message.PlainText(); got != "/respond input-1" {
+	if got := msg.Message.PlainText(); got != "/respond q1.o2" {
+		t.Fatalf("callback text = %q", got)
+	}
+	if mentioned, _ := msg.Metadata["is_mentioned"].(bool); !mentioned {
+		t.Fatalf("metadata = %#v, want directed callback", msg.Metadata)
+	}
+	if got, _ := msg.Metadata["user_input_id"].(string); got != "input-1" {
+		t.Fatalf("user_input_id metadata = %q", got)
+	}
+
+	// Bare respond:<id> has no answer to submit: build must reject it (the
+	// callback handler acks it as a no-op before ever dispatching).
+	update.Callback.Data = "respond:input-1"
+	if _, ok := adapter.buildTelegramCallbackInboundMessage(channel.ChannelConfig{}, update); ok {
+		t.Fatal("bare respond callback must not build an inbound message")
+	}
+}
+
+func TestBuildTelegramSelectedOptionCallbackSubmitsAnswer(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	update := &tele.Update{
+		ID: 101,
+		Callback: &tele.Callback{
+			ID:     "callback-3",
+			Data:   "respond:input-1:q1.o2",
+			Sender: &tele.User{ID: 123, Username: "alice"},
+			Message: &tele.Message{
+				ID:   456,
+				Text: "Question",
+				Chat: &tele.Chat{ID: -10001, Type: tele.ChatGroup, Title: "Test Group"},
+			},
+		},
+	}
+
+	msg, ok := adapter.buildTelegramCallbackInboundMessage(channel.ChannelConfig{}, update)
+	if !ok {
+		t.Fatal("expected callback inbound message")
+	}
+	if got := msg.Message.PlainText(); got != "/respond q1.o2" {
 		t.Fatalf("callback text = %q", got)
 	}
 	if mentioned, _ := msg.Metadata["is_mentioned"].(bool); !mentioned {

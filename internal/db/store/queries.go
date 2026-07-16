@@ -400,6 +400,7 @@ type Queries interface {
 	UpdateSessionTypeAndMetadata(ctx context.Context, arg dbsqlc.UpdateSessionTypeAndMetadataParams) (dbsqlc.BotSession, error)
 	UpdateToolApprovalPromptMessage(ctx context.Context, arg dbsqlc.UpdateToolApprovalPromptMessageParams) (dbsqlc.ToolApprovalRequest, error)
 	UpdateUserInputAssistantMessage(ctx context.Context, arg dbsqlc.UpdateUserInputAssistantMessageParams) (dbsqlc.UserInputRequest, error)
+	UpdateUserInputInteraction(ctx context.Context, arg dbsqlc.UpdateUserInputInteractionParams) (dbsqlc.UserInputRequest, error)
 	UpdateUserInputPromptMessage(ctx context.Context, arg dbsqlc.UpdateUserInputPromptMessageParams) (dbsqlc.UserInputRequest, error)
 	UpdateUserInputToolResultMessage(ctx context.Context, arg dbsqlc.UpdateUserInputToolResultMessageParams) (dbsqlc.UserInputRequest, error)
 	ReplaceHistoryTurn(ctx context.Context, arg dbsqlc.ReplaceHistoryTurnParams) (dbsqlc.ReplaceHistoryTurnRow, error)

@@ -694,6 +694,8 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   status TEXT NOT NULL DEFAULT 'pending',
   input_json JSONB NOT NULL,
   ui_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  interaction_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  interaction_revision INTEGER NOT NULL DEFAULT 0,
   result_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   provider_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   requested_by_channel_identity_id UUID REFERENCES channel_identities(id) ON DELETE SET NULL,
