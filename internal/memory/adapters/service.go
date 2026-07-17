@@ -144,7 +144,7 @@ func (s *Service) Create(ctx context.Context, req ProviderCreateRequest) (Provid
 		return ProviderGetResponse{}, fmt.Errorf("create memory provider: %w", err)
 	}
 	resp := s.toGetResponse(row)
-	s.tryInstantiate(resp.ID, resp.Provider, resp.Config)
+	s.tryInstantiate(ctx, resp.ID, resp.Provider, resp.Config)
 	return resp, nil
 }
 
@@ -199,7 +199,7 @@ func (s *Service) InstantiateAll(ctx context.Context) (int, error) {
 	loaded := 0
 	for _, row := range rows {
 		resp := s.toGetResponse(row)
-		if _, err := s.registry.Instantiate(resp.ID, resp.Provider, resp.Config); err != nil {
+		if _, err := s.registry.Instantiate(ctx, resp.ID, resp.Provider, resp.Config); err != nil {
 			s.logger.Warn("auto-instantiate memory provider failed",
 				slog.String("id", resp.ID), slog.String("provider", resp.Provider), slog.Any("error", err))
 			continue
@@ -239,7 +239,7 @@ func (s *Service) Update(ctx context.Context, id string, req ProviderUpdateReque
 		return ProviderGetResponse{}, fmt.Errorf("update memory provider: %w", err)
 	}
 	resp := s.toGetResponse(updated)
-	s.tryEvictAndReinstantiate(resp.ID, resp.Provider, resp.Config)
+	s.tryEvictAndReinstantiate(ctx, resp.ID, resp.Provider, resp.Config)
 	return resp, nil
 }
 
@@ -252,7 +252,9 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	if s.registry != nil {
-		s.registry.Remove(id)
+		if err := s.registry.Remove(ctx, id); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -294,22 +296,25 @@ func (s *Service) toGetResponse(row sqlc.MemoryProvider) ProviderGetResponse {
 	}
 }
 
-func (s *Service) tryInstantiate(id, providerType string, config map[string]any) {
+func (s *Service) tryInstantiate(ctx context.Context, id, providerType string, config map[string]any) {
 	if s.registry == nil {
 		return
 	}
-	if _, err := s.registry.Instantiate(id, providerType, config); err != nil {
+	if _, err := s.registry.Instantiate(ctx, id, providerType, config); err != nil {
 		s.logger.Warn("auto-instantiate memory provider failed",
 			slog.String("id", id), slog.String("provider", providerType), slog.Any("error", err))
 	}
 }
 
-func (s *Service) tryEvictAndReinstantiate(id, providerType string, config map[string]any) {
+func (s *Service) tryEvictAndReinstantiate(ctx context.Context, id, providerType string, config map[string]any) {
 	if s.registry == nil {
 		return
 	}
-	s.registry.Remove(id)
-	s.tryInstantiate(id, providerType, config)
+	if err := s.registry.Remove(ctx, id); err != nil {
+		s.logger.Warn("evict memory provider failed", slog.String("id", id), slog.Any("error", err))
+		return
+	}
+	s.tryInstantiate(ctx, id, providerType, config)
 }
 
 func isValidProviderType(t ProviderType) bool {

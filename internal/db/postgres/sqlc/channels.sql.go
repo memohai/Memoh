@@ -13,7 +13,7 @@ import (
 
 const deleteBotChannelConfig = `-- name: DeleteBotChannelConfig :exec
 DELETE FROM bot_channel_configs
-WHERE bot_id = $1 AND channel_type = $2
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND channel_type = $2
 `
 
 type DeleteBotChannelConfigParams struct {
@@ -27,9 +27,9 @@ func (q *Queries) DeleteBotChannelConfig(ctx context.Context, arg DeleteBotChann
 }
 
 const getBotChannelConfig = `-- name: GetBotChannelConfig :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, team_id
 FROM bot_channel_configs
-WHERE bot_id = $1 AND channel_type = $2
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND channel_type = $2
 LIMIT 1
 `
 
@@ -54,14 +54,15 @@ func (q *Queries) GetBotChannelConfig(ctx context.Context, arg GetBotChannelConf
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getBotChannelConfigByExternalIdentity = `-- name: GetBotChannelConfigByExternalIdentity :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, team_id
 FROM bot_channel_configs
-WHERE channel_type = $1 AND external_identity = $2
+WHERE team_id = public.memoh_current_team_id() AND channel_type = $1 AND external_identity = $2
 LIMIT 1
 `
 
@@ -86,14 +87,15 @@ func (q *Queries) GetBotChannelConfigByExternalIdentity(ctx context.Context, arg
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getUserChannelBinding = `-- name: GetUserChannelBinding :one
-SELECT id, user_id, channel_type, config, created_at, updated_at
+SELECT id, user_id, channel_type, config, created_at, updated_at, team_id
 FROM user_channel_bindings
-WHERE user_id = $1 AND channel_type = $2
+WHERE team_id = public.memoh_current_team_id() AND user_id = $1 AND channel_type = $2
 LIMIT 1
 `
 
@@ -112,14 +114,15 @@ func (q *Queries) GetUserChannelBinding(ctx context.Context, arg GetUserChannelB
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listBotChannelConfigsByType = `-- name: ListBotChannelConfigsByType :many
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, team_id
 FROM bot_channel_configs
-WHERE channel_type = $1
+WHERE team_id = public.memoh_current_team_id() AND channel_type = $1
 ORDER BY created_at DESC
 `
 
@@ -145,6 +148,7 @@ func (q *Queries) ListBotChannelConfigsByType(ctx context.Context, channelType s
 			&i.VerifiedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -157,9 +161,9 @@ func (q *Queries) ListBotChannelConfigsByType(ctx context.Context, channelType s
 }
 
 const listUserChannelBindingsByPlatform = `-- name: ListUserChannelBindingsByPlatform :many
-SELECT id, user_id, channel_type, config, created_at, updated_at
+SELECT id, user_id, channel_type, config, created_at, updated_at, team_id
 FROM user_channel_bindings
-WHERE channel_type = $1
+WHERE team_id = public.memoh_current_team_id() AND channel_type = $1
 ORDER BY created_at DESC
 `
 
@@ -179,6 +183,7 @@ func (q *Queries) ListUserChannelBindingsByPlatform(ctx context.Context, channel
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -196,7 +201,7 @@ SET routing = COALESCE(routing, '{}'::jsonb) || jsonb_build_object(
   '_matrix',
   COALESCE(routing->'_matrix', '{}'::jsonb) || jsonb_build_object('since_token', $2::text)
 )
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 type SaveMatrixSyncSinceTokenParams struct {
@@ -217,8 +222,8 @@ UPDATE bot_channel_configs
 SET
   disabled = $3,
   updated_at = now()
-WHERE bot_id = $1 AND channel_type = $2
-RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND channel_type = $2
+RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, team_id
 `
 
 type UpdateBotChannelConfigDisabledParams struct {
@@ -243,6 +248,7 @@ func (q *Queries) UpdateBotChannelConfigDisabled(ctx context.Context, arg Update
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -252,7 +258,7 @@ INSERT INTO bot_channel_configs (
   bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-ON CONFLICT (bot_id, channel_type)
+ON CONFLICT (team_id, bot_id, channel_type)
 DO UPDATE SET
   credentials = EXCLUDED.credentials,
   external_identity = EXCLUDED.external_identity,
@@ -262,7 +268,7 @@ DO UPDATE SET
   disabled = EXCLUDED.disabled,
   verified_at = EXCLUDED.verified_at,
   updated_at = now()
-RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, team_id
 `
 
 type UpsertBotChannelConfigParams struct {
@@ -303,6 +309,7 @@ func (q *Queries) UpsertBotChannelConfig(ctx context.Context, arg UpsertBotChann
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -310,11 +317,11 @@ func (q *Queries) UpsertBotChannelConfig(ctx context.Context, arg UpsertBotChann
 const upsertUserChannelBinding = `-- name: UpsertUserChannelBinding :one
 INSERT INTO user_channel_bindings (user_id, channel_type, config)
 VALUES ($1, $2, $3)
-ON CONFLICT (user_id, channel_type)
+ON CONFLICT (team_id, user_id, channel_type)
 DO UPDATE SET
   config = EXCLUDED.config,
   updated_at = now()
-RETURNING id, user_id, channel_type, config, created_at, updated_at
+RETURNING id, user_id, channel_type, config, created_at, updated_at, team_id
 `
 
 type UpsertUserChannelBindingParams struct {
@@ -333,6 +340,7 @@ func (q *Queries) UpsertUserChannelBinding(ctx context.Context, arg UpsertUserCh
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

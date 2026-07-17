@@ -49,6 +49,49 @@ func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
 	if _, err := tx.Exec(ctx, baseline); err != nil {
 		t.Fatalf("apply 0001 baseline: %v", err)
 	}
+	bindTeamQueryFixture(t, ctx, tx)
+	if _, err := tx.Exec(ctx, `
+ALTER TABLE users ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+ALTER TABLE bots ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+ALTER TABLE bot_sessions ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+ALTER TABLE bot_channel_routes ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+ALTER TABLE channel_identities ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+ALTER TABLE bot_history_message_compacts ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+ALTER TABLE bot_history_messages ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+
+DROP VIEW bot_visible_history_messages;
+CREATE VIEW bot_visible_history_messages AS
+SELECT
+  m.team_id,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id,
+  m.source_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.compact_id,
+  m.session_mode,
+  m.runtime_type,
+  m.model_id,
+  m.event_id,
+  m.display_text,
+  m.created_at
+FROM bot_history_messages m
+WHERE m.turn_visible = true
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL;
+`); err != nil {
+		t.Fatalf("add team query fixture schema: %v", err)
+	}
 
 	userID := uuid.NewString()
 	botID := uuid.NewString()

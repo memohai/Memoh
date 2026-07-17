@@ -337,12 +337,12 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, vectorStore *pgvectordb.Store, wikiStore *wikistore.Store) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileStore := storefs.New(log, provider)
-	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(ctx context.Context, teamID, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		var ws wikistore.Store
 		if wikiStore != nil {
 			ws = *wikiStore
 		}
-		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, vectorStore, ws)
+		runtime, err := membuiltin.NewBuiltinRuntimeFromConfigContext(ctx, log, providerConfig, fileStore, queries, vectorStore, ws, memprovider.FixedTeamIDResolver(teamID))
 		if err != nil {
 			return nil, err
 		}
@@ -351,10 +351,10 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 		p.ApplyProviderConfig(providerConfig)
 		return p, nil
 	})
-	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		return memmem0.NewMem0Provider(log, providerConfig, fileStore)
 	})
-	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		return memopenviking.NewOpenVikingProvider(log, providerConfig)
 	})
 	// Default provider for bots without an explicit memory_provider_id. Uses the

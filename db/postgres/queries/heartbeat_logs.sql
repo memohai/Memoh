@@ -11,18 +11,18 @@ SET status = $2,
     usage = $5,
     model_id = $6,
     completed_at = now()
-WHERE id = $1
-RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at;
+WHERE team_id = public.memoh_current_team_id() AND id = $1
+RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at, team_id;
 
 -- name: ListHeartbeatLogsByBot :many
 SELECT id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM bot_heartbeat_logs
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: CountHeartbeatLogsByBot :one
-SELECT count(*) FROM bot_heartbeat_logs WHERE bot_id = $1;
+SELECT count(*) FROM bot_heartbeat_logs WHERE team_id = public.memoh_current_team_id() AND bot_id = $1;
 
 -- name: DeleteHeartbeatLogsByBot :exec
-DELETE FROM bot_heartbeat_logs WHERE bot_id = $1;
+DELETE FROM bot_heartbeat_logs WHERE team_id = public.memoh_current_team_id() AND bot_id = $1;

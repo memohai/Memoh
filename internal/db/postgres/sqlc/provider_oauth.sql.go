@@ -12,7 +12,7 @@ import (
 )
 
 const deleteProviderOAuthToken = `-- name: DeleteProviderOAuthToken :exec
-DELETE FROM provider_oauth_tokens WHERE provider_id = $1
+DELETE FROM provider_oauth_tokens WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
 `
 
 func (q *Queries) DeleteProviderOAuthToken(ctx context.Context, providerID pgtype.UUID) error {
@@ -21,7 +21,7 @@ func (q *Queries) DeleteProviderOAuthToken(ctx context.Context, providerID pgtyp
 }
 
 const getProviderOAuthTokenByProvider = `-- name: GetProviderOAuthTokenByProvider :one
-SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at FROM provider_oauth_tokens WHERE provider_id = $1
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, team_id FROM provider_oauth_tokens WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
 `
 
 func (q *Queries) GetProviderOAuthTokenByProvider(ctx context.Context, providerID pgtype.UUID) (ProviderOauthToken, error) {
@@ -40,12 +40,13 @@ func (q *Queries) GetProviderOAuthTokenByProvider(ctx context.Context, providerI
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getProviderOAuthTokenByState = `-- name: GetProviderOAuthTokenByState :one
-SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at FROM provider_oauth_tokens WHERE state = $1 AND state != ''
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, team_id FROM provider_oauth_tokens WHERE team_id = public.memoh_current_team_id() AND state = $1 AND state != ''
 `
 
 func (q *Queries) GetProviderOAuthTokenByState(ctx context.Context, state string) (ProviderOauthToken, error) {
@@ -64,6 +65,7 @@ func (q *Queries) GetProviderOAuthTokenByState(ctx context.Context, state string
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -76,7 +78,7 @@ VALUES (
   $3,
   $4
 )
-ON CONFLICT (provider_id) DO UPDATE SET
+ON CONFLICT (team_id, provider_id) DO UPDATE SET
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
   metadata = EXCLUDED.metadata,
@@ -123,7 +125,7 @@ VALUES (
   $8,
   $9
 )
-ON CONFLICT (provider_id) DO UPDATE SET
+ON CONFLICT (team_id, provider_id) DO UPDATE SET
   access_token = EXCLUDED.access_token,
   refresh_token = EXCLUDED.refresh_token,
   expires_at = EXCLUDED.expires_at,
@@ -133,7 +135,7 @@ ON CONFLICT (provider_id) DO UPDATE SET
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
   metadata = EXCLUDED.metadata,
   updated_at = now()
-RETURNING id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at
+RETURNING id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, team_id
 `
 
 type UpsertProviderOAuthTokenParams struct {
@@ -174,6 +176,7 @@ func (q *Queries) UpsertProviderOAuthToken(ctx context.Context, arg UpsertProvid
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

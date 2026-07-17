@@ -31,7 +31,9 @@ func (w sessionWebhookContext) isValid() bool {
 	return time.Now().UnixMilli() < w.ExpiredTime
 }
 
-// sessionWebhookCache stores recent sessionWebhook contexts keyed by msgId.
+// sessionWebhookCache stores recent sessionWebhook contexts by channel config
+// and msgId. DingTalk message IDs are external-account scoped, so msgId alone
+// cannot isolate multiple configured bots in the same process.
 type sessionWebhookCache struct {
 	mu    sync.RWMutex
 	items map[string]sessionWebhookContext
@@ -48,8 +50,8 @@ func newSessionWebhookCache(ttl time.Duration) *sessionWebhookCache {
 	}
 }
 
-func (c *sessionWebhookCache) put(msgID string, ctx sessionWebhookContext) {
-	key := strings.TrimSpace(msgID)
+func (c *sessionWebhookCache) put(configID, msgID string, ctx sessionWebhookContext) {
+	key := sessionWebhookCacheKey(configID, msgID)
 	if key == "" {
 		return
 	}
@@ -62,8 +64,8 @@ func (c *sessionWebhookCache) put(msgID string, ctx sessionWebhookContext) {
 	c.mu.Unlock()
 }
 
-func (c *sessionWebhookCache) get(msgID string) (sessionWebhookContext, bool) {
-	key := strings.TrimSpace(msgID)
+func (c *sessionWebhookCache) get(configID, msgID string) (sessionWebhookContext, bool) {
+	key := sessionWebhookCacheKey(configID, msgID)
 	if key == "" {
 		return sessionWebhookContext{}, false
 	}
@@ -80,6 +82,15 @@ func (c *sessionWebhookCache) get(msgID string) (sessionWebhookContext, bool) {
 		return sessionWebhookContext{}, false
 	}
 	return item, true
+}
+
+func sessionWebhookCacheKey(configID, msgID string) string {
+	configID = strings.TrimSpace(configID)
+	msgID = strings.TrimSpace(msgID)
+	if configID == "" || msgID == "" {
+		return ""
+	}
+	return configID + "\x00" + msgID
 }
 
 func (c *sessionWebhookCache) gcLocked() {

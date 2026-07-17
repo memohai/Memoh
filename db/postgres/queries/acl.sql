@@ -4,7 +4,7 @@
 SELECT COALESCE((
   SELECT r.effect
   FROM bot_acl_rules r
-  WHERE r.bot_id = b.id
+  WHERE r.team_id = public.memoh_current_team_id() AND r.bot_id = b.id
     AND r.enabled = true
     AND r.action = sqlc.arg(action)
     AND r.effect <> b.acl_default_effect
@@ -16,13 +16,13 @@ SELECT COALESCE((
   LIMIT 1
 ), b.acl_default_effect) AS effect
 FROM bots b
-WHERE b.id = sqlc.arg(bot_id);
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = sqlc.arg(bot_id);
 
 -- name: GetBotACLDefaultEffect :one
-SELECT acl_default_effect FROM bots WHERE id = $1;
+SELECT acl_default_effect FROM bots WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
 -- name: SetBotACLDefaultEffect :exec
-UPDATE bots SET acl_default_effect = $2, updated_at = now() WHERE id = $1;
+UPDATE bots SET acl_default_effect = $2, updated_at = now() WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
 -- name: ListBotACLRules :many
 SELECT
@@ -51,13 +51,14 @@ SELECT
   )::text AS source_conversation_name,
   COALESCE(NULLIF(TRIM(COALESCE(source_route.metadata->>'conversation_avatar_url', '')), ''), '')::text AS source_conversation_avatar_url
 FROM bot_acl_rules r
-LEFT JOIN channel_identities ci ON ci.id = r.channel_identity_id
-LEFT JOIN bot_channel_routes source_route ON source_route.bot_id = r.bot_id
+LEFT JOIN channel_identities ci ON ci.id = r.channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_channel_routes source_route ON source_route.team_id = public.memoh_current_team_id()
+  AND source_route.bot_id = r.bot_id
   AND r.source_conversation_id IS NOT NULL
   AND source_route.external_conversation_id = r.source_conversation_id
   AND COALESCE(source_route.external_thread_id, '') = COALESCE(r.source_thread_id, '')
   AND (r.source_channel IS NULL OR source_route.channel_type = r.source_channel)
-WHERE r.bot_id = $1
+WHERE r.team_id = public.memoh_current_team_id() AND r.bot_id = $1
   AND r.action = 'chat.trigger'
 ORDER BY r.created_at DESC;
 
@@ -105,8 +106,8 @@ SET
   source_conversation_id = sqlc.narg(source_conversation_id)::text,
   source_thread_id = sqlc.narg(source_thread_id)::text,
   updated_at = now()
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id() AND id = $1
 RETURNING *;
 
 -- name: DeleteBotACLRuleByID :exec
-DELETE FROM bot_acl_rules WHERE id = $1;
+DELETE FROM bot_acl_rules WHERE team_id = public.memoh_current_team_id() AND id = $1;

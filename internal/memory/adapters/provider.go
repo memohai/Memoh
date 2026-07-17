@@ -8,6 +8,10 @@ import (
 
 const ToolSearchMemory = "search_memory"
 
+// DefaultBuiltinProviderID is the virtual provider selected when a bot has no
+// persisted memory_provider_id. Registries materialize it per team.
+const DefaultBuiltinProviderID = "__builtin_default__"
+
 // Provider is the unified interface for memory systems. Each provider type
 // (builtin, mem0, openviking, etc.) implements this independently with its
 // own storage, retrieval, and tool logic.

@@ -53,17 +53,27 @@ func NewGraphRuntime(logger *slog.Logger, wikiStore wikistore.Store, fs memorySt
 
 // SetSemanticIndex wires an optional Postgres pgvector seed index. It never
 // owns the memory source of truth; failures only degrade to graph lexical recall.
-func (r *graphRuntime) SetSemanticIndex(index *pgvectorIndex) {
+func (r *graphRuntime) SetSemanticIndex(ctx context.Context, index *pgvectorIndex) {
 	if index == nil {
 		return
 	}
 	r.semantic = index
 	// Failed upserts go to a small per-runtime retry queue; the background
 	// loop drains it so the seed index converges without failing writes.
-	r.retry.start(index)
+	r.retry.start(ctx, index)
 }
 
 func (*graphRuntime) Mode() string { return string(ModeGraph) }
+
+func (r *graphRuntime) Close() error {
+	if r == nil {
+		return nil
+	}
+	if r.retry != nil {
+		r.retry.stop()
+	}
+	return nil
+}
 
 func (r *graphRuntime) MemoryVersion(_ context.Context, botID string) string {
 	if r == nil || r.cache == nil {

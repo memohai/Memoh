@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	dbpkg "github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -266,7 +265,7 @@ func beginPostgresMessageTestTx(t *testing.T, ctx context.Context) pgx.Tx {
 	if dsn == "" {
 		t.Skip("skip postgres integration test: TEST_POSTGRES_DSN is not set")
 	}
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect to configured postgres integration database: %v", err)
 	}

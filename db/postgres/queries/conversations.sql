@@ -11,8 +11,8 @@ SELECT
   b.created_at,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = sqlc.arg(bot_id)
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = sqlc.arg(bot_id)
 LIMIT 1;
 
 -- name: GetChatByID :one
@@ -28,8 +28,8 @@ SELECT
   b.created_at,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1;
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = $1;
 
 -- name: ListChatsByBotAndUser :many
 SELECT
@@ -44,8 +44,8 @@ SELECT
   b.created_at,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = sqlc.arg(bot_id)
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = sqlc.arg(bot_id)
   AND b.owner_user_id = sqlc.arg(user_id)
 ORDER BY b.updated_at DESC;
 
@@ -68,8 +68,8 @@ SELECT
   END)::text AS participant_role,
   NULL::timestamptz AS last_observed_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = sqlc.arg(bot_id)
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = sqlc.arg(bot_id)
   AND b.owner_user_id = sqlc.arg(user_id)
 ORDER BY b.updated_at DESC;
 
@@ -79,7 +79,7 @@ SELECT
   'owner'::text AS participant_role,
   NULL::timestamptz AS last_observed_at
 FROM bots b
-WHERE b.id = sqlc.arg(chat_id)
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = sqlc.arg(chat_id)
   AND b.owner_user_id = sqlc.arg(user_id)
 LIMIT 1;
 
@@ -96,8 +96,8 @@ SELECT
   b.created_at,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = $1
 ORDER BY b.created_at DESC;
 
 -- name: UpdateChatTitle :one
@@ -105,7 +105,7 @@ WITH updated AS (
   UPDATE bots
   SET display_name = sqlc.arg(title),
       updated_at = now()
-  WHERE bots.id = sqlc.arg(bot_id)
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = sqlc.arg(bot_id)
   RETURNING *
 )
 SELECT
@@ -120,25 +120,27 @@ SELECT
   updated.created_at,
   updated.updated_at
 FROM updated
-LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id;
+LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id AND chat_models.team_id = public.memoh_current_team_id();
 
 -- name: TouchChat :exec
 UPDATE bots
 SET updated_at = now()
-WHERE id = sqlc.arg(chat_id);
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(chat_id);
 
 -- name: DeleteChat :exec
 WITH target_sessions AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
-  WHERE session.bot_id = sqlc.arg(chat_id)
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.bot_id = sqlc.arg(chat_id)
   ORDER BY session.id
   FOR UPDATE
 ),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
-  WHERE compact.bot_id = sqlc.arg(chat_id)
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.bot_id = sqlc.arg(chat_id)
     AND (SELECT count(*) FROM target_sessions) >= 0
   ORDER BY compact.id
   FOR UPDATE
@@ -146,13 +148,15 @@ target_compaction_artifacts AS MATERIALIZED (
 deleted_compaction_artifacts AS (
   DELETE FROM bot_history_message_compacts compact
   USING target_compaction_artifacts target
-  WHERE compact.id = target.id
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = target.id
   RETURNING compact.id
 ),
 target_messages AS MATERIALIZED (
   SELECT message.id
   FROM bot_history_messages message
-  WHERE message.bot_id = sqlc.arg(chat_id)
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.bot_id = sqlc.arg(chat_id)
     AND (SELECT count(*) FROM target_sessions) >= 0
     AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
   ORDER BY message.id
@@ -161,30 +165,33 @@ target_messages AS MATERIALIZED (
 deleted_messages AS (
   DELETE FROM bot_history_messages message
   USING target_messages target
-  WHERE message.id = target.id
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.id = target.id
   RETURNING message.id
 ),
 deleted_sessions AS (
   DELETE FROM bot_sessions session
   USING target_sessions target
-  WHERE session.id = target.id
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
     AND (SELECT count(*) FROM deleted_messages) >= 0
   RETURNING session.id
 )
 DELETE FROM bot_channel_routes bcr
-WHERE bcr.bot_id = sqlc.arg(chat_id)
+WHERE bcr.team_id = public.memoh_current_team_id()
+  AND bcr.bot_id = sqlc.arg(chat_id)
   AND (SELECT count(*) FROM deleted_sessions) >= 0;
 
 -- name: GetChatParticipant :one
 SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
 FROM bots b
-WHERE b.id = sqlc.arg(chat_id) AND b.owner_user_id = sqlc.arg(user_id)
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = sqlc.arg(chat_id) AND b.owner_user_id = sqlc.arg(user_id)
 LIMIT 1;
 
 -- name: ListChatParticipants :many
 SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
 FROM bots b
-WHERE b.id = sqlc.arg(chat_id)
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = sqlc.arg(chat_id)
 ORDER BY joined_at ASC;
 
 -- name: RemoveChatParticipant :exec
@@ -192,7 +199,7 @@ SELECT 1
 WHERE EXISTS (
   SELECT 1
   FROM bots b
-  WHERE b.id = sqlc.arg(chat_id)
+  WHERE b.team_id = public.memoh_current_team_id() AND b.id = sqlc.arg(chat_id)
     AND b.owner_user_id = sqlc.arg(user_id)
 );
 
@@ -204,7 +211,7 @@ updated AS (
   UPDATE bots
   SET chat_model_id = COALESCE(sqlc.narg(chat_model_id)::uuid, bots.chat_model_id),
       updated_at = now()
-  WHERE bots.id = sqlc.arg(id)
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = sqlc.arg(id)
   RETURNING bots.id, bots.chat_model_id, bots.updated_at
 )
 SELECT
@@ -212,7 +219,7 @@ SELECT
   chat_models.id AS model_id,
   updated.updated_at
 FROM updated
-LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id;
+LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id AND chat_models.team_id = public.memoh_current_team_id();
 
 -- name: GetChatSettings :one
 SELECT
@@ -220,5 +227,5 @@ SELECT
   chat_models.id AS model_id,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1;
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
+WHERE b.team_id = public.memoh_current_team_id() AND b.id = $1;

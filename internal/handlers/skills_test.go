@@ -502,7 +502,7 @@ func (*skillsTestDB) Query(context.Context, string, ...interface{}) (pgx.Rows, e
 
 func (d *skillsTestDB) QueryRow(_ context.Context, sql string, _ ...interface{}) pgx.Row {
 	switch {
-	case strings.Contains(sql, "FROM users WHERE id = $1"):
+	case strings.Contains(sql, "FROM users") && strings.Contains(sql, "id = $1"):
 		return makeUserRow(mustParseUUID(d.userID), "user")
 	case strings.Contains(sql, "FROM bots"):
 		return makeBotRow(mustParseUUID(d.botID), mustParseUUID(d.userID), d.metadataJSON)

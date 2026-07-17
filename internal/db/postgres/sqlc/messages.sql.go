@@ -14,7 +14,7 @@ import (
 const allocateSessionTurnPosition = `-- name: AllocateSessionTurnPosition :one
 UPDATE bot_sessions
 SET next_turn_position = next_turn_position + 1
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id() AND id = $1
 RETURNING (next_turn_position - 1)::bigint AS position
 `
 
@@ -29,7 +29,7 @@ const appendMessageToHistoryTurnByRequest = `-- name: AppendMessageToHistoryTurn
 WITH target AS (
   SELECT request.turn_id, request.session_id, request.turn_position
   FROM bot_history_messages request
-  WHERE request.session_id = $2
+  WHERE request.team_id = public.memoh_current_team_id() AND request.session_id = $2
     AND request.id = $3
     AND request.turn_id IS NOT NULL
     AND request.turn_position IS NOT NULL
@@ -44,7 +44,7 @@ next_seq AS (
     target.turn_position,
     COALESCE(MAX(existing.turn_message_seq), 0) + 1 AS turn_message_seq
   FROM target
-  JOIN bot_history_messages existing ON existing.turn_id = target.turn_id
+  JOIN bot_history_messages existing ON existing.turn_id = target.turn_id AND existing.team_id = public.memoh_current_team_id()
   GROUP BY target.turn_id, target.session_id, target.turn_position
 )
 UPDATE bot_history_messages m
@@ -56,7 +56,7 @@ SET turn_id = next_seq.turn_id,
     turn_superseded_at = NULL,
     turn_superseded_reason = NULL
 FROM next_seq
-WHERE m.id = $1
+WHERE m.team_id = public.memoh_current_team_id() AND m.id = $1
   AND m.session_id = next_seq.session_id
   AND m.turn_id IS NULL
 RETURNING m.id
@@ -79,7 +79,7 @@ const appendMessageToLatestHistoryTurn = `-- name: AppendMessageToLatestHistoryT
 WITH latest AS (
   SELECT visible.turn_id, visible.session_id, visible.turn_position
   FROM bot_history_messages visible
-  WHERE visible.session_id = $2
+  WHERE visible.team_id = public.memoh_current_team_id() AND visible.session_id = $2
     AND visible.turn_id IS NOT NULL
     AND visible.turn_position IS NOT NULL
     AND visible.turn_message_seq IS NOT NULL
@@ -95,7 +95,7 @@ next_seq AS (
     latest.turn_position,
     COALESCE(MAX(existing.turn_message_seq), 0) + 1 AS turn_message_seq
   FROM latest
-  JOIN bot_history_messages existing ON existing.turn_id = latest.turn_id
+  JOIN bot_history_messages existing ON existing.turn_id = latest.turn_id AND existing.team_id = public.memoh_current_team_id()
   GROUP BY latest.turn_id, latest.session_id, latest.turn_position
 )
 UPDATE bot_history_messages m
@@ -107,7 +107,7 @@ SET turn_id = next_seq.turn_id,
     turn_superseded_at = NULL,
     turn_superseded_reason = NULL
 FROM next_seq
-WHERE m.id = $1
+WHERE m.team_id = public.memoh_current_team_id() AND m.id = $1
   AND m.session_id = next_seq.session_id
   AND m.turn_id IS NULL
 RETURNING m.id
@@ -135,14 +135,14 @@ WITH target AS (
     request.id AS request_message_id,
     request.created_at AS request_created_at
   FROM bot_history_messages request
-  WHERE request.session_id = $1
+  WHERE request.team_id = public.memoh_current_team_id() AND request.session_id = $1
     AND request.id = $2
     AND request.turn_id IS NOT NULL
     AND request.turn_visible = true
     AND NOT EXISTS (
       SELECT 1
       FROM bot_history_messages assistant
-      WHERE assistant.turn_id = request.turn_id
+      WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = request.turn_id
         AND assistant.role = 'assistant'
         AND assistant.turn_message_seq = 2
         AND assistant.turn_visible = true
@@ -160,7 +160,7 @@ linked AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM target
-  WHERE assistant.id = $3
+  WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.id = $3
     AND assistant.session_id = target.session_id
   RETURNING assistant.id AS assistant_message_id, assistant.created_at AS assistant_created_at
 )
@@ -224,7 +224,7 @@ WITH target AS (
     request.id AS request_message_id,
     request.created_at AS request_created_at
   FROM bot_history_messages request
-  WHERE request.session_id = $1
+  WHERE request.team_id = public.memoh_current_team_id() AND request.session_id = $1
     AND request.role = 'user'
     AND request.turn_message_seq = 1
     AND request.turn_id IS NOT NULL
@@ -232,7 +232,7 @@ WITH target AS (
     AND NOT EXISTS (
       SELECT 1
       FROM bot_history_messages assistant
-      WHERE assistant.turn_id = request.turn_id
+      WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = request.turn_id
         AND assistant.role = 'assistant'
         AND assistant.turn_message_seq = 2
         AND assistant.turn_visible = true
@@ -251,7 +251,7 @@ linked AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM target
-  WHERE assistant.id = $2
+  WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.id = $2
     AND assistant.session_id = target.session_id
   RETURNING assistant.id AS assistant_message_id, assistant.created_at AS assistant_created_at
 )
@@ -308,7 +308,8 @@ const clearHistoryByBot = `-- name: ClearHistoryByBot :exec
 WITH target_sessions AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
-  WHERE session.bot_id = $1
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.bot_id = $1
   ORDER BY session.id
   FOR UPDATE
 ),
@@ -316,13 +317,15 @@ invalidated_sessions AS (
   UPDATE bot_sessions session
   SET compaction_epoch = session.compaction_epoch + 1
   FROM target_sessions target
-  WHERE session.id = target.id
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
   RETURNING session.id
 ),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
-  WHERE compact.bot_id = $1
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.bot_id = $1
     AND (SELECT count(*) FROM target_sessions) >= 0
   ORDER BY compact.id
   FOR UPDATE
@@ -330,13 +333,15 @@ target_compaction_artifacts AS MATERIALIZED (
 deleted_compaction_artifacts AS (
   DELETE FROM bot_history_message_compacts AS compact
   USING target_compaction_artifacts target
-  WHERE compact.id = target.id
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = target.id
   RETURNING compact.id
 ),
 target_messages AS MATERIALIZED (
   SELECT message.id
   FROM bot_history_messages message
-  WHERE message.bot_id = $1
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.bot_id = $1
     AND (SELECT count(*) FROM target_sessions) >= 0
     AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
   ORDER BY message.id
@@ -344,7 +349,8 @@ target_messages AS MATERIALIZED (
 )
 DELETE FROM bot_history_messages AS message
 USING target_messages target
-WHERE message.id = target.id
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.id = target.id
 `
 
 func (q *Queries) ClearHistoryByBot(ctx context.Context, targetBotID pgtype.UUID) error {
@@ -356,20 +362,23 @@ const clearHistoryBySession = `-- name: ClearHistoryBySession :exec
 WITH target_session AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
-  WHERE session.id = $1
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = $1
   FOR UPDATE
 ),
 invalidated_session AS (
   UPDATE bot_sessions session
   SET compaction_epoch = session.compaction_epoch + 1
   FROM target_session target
-  WHERE session.id = target.id
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
   RETURNING session.id
 ),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
-  WHERE compact.session_id = $1
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.session_id = $1
     AND (SELECT count(*) FROM target_session) >= 0
   ORDER BY compact.id
   FOR UPDATE
@@ -377,13 +386,15 @@ target_compaction_artifacts AS MATERIALIZED (
 deleted_compaction_artifacts AS (
   DELETE FROM bot_history_message_compacts AS compact
   USING target_compaction_artifacts target
-  WHERE compact.id = target.id
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = target.id
   RETURNING compact.id
 ),
 target_messages AS MATERIALIZED (
   SELECT message.id
   FROM bot_history_messages message
-  WHERE message.session_id = $1
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.session_id = $1
     AND (SELECT count(*) FROM target_session) >= 0
     AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
   ORDER BY message.id
@@ -391,7 +402,8 @@ target_messages AS MATERIALIZED (
 )
 DELETE FROM bot_history_messages AS message
 USING target_messages target
-WHERE message.id = target.id
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.id = target.id
 `
 
 func (q *Queries) ClearHistoryBySession(ctx context.Context, targetSessionID pgtype.UUID) error {
@@ -401,7 +413,8 @@ func (q *Queries) ClearHistoryBySession(ctx context.Context, targetSessionID pgt
 
 const countMessagesByBot = `-- name: CountMessagesByBot :one
 SELECT COUNT(*) FROM bot_visible_history_messages
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
 `
 
 func (q *Queries) CountMessagesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
@@ -415,7 +428,7 @@ const createHistoryTurn = `-- name: CreateHistoryTurn :one
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.id = $1
+  WHERE bot_sessions.team_id = public.memoh_current_team_id() AND bot_sessions.id = $1
   RETURNING next_turn_position - 1 AS position
 ),
 input AS (
@@ -438,7 +451,7 @@ linked_request AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.id = input.request_message_id
+  WHERE m.team_id = public.memoh_current_team_id() AND m.id = input.request_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -453,7 +466,7 @@ linked_assistant AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.id = input.assistant_message_id
+  WHERE m.team_id = public.memoh_current_team_id() AND m.id = input.assistant_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -527,7 +540,7 @@ const createHistoryTurnWithID = `-- name: CreateHistoryTurnWithID :one
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.id = $1
+  WHERE bot_sessions.team_id = public.memoh_current_team_id() AND bot_sessions.id = $1
   RETURNING next_turn_position - 1 AS position
 ),
 input AS (
@@ -550,7 +563,7 @@ linked_request AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.id = input.request_message_id
+  WHERE m.team_id = public.memoh_current_team_id() AND m.id = input.request_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -565,7 +578,7 @@ linked_assistant AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.id = input.assistant_message_id
+  WHERE m.team_id = public.memoh_current_team_id() AND m.id = input.assistant_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -657,7 +670,7 @@ linked_request AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.id = input.request_message_id
+  WHERE m.team_id = public.memoh_current_team_id() AND m.id = input.request_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -672,7 +685,7 @@ linked_assistant AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.id = input.assistant_message_id
+  WHERE m.team_id = public.memoh_current_team_id() AND m.id = input.assistant_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -881,7 +894,8 @@ const createMessageInHistoryTurnByRequest = `-- name: CreateMessageInHistoryTurn
 WITH owner_session AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
-  WHERE session.id = $1
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = $1
   FOR UPDATE
 ),
 target AS MATERIALIZED (
@@ -893,7 +907,7 @@ target AS MATERIALIZED (
       WHEN $2::text = 'assistant' AND NOT EXISTS (
         SELECT 1
         FROM bot_history_messages assistant
-        WHERE assistant.turn_id = turns.turn_id
+        WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = turns.turn_id
           AND assistant.role = 'assistant'
           AND assistant.turn_message_seq = 2
           AND assistant.turn_visible = true
@@ -901,14 +915,15 @@ target AS MATERIALIZED (
       ELSE COALESCE((
         SELECT existing.turn_message_seq + 1
         FROM bot_history_messages existing
-        WHERE existing.turn_id = turns.turn_id
+        WHERE existing.team_id = public.memoh_current_team_id() AND existing.turn_id = turns.turn_id
         ORDER BY existing.turn_message_seq DESC
         LIMIT 1
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
   JOIN owner_session owner ON owner.id = turns.session_id
-  WHERE turns.session_id = $1
+  WHERE turns.team_id = public.memoh_current_team_id()
+    AND turns.session_id = $1
     AND turns.id = $3
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
@@ -1080,7 +1095,8 @@ const createMessageInHistoryTurnByRequestAndBind = `-- name: CreateMessageInHist
 WITH owner_session AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
-  WHERE session.id = $1
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = $1
   FOR UPDATE
 ),
 target AS MATERIALIZED (
@@ -1092,7 +1108,7 @@ target AS MATERIALIZED (
       WHEN $2::text = 'assistant' AND NOT EXISTS (
         SELECT 1
         FROM bot_history_messages assistant
-        WHERE assistant.turn_id = turns.turn_id
+        WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = turns.turn_id
           AND assistant.role = 'assistant'
           AND assistant.turn_message_seq = 2
           AND assistant.turn_visible = true
@@ -1100,14 +1116,15 @@ target AS MATERIALIZED (
       ELSE COALESCE((
         SELECT existing.turn_message_seq + 1
         FROM bot_history_messages existing
-        WHERE existing.turn_id = turns.turn_id
+        WHERE existing.team_id = public.memoh_current_team_id() AND existing.turn_id = turns.turn_id
         ORDER BY existing.turn_message_seq DESC
         LIMIT 1
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
   JOIN owner_session owner ON owner.id = turns.session_id
-  WHERE turns.session_id = $1
+  WHERE turns.team_id = public.memoh_current_team_id()
+    AND turns.session_id = $1
     AND turns.id = $3
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
@@ -1222,7 +1239,7 @@ const createMessageWithHistoryTurn = `-- name: CreateMessageWithHistoryTurn :one
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.id = $1
+  WHERE bot_sessions.team_id = public.memoh_current_team_id() AND bot_sessions.id = $1
   RETURNING (next_turn_position - 1)::bigint AS position
 ),
 inserted_message AS (
@@ -1340,7 +1357,7 @@ WITH target AS (
     existing.turn_position,
     bool_or(existing.turn_visible) AS turn_visible
   FROM bot_history_messages existing
-  WHERE existing.turn_id = $17
+  WHERE existing.team_id = public.memoh_current_team_id() AND existing.turn_id = $17
     AND existing.session_id = $18::uuid
     AND existing.bot_id = $2
     AND existing.turn_position IS NOT NULL
@@ -1584,7 +1601,7 @@ WITH input_rows(
 next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.id = $53
+  WHERE bot_sessions.team_id = public.memoh_current_team_id() AND bot_sessions.id = $53
   RETURNING (next_turn_position - 1)::bigint AS position
 ),
 inserted_messages AS (
@@ -1782,20 +1799,23 @@ const deleteMessagesByIDs = `-- name: DeleteMessagesByIDs :exec
 WITH session_locator AS MATERIALIZED (
   SELECT DISTINCT message.session_id
   FROM bot_history_messages message
-  WHERE message.id = ANY($1::uuid[])
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.id = ANY($1::uuid[])
     AND message.session_id IS NOT NULL
 ),
 owner_sessions AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
   JOIN session_locator locator ON locator.session_id = session.id
+  WHERE session.team_id = public.memoh_current_team_id()
   ORDER BY session.id
   FOR UPDATE
 ),
 target_messages AS MATERIALIZED (
   SELECT message.id
   FROM bot_history_messages message
-  WHERE message.id = ANY($1::uuid[])
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.id = ANY($1::uuid[])
     AND (SELECT count(*) FROM owner_sessions) >= 0
   ORDER BY message.id
   FOR UPDATE
@@ -1803,16 +1823,20 @@ target_messages AS MATERIALIZED (
 deleted AS (
   DELETE FROM bot_history_messages message
   USING target_messages target
-  WHERE message.id = target.id
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.id = target.id
   RETURNING message.session_id, message.compact_id
 ),
 compaction_epoch_bump AS (
   UPDATE bot_sessions session
   SET compaction_epoch = session.compaction_epoch + 1
-  WHERE EXISTS (
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND EXISTS (
     SELECT 1
     FROM deleted changed
-    JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+    JOIN bot_history_message_compacts compact
+      ON compact.id = changed.compact_id
+     AND compact.team_id = public.memoh_current_team_id()
     WHERE changed.session_id = session.id
       AND compact.bot_id = session.bot_id
       AND compact.session_id = session.id
@@ -1832,7 +1856,7 @@ const getHistoryTurnByID = `-- name: GetHistoryTurnByID :one
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
-  WHERE m.turn_id = $1
+  WHERE m.team_id = public.memoh_current_team_id() AND m.turn_id = $1
     AND m.session_id = $2
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -1852,7 +1876,8 @@ SELECT
   COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
 FROM target
 JOIN bot_history_messages m
-  ON m.turn_id = target.turn_id
+  ON m.team_id = public.memoh_current_team_id()
+ AND m.turn_id = target.turn_id
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position
 `
@@ -1899,7 +1924,7 @@ const getLatestVisibleHistoryTurnBySession = `-- name: GetLatestVisibleHistoryTu
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
-  WHERE m.session_id = $1
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -1920,7 +1945,8 @@ SELECT
   COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
 FROM target
 JOIN bot_history_messages m
-  ON m.turn_id = target.turn_id
+  ON m.team_id = public.memoh_current_team_id()
+ AND m.turn_id = target.turn_id
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position
 `
@@ -1982,9 +2008,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2074,9 +2100,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2162,9 +2188,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.id = $2
 LIMIT 1
@@ -2228,7 +2254,7 @@ const getVisibleHistoryTurnByMessage = `-- name: GetVisibleHistoryTurnByMessage 
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
-  WHERE m.session_id = $1
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
     AND m.id = $2
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -2249,7 +2275,8 @@ SELECT
   COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
 FROM target
 JOIN bot_history_messages m
-  ON m.turn_id = target.turn_id
+  ON m.team_id = public.memoh_current_team_id()
+ AND m.turn_id = target.turn_id
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position
 `
@@ -2299,7 +2326,7 @@ SELECT
   m.turn_message_seq,
   m.created_at
 FROM bot_history_messages m
-WHERE m.session_id = $1
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2340,7 +2367,7 @@ SELECT
   m.turn_message_seq,
   m.created_at
 FROM bot_history_messages m
-WHERE m.session_id = $1
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2377,7 +2404,8 @@ const hideMessagesByHistoryTurn = `-- name: HideMessagesByHistoryTurn :exec
 WITH session_locator AS MATERIALIZED (
   SELECT DISTINCT message.session_id
   FROM bot_history_messages message
-  WHERE message.turn_id = $1
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.turn_id = $1
     AND message.turn_visible = true
     AND message.session_id IS NOT NULL
 ),
@@ -2385,13 +2413,15 @@ owner_sessions AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
   JOIN session_locator locator ON locator.session_id = session.id
+  WHERE session.team_id = public.memoh_current_team_id()
   ORDER BY session.id
   FOR UPDATE
 ),
 hidden AS (
   UPDATE bot_history_messages
   SET turn_visible = false
-  WHERE turn_id = $1
+  WHERE team_id = public.memoh_current_team_id()
+    AND turn_id = $1
     AND turn_visible = true
     AND (SELECT count(*) FROM owner_sessions) >= 0
   RETURNING session_id, compact_id
@@ -2399,10 +2429,13 @@ hidden AS (
 compaction_epoch_bump AS (
   UPDATE bot_sessions session
   SET compaction_epoch = session.compaction_epoch + 1
-  WHERE EXISTS (
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND EXISTS (
     SELECT 1
     FROM hidden changed
-    JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+    JOIN bot_history_message_compacts compact
+      ON compact.id = changed.compact_id
+     AND compact.team_id = public.memoh_current_team_id()
     WHERE changed.session_id = session.id
       AND compact.bot_id = session.bot_id
       AND compact.session_id = session.id
@@ -2426,7 +2459,7 @@ WITH target AS (
     existing.turn_position,
     bool_or(existing.turn_visible) AS turn_visible
   FROM bot_history_messages existing
-  WHERE existing.turn_id = $3
+  WHERE existing.team_id = public.memoh_current_team_id() AND existing.turn_id = $3
     AND existing.turn_position IS NOT NULL
   GROUP BY existing.turn_id, existing.session_id, existing.turn_position
   LIMIT 1
@@ -2440,7 +2473,7 @@ SET turn_id = target.turn_id,
     turn_superseded_at = NULL,
     turn_superseded_reason = NULL
 FROM target
-WHERE m.id = $2
+WHERE m.team_id = public.memoh_current_team_id() AND m.id = $2
   AND m.session_id = target.session_id
 RETURNING m.id
 `
@@ -2467,7 +2500,7 @@ WITH target AS (
     assistant.created_at AS assistant_created_at,
     assistant.id AS assistant_id
   FROM bot_history_messages assistant
-  WHERE assistant.turn_id = $1
+  WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = $1
     AND assistant.role = 'assistant'
     AND assistant.turn_message_seq = 2
     AND assistant.turn_visible = true
@@ -2483,7 +2516,7 @@ tail AS (
   JOIN bot_history_messages m
     ON m.session_id = target.session_id
    AND m.role IN ('assistant', 'tool')
-  WHERE m.id <> target.assistant_id
+  WHERE m.team_id = public.memoh_current_team_id() AND m.id <> target.assistant_id
     AND m.turn_id IS NULL
     AND (m.created_at, m.id) > (target.assistant_created_at, target.assistant_id)
 )
@@ -2493,7 +2526,7 @@ SET turn_id = tail.turn_id,
     turn_visible = true,
     turn_message_seq = tail.turn_message_seq
 FROM tail
-WHERE m.id = tail.message_id
+WHERE m.team_id = public.memoh_current_team_id() AND m.id = tail.message_id
 `
 
 func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID pgtype.UUID) error {
@@ -2524,9 +2557,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.bot_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.bot_id = $1
   AND m.created_at >= $2
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.created_at ASC, m.id ASC
@@ -2624,9 +2658,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
   AND m.created_at >= $2
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
@@ -2730,9 +2765,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.bot_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.bot_id = $1
 ORDER BY m.created_at ASC, m.id ASC
 `
 
@@ -2826,7 +2861,7 @@ SELECT
   MIN(m.created_at)::timestamptz AS created_at,
   COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
 FROM bot_history_messages m
-WHERE m.bot_id = $1
+WHERE m.team_id = public.memoh_current_team_id() AND m.bot_id = $1
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
   AND m.session_id IS NOT NULL
@@ -2886,7 +2921,8 @@ SELECT
   m.bot_id,
   m.session_id
 FROM bot_history_messages m
-WHERE m.compact_id = $1
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.compact_id = $1
 ORDER BY m.created_at ASC, m.id ASC
 `
 
@@ -2940,9 +2976,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.bot_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.bot_id = $1
 ORDER BY m.created_at ASC, m.id ASC
 LIMIT 10000
 `
@@ -3031,9 +3068,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3133,9 +3170,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3251,9 +3288,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3262,7 +3299,7 @@ WHERE m.session_id = $1
     > (
       SELECT c.turn_position, c.turn_message_seq, c.created_at, c.id
       FROM bot_history_messages c
-      WHERE c.session_id = $1
+      WHERE c.team_id = public.memoh_current_team_id() AND c.session_id = $1
         AND c.turn_visible = true
         AND c.turn_id IS NOT NULL
         AND c.turn_position IS NOT NULL
@@ -3364,9 +3401,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.bot_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.bot_id = $1
   AND m.created_at < $2
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $3
@@ -3462,9 +3500,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3564,9 +3602,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3682,9 +3720,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3693,7 +3731,7 @@ WHERE m.session_id = $1
     < (
       SELECT c.turn_position, c.turn_message_seq, c.created_at, c.id
       FROM bot_history_messages c
-      WHERE c.session_id = $1
+      WHERE c.team_id = public.memoh_current_team_id() AND c.session_id = $1
         AND c.turn_visible = true
         AND c.turn_id IS NOT NULL
         AND c.turn_position IS NOT NULL
@@ -3795,9 +3833,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT 10000
 `
@@ -3886,9 +3925,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.bot_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.bot_id = $1
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2
 `
@@ -3982,9 +4022,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -4078,9 +4118,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -4170,9 +4210,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.bot_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.bot_id = $1
   AND m.created_at >= $2
 ORDER BY m.created_at ASC, m.id ASC
 `
@@ -4266,9 +4307,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
   AND m.created_at >= $2
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
@@ -4346,8 +4388,9 @@ WITH observed_routes AS (
     s.route_id,
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_visible_history_messages m
-  JOIN bot_sessions s ON s.id = m.session_id
-  WHERE m.bot_id = $1
+  JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.bot_id = $1
     AND m.sender_channel_identity_id = $2::uuid
     AND s.route_id IS NOT NULL
   GROUP BY s.route_id
@@ -4370,7 +4413,7 @@ SELECT
   COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
-JOIN bot_channel_routes r ON r.id = rr.route_id
+JOIN bot_channel_routes r ON r.id = rr.route_id AND r.team_id = public.memoh_current_team_id()
 GROUP BY
   r.id,
   r.channel_type,
@@ -4433,9 +4476,10 @@ WITH observed_routes AS (
     s.route_id,
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_visible_history_messages m
-  JOIN bot_sessions s ON s.id = m.session_id
-  JOIN bot_channel_routes r ON r.id = s.route_id
-  WHERE m.bot_id = $1
+  JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+  JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.bot_id = $1
     AND LOWER(TRIM(r.channel_type)) = LOWER(TRIM($2))
     AND s.route_id IS NOT NULL
   GROUP BY s.route_id
@@ -4458,7 +4502,7 @@ SELECT
   COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
-JOIN bot_channel_routes r ON r.id = rr.route_id
+JOIN bot_channel_routes r ON r.id = rr.route_id AND r.team_id = public.memoh_current_team_id()
 GROUP BY
   r.id,
   r.channel_type,
@@ -4545,16 +4589,24 @@ SELECT
   )::text AS conversation_name,
   r.default_reply_target AS reply_target
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-JOIN bot_sessions s ON s.id = m.session_id
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci
+  ON ci.id = m.sender_channel_identity_id
+ AND ci.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s
+  ON s.id = m.session_id
+ AND s.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_channel_routes r
+  ON r.id = s.route_id
+ AND r.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
   -- A fresh pending claim is a 15-minute cross-process lease. Stale pending,
   -- error, deleted, and blank-summary claims remain reclaimable; current OK
   -- summaries stay ineligible exactly as on the read path.
   AND (m.compact_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM bot_history_message_compacts c
-    WHERE c.id = m.compact_id
+    WHERE c.team_id = public.memoh_current_team_id()
+      AND c.id = m.compact_id
       AND c.bot_id = m.bot_id
       AND c.session_id = s.id
       AND c.compaction_epoch = s.compaction_epoch
@@ -4639,7 +4691,7 @@ const listVisibleMessagesFromBySession = `-- name: ListVisibleMessagesFromBySess
 WITH cursor_message AS (
   SELECT m.turn_position
   FROM bot_history_messages m
-  WHERE m.session_id = $1
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -4669,9 +4721,9 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 CROSS JOIN cursor_message cursor
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -4757,7 +4809,7 @@ WITH target AS (
     m.turn_message_seq,
     m.created_at
   FROM bot_history_messages m
-  WHERE m.session_id = $1
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -4770,7 +4822,7 @@ before_rows AS (
   SELECT m.id
   FROM bot_history_messages m
   CROSS JOIN target
-  WHERE m.session_id = $1
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -4784,7 +4836,7 @@ after_rows AS (
   SELECT m.id
   FROM bot_history_messages m
   CROSS JOIN target
-  WHERE m.session_id = $1
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -4826,9 +4878,9 @@ SELECT
 FROM window_rows w
 CROSS JOIN target
 JOIN bot_history_messages m ON m.id = w.id
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
@@ -4914,7 +4966,7 @@ func (q *Queries) LocateMessagesWindowByExternalIDBySession(ctx context.Context,
 const lockHistoryTurnAppendByRequest = `-- name: LockHistoryTurnAppendByRequest :exec
 SELECT pg_advisory_xact_lock(hashtextextended(m.turn_id::text, 0))
 FROM bot_history_messages m
-WHERE m.session_id = $1
+WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.id = $2
   AND m.turn_id IS NOT NULL
 LIMIT 1
@@ -4939,8 +4991,11 @@ WITH expected_claims AS MATERIALIZED (
 ), artifact_locator AS MATERIALIZED (
   SELECT compact.id, compact.session_id
   FROM bot_history_message_compacts compact
-  WHERE compact.id = $3
-    OR compact.id = ANY($2::uuid[])
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND (
+      compact.id = $3
+      OR compact.id = ANY($2::uuid[])
+    )
 ), owner_sessions AS MATERIALIZED (
   SELECT session.id, session.bot_id, session.compaction_epoch
   FROM bot_sessions session
@@ -4949,6 +5004,7 @@ WITH expected_claims AS MATERIALIZED (
     FROM artifact_locator locator
     WHERE locator.session_id IS NOT NULL
   ) owner ON owner.session_id = session.id
+  WHERE session.team_id = public.memoh_current_team_id()
   ORDER BY session.id
   FOR UPDATE OF session
 ), locked_artifacts AS MATERIALIZED (
@@ -4962,7 +5018,8 @@ WITH expected_claims AS MATERIALIZED (
     compact.started_at
   FROM bot_history_message_compacts compact
   JOIN artifact_locator locator ON locator.id = compact.id
-  WHERE (SELECT count(*) FROM owner_sessions) >= 0
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND (SELECT count(*) FROM owner_sessions) >= 0
     AND (
       compact.session_id IS NULL
       OR EXISTS (
@@ -5024,7 +5081,8 @@ WITH expected_claims AS MATERIALIZED (
   FROM bot_history_messages message
   JOIN expected_claims claim ON claim.message_id = message.id
   CROSS JOIN target_compact target
-  WHERE CARDINALITY($1::uuid[]) = CARDINALITY($2::uuid[])
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND CARDINALITY($1::uuid[]) = CARDINALITY($2::uuid[])
     AND message.compact_id IS NOT DISTINCT FROM claim.expected_compact_id
     AND message.bot_id = target.bot_id
     AND message.session_id = target.session_id
@@ -5063,7 +5121,8 @@ WITH expected_claims AS MATERIALIZED (
       error_message = 'source lease reclaimed',
       completed_at = now()
   FROM claims_to_reclaim reclaimable
-  WHERE current_claim.id = reclaimable.id
+  WHERE current_claim.team_id = public.memoh_current_team_id()
+    AND current_claim.id = reclaimable.id
     AND current_claim.status = 'pending'
   RETURNING current_claim.id
 )
@@ -5071,7 +5130,8 @@ UPDATE bot_history_messages message
 SET compact_id = target.id
 FROM locked_messages locked,
      target_compact target
-WHERE message.id = locked.id
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.id = locked.id
   AND message.compact_id IS NOT DISTINCT FROM locked.expected_compact_id
   AND message.bot_id = target.bot_id
   AND message.session_id = target.session_id
@@ -5117,14 +5177,16 @@ const replaceHistoryTurn = `-- name: ReplaceHistoryTurn :one
 WITH owner_session AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
-  WHERE session.id = $1
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = $1
   FOR UPDATE
 ),
 old_turn_target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
   JOIN owner_session owner ON owner.id = m.session_id
-  WHERE m.turn_id = $2
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.turn_id = $2
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
   LIMIT 1
@@ -5144,7 +5206,8 @@ old_turn AS (
     MAX(m.created_at)::timestamptz AS updated_at
   FROM old_turn_target
   JOIN bot_history_messages m
-    ON m.turn_id = old_turn_target.turn_id
+    ON m.team_id = public.memoh_current_team_id()
+   AND m.turn_id = old_turn_target.turn_id
    AND m.session_id = old_turn_target.session_id
   GROUP BY old_turn_target.turn_id, old_turn_target.session_id, old_turn_target.turn_position
 ),
@@ -5152,6 +5215,7 @@ old_lock AS (
   SELECT m.id, m.bot_id, m.session_id, m.compact_id
   FROM bot_history_messages m
   JOIN old_turn ON old_turn.id = m.turn_id
+  WHERE m.team_id = public.memoh_current_team_id()
   FOR UPDATE
 ),
 old_lock_guard AS (
@@ -5160,7 +5224,7 @@ old_lock_guard AS (
 latest_turn AS (
   SELECT m.turn_id AS id
   FROM bot_history_messages m
-  WHERE m.session_id = $1
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -5180,7 +5244,7 @@ replacement_input AS (
       OR EXISTS (
         SELECT 1
         FROM bot_history_messages request_message
-        WHERE request_message.id = $3::uuid
+        WHERE request_message.team_id = public.memoh_current_team_id() AND request_message.id = $3::uuid
           AND request_message.session_id = old_turn.session_id
           AND request_message.role = 'user'
           AND (
@@ -5195,7 +5259,7 @@ replacement_input AS (
       OR EXISTS (
         SELECT 1
         FROM bot_history_messages assistant_message
-        WHERE assistant_message.id = $4::uuid
+        WHERE assistant_message.team_id = public.memoh_current_team_id() AND assistant_message.id = $4::uuid
           AND assistant_message.session_id = old_turn.session_id
           AND assistant_message.role = 'assistant'
           AND assistant_message.turn_id IS NULL
@@ -5207,8 +5271,12 @@ affected_compaction_sessions AS MATERIALIZED (
   SELECT DISTINCT locked.session_id
   FROM old_lock locked
   JOIN replacement_input ON replacement_input.session_id = locked.session_id
-  JOIN bot_history_message_compacts compact ON compact.id = locked.compact_id
-  JOIN bot_sessions session ON session.id = locked.session_id
+  JOIN bot_history_message_compacts compact
+    ON compact.id = locked.compact_id
+   AND compact.team_id = public.memoh_current_team_id()
+  JOIN bot_sessions session
+    ON session.id = locked.session_id
+   AND session.team_id = public.memoh_current_team_id()
   WHERE locked.id IS DISTINCT FROM replacement_input.replacement_request_message_id
     AND locked.id IS DISTINCT FROM replacement_input.replacement_assistant_message_id
     AND compact.bot_id = locked.bot_id
@@ -5227,7 +5295,7 @@ next_position AS (
         ELSE 0
       END
   FROM replacement_input
-  WHERE s.id = replacement_input.session_id
+  WHERE s.team_id = public.memoh_current_team_id() AND s.id = replacement_input.session_id
   RETURNING s.next_turn_position - 1 AS position
 ),
 replacement AS (
@@ -5253,7 +5321,7 @@ updated AS (
       turn_superseded_reason = $6,
       turn_visible = false
   FROM replacement
-  WHERE old.turn_id = $2
+  WHERE old.team_id = public.memoh_current_team_id() AND old.turn_id = $2
     AND old.session_id = $1
     AND old.turn_superseded_at IS NULL
     AND old.id IS DISTINCT FROM replacement.request_message_id
@@ -5267,7 +5335,7 @@ hidden_old_messages AS (
   UPDATE bot_history_messages m
   SET turn_visible = false
   FROM updated_turn, replacement
-  WHERE m.turn_id = updated_turn.id
+  WHERE m.team_id = public.memoh_current_team_id() AND m.turn_id = updated_turn.id
     AND m.id IS DISTINCT FROM replacement.request_message_id
     AND m.id IS DISTINCT FROM replacement.assistant_message_id
   RETURNING m.id
@@ -5291,18 +5359,21 @@ linked_anchors AS (
   FROM replacement
   CROSS JOIN hidden_done
   JOIN updated_turn ON true
-  WHERE (
-      m.id = replacement.request_message_id
-      AND m.role = 'user'
-      AND (
-        m.turn_id IS NULL
-        OR m.turn_id = updated_turn.id
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND (
+      (
+        m.id = replacement.request_message_id
+        AND m.role = 'user'
+        AND (
+          m.turn_id IS NULL
+          OR m.turn_id = updated_turn.id
+        )
       )
-    )
-    OR (
-      m.id = replacement.assistant_message_id
-      AND m.role = 'assistant'
-      AND m.turn_id IS NULL
+      OR (
+        m.id = replacement.assistant_message_id
+        AND m.role = 'assistant'
+        AND m.turn_id IS NULL
+      )
     )
   RETURNING m.id
 ),
@@ -5322,15 +5393,15 @@ linked_tail AS (
       replacement.position AS turn_position,
       2 + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id) AS turn_message_seq
     FROM replacement
-    JOIN bot_history_messages assistant ON assistant.id = replacement.assistant_message_id
+    JOIN bot_history_messages assistant ON assistant.id = replacement.assistant_message_id AND assistant.team_id = public.memoh_current_team_id()
     JOIN bot_history_messages m
       ON m.session_id = replacement.session_id
      AND m.role IN ('assistant', 'tool')
-    WHERE m.id <> replacement.assistant_message_id
+    WHERE m.team_id = public.memoh_current_team_id() AND m.id <> replacement.assistant_message_id
       AND m.turn_id IS NULL
       AND (m.created_at, m.id) > (assistant.created_at, assistant.id)
   ) tail
-  WHERE m.id = tail.message_id
+  WHERE m.team_id = public.memoh_current_team_id() AND m.id = tail.message_id
   RETURNING m.id
 ),
 linked_anchors_done AS (
@@ -5410,9 +5481,10 @@ SELECT
   ci.display_name AS sender_display_name,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-WHERE m.bot_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.bot_id = $1
   AND ($2::uuid IS NULL OR m.session_id = $2::uuid)
   AND ($3::uuid IS NULL OR m.sender_channel_identity_id = $3::uuid)
   AND ($4::timestamptz IS NULL OR m.created_at >= $4::timestamptz)
@@ -5499,7 +5571,8 @@ const supersedeHistoryTurn = `-- name: SupersedeHistoryTurn :one
 WITH owner_session AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
-  WHERE session.id = $1
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = $1
   FOR UPDATE
 ),
 updated AS (
@@ -5509,7 +5582,8 @@ updated AS (
       turn_superseded_reason = $4,
       turn_visible = false
   FROM owner_session owner
-  WHERE m.turn_id = $5
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.turn_id = $5
     AND m.session_id = owner.id
     AND m.turn_superseded_at IS NULL
   RETURNING
@@ -5529,10 +5603,13 @@ updated AS (
 compaction_epoch_bump AS (
   UPDATE bot_sessions session
   SET compaction_epoch = session.compaction_epoch + 1
-  WHERE EXISTS (
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND EXISTS (
     SELECT 1
     FROM updated changed
-    JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+    JOIN bot_history_message_compacts compact
+      ON compact.id = changed.compact_id
+     AND compact.team_id = public.memoh_current_team_id()
     WHERE changed.session_id = session.id
       AND compact.bot_id = changed.bot_id
       AND compact.session_id = session.id

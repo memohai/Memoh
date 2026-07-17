@@ -36,9 +36,9 @@ type assetOpener interface {
 type DiscordAdapter struct {
 	logger          *slog.Logger
 	mu              sync.RWMutex
-	sessions        map[string]*discordgo.Session // keyed by bot token
-	handlerRemovers map[string]func()             // keyed by bot token
-	seenMessages    map[string]time.Time          // keyed by token:messageID
+	sessions        map[string]*discordgo.Session // keyed by config ID + bot token
+	handlerRemovers map[string]func()             // keyed by config ID + bot token
+	seenMessages    map[string]time.Time          // keyed by config ID + message ID
 	assets          assetOpener
 }
 
@@ -112,8 +112,9 @@ func (*DiscordAdapter) Descriptor() channel.Descriptor {
 
 func (a *DiscordAdapter) getOrCreateSession(token, configID string) (*discordgo.Session, error) {
 	channel.SetIMErrorSecrets("discord:"+configID, token)
+	cacheKey := discordSessionCacheKey(configID, token)
 	a.mu.RLock()
-	session, ok := a.sessions[token]
+	session, ok := a.sessions[cacheKey]
 	a.mu.RUnlock()
 	if ok {
 		return session, nil
@@ -121,7 +122,7 @@ func (a *DiscordAdapter) getOrCreateSession(token, configID string) (*discordgo.
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if s, ok := a.sessions[token]; ok {
+	if s, ok := a.sessions[cacheKey]; ok {
 		return s, nil
 	}
 
@@ -133,8 +134,12 @@ func (a *DiscordAdapter) getOrCreateSession(token, configID string) (*discordgo.
 
 	session.Identify.Intents = discordgo.IntentsAll
 
-	a.sessions[token] = session
+	a.sessions[cacheKey] = session
 	return session, nil
+}
+
+func discordSessionCacheKey(configID, token string) string {
+	return strings.TrimSpace(configID) + "\x00" + strings.TrimSpace(token)
 }
 
 func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
@@ -161,7 +166,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 			return
 		}
 
-		if a.isDuplicateInbound(discordCfg.BotToken, m.ID) {
+		if a.isDuplicateInbound(cfg.ID, m.ID) {
 			return
 		}
 
@@ -253,7 +258,8 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 		}()
 	})
 
-	a.swapHandlerRemover(discordCfg.BotToken, remove)
+	sessionKey := discordSessionCacheKey(cfg.ID, discordCfg.BotToken)
+	a.swapHandlerRemover(sessionKey, remove)
 
 	if err := session.Open(); err != nil {
 		return nil, fmt.Errorf("discord open connection: %w", err)
@@ -263,7 +269,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 		if a.logger != nil {
 			a.logger.Info("stop", slog.String("config_id", cfg.ID))
 		}
-		remove := a.clearSessionState(discordCfg.BotToken)
+		remove := a.clearSessionState(sessionKey)
 		if remove != nil {
 			remove()
 		}
@@ -708,8 +714,8 @@ func (*DiscordAdapter) isBotMentioned(msg *discordgo.Message, botID string) bool
 		strings.Contains(content, strings.ToLower(botNickMention))
 }
 
-func (a *DiscordAdapter) isDuplicateInbound(token, messageID string) bool {
-	if strings.TrimSpace(token) == "" || strings.TrimSpace(messageID) == "" {
+func (a *DiscordAdapter) isDuplicateInbound(configID, messageID string) bool {
+	if strings.TrimSpace(configID) == "" || strings.TrimSpace(messageID) == "" {
 		return false
 	}
 
@@ -725,7 +731,7 @@ func (a *DiscordAdapter) isDuplicateInbound(token, messageID string) bool {
 		}
 	}
 
-	seenKey := token + ":" + messageID
+	seenKey := configID + ":" + messageID
 	if _, ok := a.seenMessages[seenKey]; ok {
 		return true
 	}
@@ -733,20 +739,20 @@ func (a *DiscordAdapter) isDuplicateInbound(token, messageID string) bool {
 	return false
 }
 
-func (a *DiscordAdapter) swapHandlerRemover(token string, remove func()) {
+func (a *DiscordAdapter) swapHandlerRemover(sessionKey string, remove func()) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if oldRemove := a.handlerRemovers[token]; oldRemove != nil {
+	if oldRemove := a.handlerRemovers[sessionKey]; oldRemove != nil {
 		oldRemove()
 	}
-	a.handlerRemovers[token] = remove
+	a.handlerRemovers[sessionKey] = remove
 }
 
-func (a *DiscordAdapter) clearSessionState(token string) func() {
+func (a *DiscordAdapter) clearSessionState(sessionKey string) func() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	remove := a.handlerRemovers[token]
-	delete(a.handlerRemovers, token)
-	delete(a.sessions, token)
+	remove := a.handlerRemovers[sessionKey]
+	delete(a.handlerRemovers, sessionKey)
+	delete(a.sessions, sessionKey)
 	return remove
 }

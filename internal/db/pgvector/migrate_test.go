@@ -160,6 +160,13 @@ INSERT INTO public.memory_node_embeddings (
 	if legacyRows != 1 {
 		t.Fatalf("legacy rows = %d, want 1", legacyRows)
 	}
+	var legacyTeamID string
+	if err := conn.QueryRow(ctx, `SELECT team_id::text FROM public.memory_node_embeddings WHERE node_id = 'legacy-node'`).Scan(&legacyTeamID); err != nil {
+		t.Fatalf("read legacy team: %v", err)
+	}
+	if legacyTeamID != "00000000-0000-0000-0000-000000000001" {
+		t.Fatalf("legacy team = %q", legacyTeamID)
+	}
 
 	store, err := Open(ctx, slog.New(slog.DiscardHandler), vectorCfg)
 	if err != nil {
@@ -167,9 +174,11 @@ INSERT INTO public.memory_node_embeddings (
 	}
 	defer store.Close()
 	queries := store.Queries()
+	teamID := uuidValue(1)
 	botID := uuidValue(3)
 	modelID := uuidValue(4)
 	if err := queries.UpsertMemoryNodeEmbedding(ctx, pgvectorsqlc.UpsertMemoryNodeEmbeddingParams{
+		TeamID:     teamID,
 		BotID:      botID,
 		NodeID:     "sqlc-node",
 		ModelID:    modelID,
@@ -181,6 +190,7 @@ INSERT INTO public.memory_node_embeddings (
 	}
 	rows, err := queries.SearchMemoryNodeEmbeddings(ctx, pgvectorsqlc.SearchMemoryNodeEmbeddingsParams{
 		Embedding: pgvector.NewVector([]float32{1, 0}),
+		TeamID:    teamID,
 		BotID:     botID,
 		ModelID:   modelID,
 		RowLimit:  5,
@@ -192,10 +202,73 @@ INSERT INTO public.memory_node_embeddings (
 		t.Fatalf("sqlc search rows = %#v", rows)
 	}
 
+	teamTwo := uuidValue(2)
+	if err := queries.UpsertMemoryNodeEmbedding(ctx, pgvectorsqlc.UpsertMemoryNodeEmbeddingParams{
+		TeamID:     teamTwo,
+		BotID:      botID,
+		NodeID:     "other-team-node",
+		ModelID:    modelID,
+		Dimensions: 2,
+		BodyHash:   "other-team-hash",
+		Embedding:  pgvector.NewVector([]float32{0, 1}),
+	}); err != nil {
+		t.Fatalf("seed other team: %v", err)
+	}
+	func() {
+		role := fmt.Sprintf("memoh_pgvector_rls_test_%d_%d", os.Getpid(), time.Now().UnixNano())
+		quotedRole := pgx.Identifier{role}.Sanitize()
+		if _, err := conn.Exec(ctx, "CREATE ROLE "+quotedRole+" NOLOGIN NOSUPERUSER NOBYPASSRLS"); err != nil {
+			t.Fatalf("create RLS role: %v", err)
+		}
+		defer func() {
+			_, _ = conn.Exec(ctx, "RESET ROLE")
+			_, _ = conn.Exec(ctx, "DROP OWNED BY "+quotedRole)
+			_, _ = conn.Exec(ctx, "DROP ROLE IF EXISTS "+quotedRole)
+		}()
+		for _, grant := range []string{
+			"GRANT USAGE ON SCHEMA public TO " + quotedRole,
+			"GRANT SELECT ON public.memory_node_embeddings TO " + quotedRole,
+			"GRANT EXECUTE ON FUNCTION public.memoh_pgvector_current_team_id() TO " + quotedRole,
+		} {
+			if _, err := conn.Exec(ctx, grant); err != nil {
+				t.Fatalf("grant RLS role: %v", err)
+			}
+		}
+		if _, err := conn.Exec(ctx, "SET ROLE "+quotedRole); err != nil {
+			t.Fatalf("set RLS role: %v", err)
+		}
+		if _, err := conn.Exec(ctx, "SELECT set_config('memoh.team_id', $1, false)", teamID.String()); err != nil {
+			t.Fatalf("bind RLS team: %v", err)
+		}
+		rlsQueries := pgvectorsqlc.New(conn)
+		visible, err := rlsQueries.CountMemoryNodeEmbeddings(ctx, pgvectorsqlc.CountMemoryNodeEmbeddingsParams{
+			TeamID:  teamID,
+			BotID:   botID,
+			ModelID: modelID,
+		})
+		if err != nil {
+			t.Fatalf("count current team through RLS: %v", err)
+		}
+		if visible != 1 {
+			t.Fatalf("current-team rows = %d, want 1", visible)
+		}
+		hidden, err := rlsQueries.CountMemoryNodeEmbeddings(ctx, pgvectorsqlc.CountMemoryNodeEmbeddingsParams{
+			TeamID:  teamTwo,
+			BotID:   botID,
+			ModelID: modelID,
+		})
+		if err != nil {
+			t.Fatalf("count other team through RLS: %v", err)
+		}
+		if hidden != 0 {
+			t.Fatalf("other-team rows visible through RLS = %d", hidden)
+		}
+	}()
+
 	if _, err := conn.Exec(ctx, `DROP TABLE public.memory_node_embeddings`); err != nil {
 		t.Fatalf("drop embeddings table: %v", err)
 	}
-	if _, err := queries.MemoryNodeEmbeddingsExist(ctx); err == nil {
+	if _, err := queries.MemoryNodeEmbeddingsExist(ctx, teamID); err == nil {
 		t.Fatal("read-only health query repaired a missing table")
 	}
 	if err := MigrateUp(slog.New(slog.DiscardHandler), vectorCfg); err != nil {

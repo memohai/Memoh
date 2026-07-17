@@ -18,4 +18,5 @@ type MemoryNodeEmbedding struct {
 	Embedding  pgvector_go.Vector `json:"embedding"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	TeamID     pgtype.UUID        `json:"team_id"`
 }

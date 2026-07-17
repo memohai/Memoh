@@ -26,7 +26,7 @@ type DingTalkAdapter struct {
 	clients    map[string]*dtsdk.StreamClient
 	apiClients map[string]*apiClient
 
-	// webhookCache stores recent sessionWebhook contexts keyed by msgId.
+	// webhookCache stores recent sessionWebhook contexts by config ID and msgId.
 	webhookCache *sessionWebhookCache
 }
 
@@ -202,7 +202,7 @@ func (a *DingTalkAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	// Session webhook fast path: immediate reply without access_token round-trip.
 	// Webhooks only support text/markdown; attachments fall through to the OpenAPI.
 	if len(msg.Message.Attachments) == 0 {
-		if whCtx, ok := a.lookupWebhook(logicalMsg.Reply); ok && whCtx.isValid() {
+		if whCtx, ok := a.lookupWebhook(cfg.ID, logicalMsg.Reply); ok && whCtx.isValid() {
 			body, bodyErr := buildWebhookBody(logicalMsg)
 			if bodyErr == nil {
 				apiCli := a.getOrNewAPIClient(cfg)
@@ -376,7 +376,7 @@ func (a *DingTalkAdapter) newChatBotHandler(cfg channel.ChannelConfig, handler c
 
 		// Cache the session webhook so that Send can use the fast-reply path.
 		if strings.TrimSpace(data.MsgId) != "" && strings.TrimSpace(data.SessionWebhook) != "" {
-			a.rememberWebhook(data.MsgId, sessionWebhookContext{
+			a.rememberWebhook(cfg.ID, data.MsgId, sessionWebhookContext{
 				SessionWebhook: data.SessionWebhook,
 				ExpiredTime:    data.SessionWebhookExpiredTime,
 				ConversationID: data.ConversationId,
@@ -424,7 +424,7 @@ func (a *DingTalkAdapter) getOrNewAPIClient(cfg channel.ChannelConfig) *apiClien
 	return newAPIClient(parsed.AppKey, parsed.AppSecret)
 }
 
-func (a *DingTalkAdapter) lookupWebhook(reply *channel.ReplyRef) (sessionWebhookContext, bool) {
+func (a *DingTalkAdapter) lookupWebhook(configID string, reply *channel.ReplyRef) (sessionWebhookContext, bool) {
 	if reply == nil {
 		return sessionWebhookContext{}, false
 	}
@@ -432,10 +432,10 @@ func (a *DingTalkAdapter) lookupWebhook(reply *channel.ReplyRef) (sessionWebhook
 	if msgID == "" {
 		return sessionWebhookContext{}, false
 	}
-	return a.webhookCache.get(msgID)
+	return a.webhookCache.get(configID, msgID)
 }
 
-func (a *DingTalkAdapter) rememberWebhook(msgID string, whCtx sessionWebhookContext) {
+func (a *DingTalkAdapter) rememberWebhook(configID, msgID string, whCtx sessionWebhookContext) {
 	msgID = strings.TrimSpace(msgID)
 	if msgID == "" || strings.TrimSpace(whCtx.SessionWebhook) == "" {
 		return
@@ -443,5 +443,5 @@ func (a *DingTalkAdapter) rememberWebhook(msgID string, whCtx sessionWebhookCont
 	if whCtx.CreatedAt.IsZero() {
 		whCtx.CreatedAt = time.Now().UTC()
 	}
-	a.webhookCache.put(msgID, whCtx)
+	a.webhookCache.put(configID, msgID, whCtx)
 }

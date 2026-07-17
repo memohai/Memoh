@@ -15,7 +15,7 @@ import (
 
 // TestListManagersEveryoneUsesScopedBindings verifies that when "everyone" carries
 // Manage, ListManagers uses the bot-scoped query (ListChannelIdentityBindingsForBot)
-// instead of the global ListChannelIdentityBindings. This prevents cross-tenant
+// instead of the global ListChannelIdentityBindings. This prevents cross-team
 // data leaks while still showing workspace members' bound identities.
 func TestListManagersEveryoneUsesScopedBindings(t *testing.T) {
 	ctx := context.Background()
