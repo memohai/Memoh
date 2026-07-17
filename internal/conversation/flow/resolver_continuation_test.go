@@ -86,12 +86,12 @@ func TestDeferredContinuationPreservesTurnAndAppendsRows(t *testing.T) {
 
 	tracker := newDeferredContinuationRowTracker(continuation)
 	start := agentpkg.StreamEvent{Type: agentpkg.EventAgentStart}
-	tracker.annotate(&start)
+	tracker.Annotate(&start)
 	if len(start.LedgerRows) != 2 || start.LedgerRows[0].TurnMessageSeq != 2 || start.LedgerRows[1].StableID != response.MessageID || start.LedgerRows[1].TurnMessageSeq != 3 {
 		t.Fatalf("continuation start ledger = %#v", start.LedgerRows)
 	}
 	step := agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart}
-	tracker.annotate(&step)
+	tracker.Annotate(&step)
 	if len(step.LedgerRows) != 1 || step.LedgerRows[0].Role != "assistant" || step.LedgerRows[0].TurnMessageSeq != 4 {
 		t.Fatalf("continuation assistant row = %#v", step.LedgerRows)
 	}

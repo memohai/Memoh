@@ -515,6 +515,95 @@ func TestStreamACPAgentWSTerminalProjectionUsesPersistedRows(t *testing.T) {
 	}
 }
 
+// ACP streams carry no step-start events, so the row tracker derives
+// assistant-row boundaries from the transcript folding rules. This test runs
+// a two-segment turn end to end: every live block's stable ID must equal the
+// identity its row settles with at the persistence fence.
+func TestStreamACPAgentWSKeepsMultiSegmentRowIdentitiesAligned(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	messages := &acpProjectionMessageService{}
+	pool := &recordingACPPrompter{
+		streamEvents: []event.StreamEvent{
+			{Type: event.TextDelta, Delta: "first answer"},
+			{Type: event.ToolCallStart, ToolCallID: "call-1", ToolName: "read"},
+			{Type: event.ToolCallEnd, ToolCallID: "call-1", ToolName: "read", Result: "contents"},
+			{Type: event.TextDelta, Delta: "second answer"},
+		},
+		result: acpclient.PromptResult{
+			Output: []sdk.Message{
+				{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+					sdk.TextPart{Text: "first answer"},
+					sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "read"},
+				}},
+				sdk.ToolMessage(sdk.ToolResultPart{
+					ToolCallID: "call-1",
+					ToolName:   "read",
+					Result:     "contents",
+				}),
+				sdk.AssistantMessage("second answer"),
+			},
+			StopReason: "end_turn",
+		},
+	}
+	resolver := &Resolver{
+		messageService: messages,
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: acpRuntimeSessionServiceForTest("user-1"),
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	eventCh := make(chan WSStreamEvent, 16)
+	if err := resolver.streamACPAgentWS(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID: "bot-1", SessionID: "session-1", Query: "inspect",
+			RuntimeTurn: turn, UserMessagePersisted: true, PersistedUserMessageID: turn.Request.MessageID,
+		},
+		eventCh,
+		make(chan struct{}),
+	); err != nil {
+		t.Fatalf("streamACPAgentWS() error = %v", err)
+	}
+
+	events := drainAgentEvents(t, eventCh)
+	deltas := make([]agentpkg.StreamEvent, 0, 2)
+	for _, ev := range events {
+		if ev.Type == agentpkg.EventTextDelta {
+			deltas = append(deltas, ev)
+		}
+	}
+	if len(deltas) != 2 {
+		t.Fatalf("streamed text deltas = %d, want 2 (events: %#v)", len(deltas), events)
+	}
+	if len(messages.roundInputs) != 3 {
+		t.Fatalf("persisted rows = %d, want 3 (assistant, tool, assistant)", len(messages.roundInputs))
+	}
+	first, tool, second := messages.roundInputs[0], messages.roundInputs[1], messages.roundInputs[2]
+	if first.Role != "assistant" || tool.Role != "tool" || second.Role != "assistant" {
+		t.Fatalf("persisted roles = %q, %q, %q", first.Role, tool.Role, second.Role)
+	}
+	if deltas[0].StableID == "" || deltas[0].StableID != first.MessageID {
+		t.Fatalf("first delta stable ID = %q, want persisted %q", deltas[0].StableID, first.MessageID)
+	}
+	if deltas[1].StableID == "" || deltas[1].StableID != second.MessageID {
+		t.Fatalf("second delta stable ID = %q, want persisted %q", deltas[1].StableID, second.MessageID)
+	}
+	if deltas[0].StableID == deltas[1].StableID {
+		t.Fatalf("both segments share live identity %q", deltas[0].StableID)
+	}
+	toolEnd := requireStreamEvent(t, events, agentpkg.EventToolCallEnd)
+	if len(toolEnd.RowIdentities) != 2 || toolEnd.RowIdentities[1].StableID != tool.MessageID {
+		t.Fatalf("tool end identities = %#v, want persisted tool row %q", toolEnd.RowIdentities, tool.MessageID)
+	}
+	if first.TurnMessageSeq != 2 || tool.TurnMessageSeq != 3 || second.TurnMessageSeq != 4 {
+		t.Fatalf("persisted sequences = %d, %d, %d, want 2, 3, 4",
+			first.TurnMessageSeq, tool.TurnMessageSeq, second.TurnMessageSeq)
+	}
+}
+
 func TestStreamACPAgentWSRechecksRuntimeOwnerWorkspaceExecBeforePrompt(t *testing.T) {
 	t.Parallel()
 

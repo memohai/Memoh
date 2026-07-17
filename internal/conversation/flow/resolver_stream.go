@@ -304,7 +304,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		if !stored {
 			switch {
 			case hasSnapshot:
-				if _, err := r.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput); err != nil {
+				if _, err := r.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot, toolCallCount, idleCancel.DidFire(), hasVisibleOutput); err != nil {
 					errCh <- fmt.Errorf("persist partial agent result: %w", err)
 					return
 				}
@@ -546,7 +546,7 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 	canonicalFinalized := false
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
-		rowTracker.annotate(&event)
+		rowTracker.Annotate(&event)
 
 		// Track tool calls for adaptive idle timeout
 		if event.Type == agentpkg.EventToolCallStart {
@@ -654,7 +654,7 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 				return persistedMessages, fmt.Errorf("runtime ownership check before partial persistence: %w", guardErr)
 			}
 			var persistErr error
-			persistedMessages, persistErr = r.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+			persistedMessages, persistErr = r.persistPartialResult(ctx, req, rc, lastSnapshot, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 			if persistErr != nil {
 				return persistedMessages, fmt.Errorf("persist partial agent result: %w", persistErr)
 			}
@@ -806,7 +806,7 @@ func hasPersistableAssistantOutput(messages []conversation.ModelMessage) bool {
 	return false
 }
 
-func bindRuntimeInjectedRecorder(cfg *agentpkg.RunConfig, rc resolvedContext, rowTracker *runtimeRowTracker) {
+func bindRuntimeInjectedRecorder(cfg *agentpkg.RunConfig, rc resolvedContext, rowTracker *RuntimeRowTracker) {
 	if cfg == nil || rowTracker == nil || rc.recordInjectedMessage == nil {
 		return
 	}
@@ -819,7 +819,7 @@ func bindRuntimeInjectedRecorder(cfg *agentpkg.RunConfig, rc resolvedContext, ro
 	}
 }
 
-func bindRuntimeSyntheticRowRecorder(cfg *agentpkg.RunConfig, rowTracker *runtimeRowTracker) {
+func bindRuntimeSyntheticRowRecorder(cfg *agentpkg.RunConfig, rowTracker *RuntimeRowTracker) {
 	if cfg == nil || rowTracker == nil {
 		return
 	}
@@ -835,24 +835,33 @@ func bindRuntimeSyntheticRowRecorder(cfg *agentpkg.RunConfig, rowTracker *runtim
 // When no partial messages are available, failures are not persisted. The UI
 // can show temporary errors without committing a user-only history row for a
 // send that did not successfully produce an assistant turn.
+//
+// Reachability note: both stream loops persist a captured terminal snapshot
+// inline (or return on its error), so today hasSnapshot implies stored and
+// this branch never fires. It stays as the defensive fallback for partial
+// persistence and therefore must carry the full snapshot — including the row
+// identities bound at capture time. Dropping runtimeRows would persist the
+// user row with its reservation while assistant rows fall back to fresh
+// identities, which breaks the turn's row-ledger ordering.
 func (r *Resolver) persistPartialResult(
 	ctx context.Context,
 	req conversation.ChatRequest,
 	rc resolvedContext,
-	partialMessages []sdk.Message,
+	snap terminalSnapshot,
 	toolCallCount int,
 	wasIdleTimeout bool,
 	hasVisibleOutput bool,
 ) ([]messagepkg.Message, error) {
 	persistCtx := context.WithoutCancel(ctx)
 
-	if len(partialMessages) > 0 {
+	if len(snap.sdkMessages) > 0 {
 		// AllowPendingToolCalls=false → repairToolCallClosures will inject
 		// synthetic error tool_results for any tool_calls that never received
 		// a real result, preserving the assistant ↔ tool pairing required by
 		// downstream provider serializers (especially Anthropic).
 		persisted, err := r.persistTerminalSnapshotResult(persistCtx, req, rc, terminalSnapshot{
-			sdkMessages:   partialMessages,
+			sdkMessages:   snap.sdkMessages,
+			runtimeRows:   snap.runtimeRows,
 			aborted:       !hasVisibleOutput,
 			visibleOutput: hasVisibleOutput,
 		})
@@ -860,7 +869,7 @@ func (r *Resolver) persistPartialResult(
 			r.logger.Info("persisted partial agent result",
 				slog.String("bot_id", req.BotID),
 				slog.Int("tool_calls", toolCallCount),
-				slog.Int("partial_messages", len(partialMessages)),
+				slog.Int("partial_messages", len(snap.sdkMessages)),
 				slog.Bool("idle_timeout", wasIdleTimeout),
 			)
 			// Trigger compaction on the failure path so that oversized

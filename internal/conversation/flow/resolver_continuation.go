@@ -183,9 +183,9 @@ func (r *Resolver) persistDeferredResponse(
 	return continuation, nil
 }
 
-func newDeferredContinuationRowTracker(continuation DeferredContinuation) *runtimeRowTracker {
+func newDeferredContinuationRowTracker(continuation DeferredContinuation) *RuntimeRowTracker {
 	turn := continuation.turn
-	tracker := &runtimeRowTracker{
+	tracker := &RuntimeRowTracker{
 		turn:        &turn,
 		nextStepSeq: continuation.responseRow.TurnMessageSeq + 1,
 	}
@@ -216,7 +216,7 @@ func (r *Resolver) continueDeferredSession(
 	stream := r.agent.Stream(ctx, cfg)
 	stored := false
 	for event := range stream {
-		rowTracker.annotate(&event)
+		rowTracker.Annotate(&event)
 		data, err := json.Marshal(event)
 		if err != nil {
 			continue

@@ -157,6 +157,10 @@ func filterToolMessageToPending(msg conversation.ModelMessage, pending map[strin
 	}
 	filteredMsg := converted[0]
 	filteredMsg.Usage = msg.Usage
+	// The rebuilt message must keep the reserved row identity: dropping it
+	// would let assignMissingRuntimeRows mint a fresh ID, and the persisted
+	// tool row would no longer match the identity the live stream announced.
+	filteredMsg.RuntimeRow = msg.RuntimeRow
 	return &filteredMsg
 }
 

@@ -12,16 +12,33 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
-// runtimeRowTracker assigns database row identities at the first model-step
+// RuntimeRowTracker assigns database row identities at the first model-step
 // event. Each SDK step has one assistant row and an optional aggregate tool
 // row; reserving the adjacent odd sequence leaves room for a synthetic tool
 // closure without renumbering a later assistant row.
-type runtimeRowTracker struct {
+type RuntimeRowTracker struct {
 	mu          sync.Mutex
 	turn        *messagepkg.RuntimeTurnReservation
 	nextStepSeq int64
 	steps       []*runtimeStepRows
 	active      *runtimeStepRows
+
+	// newMessageID allocates row identities; nil means uuid.NewString. It is
+	// injectable so contract fixture generation can produce deterministic IDs
+	// (random UUIDs would make every regenerated fixture drift).
+	newMessageID func() string
+
+	// implicitSteps selects transcript-derived step boundaries for event
+	// streams that never emit EventModelStepStart (the ACP session bridge).
+	// The boundary rules mirror acpclient.TranscriptRecorder's folding logic:
+	// both must agree, because the live step an event is annotated with and
+	// the terminal message bindTerminalRows settles it into are required to
+	// be the same row.
+	implicitSteps bool
+	// implicit* mirror the recorder's pending-part state for the active step.
+	implicitPendingText      bool
+	implicitPendingReasoning bool
+	implicitToolCallIDs      map[string]struct{}
 
 	terminalSyntheticRows []messagepkg.RuntimeRowReservation
 	auxiliaryRows         []messagepkg.RuntimeRowReservation
@@ -32,16 +49,57 @@ type runtimeStepRows struct {
 	assistant messagepkg.RuntimeRowReservation
 	tool      *messagepkg.RuntimeRowReservation
 	discarded bool
+	// sealed marks a step whose assistant message the transcript has closed
+	// (tool result emitted, or a folding flush). Only implicit-step streams
+	// seal steps; the next content block must start a fresh step.
+	sealed bool
 }
 
-func newRuntimeRowTracker(turn *messagepkg.RuntimeTurnReservation) *runtimeRowTracker {
+func newRuntimeRowTracker(turn *messagepkg.RuntimeTurnReservation) *RuntimeRowTracker {
 	if turn == nil || strings.TrimSpace(turn.TurnID) == "" || turn.TurnPosition <= 0 {
 		return nil
 	}
-	return &runtimeRowTracker{turn: turn, nextStepSeq: 2}
+	return &RuntimeRowTracker{turn: turn, nextStepSeq: 2}
 }
 
-func (t *runtimeRowTracker) annotate(event *agentpkg.StreamEvent) {
+// newImplicitStepRuntimeRowTracker builds a tracker for event streams that
+// never emit EventModelStepStart (the ACP session bridge). Step boundaries
+// are derived from the same folding rules acpclient.TranscriptRecorder
+// applies when it builds the terminal output, so a live block's stable_id is
+// the identity bindTerminalRows settles the same content with.
+func newImplicitStepRuntimeRowTracker(turn *messagepkg.RuntimeTurnReservation) *RuntimeRowTracker {
+	tracker := newRuntimeRowTracker(turn)
+	if tracker != nil {
+		tracker.implicitSteps = true
+	}
+	return tracker
+}
+
+// NewRuntimeRowTracker builds a tracker with an explicit message-ID
+// generator. It exists for consumers outside this package that replay the
+// resolver's annotation step (the runtime contract fixtures in
+// internal/handlers) and need deterministic row identities; production
+// resolver paths keep using newRuntimeRowTracker, which defaults to
+// uuid.NewString.
+func NewRuntimeRowTracker(turn *messagepkg.RuntimeTurnReservation, newMessageID func() string) *RuntimeRowTracker {
+	tracker := newRuntimeRowTracker(turn)
+	if tracker == nil {
+		return nil
+	}
+	if newMessageID != nil {
+		tracker.newMessageID = newMessageID
+	}
+	return tracker
+}
+
+func (t *RuntimeRowTracker) allocMessageID() string {
+	if t.newMessageID == nil {
+		return uuid.NewString()
+	}
+	return t.newMessageID()
+}
+
+func (t *RuntimeRowTracker) Annotate(event *agentpkg.StreamEvent) {
 	if t == nil || event == nil {
 		return
 	}
@@ -49,6 +107,7 @@ func (t *runtimeRowTracker) annotate(event *agentpkg.StreamEvent) {
 	defer t.mu.Unlock()
 	switch event.Type {
 	case agentpkg.EventModelStepStart:
+		t.resetImplicitPartsLocked()
 		t.flushPendingLedgerLocked(event)
 		step := t.startStepLocked()
 		appendRuntimeLedgerRows(event, step.assistant)
@@ -58,6 +117,7 @@ func (t *runtimeRowTracker) annotate(event *agentpkg.StreamEvent) {
 			t.active.discarded = true
 			t.active = nil
 		}
+		t.resetImplicitPartsLocked()
 		event.ResetLedger = true
 		event.LedgerRows = runtimeRowIdentities(t.currentLedgerRowsLocked())
 		t.pendingLedgerRows = nil
@@ -67,29 +127,35 @@ func (t *runtimeRowTracker) annotate(event *agentpkg.StreamEvent) {
 		t.flushPendingLedgerLocked(event)
 		return
 	}
-	stepWasNew := t.active == nil
-	step := t.ensureStepLocked()
-	if step == nil {
-		return
+	step := t.active
+	if t.implicitSteps && step != nil && t.implicitStepBoundaryLocked(step, event) {
+		// The transcript folds everything before this event into a closed
+		// assistant message, so the event must land on a fresh row.
+		step.sealed = true
+		step = nil
+		t.resetImplicitPartsLocked()
 	}
-	if stepWasNew {
+	if step == nil {
+		step = t.startStepLocked()
 		appendRuntimeLedgerRows(event, step.assistant)
 	}
 	if event.Type == agentpkg.EventToolCallEnd {
 		toolWasNew := step.tool == nil
-		tool := step.ensureTool(t.turn)
+		tool := step.ensureTool(t.turn, t.allocMessageID)
 		applyRuntimeRowsToEvent(event, step.assistant, tool)
 		if toolWasNew {
 			appendRuntimeLedgerRows(event, tool)
 		}
 		t.flushPendingLedgerLocked(event)
+		t.applyImplicitEventLocked(step, event)
 		return
 	}
 	applyRuntimeRowsToEvent(event, step.assistant)
 	t.flushPendingLedgerLocked(event)
+	t.applyImplicitEventLocked(step, event)
 }
 
-func (t *runtimeRowTracker) startStepLocked() *runtimeStepRows {
+func (t *RuntimeRowTracker) startStepLocked() *runtimeStepRows {
 	step := &runtimeStepRows{assistant: t.newRow("assistant", t.nextStepSeq)}
 	t.nextStepSeq += 2
 	t.steps = append(t.steps, step)
@@ -97,18 +163,90 @@ func (t *runtimeRowTracker) startStepLocked() *runtimeStepRows {
 	return step
 }
 
-func (t *runtimeRowTracker) ensureStepLocked() *runtimeStepRows {
-	if t.active != nil {
-		return t.active
+// implicitStepBoundaryLocked reports whether event begins a new assistant
+// message under the transcript recorder's folding rules: text after a tool
+// call part, reasoning after text or a tool call part, and an unmatched
+// decision request while text or reasoning is pending all flush the current
+// message. On a sealed step (a tool result already closed the message) any
+// new content starts a fresh message — except a late parallel ToolCallEnd,
+// whose transcript flush is a no-op and whose result joins the sealed
+// message's aggregate tool row.
+func (t *RuntimeRowTracker) implicitStepBoundaryLocked(step *runtimeStepRows, event *agentpkg.StreamEvent) bool {
+	if step.sealed {
+		switch event.Type {
+		case agentpkg.EventTextDelta,
+			agentpkg.EventReasoningDelta,
+			agentpkg.EventToolCallStart,
+			agentpkg.EventToolApprovalRequest,
+			agentpkg.EventUserInputRequest:
+			return true
+		default:
+			return false
+		}
 	}
-	return t.startStepLocked()
+	switch event.Type {
+	case agentpkg.EventTextDelta:
+		return len(t.implicitToolCallIDs) > 0
+	case agentpkg.EventReasoningDelta:
+		return t.implicitPendingText || len(t.implicitToolCallIDs) > 0
+	case agentpkg.EventToolApprovalRequest, agentpkg.EventUserInputRequest:
+		if _, ok := t.implicitToolCallIDs[strings.TrimSpace(event.ToolCallID)]; ok {
+			return false
+		}
+		return t.implicitPendingText || t.implicitPendingReasoning
+	default:
+		return false
+	}
+}
+
+// applyImplicitEventLocked advances the transcript-mirror state after an
+// event has been annotated to step. ToolCallEnd closes the assistant message
+// in the transcript (a tool result follows), so the step is sealed; the
+// other updates track the recorder's pending text/reasoning buffers and the
+// tool call parts accumulated into the current message.
+func (t *RuntimeRowTracker) applyImplicitEventLocked(step *runtimeStepRows, event *agentpkg.StreamEvent) {
+	if !t.implicitSteps {
+		return
+	}
+	switch event.Type {
+	case agentpkg.EventTextDelta:
+		t.implicitPendingText = true
+	case agentpkg.EventReasoningDelta:
+		t.implicitPendingReasoning = true
+	case agentpkg.EventToolCallStart:
+		// A tool call folds pending text/reasoning into the current message;
+		// the message itself stays open.
+		t.implicitPendingText = false
+		t.implicitPendingReasoning = false
+		t.trackImplicitToolCallLocked(event.ToolCallID)
+	case agentpkg.EventToolApprovalRequest, agentpkg.EventUserInputRequest:
+		// An unmatched decision request adds a tool call part to the current
+		// message, mirroring the recorder's metadata attachment.
+		t.trackImplicitToolCallLocked(event.ToolCallID)
+	case agentpkg.EventToolCallEnd:
+		step.sealed = true
+		t.resetImplicitPartsLocked()
+	}
+}
+
+func (t *RuntimeRowTracker) trackImplicitToolCallLocked(toolCallID string) {
+	if t.implicitToolCallIDs == nil {
+		t.implicitToolCallIDs = map[string]struct{}{}
+	}
+	t.implicitToolCallIDs[strings.TrimSpace(toolCallID)] = struct{}{}
+}
+
+func (t *RuntimeRowTracker) resetImplicitPartsLocked() {
+	t.implicitPendingText = false
+	t.implicitPendingReasoning = false
+	t.implicitToolCallIDs = nil
 }
 
 // reserveInjectedRow places a mid-turn user message in the same durable
 // sequence as the assistant/tool rows around it. The agent invokes the
 // injection recorder on its own goroutine, so allocation shares the tracker
 // mutex with stream-event annotation.
-func (t *runtimeRowTracker) reserveInjectedRow() *messagepkg.RuntimeRowReservation {
+func (t *RuntimeRowTracker) reserveInjectedRow() *messagepkg.RuntimeRowReservation {
 	if t == nil {
 		return nil
 	}
@@ -121,7 +259,7 @@ func (t *runtimeRowTracker) reserveInjectedRow() *messagepkg.RuntimeRowReservati
 	return &row
 }
 
-func (t *runtimeRowTracker) reserveTerminalSyntheticRow(role string) {
+func (t *RuntimeRowTracker) reserveTerminalSyntheticRow(role string) {
 	if t == nil {
 		return
 	}
@@ -134,7 +272,7 @@ func (t *runtimeRowTracker) reserveTerminalSyntheticRow(role string) {
 	t.pendingLedgerRows = append(t.pendingLedgerRows, row)
 }
 
-func (t *runtimeRowTracker) currentLedgerRowsLocked() []messagepkg.RuntimeRowReservation {
+func (t *RuntimeRowTracker) currentLedgerRowsLocked() []messagepkg.RuntimeRowReservation {
 	rows := []messagepkg.RuntimeRowReservation{t.turn.Request}
 	for _, step := range t.steps {
 		if step.discarded {
@@ -152,7 +290,7 @@ func (t *runtimeRowTracker) currentLedgerRowsLocked() []messagepkg.RuntimeRowRes
 	return rows
 }
 
-func (t *runtimeRowTracker) flushPendingLedgerLocked(event *agentpkg.StreamEvent) {
+func (t *RuntimeRowTracker) flushPendingLedgerLocked(event *agentpkg.StreamEvent) {
 	if len(t.pendingLedgerRows) == 0 {
 		return
 	}
@@ -160,9 +298,9 @@ func (t *runtimeRowTracker) flushPendingLedgerLocked(event *agentpkg.StreamEvent
 	t.pendingLedgerRows = nil
 }
 
-func (t *runtimeRowTracker) newRow(role string, seq int64) messagepkg.RuntimeRowReservation {
+func (t *RuntimeRowTracker) newRow(role string, seq int64) messagepkg.RuntimeRowReservation {
 	return messagepkg.RuntimeRowReservation{
-		MessageID:      uuid.NewString(),
+		MessageID:      t.allocMessageID(),
 		Role:           role,
 		TurnID:         t.turn.TurnID,
 		TurnPosition:   t.turn.TurnPosition,
@@ -170,10 +308,10 @@ func (t *runtimeRowTracker) newRow(role string, seq int64) messagepkg.RuntimeRow
 	}
 }
 
-func (s *runtimeStepRows) ensureTool(turn *messagepkg.RuntimeTurnReservation) messagepkg.RuntimeRowReservation {
+func (s *runtimeStepRows) ensureTool(turn *messagepkg.RuntimeTurnReservation, newMessageID func() string) messagepkg.RuntimeRowReservation {
 	if s.tool == nil {
 		row := messagepkg.RuntimeRowReservation{
-			MessageID:      uuid.NewString(),
+			MessageID:      newMessageID(),
 			Role:           "tool",
 			TurnID:         turn.TurnID,
 			TurnPosition:   turn.TurnPosition,
@@ -187,7 +325,7 @@ func (s *runtimeStepRows) ensureTool(turn *messagepkg.RuntimeTurnReservation) me
 // bindTerminalRows maps the SDK's canonical assistant/tool row sequence back
 // to the identities allocated while streaming. Missing tool results are the
 // synthetic closure case and consume the slot reserved beside their step.
-func (t *runtimeRowTracker) bindTerminalRows(messages []sdk.Message) []messagepkg.RuntimeRowReservation {
+func (t *RuntimeRowTracker) bindTerminalRows(messages []sdk.Message) []messagepkg.RuntimeRowReservation {
 	if t == nil || len(messages) == 0 {
 		return nil
 	}
@@ -214,7 +352,7 @@ func (t *runtimeRowTracker) bindTerminalRows(messages []sdk.Message) []messagepk
 		case "tool":
 			idx := stepIndex - 1
 			if idx >= 0 && idx < len(t.steps) && !t.steps[idx].discarded {
-				rows[i] = t.steps[idx].ensureTool(t.turn)
+				rows[i] = t.steps[idx].ensureTool(t.turn, t.allocMessageID)
 			} else {
 				rows[i] = t.newRow("tool", t.nextStepSeq)
 				t.nextStepSeq++

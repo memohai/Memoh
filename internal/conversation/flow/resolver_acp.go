@@ -215,9 +215,12 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		return projectionPersistErr
 	}
 
-	rowTracker := newRuntimeRowTracker(req.RuntimeTurn)
+	// ACP streams never emit EventModelStepStart; the tracker derives step
+	// boundaries from the same folding rules that build the terminal output,
+	// so live block identities survive into the persisted row ledger.
+	rowTracker := newImplicitStepRuntimeRowTracker(req.RuntimeTurn)
 	emit := func(ev agentpkg.StreamEvent) {
-		rowTracker.annotate(&ev)
+		rowTracker.Annotate(&ev)
 		if isACPDecisionProjectionEvent(ev) && recordProjectionStatus(ev) {
 			persisted, persistErr := r.persistACPDecisionProjection(context.WithoutCancel(ctx), req, ev)
 			if persistErr != nil {

@@ -212,7 +212,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 			Query:     "hello",
 		},
 		resolvedContext{},
-		nil,
+		terminalSnapshot{},
 		0,
 		false,
 		true,
@@ -220,6 +220,62 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 
 	if len(messages.persisted) != 0 {
 		t.Fatalf("expected failed stream not to persist user-only history, got %#v", messages.persisted)
+	}
+}
+
+func TestPersistPartialResultCarriesBoundRuntimeRows(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	tracker := newRuntimeRowTracker(turn)
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	delta := agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "partial answer"}
+	tracker.Annotate(&delta)
+
+	sdkMessages := []sdk.Message{sdk.AssistantMessage("partial answer")}
+	snap := terminalSnapshot{
+		sdkMessages:   sdkMessages,
+		runtimeRows:   tracker.bindTerminalRows(sdkMessages),
+		visibleOutput: true,
+	}
+
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	if _, err := resolver.persistPartialResult(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:                "bot-1",
+			SessionID:            "session-1",
+			Query:                "hello",
+			RuntimeTurn:          turn,
+			SkipMemoryExtraction: true,
+		},
+		resolvedContext{},
+		snap,
+		0,
+		false,
+		true,
+	); err != nil {
+		t.Fatalf("persistPartialResult returned error: %v", err)
+	}
+
+	if len(messages.roundInputs) != 2 {
+		t.Fatalf("expected user and assistant messages to persist, got %#v", messages.roundInputs)
+	}
+	user, assistant := messages.roundInputs[0], messages.roundInputs[1]
+	if user.TurnMessageSeq != 1 || user.MessageID != turn.Request.MessageID {
+		t.Fatalf("user row reservation = %#v, want turn request row", user)
+	}
+	// The assistant row must land on the identity the live stream announced;
+	// dropping snap.runtimeRows would leave it unreserved and break the
+	// turn's row-ledger ordering.
+	if assistant.MessageID != delta.StableID || assistant.TurnID != turn.TurnID ||
+		assistant.TurnPosition != turn.TurnPosition || assistant.TurnMessageSeq != 2 {
+		t.Fatalf("assistant row = %#v, want live identity %q at sequence 2", assistant, delta.StableID)
 	}
 }
 
@@ -348,8 +404,8 @@ func TestRuntimeInjectedMessagePersistsInReservedTurnOrder(t *testing.T) {
 
 	turn := runtimeRowTestTurn()
 	tracker := newRuntimeRowTracker(turn)
-	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
-	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventToolCallEnd})
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventToolCallEnd})
 
 	records := make([]conversation.InjectedMessageRecord, 0, 1)
 	rc := resolvedContext{
@@ -366,7 +422,7 @@ func TestRuntimeInjectedMessagePersistsInReservedTurnOrder(t *testing.T) {
 	bindRuntimeInjectedRecorder(&cfg, rc, tracker)
 	cfg.InjectedRecorder("---\nsource: web\n---\nchange direction", 2)
 
-	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
 	sdkMessages := []sdk.Message{
 		{
 			Role: sdk.MessageRoleAssistant,
@@ -426,12 +482,12 @@ func TestRuntimeReadMediaSyntheticUserPersistsInReservedTurnOrder(t *testing.T) 
 
 	turn := runtimeRowTestTurn()
 	tracker := newRuntimeRowTracker(turn)
-	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
-	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventToolCallEnd})
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventToolCallEnd})
 	cfg := agentpkg.RunConfig{}
 	bindRuntimeSyntheticRowRecorder(&cfg, tracker)
 	cfg.SyntheticRowRecorder("user")
-	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
 
 	sdkMessages := []sdk.Message{
 		{
