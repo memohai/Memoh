@@ -11,10 +11,14 @@ export type AccountsAccount = {
     email?: string;
     id?: string;
     is_active?: boolean;
+    joined_at?: string;
     last_login_at?: string;
+    membership_is_active?: boolean;
+    membership_updated_at?: string;
     metadata?: {
         [key: string]: unknown;
     };
+    principal_is_active?: boolean;
     role?: string;
     timezone?: string;
     updated_at?: string;
@@ -13606,6 +13610,10 @@ export type DeleteUsersByIdErrors = {
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -13690,6 +13698,10 @@ export type PutUsersByIdErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
     /**
      * Internal Server Error
      */

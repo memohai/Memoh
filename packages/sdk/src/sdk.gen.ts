@@ -2480,9 +2480,9 @@ export const postUsersMeRuntimes = <ThrowOnError extends boolean = false>(option
 export const deleteUsersMeRuntimesById = <ThrowOnError extends boolean = false>(options: Options<DeleteUsersMeRuntimesByIdData, ThrowOnError>): RequestResult<DeleteUsersMeRuntimesByIdResponses, DeleteUsersMeRuntimesByIdErrors, ThrowOnError> => (options.client ?? client).delete<DeleteUsersMeRuntimesByIdResponses, DeleteUsersMeRuntimesByIdErrors, ThrowOnError>({ url: '/users/me/runtimes/{id}', ...options });
 
 /**
- * Remove member (admin only)
+ * Deactivate member (admin only)
  *
- * Remove a workspace member by removing login credentials and disabling the account
+ * Deactivate the member in the current workspace without changing global credentials
  */
 export const deleteUsersById = <ThrowOnError extends boolean = false>(options: Options<DeleteUsersByIdData, ThrowOnError>): RequestResult<DeleteUsersByIdResponses, DeleteUsersByIdErrors, ThrowOnError> => (options.client ?? client).delete<DeleteUsersByIdResponses, DeleteUsersByIdErrors, ThrowOnError>({ url: '/users/{id}', ...options });
 
@@ -2496,7 +2496,7 @@ export const getUsersById = <ThrowOnError extends boolean = false>(options: Opti
 /**
  * Update user (admin only)
  *
- * Update user profile and status
+ * Update the user's role or membership status in the current workspace
  */
 export const putUsersById = <ThrowOnError extends boolean = false>(options: Options<PutUsersByIdData, ThrowOnError>): RequestResult<PutUsersByIdResponses, PutUsersByIdErrors, ThrowOnError> => (options.client ?? client).put<PutUsersByIdResponses, PutUsersByIdErrors, ThrowOnError>({
     url: '/users/{id}',

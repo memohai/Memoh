@@ -59,7 +59,11 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM updated_user changed_user
 JOIN updated_membership changed_membership
   ON changed_membership.user_id = changed_user.id
@@ -78,21 +82,25 @@ type CreateAccountParams struct {
 }
 
 type CreateAccountRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	Username     pgtype.Text        `json:"username"`
-	Email        pgtype.Text        `json:"email"`
-	PasswordHash pgtype.Text        `json:"password_hash"`
-	Role         string             `json:"role"`
-	DisplayName  pgtype.Text        `json:"display_name"`
-	AvatarUrl    pgtype.Text        `json:"avatar_url"`
-	Timezone     string             `json:"timezone"`
-	DataRoot     pgtype.Text        `json:"data_root"`
-	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
-	IsActive     pgtype.Bool        `json:"is_active"`
-	Metadata     []byte             `json:"metadata"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	TeamID       pgtype.UUID        `json:"team_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
 }
 
 func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (CreateAccountRow, error) {
@@ -124,6 +132,10 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (C
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
@@ -146,7 +158,11 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM created_user changed_user
 JOIN created_membership changed_membership
   ON changed_membership.user_id = changed_user.id
@@ -158,21 +174,25 @@ type CreateUserParams struct {
 }
 
 type CreateUserRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	Username     pgtype.Text        `json:"username"`
-	Email        pgtype.Text        `json:"email"`
-	PasswordHash pgtype.Text        `json:"password_hash"`
-	Role         string             `json:"role"`
-	DisplayName  pgtype.Text        `json:"display_name"`
-	AvatarUrl    pgtype.Text        `json:"avatar_url"`
-	Timezone     string             `json:"timezone"`
-	DataRoot     pgtype.Text        `json:"data_root"`
-	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
-	IsActive     pgtype.Bool        `json:"is_active"`
-	Metadata     []byte             `json:"metadata"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	TeamID       pgtype.UUID        `json:"team_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
@@ -194,12 +214,16 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
 
 const getAccountByIdentity = `-- name: GetAccountByIdentity :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at
 FROM team_accounts
 WHERE username = $1 OR email = $1
 `
@@ -223,12 +247,16 @@ func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
 
 const getAccountByUserID = `-- name: GetAccountByUserID :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id FROM team_accounts WHERE id = $1
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at FROM team_accounts WHERE id = $1
 `
 
 func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (TeamAccount, error) {
@@ -250,6 +278,10 @@ func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (T
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
@@ -284,7 +316,7 @@ func (q *Queries) GetUserByID(ctx context.Context, userID pgtype.UUID) (User, er
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id FROM team_accounts
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at FROM team_accounts
 WHERE username IS NOT NULL
 ORDER BY created_at DESC
 `
@@ -314,6 +346,10 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]TeamAccount, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TeamID,
+			&i.PrincipalIsActive,
+			&i.MembershipIsActive,
+			&i.JoinedAt,
+			&i.MembershipUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -342,7 +378,7 @@ func (q *Queries) RemoveMember(ctx context.Context, userID pgtype.UUID) (pgtype.
 }
 
 const searchAccounts = `-- name: SearchAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at
 FROM team_accounts
 WHERE username IS NOT NULL
   AND (
@@ -385,6 +421,10 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TeamID,
+			&i.PrincipalIsActive,
+			&i.MembershipIsActive,
+			&i.JoinedAt,
+			&i.MembershipUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -400,7 +440,7 @@ const updateAccountAdmin = `-- name: UpdateAccountAdmin :one
 WITH updated_membership AS (
   UPDATE team_members membership
   SET role = $1::user_role,
-      is_active = $2,
+      is_active = COALESCE($2::boolean, membership.is_active),
       updated_at = now()
   WHERE membership.team_id = public.memoh_current_team_id()
     AND membership.user_id = $3
@@ -413,33 +453,41 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM updated_membership changed_membership
 JOIN users changed_user ON changed_user.id = changed_membership.user_id
 `
 
 type UpdateAccountAdminParams struct {
 	Role     string      `json:"role"`
-	IsActive bool        `json:"is_active"`
+	IsActive pgtype.Bool `json:"is_active"`
 	UserID   pgtype.UUID `json:"user_id"`
 }
 
 type UpdateAccountAdminRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	Username     pgtype.Text        `json:"username"`
-	Email        pgtype.Text        `json:"email"`
-	PasswordHash pgtype.Text        `json:"password_hash"`
-	Role         string             `json:"role"`
-	DisplayName  pgtype.Text        `json:"display_name"`
-	AvatarUrl    pgtype.Text        `json:"avatar_url"`
-	Timezone     string             `json:"timezone"`
-	DataRoot     pgtype.Text        `json:"data_root"`
-	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
-	IsActive     pgtype.Bool        `json:"is_active"`
-	Metadata     []byte             `json:"metadata"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	TeamID       pgtype.UUID        `json:"team_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
 }
 
 func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdminParams) (UpdateAccountAdminRow, error) {
@@ -461,6 +509,10 @@ func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdmin
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
@@ -538,7 +590,11 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM updated_user changed_user
 JOIN current_membership changed_membership
   ON changed_membership.user_id = changed_user.id
@@ -553,21 +609,25 @@ type UpdateAccountProfileParams struct {
 }
 
 type UpdateAccountProfileRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	Username     pgtype.Text        `json:"username"`
-	Email        pgtype.Text        `json:"email"`
-	PasswordHash pgtype.Text        `json:"password_hash"`
-	Role         string             `json:"role"`
-	DisplayName  pgtype.Text        `json:"display_name"`
-	AvatarUrl    pgtype.Text        `json:"avatar_url"`
-	Timezone     string             `json:"timezone"`
-	DataRoot     pgtype.Text        `json:"data_root"`
-	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
-	IsActive     pgtype.Bool        `json:"is_active"`
-	Metadata     []byte             `json:"metadata"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	TeamID       pgtype.UUID        `json:"team_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
 }
 
 func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountProfileParams) (UpdateAccountProfileRow, error) {
@@ -595,6 +655,10 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountPro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
@@ -649,7 +713,11 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM selected_user changed_user
 JOIN upserted_membership changed_membership
   ON changed_membership.user_id = changed_user.id
@@ -668,21 +736,25 @@ type UpsertAccountByUsernameParams struct {
 }
 
 type UpsertAccountByUsernameRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	Username     pgtype.Text        `json:"username"`
-	Email        pgtype.Text        `json:"email"`
-	PasswordHash pgtype.Text        `json:"password_hash"`
-	Role         string             `json:"role"`
-	DisplayName  pgtype.Text        `json:"display_name"`
-	AvatarUrl    pgtype.Text        `json:"avatar_url"`
-	Timezone     string             `json:"timezone"`
-	DataRoot     pgtype.Text        `json:"data_root"`
-	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
-	IsActive     pgtype.Bool        `json:"is_active"`
-	Metadata     []byte             `json:"metadata"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	TeamID       pgtype.UUID        `json:"team_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
 }
 
 func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccountByUsernameParams) (UpsertAccountByUsernameRow, error) {
@@ -714,6 +786,10 @@ func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccount
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }

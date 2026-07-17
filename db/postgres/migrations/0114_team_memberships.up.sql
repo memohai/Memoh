@@ -251,7 +251,71 @@ SELECT
     u.metadata,
     u.created_at,
     u.updated_at,
-    tm.team_id
+    tm.team_id,
+    u.is_active AS principal_is_active,
+    tm.is_active AS membership_is_active,
+    tm.created_at AS joined_at,
+    tm.updated_at AS membership_updated_at
 FROM public.team_members tm
 JOIN public.users u ON u.id = tm.user_id
 WHERE tm.team_id = public.memoh_current_team_id();
+
+-- Serialize membership authority changes and keep one active admin per team.
+CREATE OR REPLACE FUNCTION public.memoh_guard_last_active_team_admin()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    IF OLD.role <> 'admin'
+       OR NOT OLD.is_active
+       OR NOT EXISTS (
+           SELECT 1
+             FROM public.users principal
+            WHERE principal.id = OLD.user_id
+              AND principal.is_active
+       ) THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    IF TG_OP = 'UPDATE' AND NEW.role = 'admin' AND NEW.is_active THEN
+        RETURN NEW;
+    END IF;
+
+    -- Concurrent demotions/removals for the same team must observe each other.
+    PERFORM 1
+      FROM public.teams
+     WHERE id = OLD.team_id
+     FOR UPDATE;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM public.team_members candidate
+          JOIN public.users principal
+            ON principal.id = candidate.user_id
+           AND principal.is_active
+         WHERE candidate.team_id = OLD.team_id
+           AND candidate.user_id <> OLD.user_id
+           AND candidate.role = 'admin'
+           AND candidate.is_active
+    ) THEN
+        RAISE EXCEPTION 'team must retain at least one active admin'
+            USING ERRCODE = '23514',
+                  CONSTRAINT = 'team_members_last_active_admin';
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+CREATE TRIGGER team_members_last_active_admin_guard
+BEFORE UPDATE OF role, is_active OR DELETE ON public.team_members
+FOR EACH ROW
+EXECUTE FUNCTION public.memoh_guard_last_active_team_admin();

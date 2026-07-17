@@ -13087,7 +13087,7 @@ const docTemplate = `{
                 }
             },
             "put": {
-                "description": "Update user profile and status",
+                "description": "Update the user's role or membership status in the current workspace",
                 "tags": [
                     "users"
                 ],
@@ -13135,6 +13135,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -13144,11 +13150,11 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Remove a workspace member by removing login credentials and disabling the account",
+                "description": "Deactivate the member in the current workspace without changing global credentials",
                 "tags": [
                     "users"
                 ],
-                "summary": "Remove member (admin only)",
+                "summary": "Deactivate member (admin only)",
                 "parameters": [
                     {
                         "type": "string",
@@ -13176,6 +13182,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -13527,12 +13539,24 @@ const docTemplate = `{
                 "is_active": {
                     "type": "boolean"
                 },
+                "joined_at": {
+                    "type": "string"
+                },
                 "last_login_at": {
+                    "type": "string"
+                },
+                "membership_is_active": {
+                    "type": "boolean"
+                },
+                "membership_updated_at": {
                     "type": "string"
                 },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "principal_is_active": {
+                    "type": "boolean"
                 },
                 "role": {
                     "type": "string"

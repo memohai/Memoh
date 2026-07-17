@@ -4,6 +4,7 @@ package db_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -321,7 +322,7 @@ func TestAdminAccountUpdateOnlyChangesCurrentMembership(t *testing.T) {
 	updated, err := dbsqlc.New(tx).UpdateAccountAdmin(ctx, dbsqlc.UpdateAccountAdminParams{
 		UserID:   uuidValue(t, userID),
 		Role:     "admin",
-		IsActive: false,
+		IsActive: pgtype.Bool{Bool: false, Valid: true},
 	})
 	if err != nil {
 		t.Fatalf("update current membership: %v", err)
@@ -350,6 +351,151 @@ func TestAdminAccountUpdateOnlyChangesCurrentMembership(t *testing.T) {
 	}
 	if teamOneRole != "admin" || !teamOneActive || teamTwoActive {
 		t.Fatalf("membership states = team-one %q/%v, team-two active=%v", teamOneRole, teamOneActive, teamTwoActive)
+	}
+}
+
+func TestRoleOnlyAdminUpdatePreservesMembershipState(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+
+	var targetID, supportAdminID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (username, is_active)
+		VALUES ('globally-suspended-member', false)
+		RETURNING id`).Scan(&targetID); err != nil {
+		t.Fatalf("seed suspended principal: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (username, is_active)
+		VALUES ('support-admin', true)
+		RETURNING id`).Scan(&supportAdminID); err != nil {
+		t.Fatalf("seed support admin: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO team_members (team_id, user_id, role, is_active)
+		VALUES ($1, $2, 'member', true), ($1, $3, 'admin', true)`,
+		team.DefaultTeamID, targetID, supportAdminID); err != nil {
+		t.Fatalf("seed memberships: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin role-only update: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", team.DefaultTeamID); err != nil {
+		t.Fatalf("bind role-only update team: %v", err)
+	}
+	updated, err := dbsqlc.New(tx).UpdateAccountAdmin(ctx, dbsqlc.UpdateAccountAdminParams{
+		UserID:   uuidValue(t, targetID),
+		Role:     "admin",
+		IsActive: pgtype.Bool{},
+	})
+	if err != nil {
+		t.Fatalf("role-only update: %v", err)
+	}
+	if updated.PrincipalIsActive || !updated.MembershipIsActive || updated.IsActive.Bool {
+		t.Fatalf("active states = principal %v, membership %v, effective %v",
+			updated.PrincipalIsActive, updated.MembershipIsActive, updated.IsActive.Bool)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit role-only update: %v", err)
+	}
+}
+
+func TestLastActiveTeamAdminGuard(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+
+	var firstID, secondID, inactiveID string
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username) VALUES ('guard-admin-one') RETURNING id`).Scan(&firstID); err != nil {
+		t.Fatalf("seed first admin principal: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO team_members (team_id, user_id, role, is_active)
+		VALUES ($1, $2, 'admin', true)`, team.DefaultTeamID, firstID); err != nil {
+		t.Fatalf("seed first admin membership: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (username, is_active)
+		VALUES ('guard-inactive-admin', false)
+		RETURNING id`).Scan(&inactiveID); err != nil {
+		t.Fatalf("seed inactive admin principal: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO team_members (team_id, user_id, role, is_active)
+		VALUES ($1, $2, 'admin', true)`, team.DefaultTeamID, inactiveID); err != nil {
+		t.Fatalf("seed inactive admin membership: %v", err)
+	}
+
+	for name, statement := range map[string]string{
+		"demote":     `UPDATE team_members SET role='member' WHERE user_id=$1`,
+		"deactivate": `UPDATE team_members SET is_active=false WHERE user_id=$1`,
+		"delete":     `DELETE FROM team_members WHERE user_id=$1`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pool.Exec(ctx, statement, firstID)
+			if sqlState(err) != "23514" {
+				t.Fatalf("SQLSTATE = %q, want 23514: %v", sqlState(err), err)
+			}
+		})
+	}
+
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username) VALUES ('guard-admin-two') RETURNING id`).Scan(&secondID); err != nil {
+		t.Fatalf("seed second admin principal: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO team_members (team_id, user_id, role, is_active)
+		VALUES ($1, $2, 'admin', true)`, team.DefaultTeamID, secondID); err != nil {
+		t.Fatalf("seed second admin membership: %v", err)
+	}
+
+	ids := []string{firstID, secondID}
+	errs := make([]error, len(ids))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range ids {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			_, errs[index] = pool.Exec(ctx,
+				`UPDATE team_members SET role='member' WHERE team_id=$1 AND user_id=$2`,
+				team.DefaultTeamID, ids[index])
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	succeeded, rejected := 0, 0
+	for _, err := range errs {
+		switch sqlState(err) {
+		case "":
+			if err == nil {
+				succeeded++
+			}
+		case "23514":
+			rejected++
+		}
+	}
+	if succeeded != 1 || rejected != 1 {
+		t.Fatalf("concurrent demotions succeeded/rejected = %d/%d, errors=%v", succeeded, rejected, errs)
+	}
+
+	var activeAdmins int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM team_members membership
+		JOIN users principal
+		  ON principal.id=membership.user_id
+		 AND principal.is_active
+		WHERE membership.team_id=$1
+		  AND membership.role='admin'
+		  AND membership.is_active`, team.DefaultTeamID).Scan(&activeAdmins); err != nil {
+		t.Fatalf("count active admins: %v", err)
+	}
+	if activeAdmins != 1 {
+		t.Fatalf("active admin count = %d, want 1", activeAdmins)
 	}
 }
 

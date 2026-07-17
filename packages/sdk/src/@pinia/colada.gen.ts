@@ -4603,9 +4603,9 @@ export const deleteUsersMeRuntimesByIdMutation = (options?: Partial<Options<Dele
 });
 
 /**
- * Remove member (admin only)
+ * Deactivate member (admin only)
  *
- * Remove a workspace member by removing login credentials and disabling the account
+ * Deactivate the member in the current workspace without changing global credentials
  */
 export const deleteUsersByIdMutation = (options?: Partial<Options<DeleteUsersByIdData>>): UseMutationOptions<unknown, Options<DeleteUsersByIdData>, DeleteUsersByIdError> => ({
     mutation: async (vars) => {
@@ -4640,7 +4640,7 @@ export const getUsersByIdQuery = defineQueryOptions<Options<GetUsersByIdData>, G
 /**
  * Update user (admin only)
  *
- * Update user profile and status
+ * Update the user's role or membership status in the current workspace
  */
 export const putUsersByIdMutation = (options?: Partial<Options<PutUsersByIdData>>): UseMutationOptions<PutUsersByIdResponse, Options<PutUsersByIdData>, PutUsersByIdError> => ({
     mutation: async (vars) => {

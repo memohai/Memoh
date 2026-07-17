@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
@@ -105,7 +106,7 @@ func (s *Store) UpdateAdmin(ctx context.Context, input dbstore.UpdateAccountAdmi
 	row, err := s.queries.UpdateAccountAdmin(ctx, dbsqlc.UpdateAccountAdminParams{
 		UserID:   userID,
 		Role:     input.Role,
-		IsActive: input.IsActive,
+		IsActive: optionalBool(input.IsActive),
 	})
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)
@@ -156,6 +157,10 @@ func mapQueryErr(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return db.ErrNotFound
 	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "team_members_last_active_admin" {
+		return db.ErrLastActiveAdmin
+	}
 	return err
 }
 
@@ -165,6 +170,13 @@ func text(value string) pgtype.Text {
 
 func optionalText(value string) pgtype.Text {
 	return pgtype.Text{String: value, Valid: value != ""}
+}
+
+func optionalBool(value *bool) pgtype.Bool {
+	if value == nil {
+		return pgtype.Bool{}
+	}
+	return pgtype.Bool{Bool: *value, Valid: true}
 }
 
 func accountRecords(rows []dbsqlc.TeamAccount) []dbstore.AccountRecord {
@@ -177,23 +189,31 @@ func accountRecords(rows []dbsqlc.TeamAccount) []dbstore.AccountRecord {
 
 func accountRecord(row dbsqlc.TeamAccount) dbstore.AccountRecord {
 	rec := dbstore.AccountRecord{
-		ID:              row.ID.String(),
-		Username:        row.Username.String,
-		Email:           row.Email.String,
-		Role:            row.Role,
-		DisplayName:     row.DisplayName.String,
-		AvatarURL:       row.AvatarUrl.String,
-		Timezone:        row.Timezone,
-		PasswordHash:    row.PasswordHash.String,
-		HasPasswordHash: row.PasswordHash.Valid,
-		IsActive:        row.IsActive.Bool,
-		Metadata:        string(row.Metadata),
+		ID:               row.ID.String(),
+		Username:         row.Username.String,
+		Email:            row.Email.String,
+		Role:             row.Role,
+		DisplayName:      row.DisplayName.String,
+		AvatarURL:        row.AvatarUrl.String,
+		Timezone:         row.Timezone,
+		PasswordHash:     row.PasswordHash.String,
+		HasPasswordHash:  row.PasswordHash.Valid,
+		IsActive:         row.IsActive.Bool,
+		PrincipalActive:  row.PrincipalIsActive,
+		MembershipActive: row.MembershipIsActive,
+		Metadata:         string(row.Metadata),
 	}
 	if row.CreatedAt.Valid {
 		rec.CreatedAt = row.CreatedAt.Time
 	}
 	if row.UpdatedAt.Valid {
 		rec.UpdatedAt = row.UpdatedAt.Time
+	}
+	if row.JoinedAt.Valid {
+		rec.JoinedAt = row.JoinedAt.Time
+	}
+	if row.MembershipUpdatedAt.Valid {
+		rec.MembershipUpdatedAt = row.MembershipUpdatedAt.Time
 	}
 	if row.LastLoginAt.Valid {
 		rec.LastLoginAt = row.LastLoginAt.Time

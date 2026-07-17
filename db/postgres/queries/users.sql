@@ -16,7 +16,11 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM created_user changed_user
 JOIN created_membership changed_membership
   ON changed_membership.user_id = changed_user.id;
@@ -63,7 +67,11 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM updated_user changed_user
 JOIN updated_membership changed_membership
   ON changed_membership.user_id = changed_user.id;
@@ -118,7 +126,11 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM selected_user changed_user
 JOIN upserted_membership changed_membership
   ON changed_membership.user_id = changed_user.id;
@@ -183,7 +195,11 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM updated_user changed_user
 JOIN current_membership changed_membership
   ON changed_membership.user_id = changed_user.id;
@@ -192,7 +208,7 @@ JOIN current_membership changed_membership
 WITH updated_membership AS (
   UPDATE team_members membership
   SET role = sqlc.arg(role)::user_role,
-      is_active = sqlc.arg(is_active),
+      is_active = COALESCE(sqlc.narg(is_active)::boolean, membership.is_active),
       updated_at = now()
   WHERE membership.team_id = public.memoh_current_team_id()
     AND membership.user_id = sqlc.arg(user_id)
@@ -205,7 +221,11 @@ SELECT
   changed_membership.data_root, changed_user.last_login_at,
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
-  changed_membership.team_id
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
 FROM updated_membership changed_membership
 JOIN users changed_user ON changed_user.id = changed_membership.user_id;
 

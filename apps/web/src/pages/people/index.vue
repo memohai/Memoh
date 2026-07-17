@@ -27,15 +27,12 @@
               <TableHead>{{ t('people.role') }}</TableHead>
               <TableHead>{{ t('common.status') }}</TableHead>
               <TableHead>{{ t('people.lastLogin') }}</TableHead>
-              <TableHead class="w-24 text-right">
-                {{ t('common.actions') }}
-              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             <TableRow v-if="loading && users.length === 0">
               <TableCell
-                :colspan="5"
+                :colspan="4"
                 class="p-0"
               >
                 <div class="space-y-2 p-3">
@@ -49,7 +46,7 @@
             </TableRow>
             <TableRow v-else-if="users.length === 0">
               <TableCell
-                :colspan="5"
+                :colspan="4"
                 class="h-28 text-center text-muted-foreground"
               >
                 {{ t('people.empty') }}
@@ -113,31 +110,6 @@
               </TableCell>
               <TableCell class="text-muted-foreground">
                 {{ formatMemberDate(user.last_login_at, t('people.never')) }}
-              </TableCell>
-              <TableCell>
-                <div class="flex justify-end gap-1">
-                  <ConfirmPopover
-                    :title="t('people.removeMember')"
-                    :message="t('people.removeConfirm', { name: memberName(user) })"
-                    :confirm-text="t('people.removeMember')"
-                    variant="destructive"
-                    :loading="isUserPending(user)"
-                    @confirm="removeMember(user)"
-                  >
-                    <template #trigger>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        :title="t('people.removeMember')"
-                        :aria-label="t('people.removeMemberFor', { name: memberName(user) })"
-                        :disabled="isSelf(user) || isUserPending(user)"
-                      >
-                        <Trash2 class="size-4" />
-                      </Button>
-                    </template>
-                  </ConfirmPopover>
-                </div>
               </TableCell>
             </TableRow>
           </TableBody>
@@ -274,7 +246,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
-import { Trash2, UserPlus } from 'lucide-vue-next'
+import { UserPlus } from 'lucide-vue-next'
 import {
   Alert,
   AlertDescription,
@@ -305,7 +277,6 @@ import {
   TableHeader,
   TableRow,
 } from '@felinic/ui'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
@@ -314,7 +285,6 @@ import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import {
-  deleteUsersById,
   getUsers,
   postUsers,
   putUsersById,
@@ -497,22 +467,4 @@ async function updateUserStatus(user: UserAccount, isActive: boolean) {
   }
 }
 
-async function removeMember(user: UserAccount) {
-  const userID = user.id
-  if (!userID || isSelf(user)) return
-
-  setUserPending(userID, true)
-  try {
-    await deleteUsersById({
-      path: { id: userID },
-      throwOnError: true,
-    })
-    toast.success(t('people.removeSuccess'))
-    await loadUsers()
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('people.removeFailed'), { prefixFallback: true }))
-  } finally {
-    setUserPending(userID, false)
-  }
-}
 </script>

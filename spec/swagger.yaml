@@ -13,11 +13,19 @@ definitions:
         type: string
       is_active:
         type: boolean
+      joined_at:
+        type: string
       last_login_at:
+        type: string
+      membership_is_active:
+        type: boolean
+      membership_updated_at:
         type: string
       metadata:
         additionalProperties: {}
         type: object
+      principal_is_active:
+        type: boolean
       role:
         type: string
       timezone:
@@ -13452,8 +13460,8 @@ paths:
       - users
   /users/{id}:
     delete:
-      description: Remove a workspace member by removing login credentials and disabling
-        the account
+      description: Deactivate the member in the current workspace without changing
+        global credentials
       parameters:
       - description: User ID
         in: path
@@ -13475,11 +13483,15 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Remove member (admin only)
+      summary: Deactivate member (admin only)
       tags:
       - users
     get:
@@ -13515,7 +13527,7 @@ paths:
       tags:
       - users
     put:
-      description: Update user profile and status
+      description: Update the user's role or membership status in the current workspace
       parameters:
       - description: User ID
         in: path
@@ -13543,6 +13555,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":

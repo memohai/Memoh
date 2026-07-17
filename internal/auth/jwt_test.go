@@ -98,3 +98,53 @@ func TestRefreshTokenFromContext_MissingUser(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, httpErr.Code)
 	assert.Equal(t, "invalid token", httpErr.Message)
 }
+
+func TestJWTMiddlewareRejectsInactiveAccountSession(t *testing.T) {
+	const secret = "test-secret"
+	token, _, err := GenerateToken("user-123", secret, time.Hour)
+	require.NoError(t, err)
+
+	validatedUserID := ""
+	e := echo.New()
+	e.Use(JWTMiddleware(secret, func(echo.Context) bool { return false }, func(_ context.Context, userID string) error {
+		validatedUserID = userID
+		return errTestInactiveSession
+	}))
+	e.GET("/protected", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Equal(t, "user-123", validatedUserID)
+}
+
+func TestJWTMiddlewareDoesNotValidateChatRouteTokenAsAccount(t *testing.T) {
+	const secret = "test-secret"
+	token, _, err := GenerateChatToken(ChatToken{
+		BotID:  "bot-1",
+		ChatID: "chat-1",
+		UserID: "channel-identity-1",
+	}, secret, time.Hour)
+	require.NoError(t, err)
+
+	validatorCalled := false
+	e := echo.New()
+	e.Use(JWTMiddleware(secret, func(echo.Context) bool { return false }, func(context.Context, string) error {
+		validatorCalled = true
+		return nil
+	}))
+	e.GET("/chat-route", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+
+	req := httptest.NewRequest(http.MethodGet, "/chat-route", nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.False(t, validatorCalled)
+}
+
+var errTestInactiveSession = errors.New("inactive test session")

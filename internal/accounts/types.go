@@ -6,18 +6,22 @@ import (
 
 // Account represents a human account credential record.
 type Account struct {
-	ID          string         `json:"id"`
-	Username    string         `json:"username"`
-	Email       string         `json:"email,omitempty"`
-	Role        string         `json:"role"`
-	DisplayName string         `json:"display_name"`
-	AvatarURL   string         `json:"avatar_url,omitempty"`
-	Timezone    string         `json:"timezone,omitempty"`
-	IsActive    bool           `json:"is_active"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	LastLoginAt time.Time      `json:"last_login_at,omitempty"`
+	ID                  string         `json:"id"`
+	Username            string         `json:"username"`
+	Email               string         `json:"email,omitempty"`
+	Role                string         `json:"role"`
+	DisplayName         string         `json:"display_name"`
+	AvatarURL           string         `json:"avatar_url,omitempty"`
+	Timezone            string         `json:"timezone,omitempty"`
+	IsActive            bool           `json:"is_active"`
+	PrincipalIsActive   bool           `json:"principal_is_active"`
+	MembershipIsActive  bool           `json:"membership_is_active"`
+	Metadata            map[string]any `json:"metadata,omitempty"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+	JoinedAt            time.Time      `json:"joined_at"`
+	MembershipUpdatedAt time.Time      `json:"membership_updated_at"`
+	LastLoginAt         time.Time      `json:"last_login_at,omitempty"`
 }
 
 // CreateAccountRequest is the input for creating an account.

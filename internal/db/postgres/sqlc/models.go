@@ -713,21 +713,25 @@ type Team struct {
 }
 
 type TeamAccount struct {
-	ID           pgtype.UUID        `json:"id"`
-	Username     pgtype.Text        `json:"username"`
-	Email        pgtype.Text        `json:"email"`
-	PasswordHash pgtype.Text        `json:"password_hash"`
-	Role         string             `json:"role"`
-	DisplayName  pgtype.Text        `json:"display_name"`
-	AvatarUrl    pgtype.Text        `json:"avatar_url"`
-	Timezone     string             `json:"timezone"`
-	DataRoot     pgtype.Text        `json:"data_root"`
-	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
-	IsActive     pgtype.Bool        `json:"is_active"`
-	Metadata     []byte             `json:"metadata"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	TeamID       pgtype.UUID        `json:"team_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
 }
 
 type TeamMember struct {

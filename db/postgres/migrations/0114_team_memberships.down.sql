@@ -1,6 +1,9 @@
 -- 0114_team_memberships
 -- Restore the pre-membership model when every user still belongs to exactly one team.
 
+DROP TRIGGER IF EXISTS team_members_last_active_admin_guard ON public.team_members;
+DROP FUNCTION IF EXISTS public.memoh_guard_last_active_team_admin();
+
 -- Inspect the complete membership set even when the migration owner is a
 -- non-superuser subject to FORCE RLS. Transaction rollback restores this state
 -- when the fail-closed guard rejects a multi-membership database.
