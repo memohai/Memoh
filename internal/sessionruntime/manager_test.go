@@ -42,6 +42,13 @@ type runtimeBackendContractSuite struct {
 type overflowObservingBackend struct {
 	Backend
 	overflow chan Event
+	// paused freezes event delivery so the test can force a deterministic
+	// backend subscriber-buffer overflow: with delivery frozen, the publish
+	// burst only has to outgrow the backend subscriber buffer (see
+	// subscriberSet.register), never the manager's own out buffer or any
+	// scheduling accident. atomic because the forwarding goroutine below reads
+	// it while the test goroutine writes it.
+	paused atomic.Bool
 }
 
 func (b *overflowObservingBackend) Subscribe(ctx context.Context, key Key) (Subscription, error) {
@@ -63,6 +70,16 @@ func (b *overflowObservingBackend) Subscribe(ctx context.Context, key Key) (Subs
 			case event, ok := <-sub.C:
 				if !ok {
 					return
+				}
+				// Poll while paused instead of blocking on a mutex so
+				// cancellation through forwardCtx still unwinds promptly even
+				// when the test fails between pausing and resuming.
+				for b.paused.Load() {
+					select {
+					case <-forwardCtx.Done():
+						return
+					case <-time.After(time.Millisecond):
+					}
 				}
 				select {
 				case events <- event:
@@ -3977,6 +3994,11 @@ func runRuntimeManagerReconcilesMissedPublishContract(t *testing.T, suite distri
 	}
 }
 
+// overflowRecoveryStallTimeout bounds how long the overflow-recovery wait may
+// go without any event before failing. Generous on purpose: it guards against
+// a wedged pipeline, not against slow scheduling.
+const overflowRecoveryStallTimeout = 10 * time.Second
+
 func runRuntimeManagerSignalsSubscriberOverflowContract(t *testing.T, suite runtimeBackendContractSuite) {
 	t.Helper()
 
@@ -3992,6 +4014,13 @@ func runRuntimeManagerSignalsSubscriberOverflowContract(t *testing.T, suite runt
 	defer sub.Close()
 	baseline := waitRuntimeEvent(t, sub.C, func(event Event) bool { return event.Type == EventRuntimeSnapshot })
 	checkpointSeq := baseline.Seq + 160
+	// Freeze delivery before the burst so the overflow cannot be outrun by the
+	// consumer: the burst then only has to exceed the backend subscriber
+	// buffer (64) plus the one event the paused forwarder holds, independent
+	// of the manager's own buffering or goroutine scheduling. Without the
+	// freeze the guarantee silently depends on the manager's out channel size.
+	backend.paused.Store(true)
+	defer backend.paused.Store(false)
 	for seq := baseline.Seq + 1; seq <= checkpointSeq; seq++ {
 		updatedAt := time.Now().UTC()
 		if _, _, err := backend.Update(context.Background(), Key{BotID: testBotID, SessionID: testSessionID}, func(snapshot Snapshot, ok bool) (Snapshot, bool, error) {
@@ -4011,9 +4040,16 @@ func runRuntimeManagerSignalsSubscriberOverflowContract(t *testing.T, suite runt
 			t.Fatalf("publish overflow update %d: %v", seq, err)
 		}
 	}
+	backend.paused.Store(false)
 	var recovered Event
 	overflowObserved := false
-	deadline := time.After(5 * time.Second)
+	// Stall detector, not a wall-clock budget: recovery crosses several
+	// goroutine hops (backend channel -> forwarder -> manager -> subscriber),
+	// and under -race with the contract subtests running in parallel an
+	// absolute deadline can expire even while events are still flowing. Any
+	// received event resets the timer; only a fully stalled pipeline fails.
+	stall := time.NewTimer(overflowRecoveryStallTimeout)
+	defer stall.Stop()
 	for recovered.Snapshot == nil || !overflowObserved {
 		select {
 		case event, ok := <-sub.C:
@@ -4025,9 +4061,16 @@ func runRuntimeManagerSignalsSubscriberOverflowContract(t *testing.T, suite runt
 			}
 		case <-backend.overflow:
 			overflowObserved = true
-		case <-deadline:
+		case <-stall.C:
 			t.Fatal("subscription did not observe and recover a real backend queue overflow")
 		}
+		if !stall.Stop() {
+			select {
+			case <-stall.C:
+			default:
+			}
+		}
+		stall.Reset(overflowRecoveryStallTimeout)
 	}
 	if recovered.Type != EventRuntimeSnapshot || recovered.Snapshot == nil || recovered.Seq != checkpointSeq {
 		t.Fatalf("overflow recovery event = %#v", recovered)
