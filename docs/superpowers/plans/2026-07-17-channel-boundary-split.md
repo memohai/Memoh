@@ -566,7 +566,9 @@ git add -A && git commit -m "refactor(pipeline): drive discuss turns through tur
 
 ---
 
-## Phase 4：`internal/channel`目录重组
+## Phase 4：`internal/channel`目录重组（已推迟，见执行记录）
+
+> **执行记录（2026-07-17）**：实测交叉引用后确认本阶段不是纯移动——`registry.go`／`prepared_outbound.go`／`parts_render.go`被包根adapter契约引用须留根；`outbound.go`须先拆分Manager方法与adapters共用的chunking函数。按spec§4执行修正推迟到独立PR，本PR跳过此阶段。
 
 ### Task 4.1: 拆出`outbound/`再拆出`gateway/`
 

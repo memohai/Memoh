@@ -102,6 +102,7 @@ Memoh/
 说明：
 
 - 目录重组是纯移动提交（见第9节），不与接口调整混在同一PR。
+- **执行修正（2026-07-17）**：实测依赖后发现上表映射不成立——`registry.go`、`prepared_outbound.go`、`parts_render.go`被包根adapter契约（`adapter.go`、`types.go`）引用，必须留在包根；`outbound.go`混合Manager方法与被adapters直接引用的chunking函数（`ChunkText`／`ChunkMarkdownText`／`OutboundPolicy`），需先拆文件才能移动。重组因此不是纯移动，已从首个落地PR中移除，推迟到修正映射后的独立PR。
 - `internal/messaging`不并入`channel/outbound`：`Sender`是Agent工具与Schedule等多个消费方依赖的出站port，依赖方向（消费方依赖接口、Channel提供实现）已经正确。移动只会制造import噪音。
 - `internal/email`、`internal/webhooktunnel`不搬目录，但装配归入`internal/app/channel`（见第7节），与RFC第8节任务归属一致。
 
