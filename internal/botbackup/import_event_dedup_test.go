@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,6 +142,82 @@ func TestRestoreHistoryDeduplicatesLegacyMessageEventLinksByMigrationOrder(t *te
 		if err := json.Unmarshal(metadata["label"], &label); err != nil || label != archived.DisplayText.String {
 			t.Fatalf("created message %d metadata label = %q, want %q", i, label, archived.DisplayText.String)
 		}
+	}
+}
+
+func TestRestoreHistoryRejectsInvalidHistoryEventDedupMarkers(t *testing.T) {
+	messageID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000021")
+	linkedEventID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000022")
+	validMarkerEventID := "00000000-0000-0000-0000-000000000023"
+	tests := []struct {
+		name     string
+		eventID  pgtype.UUID
+		metadata string
+	}{
+		{
+			name:     "user string marker",
+			metadata: `{"_migration_0115_history_event_dedup":"user data"}`,
+		},
+		{
+			name:     "wrong message id",
+			metadata: `{"_migration_0115_history_event_dedup":{"version":1,"message_id":"00000000-0000-0000-0000-000000000024","event_id":"` + validMarkerEventID + `"}}`,
+		},
+		{
+			name:     "invalid event id",
+			metadata: `{"_migration_0115_history_event_dedup":{"version":1,"message_id":"` + messageID.String() + `","event_id":"not-a-uuid"}}`,
+		},
+		{
+			name:     "message still linked to event",
+			eventID:  linkedEventID,
+			metadata: `{"_migration_0115_history_event_dedup":{"version":1,"message_id":"` + messageID.String() + `","event_id":"` + validMarkerEventID + `"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sourceBotID := newBotBackupTestUUID()
+			targetBotID := newBotBackupTestUUID()
+			actorUserID := newBotBackupTestUUID()
+			sourceSessionID := newBotBackupTestUUID()
+			targetSessionID := newBotBackupTestUUID()
+			message := legacyEventLinkedMessage(
+				messageID,
+				sourceBotID,
+				sourceSessionID,
+				tt.eventID,
+				"reserved-marker",
+				time.Now().UTC(),
+			)
+			message.Metadata = []byte(tt.metadata)
+			queries := &recordingLegacyEventRestoreQueries{
+				targetSessionID: targetSessionID,
+				linkedEvents:    map[string]struct{}{},
+			}
+			state := &importState{
+				entries: map[string]backupZipEntry{
+					"history/sessions.json": jsonBackupEntry(t, []dbsqlc.ListSessionsByBotRow{
+						backupRoundTripSession(sourceBotID, sourceSessionID, "reserved-marker"),
+					}),
+					"history/messages.json": jsonBackupEntry(t, []dbsqlc.ListAllMessagesForBackupRow{message}),
+				},
+				counts: map[Section]int{},
+			}
+
+			err := (&Service{queries: queries}).restoreHistory(
+				context.Background(),
+				actorUserID.String(),
+				targetBotID.String(),
+				state,
+				false,
+				false,
+			)
+			if err == nil || !strings.Contains(err.Error(), "reserved 0115 history event dedup metadata marker") {
+				t.Fatalf("restoreHistory() error = %v, want reserved marker error", err)
+			}
+			if len(queries.createdMessages) != 0 {
+				t.Fatalf("created messages = %d, want restore to fail before message creation", len(queries.createdMessages))
+			}
+		})
 	}
 }
 

@@ -1396,6 +1396,10 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		if eventLinkWinners[i] {
 			eventID = eventMap[item.EventID.String()]
 		}
+		metadata, err := stripRestoredHistoryEventDedupMarker(item)
+		if err != nil {
+			return fmt.Errorf("message metadata: %w", err)
+		}
 		created, err := q.CreateMessage(ctx, sqlc.CreateMessageParams{
 			BotID:                  pgBotID,
 			SessionID:              sessionID,
@@ -1403,7 +1407,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			SourceReplyToMessageID: item.SourceReplyToMessageID,
 			Role:                   item.Role,
 			Content:                item.Content,
-			Metadata:               stripRestoredHistoryEventDedupMarker(item.Metadata),
+			Metadata:               metadata,
 			Usage:                  item.Usage,
 			SessionMode:            sessionMode,
 			RuntimeType:            runtimeType,
