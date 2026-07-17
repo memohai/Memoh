@@ -1,5 +1,5 @@
 <template>
-  <ChatDecisionPanel>
+  <div class="flex flex-col">
     <div class="px-3 py-1.5">
       <p
         data-slot="tool-approval-title"
@@ -40,13 +40,17 @@
         :class="codePreview || detailPreview ? 'mt-2' : 'mt-0.5'"
       >
         <span v-if="approval.short_id">#{{ approval.short_id }} </span>{{ $t('chat.tools.pendingApproval') }}<span v-if="executionLocationLabel"> · {{ executionLocationLabel }}</span>
+        <span
+          v-if="queueSize > 1"
+        > · {{ $t('chat.approval.moreInQueue', { count: queueSize - 1 }) }}</span>
       </p>
     </div>
 
-    <template #actions>
+    <div class="mt-2 flex gap-1.5 px-3 pb-2">
       <Button
         type="button"
         class="flex-1"
+        :disabled="responding"
         @click="respond('approve')"
       >
         {{ $t('chat.tools.approve') }}
@@ -55,38 +59,47 @@
         type="button"
         variant="secondary"
         class="flex-1"
+        :disabled="responding"
         @click="respond('reject')"
       >
         {{ $t('chat.tools.reject') }}
       </Button>
-    </template>
-  </ChatDecisionPanel>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+// One tool-approval card, rendered inside ComposerPanel's shell (no chrome of
+// its own). This is the dock port of the in-flow approval form (#840): it
+// renders the tool's own display — title, target, a syntax-highlighted command
+// preview (exec) or the tool's detail component (write/edit/patch) — through
+// getToolDisplay(block), rather than a raw payload dump. The dock carries the
+// block through the pending-approval projection for exactly this.
+import { computed, ref } from 'vue'
 import { Button } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import type { ToolCallBlock } from '@/store/chat-list'
 import { useChatStore } from '@/store/chat-list'
 import { useChatViewTarget } from '../composables/useChatViewContext'
-import ChatDecisionPanel from './chat-decision-panel.vue'
 import CodeBlock from './code-block.vue'
 import Capsule from './tool-detail/capsule.vue'
 import { getToolDisplay } from './tool-call-registry'
+import type { PendingApprovalItem } from '../composables/usePendingApprovals'
 
 const props = defineProps<{
-  block: ToolCallBlock
+  item: PendingApprovalItem
+  queueSize: number
 }>()
 
 const { t } = useI18n()
 const chatStore = useChatStore()
 const chatViewTarget = useChatViewTarget()
-const display = computed(() => getToolDisplay(props.block))
-const approval = computed(() => props.block.approval!)
+
+const block = computed(() => props.item.block)
+const display = computed(() => getToolDisplay(block.value))
+const approval = computed(() => props.item.approval)
 const input = computed(() => (
-  props.block.input && typeof props.block.input === 'object'
-    ? props.block.input as Record<string, unknown>
+  block.value.input && typeof block.value.input === 'object'
+    ? block.value.input as Record<string, unknown>
     : {}
 ))
 const actionLabel = computed(() => {
@@ -94,15 +107,15 @@ const actionLabel = computed(() => {
   return t(key, display.value.actionParams ?? {})
 })
 const approvalTitle = computed(() => {
-  if (props.block.toolName === 'exec') return t('bots.toolApproval.toolNames.exec')
-  if (props.block.toolName === 'write') return t('bots.toolApproval.toolNames.write')
+  if (block.value.toolName === 'exec') return t('bots.toolApproval.toolNames.exec')
+  if (block.value.toolName === 'write') return t('bots.toolApproval.toolNames.write')
   return actionLabel.value
 })
 const displayTarget = computed(() => (
-  props.block.toolName === 'exec' ? '' : display.value.target
+  block.value.toolName === 'exec' ? '' : display.value.target
 ))
 const codePreview = computed(() => {
-  if (props.block.toolName === 'exec') {
+  if (block.value.toolName === 'exec') {
     const command = input.value.command
     return typeof command === 'string' && command
       ? { code: command, lang: 'bash' }
@@ -111,7 +124,7 @@ const codePreview = computed(() => {
   return null
 })
 const detailPreview = computed(() => {
-  const toolName = props.block.toolName
+  const toolName = block.value.toolName
   if (toolName === 'write') {
     const content = input.value.content
     return typeof content === 'string' && content ? display.value.detail ?? null : null
@@ -127,13 +140,26 @@ const detailPreview = computed(() => {
   return null
 })
 const executionLocationLabel = computed(() => {
-  const location = props.block.execution_location
+  const location = block.value.execution_location
   if (!location) return ''
   if (location.kind === 'native') return t('bots.remoteRuntime.nativeWorkspace')
   return location.name?.trim() || ''
 })
 
-function respond(decision: 'approve' | 'reject') {
-  void chatStore.respondToolApproval(approval.value, decision, chatViewTarget.value)
+// Resolve is optimistic (the store flips the status at once and the panel
+// swaps to the next item), so no spinner — the flag only guards against a
+// double-click landing two answers on the same request before the swap.
+const responding = ref(false)
+
+async function respond(decision: 'approve' | 'reject') {
+  if (responding.value) return
+  responding.value = true
+  const ok = await chatStore.respondToolApproval(approval.value, decision, chatViewTarget.value)
+  // On success the store already flipped the status and the panel swapped to
+  // the next item, so this card unmounts. On failure (WebSocket disconnected,
+  // send rejected) the approval stays pending and THIS card stays mounted —
+  // re-enable the buttons so the user can retry after reconnecting, as the
+  // connection-lost toast instructs.
+  if (!ok) responding.value = false
 }
 </script>
