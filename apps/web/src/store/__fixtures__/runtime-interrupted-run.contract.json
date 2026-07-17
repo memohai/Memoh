@@ -16,6 +16,18 @@
           {
             "content": "partial output",
             "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-interrupted-1-row-01",
+                "turn_id": "turn-stream-interrupted-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-interrupted-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "text"
           }
         ],
@@ -28,16 +40,43 @@
             }
           ],
           "external_message_id": "stream-interrupted",
+          "id": "turn-stream-interrupted-1-request",
           "platform": "local",
           "role": "user",
           "sender_user_id": "user-1",
           "text": "Inspect the workspace",
           "timestamp": "2026-07-10T00:00:00Z"
         },
-        "row_ledger": [],
+        "row_ledger": [
+          {
+            "role": "user",
+            "stable_id": "turn-stream-interrupted-1-request",
+            "turn_id": "turn-stream-interrupted-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          },
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-interrupted-1-row-01",
+            "turn_id": "turn-stream-interrupted-1",
+            "turn_message_seq": 2,
+            "turn_position": 1
+          }
+        ],
         "started_at": "2026-07-10T00:00:00Z",
         "status": "errored",
         "stream_id": "stream-interrupted",
+        "turn_reservation": {
+          "request": {
+            "message_id": "turn-stream-interrupted-1-request",
+            "role": "user",
+            "turn_id": "turn-stream-interrupted-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          },
+          "turn_id": "turn-stream-interrupted-1",
+          "turn_position": 1
+        },
         "updated_at": "2026-07-10T00:00:10Z"
       },
       "epoch": "epoch-runtime-contract-v1",
@@ -69,16 +108,36 @@
               }
             ],
             "external_message_id": "stream-interrupted",
+            "id": "turn-stream-interrupted-1-request",
             "platform": "local",
             "role": "user",
             "sender_user_id": "user-1",
             "text": "Inspect the workspace",
             "timestamp": "2026-07-10T00:00:00Z"
           },
-          "row_ledger": [],
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-interrupted-1-request",
+              "turn_id": "turn-stream-interrupted-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-interrupted",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-interrupted-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-interrupted-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-interrupted-1",
+            "turn_position": 1
+          },
           "updated_at": "2026-07-10T00:00:10Z"
         },
         "epoch": "epoch-runtime-contract-v1",
@@ -96,7 +155,28 @@
           {
             "content": "partial output",
             "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-interrupted-1-row-01",
+                "turn_id": "turn-stream-interrupted-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-interrupted-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "text"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-interrupted-1-row-01",
+            "turn_id": "turn-stream-interrupted-1",
+            "turn_message_seq": 2,
+            "turn_position": 1
           }
         ]
       },

@@ -15,10 +15,29 @@
           "kind": "retry",
           "replace_from_message_id": "assistant-old"
         },
-        "row_ledger": [],
+        "row_ledger": [
+          {
+            "role": "user",
+            "stable_id": "turn-stream-retry-operation-1-request",
+            "turn_id": "turn-stream-retry-operation-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          }
+        ],
         "started_at": "2026-07-10T00:00:00Z",
         "status": "running",
         "stream_id": "stream-retry-operation",
+        "turn_reservation": {
+          "request": {
+            "message_id": "turn-stream-retry-operation-1-request",
+            "role": "user",
+            "turn_id": "turn-stream-retry-operation-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          },
+          "turn_id": "turn-stream-retry-operation-1",
+          "turn_position": 1
+        },
         "updated_at": "2026-07-10T00:00:00Z"
       },
       "epoch": "epoch-runtime-contract-v1",
@@ -50,10 +69,29 @@
             "timestamp": "2026-07-10T00:00:00Z"
           }
         },
-        "row_ledger": [],
+        "row_ledger": [
+          {
+            "role": "user",
+            "stable_id": "turn-stream-edit-operation-1-request",
+            "turn_id": "turn-stream-edit-operation-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          }
+        ],
         "started_at": "2026-07-10T00:00:00Z",
         "status": "running",
         "stream_id": "stream-edit-operation",
+        "turn_reservation": {
+          "request": {
+            "message_id": "turn-stream-edit-operation-1-request",
+            "role": "user",
+            "turn_id": "turn-stream-edit-operation-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          },
+          "turn_id": "turn-stream-edit-operation-1",
+          "turn_position": 1
+        },
         "updated_at": "2026-07-10T00:00:00Z"
       },
       "epoch": "epoch-runtime-contract-v1",

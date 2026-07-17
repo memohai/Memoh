@@ -96,6 +96,146 @@ func handlerRuntimeOptions(ownerID string) sessionruntime.Options {
 		StateTTL:      time.Hour,
 		OwnerLeaseTTL: time.Minute,
 		Logger:        slog.Default(),
+||||||| parent of 2767d9ab5 (test(handlers): generate runtime contract fixtures through the row tracker)
+type runtimeContractFixture struct {
+	Version                int                `json:"version"`
+	Scenario               string             `json:"scenario"`
+	RuntimeSnapshot        runtimeWireEvent   `json:"runtime_snapshot"`
+	RuntimeStream          []runtimeWireEvent `json:"runtime_stream"`
+	RuntimeTerminalStream  []runtimeWireEvent `json:"runtime_terminal_stream,omitempty"`
+	RuntimeAdmissionStream []runtimeWireEvent `json:"runtime_admission_stream,omitempty"`
+	RuntimeResetStream     []runtimeWireEvent `json:"runtime_reset_stream,omitempty"`
+	RuntimeSteerStream     []runtimeWireEvent `json:"runtime_steer_stream,omitempty"`
+}
+
+type runtimeReplacementContractFixture struct {
+	Version       int              `json:"version"`
+	RetrySnapshot runtimeWireEvent `json:"retry_snapshot"`
+	EditSnapshot  runtimeWireEvent `json:"edit_snapshot"`
+}
+
+type runtimeGenerationReuseContractFixture struct {
+	Version         int                `json:"version"`
+	Scenario        string             `json:"scenario"`
+	RuntimeSnapshot runtimeWireEvent   `json:"runtime_snapshot"`
+	RuntimeStream   []runtimeWireEvent `json:"runtime_stream"`
+}
+
+type runtimeRecoveryContractFixture struct {
+	Version           int              `json:"version"`
+	Scenario          string           `json:"scenario"`
+	RuntimeSnapshot   runtimeWireEvent `json:"runtime_snapshot"`
+	GapDelta          runtimeWireEvent `json:"gap_delta"`
+	DelayedDelta      runtimeWireEvent `json:"delayed_delta"`
+	RuntimeCheckpoint runtimeWireEvent `json:"runtime_checkpoint"`
+	PostRecoveryDelta runtimeWireEvent `json:"post_recovery_delta"`
+}
+
+type runtimeRecoveryFixtureBackend struct {
+	sessionruntime.Backend
+
+	mu       sync.Mutex
+	record   bool
+	dropNext bool
+	events   chan sessionruntime.Event
+}
+
+func newRuntimeRecoveryFixtureBackend() *runtimeRecoveryFixtureBackend {
+	return &runtimeRecoveryFixtureBackend{
+		Backend: sessionruntime.NewMemoryBackend(),
+		events:  make(chan sessionruntime.Event, 8),
+
+// runtimeFixtureTurnReservation builds the deterministic turn reservation a
+// fixture run admits with. Production pairs every admission with a
+// ReserveRuntimeTurn reservation (see local_channel.go admission builders);
+// fixtures must do the same or the generated contract cannot exercise the
+// row-identity surface (row_ledger, stable_id, row_identities).
+func runtimeFixtureTurnReservation(streamID string, position int64) *messagepkg.RuntimeTurnReservation {
+	turnID := fmt.Sprintf("turn-%s-%d", streamID, position)
+	return &messagepkg.RuntimeTurnReservation{
+		TurnID:       turnID,
+		TurnPosition: position,
+		Request: messagepkg.RuntimeRowReservation{
+			MessageID:      turnID + "-request",
+			Role:           "user",
+			TurnID:         turnID,
+			TurnPosition:   position,
+			TurnMessageSeq: 1,
+		},
+	}
+}
+
+// newRuntimeFixtureRowTracker annotates fixture agent events through the same
+// production tracker the resolver uses, with counter-based IDs so regenerated
+// fixtures stay byte-stable across runs.
+func newRuntimeFixtureRowTracker(reservation *messagepkg.RuntimeTurnReservation) *flow.RuntimeRowTracker {
+	if reservation == nil {
+		return nil
+	}
+	var next int64
+	return flow.NewRuntimeRowTracker(reservation, func() string {
+		next++
+		return fmt.Sprintf("%s-row-%02d", reservation.TurnID, next)
+	})
+}
+
+// annotateRuntimeFixtureEvent mirrors resolver_stream.go: the tracker stamps
+// StableID/RowIdentities/LedgerRows on the event before it is marshaled onto
+// the wire channel consumed by the runtime forwarder.
+func annotateRuntimeFixtureEvent(tracker *flow.RuntimeRowTracker, event *agentpkg.StreamEvent) {
+	if tracker == nil || event == nil {
+		return
+	}
+	tracker.Annotate(event)
+}
+
+type runtimeContractFixture struct {
+	Version                int                `json:"version"`
+	Scenario               string             `json:"scenario"`
+	RuntimeSnapshot        runtimeWireEvent   `json:"runtime_snapshot"`
+	RuntimeStream          []runtimeWireEvent `json:"runtime_stream"`
+	RuntimeTerminalStream  []runtimeWireEvent `json:"runtime_terminal_stream,omitempty"`
+	RuntimeAdmissionStream []runtimeWireEvent `json:"runtime_admission_stream,omitempty"`
+	RuntimeResetStream     []runtimeWireEvent `json:"runtime_reset_stream,omitempty"`
+	RuntimeSteerStream     []runtimeWireEvent `json:"runtime_steer_stream,omitempty"`
+}
+
+type runtimeReplacementContractFixture struct {
+	Version       int              `json:"version"`
+	RetrySnapshot runtimeWireEvent `json:"retry_snapshot"`
+	EditSnapshot  runtimeWireEvent `json:"edit_snapshot"`
+}
+
+type runtimeGenerationReuseContractFixture struct {
+	Version         int                `json:"version"`
+	Scenario        string             `json:"scenario"`
+	RuntimeSnapshot runtimeWireEvent   `json:"runtime_snapshot"`
+	RuntimeStream   []runtimeWireEvent `json:"runtime_stream"`
+}
+
+type runtimeRecoveryContractFixture struct {
+	Version           int              `json:"version"`
+	Scenario          string           `json:"scenario"`
+	RuntimeSnapshot   runtimeWireEvent `json:"runtime_snapshot"`
+	GapDelta          runtimeWireEvent `json:"gap_delta"`
+	DelayedDelta      runtimeWireEvent `json:"delayed_delta"`
+	RuntimeCheckpoint runtimeWireEvent `json:"runtime_checkpoint"`
+	PostRecoveryDelta runtimeWireEvent `json:"post_recovery_delta"`
+}
+
+type runtimeRecoveryFixtureBackend struct {
+	sessionruntime.Backend
+
+	mu       sync.Mutex
+	record   bool
+	dropNext bool
+	events   chan sessionruntime.Event
+}
+
+func newRuntimeRecoveryFixtureBackend() *runtimeRecoveryFixtureBackend {
+	return &runtimeRecoveryFixtureBackend{
+		Backend: sessionruntime.NewMemoryBackend(),
+		events:  make(chan sessionruntime.Event, 8),
 	}
 }
 
@@ -200,6 +340,521 @@ func richActiveRunAgentContractScript() []agentpkg.StreamEvent {
 func richActiveRunActiveAgentContractScript() []agentpkg.StreamEvent {
 	events := richActiveRunAgentContractScript()
 	return events[:len(events)-1]
+}
+
+func buildRuntimeContractSnapshot(t *testing.T, streamID string, events []agentpkg.StreamEvent) (runtimeWireEvent, []runtimeWireEvent) {
+	t.Helper()
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), runtimeFixtureManagerOptions(streamID))
+	defer func() {
+		if err := manager.Close(); err != nil {
+			t.Fatalf("close fixture runtime manager: %v", err)
+		}
+	}()
+	reservation := runtimeFixtureTurnReservation(streamID, 1)
+	requestTurn := runtimeFixtureRequestUserTurn(streamID)
+	requestTurn.ID = reservation.Request.MessageID
+	handle, err := manager.StartRunWithAdmissionHandle(
+		context.Background(),
+		runtimeContractBotID,
+		runtimeContractSessionID,
+		streamID,
+		sessionruntime.RunAdmissionView{RequestUserTurn: requestTurn, TurnReservation: reservation},
+		make(chan struct{}, 1),
+		func() {},
+		make(chan conversation.InjectMessage, 1),
+	)
+	if err != nil {
+		t.Fatalf("start fixture runtime run: %v", err)
+	}
+	baselineEvent, client := captureRuntimeFixtureSnapshot(t, manager)
+
+	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: manager}
+	rowTracker := newRuntimeFixtureRowTracker(reservation)
+	eventCh := make(chan flow.WSStreamEvent, len(events))
+	for _, event := range events {
+		annotateRuntimeFixtureEvent(rowTracker, &event)
+		eventCh <- rawRuntimeContractEvent(t, event)
+	}
+	close(eventCh)
+	if err := handler.forwardRuntimeWSStreamEvents(
+		context.Background(),
+		context.Background(),
+		handle,
+		eventCh,
+		nil,
+	); err != nil {
+		t.Fatalf("forward fixture runtime events: %v", err)
+	}
+
+	snapshot, err := manager.Snapshot(context.Background(), runtimeContractBotID, runtimeContractSessionID)
+	if err != nil {
+		t.Fatalf("load fixture runtime snapshot: %v", err)
+	}
+	stream := []runtimeWireEvent{baselineEvent}
+	for runtimeWireEventSeq(stream[len(stream)-1]) < snapshot.Seq {
+		event := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+			return runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta && runtimeWireEventSeq(event) > runtimeWireEventSeq(baselineEvent)
+		})
+		normalizeRuntimeFixtureWireEvent(event)
+		stream = append(stream, event)
+	}
+	finalEvent, _ := captureRuntimeFixtureSnapshot(t, manager)
+	return finalEvent, stream
+}
+
+func captureRuntimeFixtureSnapshot(t *testing.T, manager *sessionruntime.Manager) (runtimeWireEvent, *websocket.Conn) {
+	t.Helper()
+	handler := runtimeContractLocalChannelHandler(manager)
+	client := openLocalChannelTestWS(t, handler, runtimeContractBotID, runtimeContractUserID)
+	if err := client.WriteJSON(map[string]any{
+		"type":          "runtime_subscribe",
+		"invocation_id": "fixture-runtime-subscribe",
+		"session_id":    runtimeContractSessionID,
+	}); err != nil {
+		t.Fatalf("subscribe fixture runtime: %v", err)
+	}
+	event := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+		return runtimeWireEventType(event) == sessionruntime.EventRuntimeSnapshot
+	})
+	if _, ok := event["snapshot"].(map[string]any); !ok {
+		t.Fatalf("fixture runtime snapshot is missing: %#v", event)
+	}
+	normalizeRuntimeFixtureWireEvent(event)
+	return event, client
+}
+
+func normalizeRuntimeFixtureWireEvent(event runtimeWireEvent) {
+	event["bot_id"] = runtimeFixtureBotID
+	event["session_id"] = runtimeFixtureSessionID
+	updatedAt := runtimeFixtureStartTime.Add(10 * time.Second).Format(time.RFC3339)
+	if _, ok := event["updated_at"]; ok {
+		event["updated_at"] = updatedAt
+	}
+	if snapshot, ok := event["snapshot"].(map[string]any); ok {
+		snapshot["bot_id"] = runtimeFixtureBotID
+		snapshot["session_id"] = runtimeFixtureSessionID
+		snapshot["updated_at"] = updatedAt
+		if run, ok := snapshot["current_run_view"].(map[string]any); ok {
+			run["started_at"] = runtimeFixtureStartTime.Format(time.RFC3339)
+			run["updated_at"] = updatedAt
+		}
+	}
+	if delta, ok := event["delta"].(map[string]any); ok {
+		if run, ok := delta["current_run_view"].(map[string]any); ok {
+			run["started_at"] = runtimeFixtureStartTime.Format(time.RFC3339)
+			run["updated_at"] = updatedAt
+			normalizeRuntimeFixtureSteer(run)
+		}
+		if run, ok := delta["run"].(map[string]any); ok {
+			run["updated_at"] = updatedAt
+			normalizeRuntimeFixtureSteer(run)
+		}
+	}
+}
+
+func normalizeRuntimeFixtureSteer(run map[string]any) {
+	steer, ok := run["steer"].(map[string]any)
+	if !ok {
+		return
+	}
+	steer["id"] = "steer-runtime-contract"
+	steer["created_at"] = runtimeFixtureStartTime.Format(time.RFC3339)
+	steer["updated_at"] = runtimeFixtureStartTime.Add(10 * time.Second).Format(time.RFC3339)
+}
+
+func buildRuntimeAdmissionStream(t *testing.T) []runtimeWireEvent {
+	t.Helper()
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), runtimeFixtureManagerOptions("stream-admission"))
+	defer func() { _ = manager.Close() }()
+	baseline, client := captureRuntimeFixtureSnapshot(t, manager)
+
+	builderStarted := make(chan struct{})
+	releaseBuilder := make(chan struct{})
+	startDone := make(chan error, 1)
+	go func() {
+		_, err := manager.StartRunWithAdmissionBuilderHandle(
+			context.Background(), runtimeContractBotID, runtimeContractSessionID, "stream-admission",
+			func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+				close(builderStarted)
+				<-releaseBuilder
+				reservation := runtimeFixtureTurnReservation("stream-admission", 1)
+				requestTurn := runtimeFixtureRequestUserTurn("stream-admission")
+				requestTurn.ID = reservation.Request.MessageID
+				return sessionruntime.RunAdmissionView{RequestUserTurn: requestTurn, TurnReservation: reservation}, nil
+			},
+			make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1),
+		)
+		startDone <- err
+	}()
+	<-builderStarted
+	admitting := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+		return runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta && runtimeWireRunStatus(event) == sessionruntime.RunStatusAdmitting
+	})
+	close(releaseBuilder)
+	if err := <-startDone; err != nil {
+		t.Fatalf("activate admission fixture: %v", err)
+	}
+	running := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+		return runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta && runtimeWireRunStatus(event) == sessionruntime.RunStatusRunning
+	})
+	normalizeRuntimeFixtureWireEvent(admitting)
+	normalizeRuntimeFixtureWireEvent(running)
+	return []runtimeWireEvent{baseline, admitting, running}
+}
+
+func buildRuntimeResetStream(t *testing.T) []runtimeWireEvent {
+	t.Helper()
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), runtimeFixtureManagerOptions("stream-reset"))
+	defer func() { _ = manager.Close() }()
+	reservation := runtimeFixtureTurnReservation("stream-reset", 1)
+	requestTurn := runtimeFixtureRequestUserTurn("stream-reset")
+	requestTurn.ID = reservation.Request.MessageID
+	handle, err := manager.StartRunWithAdmissionHandle(
+		context.Background(), runtimeContractBotID, runtimeContractSessionID, "stream-reset",
+		sessionruntime.RunAdmissionView{RequestUserTurn: requestTurn, TurnReservation: reservation},
+		make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1),
+	)
+	if err != nil {
+		t.Fatalf("start reset fixture: %v", err)
+	}
+	baseline, client := captureRuntimeFixtureSnapshot(t, manager)
+	events := []agentpkg.StreamEvent{
+		{Type: agentpkg.EventTextDelta, Delta: "discarded draft"},
+		{Type: agentpkg.EventRetry},
+		{Type: agentpkg.EventTextDelta, Delta: "replacement draft"},
+	}
+	rowTracker := newRuntimeFixtureRowTracker(reservation)
+	stream := make([]runtimeWireEvent, 0, len(events)+1)
+	stream = append(stream, baseline)
+	for _, agentEvent := range events {
+		annotateRuntimeFixtureEvent(rowTracker, &agentEvent)
+		if _, err := manager.HandleAgentEvent(context.Background(), handle, agentEvent); err != nil {
+			t.Fatalf("apply reset fixture event %s: %v", agentEvent.Type, err)
+		}
+		event := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+			return runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta
+		})
+		normalizeRuntimeFixtureWireEvent(event)
+		stream = append(stream, event)
+	}
+	return stream
+}
+
+func buildRuntimeSteerStream(t *testing.T) []runtimeWireEvent {
+	t.Helper()
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), runtimeFixtureManagerOptions("stream-steer"))
+	defer func() { _ = manager.Close() }()
+	injectCh := make(chan conversation.InjectMessage, 1)
+	reservation := runtimeFixtureTurnReservation("stream-steer", 1)
+	requestTurn := runtimeFixtureRequestUserTurn("stream-steer")
+	requestTurn.ID = reservation.Request.MessageID
+	handle, err := manager.StartRunWithAdmissionHandle(
+		context.Background(), runtimeContractBotID, runtimeContractSessionID, "stream-steer",
+		sessionruntime.RunAdmissionView{RequestUserTurn: requestTurn, TurnReservation: reservation},
+		make(chan struct{}, 1), func() {}, injectCh,
+	)
+	if err != nil {
+		t.Fatalf("start steer fixture: %v", err)
+	}
+	baseline, client := captureRuntimeFixtureSnapshot(t, manager)
+	if _, err := manager.SteerRun(context.Background(), handle, "adjust course"); err != nil {
+		t.Fatalf("steer fixture run: %v", err)
+	}
+	pending := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+		return runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta && runtimeWireSteerStatus(event) == sessionruntime.SteerStatusPending
+	})
+	queued := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+		return runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta && runtimeWireSteerStatus(event) == sessionruntime.SteerStatusQueued
+	})
+	select {
+	case injected := <-injectCh:
+		if injected.Applied == nil {
+			t.Fatal("steer fixture injection has no applied callback")
+		}
+		injected.Applied()
+	case <-time.After(2 * time.Second):
+		t.Fatal("steer fixture injection timed out")
+	}
+	applied := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+		return runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta && runtimeWireSteerStatus(event) == sessionruntime.SteerStatusApplied
+	})
+	normalizeRuntimeFixtureWireEvent(pending)
+	normalizeRuntimeFixtureWireEvent(queued)
+	normalizeRuntimeFixtureWireEvent(applied)
+	return []runtimeWireEvent{baseline, pending, queued, applied}
+}
+
+func appendRuntimeFixtureDeltas(t *testing.T, manager *sessionruntime.Manager, client *websocket.Conn, stream []runtimeWireEvent) []runtimeWireEvent {
+	t.Helper()
+	snapshot, err := manager.Snapshot(context.Background(), runtimeContractBotID, runtimeContractSessionID)
+	if err != nil {
+		t.Fatalf("load runtime fixture checkpoint: %v", err)
+	}
+	for runtimeWireEventSeq(stream[len(stream)-1]) < snapshot.Seq {
+		event := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+			return runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta &&
+				runtimeWireEventSeq(event) > runtimeWireEventSeq(stream[len(stream)-1])
+		})
+		normalizeRuntimeFixtureWireEvent(event)
+		stream = append(stream, event)
+	}
+	return stream
+}
+
+func runtimeGenerationReuseRequest(streamID, text string, timestamp time.Time, reservation *messagepkg.RuntimeTurnReservation) *conversation.UITurn {
+	request := runtimeFixtureRequestUserTurn(streamID)
+	request.ID = reservation.Request.MessageID
+	request.Text = text
+	request.Timestamp = timestamp
+	request.Attachments = nil
+	return request
+}
+
+func buildRuntimeGenerationReuseContractFixture(t *testing.T) runtimeGenerationReuseContractFixture {
+	t.Helper()
+	const streamID = "stream-generation-reuse"
+	generations := []string{"generation-a", "generation-b"}
+	generationIndex := 0
+	options := runtimeFixtureManagerOptions(streamID)
+	options.RunGenerationGenerator = func() string {
+		generation := generations[generationIndex]
+		generationIndex++
+		return generation
+	}
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), options)
+	defer func() { _ = manager.Close() }()
+	baseline, client := captureRuntimeFixtureSnapshot(t, manager)
+	stream := []runtimeWireEvent{baseline}
+
+	start := func(position int64, text string, timestamp time.Time) (sessionruntime.RunHandle, *flow.RuntimeRowTracker) {
+		reservation := runtimeFixtureTurnReservation(streamID, position)
+		handle, err := manager.StartRunWithAdmissionHandle(
+			context.Background(), runtimeContractBotID, runtimeContractSessionID, streamID,
+			sessionruntime.RunAdmissionView{
+				RequestUserTurn: runtimeGenerationReuseRequest(streamID, text, timestamp, reservation),
+				TurnReservation: reservation,
+			},
+			make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1),
+		)
+		if err != nil {
+			t.Fatalf("start reused-generation fixture %d: %v", position, err)
+		}
+		return handle, newRuntimeFixtureRowTracker(reservation)
+	}
+
+	first, firstRows := start(1, "old prompt", runtimeFixtureStartTime)
+	stream = appendRuntimeFixtureDeltas(t, manager, client, stream)
+	firstDelta := agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "old answer"}
+	annotateRuntimeFixtureEvent(firstRows, &firstDelta)
+	if _, err := manager.HandleAgentEvent(context.Background(), first, firstDelta); err != nil {
+		t.Fatalf("append first reused-generation fixture output: %v", err)
+	}
+	stream = appendRuntimeFixtureDeltas(t, manager, client, stream)
+	if err := manager.FinishRun(context.Background(), first, sessionruntime.RunStatusCompleted, ""); err != nil {
+		t.Fatalf("finish first reused-generation fixture run: %v", err)
+	}
+	stream = appendRuntimeFixtureDeltas(t, manager, client, stream)
+
+	second, secondRows := start(2, "new prompt", runtimeFixtureStartTime.Add(time.Minute))
+	stream = appendRuntimeFixtureDeltas(t, manager, client, stream)
+	secondDelta := agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "new partial"}
+	annotateRuntimeFixtureEvent(secondRows, &secondDelta)
+	if _, err := manager.HandleAgentEvent(context.Background(), second, secondDelta); err != nil {
+		t.Fatalf("append second reused-generation fixture output: %v", err)
+	}
+	stream = appendRuntimeFixtureDeltas(t, manager, client, stream)
+	snapshot, snapshotClient := captureRuntimeFixtureSnapshot(t, manager)
+	if err := snapshotClient.Close(); err != nil {
+		t.Fatalf("close reused-generation snapshot client: %v", err)
+	}
+
+	return runtimeGenerationReuseContractFixture{
+		Version:         1,
+		Scenario:        "generation_reuse",
+		RuntimeSnapshot: snapshot,
+		RuntimeStream:   stream,
+	}
+}
+
+func buildRuntimeRecoveryContractFixture(t *testing.T) runtimeRecoveryContractFixture {
+	t.Helper()
+	const streamID = "stream-recovery"
+	backend := newRuntimeRecoveryFixtureBackend()
+	manager := sessionruntime.NewManager(backend, runtimeFixtureManagerOptions(streamID))
+	defer func() {
+		if err := manager.Close(); err != nil {
+			t.Fatalf("close recovery fixture runtime manager: %v", err)
+		}
+	}()
+	reservation := runtimeFixtureTurnReservation(streamID, 1)
+	requestTurn := runtimeFixtureRequestUserTurn(streamID)
+	requestTurn.ID = reservation.Request.MessageID
+	handle, err := manager.StartRunWithAdmissionHandle(
+		context.Background(),
+		runtimeContractBotID,
+		runtimeContractSessionID,
+		streamID,
+		sessionruntime.RunAdmissionView{RequestUserTurn: requestTurn, TurnReservation: reservation},
+		make(chan struct{}, 1),
+		func() {},
+		make(chan conversation.InjectMessage, 1),
+	)
+	if err != nil {
+		t.Fatalf("start recovery fixture runtime run: %v", err)
+	}
+	baseline, client := captureRuntimeFixtureSnapshot(t, manager)
+	defer func() { _ = client.Close() }()
+
+	rowTracker := newRuntimeFixtureRowTracker(reservation)
+	backend.armDroppedDelta()
+	missingDelta := agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "missing "}
+	annotateRuntimeFixtureEvent(rowTracker, &missingDelta)
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, missingDelta); err != nil {
+		t.Fatalf("append delayed recovery fixture delta: %v", err)
+	}
+	delayedEvent := receiveRuntimeRecoveryFixtureEvent(t, backend.events)
+	checkpointDelta := agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "checkpoint"}
+	annotateRuntimeFixtureEvent(rowTracker, &checkpointDelta)
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, checkpointDelta); err != nil {
+		t.Fatalf("append gap recovery fixture delta: %v", err)
+	}
+	gapEvent := receiveRuntimeRecoveryFixtureEvent(t, backend.events)
+	if delayedEvent.Seq != runtimeWireEventSeq(baseline)+1 || gapEvent.Seq != delayedEvent.Seq+1 {
+		t.Fatalf("recovery fixture sequence = baseline:%d delayed:%d gap:%d", runtimeWireEventSeq(baseline), delayedEvent.Seq, gapEvent.Seq)
+	}
+
+	checkpoint := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+		return runtimeWireEventSeq(event) >= gapEvent.Seq &&
+			(runtimeWireEventType(event) == sessionruntime.EventRuntimeSnapshot ||
+				runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta ||
+				runtimeWireEventType(event) == sessionruntime.EventRuntimeDropped)
+	})
+	if runtimeWireEventType(checkpoint) != sessionruntime.EventRuntimeSnapshot || runtimeWireEventSeq(checkpoint) != gapEvent.Seq {
+		t.Fatalf("manager gap recovery event = %#v, want checkpoint at seq %d", checkpoint, gapEvent.Seq)
+	}
+
+	continuedDelta := agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: " continued"}
+	annotateRuntimeFixtureEvent(rowTracker, &continuedDelta)
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, continuedDelta); err != nil {
+		t.Fatalf("append post-recovery fixture delta: %v", err)
+	}
+	postRecovery := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool {
+		return runtimeWireEventSeq(event) >= gapEvent.Seq+1 &&
+			(runtimeWireEventType(event) == sessionruntime.EventRuntimeSnapshot ||
+				runtimeWireEventType(event) == sessionruntime.EventRuntimeDelta ||
+				runtimeWireEventType(event) == sessionruntime.EventRuntimeDropped)
+	})
+	if runtimeWireEventType(postRecovery) != sessionruntime.EventRuntimeDelta || runtimeWireEventSeq(postRecovery) != gapEvent.Seq+1 {
+		t.Fatalf("post-recovery event = %#v, want continuous delta at seq %d", postRecovery, gapEvent.Seq+1)
+	}
+
+	delayed := runtimeFixtureWireEvent(t, delayedEvent)
+	gap := runtimeFixtureWireEvent(t, gapEvent)
+	for _, event := range []runtimeWireEvent{delayed, gap, checkpoint, postRecovery} {
+		normalizeRuntimeFixtureWireEvent(event)
+	}
+	return runtimeRecoveryContractFixture{
+		Version:           1,
+		Scenario:          "gap_checkpoint_recovery",
+		RuntimeSnapshot:   baseline,
+		GapDelta:          gap,
+		DelayedDelta:      delayed,
+		RuntimeCheckpoint: checkpoint,
+		PostRecoveryDelta: postRecovery,
+	}
+}
+
+func buildRichActiveRunContractFixture(t *testing.T) runtimeContractFixture {
+	t.Helper()
+	snapshotEvent, stream := buildRuntimeContractSnapshot(t, runtimeFixtureStreamID, richActiveRunActiveAgentContractScript())
+	terminalSnapshotEvent, fullStream := buildRuntimeContractSnapshot(t, runtimeFixtureStreamID, richActiveRunAgentContractScript())
+	if runtimeWireRunStatus(terminalSnapshotEvent) != sessionruntime.RunStatusCompleted {
+		t.Fatalf("rich terminal fixture status = %#v, want completed", terminalSnapshotEvent)
+	}
+	terminalStream := make([]runtimeWireEvent, 0, len(fullStream))
+	for _, event := range fullStream {
+		if runtimeWireEventSeq(event) > runtimeWireEventSeq(snapshotEvent) {
+			terminalStream = append(terminalStream, event)
+		}
+	}
+	if len(terminalStream) == 0 {
+		t.Fatal("rich terminal fixture is missing terminal deltas")
+	}
+	return runtimeContractFixture{
+		Version:                6,
+		Scenario:               "rich_active_run",
+		RuntimeSnapshot:        snapshotEvent,
+		RuntimeStream:          stream,
+		RuntimeTerminalStream:  terminalStream,
+		RuntimeAdmissionStream: buildRuntimeAdmissionStream(t),
+		RuntimeResetStream:     buildRuntimeResetStream(t),
+		RuntimeSteerStream:     buildRuntimeSteerStream(t),
+	}
+}
+
+func buildInterruptedRunContractFixture(t *testing.T) runtimeContractFixture {
+	t.Helper()
+	snapshotEvent, stream := buildRuntimeContractSnapshot(t, runtimeFixtureInterruptedID, interruptedRunAgentContractScript())
+	return runtimeContractFixture{
+		Version:         4,
+		Scenario:        "interrupted_run",
+		RuntimeSnapshot: snapshotEvent,
+		RuntimeStream:   stream,
+	}
+}
+
+func buildRuntimeReplacementContractFixture(t *testing.T) runtimeReplacementContractFixture {
+	t.Helper()
+	return runtimeReplacementContractFixture{
+		Version: 2,
+		RetrySnapshot: buildRuntimeOperationEvent(t, "stream-retry-operation", &sessionruntime.RunOperationView{
+			Kind:                 sessionruntime.RunOperationRetry,
+			ReplaceFromMessageID: "assistant-old",
+		}),
+		EditSnapshot: buildRuntimeOperationEvent(t, "stream-edit-operation", &sessionruntime.RunOperationView{
+			Kind:                 sessionruntime.RunOperationEdit,
+			ReplaceFromMessageID: "user-old",
+			ReplacementUserTurn: &conversation.UITurn{
+				Role:      "user",
+				Text:      "edited prompt",
+				Platform:  "local",
+				Timestamp: runtimeFixtureStartTime,
+			},
+		}),
+	}
+}
+
+func buildRuntimeOperationEvent(t *testing.T, streamID string, operation *sessionruntime.RunOperationView) runtimeWireEvent {
+	t.Helper()
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), runtimeFixtureManagerOptions(streamID))
+	defer func() { _ = manager.Close() }()
+	admission := sessionruntime.RunAdmissionView{
+		Operation:       operation,
+		TurnReservation: runtimeFixtureTurnReservation(streamID, 1),
+	}
+	if err := manager.StartRunWithAdmission(context.Background(), runtimeContractBotID, runtimeContractSessionID, streamID, admission, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start operation fixture run: %v", err)
+	}
+	event, _ := captureRuntimeFixtureSnapshot(t, manager)
+	if snapshot, ok := event["snapshot"].(map[string]any); ok {
+		snapshot["updated_at"] = runtimeFixtureStartTime.Format(time.RFC3339)
+		if run, ok := snapshot["current_run_view"].(map[string]any); ok {
+			run["started_at"] = runtimeFixtureStartTime.Format(time.RFC3339)
+			run["updated_at"] = runtimeFixtureStartTime.Format(time.RFC3339)
+		}
+	}
+	return event
+}
+
+func runtimeFixtureManagerOptions(streamID string) sessionruntime.Options {
+	return sessionruntime.Options{
+		OwnerID:                runtimeFixtureOwnerID,
+		StateTTL:               time.Hour,
+		OwnerLeaseTTL:          time.Minute,
+		Logger:                 slog.Default(),
+		EpochGenerator:         func() string { return "epoch-runtime-contract-v1" },
+		RunGenerationGenerator: func() string { return "generation-" + streamID },
+	}
 }
 
 func interruptedRunWSContractScript(t *testing.T) []flow.WSStreamEvent {

@@ -15,22 +15,60 @@
           {
             "content": "new partial",
             "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-generation-reuse-2-row-01",
+                "turn_id": "turn-stream-generation-reuse-2",
+                "turn_message_seq": 2,
+                "turn_position": 2
+              }
+            ],
+            "stable_id": "turn-stream-generation-reuse-2-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 2,
             "type": "text"
           }
         ],
         "request_user_turn": {
           "external_message_id": "stream-generation-reuse",
-          "id": "user-generation-b",
+          "id": "turn-stream-generation-reuse-2-request",
           "platform": "local",
           "role": "user",
           "sender_user_id": "user-1",
           "text": "new prompt",
           "timestamp": "2026-07-10T00:01:00Z"
         },
-        "row_ledger": [],
+        "row_ledger": [
+          {
+            "role": "user",
+            "stable_id": "turn-stream-generation-reuse-2-request",
+            "turn_id": "turn-stream-generation-reuse-2",
+            "turn_message_seq": 1,
+            "turn_position": 2
+          },
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-generation-reuse-2-row-01",
+            "turn_id": "turn-stream-generation-reuse-2",
+            "turn_message_seq": 2,
+            "turn_position": 2
+          }
+        ],
         "started_at": "2026-07-10T00:00:00Z",
         "status": "running",
         "stream_id": "stream-generation-reuse",
+        "turn_reservation": {
+          "request": {
+            "message_id": "turn-stream-generation-reuse-2-request",
+            "role": "user",
+            "turn_id": "turn-stream-generation-reuse-2",
+            "turn_message_seq": 1,
+            "turn_position": 2
+          },
+          "turn_id": "turn-stream-generation-reuse-2",
+          "turn_position": 2
+        },
         "updated_at": "2026-07-10T00:00:10Z"
       },
       "epoch": "epoch-runtime-contract-v1",
@@ -87,17 +125,36 @@
           "messages": [],
           "request_user_turn": {
             "external_message_id": "stream-generation-reuse",
-            "id": "user-generation-a",
+            "id": "turn-stream-generation-reuse-1-request",
             "platform": "local",
             "role": "user",
             "sender_user_id": "user-1",
             "text": "old prompt",
             "timestamp": "2026-07-10T00:00:00Z"
           },
-          "row_ledger": [],
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-generation-reuse-1-request",
+              "turn_id": "turn-stream-generation-reuse-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-generation-reuse",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-generation-reuse-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-generation-reuse-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-generation-reuse-1",
+            "turn_position": 1
+          },
           "updated_at": "2026-07-10T00:00:10Z"
         }
       },
@@ -115,7 +172,28 @@
           {
             "content": "old answer",
             "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-generation-reuse-1-row-01",
+                "turn_id": "turn-stream-generation-reuse-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-generation-reuse-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "text"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-generation-reuse-1-row-01",
+            "turn_id": "turn-stream-generation-reuse-1",
+            "turn_message_seq": 2,
+            "turn_position": 1
           }
         ]
       },
@@ -175,17 +253,36 @@
           "messages": [],
           "request_user_turn": {
             "external_message_id": "stream-generation-reuse",
-            "id": "user-generation-b",
+            "id": "turn-stream-generation-reuse-2-request",
             "platform": "local",
             "role": "user",
             "sender_user_id": "user-1",
             "text": "new prompt",
             "timestamp": "2026-07-10T00:01:00Z"
           },
-          "row_ledger": [],
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-generation-reuse-2-request",
+              "turn_id": "turn-stream-generation-reuse-2",
+              "turn_message_seq": 1,
+              "turn_position": 2
+            }
+          ],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-generation-reuse",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-generation-reuse-2-request",
+              "role": "user",
+              "turn_id": "turn-stream-generation-reuse-2",
+              "turn_message_seq": 1,
+              "turn_position": 2
+            },
+            "turn_id": "turn-stream-generation-reuse-2",
+            "turn_position": 2
+          },
           "updated_at": "2026-07-10T00:00:10Z"
         }
       },
@@ -203,7 +300,28 @@
           {
             "content": "new partial",
             "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-generation-reuse-2-row-01",
+                "turn_id": "turn-stream-generation-reuse-2",
+                "turn_message_seq": 2,
+                "turn_position": 2
+              }
+            ],
+            "stable_id": "turn-stream-generation-reuse-2-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 2,
             "type": "text"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-generation-reuse-2-row-01",
+            "turn_id": "turn-stream-generation-reuse-2",
+            "turn_message_seq": 2,
+            "turn_position": 2
           }
         ]
       },

@@ -12555,7 +12555,23 @@ describe('chat-list store', () => {
     expect(runtimeSubscribeMessages).toEqual([])
     const assistant = store.messages.find(turn => turn.id === 'runtime-stream-reset')
     expect(assistant?.role === 'assistant' ? assistant.messages : []).toEqual([
-      { id: 1, type: 'text', content: 'replacement draft' },
+      {
+        id: 1,
+        type: 'text',
+        content: 'replacement draft',
+        stable_id: 'turn-stream-reset-1-row-02',
+        turn_message_seq: 4,
+        turn_position: 1,
+        row_identities: [
+          {
+            role: 'assistant',
+            stable_id: 'turn-stream-reset-1-row-02',
+            turn_id: 'turn-stream-reset-1',
+            turn_message_seq: 4,
+            turn_position: 1,
+          },
+        ],
+      },
     ])
   })
 

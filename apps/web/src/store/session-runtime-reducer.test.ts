@@ -111,7 +111,23 @@ describe('session runtime reducer', () => {
 
     const reset = reduceContractStream(runtimeStateMachineContractFixture.runtime_reset_stream ?? [])
     expect(reset.snapshot?.current_run_view?.messages).toEqual([
-      { id: 1, type: 'text', content: 'replacement draft' },
+      {
+        id: 1,
+        type: 'text',
+        content: 'replacement draft',
+        stable_id: 'turn-stream-reset-1-row-02',
+        turn_message_seq: 4,
+        turn_position: 1,
+        row_identities: [
+          {
+            role: 'assistant',
+            stable_id: 'turn-stream-reset-1-row-02',
+            turn_id: 'turn-stream-reset-1',
+            turn_message_seq: 4,
+            turn_position: 1,
+          },
+        ],
+      },
     ])
 
     const steer = reduceContractStream(runtimeStateMachineContractFixture.runtime_steer_stream ?? [])

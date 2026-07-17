@@ -15,11 +15,35 @@
           {
             "content": "I need to inspect the workspace.",
             "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "reasoning"
           },
           {
             "content": "I will check the current state.",
             "id": 1,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "text"
           },
           {
@@ -39,8 +63,27 @@
                 "stdout": "/workspace\n"
               }
             ],
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              },
+              {
+                "role": "tool",
+                "stable_id": "turn-stream-rich-1-row-02",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 3,
+                "turn_position": 1
+              }
+            ],
             "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
             "tool_call_id": "call-exec",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "tool"
           },
           {
@@ -55,8 +98,20 @@
               "command": "rm -rf build"
             },
             "name": "exec",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
             "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
             "tool_call_id": "call-approval",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "tool"
           },
           {
@@ -70,8 +125,20 @@
               ]
             },
             "name": "ask_user",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
             "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
             "tool_call_id": "call-ask",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "tool",
             "user_input": {
               "can_respond": true,
@@ -107,16 +174,50 @@
             }
           ],
           "external_message_id": "stream-rich",
+          "id": "turn-stream-rich-1-request",
           "platform": "local",
           "role": "user",
           "sender_user_id": "user-1",
           "text": "Inspect the workspace",
           "timestamp": "2026-07-10T00:00:00Z"
         },
-        "row_ledger": [],
+        "row_ledger": [
+          {
+            "role": "user",
+            "stable_id": "turn-stream-rich-1-request",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          },
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 2,
+            "turn_position": 1
+          },
+          {
+            "role": "tool",
+            "stable_id": "turn-stream-rich-1-row-02",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 3,
+            "turn_position": 1
+          }
+        ],
         "started_at": "2026-07-10T00:00:00Z",
         "status": "running",
         "stream_id": "stream-rich",
+        "turn_reservation": {
+          "request": {
+            "message_id": "turn-stream-rich-1-request",
+            "role": "user",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          },
+          "turn_id": "turn-stream-rich-1",
+          "turn_position": 1
+        },
         "updated_at": "2026-07-10T00:00:10Z"
       },
       "epoch": "epoch-runtime-contract-v1",
@@ -148,16 +249,36 @@
               }
             ],
             "external_message_id": "stream-rich",
+            "id": "turn-stream-rich-1-request",
             "platform": "local",
             "role": "user",
             "sender_user_id": "user-1",
             "text": "Inspect the workspace",
             "timestamp": "2026-07-10T00:00:00Z"
           },
-          "row_ledger": [],
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-rich-1-request",
+              "turn_id": "turn-stream-rich-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-rich",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-rich-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-rich-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-rich-1",
+            "turn_position": 1
+          },
           "updated_at": "2026-07-10T00:00:10Z"
         },
         "epoch": "epoch-runtime-contract-v1",
@@ -175,7 +296,28 @@
           {
             "content": "I need to inspect the workspace.",
             "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "reasoning"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 2,
+            "turn_position": 1
           }
         ]
       },
@@ -193,6 +335,18 @@
           {
             "content": "I will check the current state.",
             "id": 1,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "text"
           }
         ]
@@ -214,8 +368,20 @@
               "command": "pwd"
             },
             "name": "exec",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
             "running": true,
+            "stable_id": "turn-stream-rich-1-row-01",
             "tool_call_id": "call-exec",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "tool"
           }
         ]
@@ -284,9 +450,37 @@
                 "stdout": "/workspace\n"
               }
             ],
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              },
+              {
+                "role": "tool",
+                "stable_id": "turn-stream-rich-1-row-02",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 3,
+                "turn_position": 1
+              }
+            ],
             "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
             "tool_call_id": "call-exec",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "tool"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "tool",
+            "stable_id": "turn-stream-rich-1-row-02",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 3,
+            "turn_position": 1
           }
         ]
       },
@@ -313,8 +507,20 @@
               "command": "rm -rf build"
             },
             "name": "exec",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
             "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
             "tool_call_id": "call-approval",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "tool"
           }
         ]
@@ -341,8 +547,20 @@
               ]
             },
             "name": "ask_user",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
             "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
             "tool_call_id": "call-ask",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "tool",
             "user_input": {
               "can_respond": true,
@@ -452,16 +670,36 @@
               }
             ],
             "external_message_id": "stream-admission",
+            "id": "turn-stream-admission-1-request",
             "platform": "local",
             "role": "user",
             "sender_user_id": "user-1",
             "text": "Inspect the workspace",
             "timestamp": "2026-07-10T00:00:00Z"
           },
-          "row_ledger": [],
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-admission-1-request",
+              "turn_id": "turn-stream-admission-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-admission",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-admission-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-admission-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-admission-1",
+            "turn_position": 1
+          },
           "updated_at": "2026-07-10T00:00:10Z"
         }
       },
@@ -485,10 +723,45 @@
           "canonical_ready": false,
           "generation": "generation-stream-reset",
           "messages": [],
-          "row_ledger": [],
+          "request_user_turn": {
+            "attachments": [
+              {
+                "content_hash": "sha256:notes",
+                "name": "notes.txt",
+                "type": "file"
+              }
+            ],
+            "external_message_id": "stream-reset",
+            "id": "turn-stream-reset-1-request",
+            "platform": "local",
+            "role": "user",
+            "sender_user_id": "user-1",
+            "text": "Inspect the workspace",
+            "timestamp": "2026-07-10T00:00:00Z"
+          },
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-reset-1-request",
+              "turn_id": "turn-stream-reset-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-reset",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-reset-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-reset-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-reset-1",
+            "turn_position": 1
+          },
           "updated_at": "2026-07-10T00:00:10Z"
         },
         "epoch": "epoch-runtime-contract-v1",
@@ -506,7 +779,28 @@
           {
             "content": "discarded draft",
             "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-reset-1-row-01",
+                "turn_id": "turn-stream-reset-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-reset-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
             "type": "text"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-reset-1-row-01",
+            "turn_id": "turn-stream-reset-1",
+            "turn_message_seq": 2,
+            "turn_position": 1
           }
         ]
       },
@@ -520,7 +814,17 @@
     {
       "bot_id": "bot-1",
       "delta": {
-        "reset_messages": true
+        "reset_messages": true,
+        "reset_row_ledger": true,
+        "row_ledger_upserts": [
+          {
+            "role": "user",
+            "stable_id": "turn-stream-reset-1-request",
+            "turn_id": "turn-stream-reset-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          }
+        ]
       },
       "epoch": "epoch-runtime-contract-v1",
       "seq": 4,
@@ -536,7 +840,28 @@
           {
             "content": "replacement draft",
             "id": 1,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-reset-1-row-02",
+                "turn_id": "turn-stream-reset-1",
+                "turn_message_seq": 4,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-reset-1-row-02",
+            "turn_message_seq": 4,
+            "turn_position": 1,
             "type": "text"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-reset-1-row-02",
+            "turn_id": "turn-stream-reset-1",
+            "turn_message_seq": 4,
+            "turn_position": 1
           }
         ]
       },
@@ -560,10 +885,45 @@
           "canonical_ready": false,
           "generation": "generation-stream-steer",
           "messages": [],
-          "row_ledger": [],
+          "request_user_turn": {
+            "attachments": [
+              {
+                "content_hash": "sha256:notes",
+                "name": "notes.txt",
+                "type": "file"
+              }
+            ],
+            "external_message_id": "stream-steer",
+            "id": "turn-stream-steer-1-request",
+            "platform": "local",
+            "role": "user",
+            "sender_user_id": "user-1",
+            "text": "Inspect the workspace",
+            "timestamp": "2026-07-10T00:00:00Z"
+          },
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-steer-1-request",
+              "turn_id": "turn-stream-steer-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-steer",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-steer-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-steer-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-steer-1",
+            "turn_position": 1
+          },
           "updated_at": "2026-07-10T00:00:10Z"
         },
         "epoch": "epoch-runtime-contract-v1",
