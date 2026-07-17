@@ -54,6 +54,7 @@ func options() fx.Option {
 			provideNetworkService,
 			provideNetworkController,
 			provideDBConn,
+			providePGVectorStore,
 			providePostgresStore,
 			provideDBQueries,
 			provideAccountStore,
