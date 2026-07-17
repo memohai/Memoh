@@ -183,8 +183,8 @@ ON CONFLICT (team_id, name) DO UPDATE SET
 RETURNING *;
 
 -- name: UpsertRegistryModel :one
-INSERT INTO models (model_id, name, provider_id, type, config)
-VALUES (sqlc.arg(model_id), sqlc.arg(name), sqlc.arg(provider_id), sqlc.arg(type), sqlc.arg(config))
+INSERT INTO models (model_id, name, provider_id, type, enable, config)
+VALUES (sqlc.arg(model_id), sqlc.arg(name), sqlc.arg(provider_id), sqlc.arg(type), false, sqlc.arg(config))
 ON CONFLICT (team_id, provider_id, model_id) DO UPDATE SET
   name = EXCLUDED.name,
   type = EXCLUDED.type,

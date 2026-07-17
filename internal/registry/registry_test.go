@@ -150,7 +150,8 @@ func (f *fakeQueries) UpdateProvider(_ context.Context, arg sqlc.UpdateProviderP
 
 // UpsertRegistryModel mirrors:
 //
-//	INSERT INTO models (model_id, name, provider_id, type, config)
+//	INSERT INTO models (model_id, name, provider_id, type, enable, config)
+//	VALUES (..., false, ...)
 //	ON CONFLICT (provider_id, model_id) DO UPDATE SET
 //	  name = EXCLUDED.name, type = EXCLUDED.type, config = EXCLUDED.config
 func (f *fakeQueries) UpsertRegistryModel(_ context.Context, arg sqlc.UpsertRegistryModelParams) (sqlc.Model, error) {
@@ -173,7 +174,7 @@ func (f *fakeQueries) UpsertRegistryModel(_ context.Context, arg sqlc.UpsertRegi
 		Name:       arg.Name,
 		ProviderID: arg.ProviderID,
 		Type:       arg.Type,
-		Enable:     true,
+		Enable:     false,
 		Config:     append([]byte(nil), arg.Config...),
 	}
 	f.models = append(f.models, m)
@@ -274,12 +275,18 @@ func TestSyncCreatesProvidersAndModels(t *testing.T) {
 	if !ok || chat.Name.String != "GPT Test" || chat.Type != "chat" {
 		t.Fatalf("chat model = %+v, want gpt-test/GPT Test/chat", chat)
 	}
+	if chat.Enable {
+		t.Fatal("chat model enable = true, want new registry models disabled")
+	}
 	if value := jsonMap(t, chat.Config)["context_window"]; value != float64(128000) {
 		t.Fatalf("chat model context_window = %#v, want 128000", value)
 	}
 	embed, ok := byModelID["gpt-embed"]
 	if !ok || embed.Type != "embedding" {
 		t.Fatalf("embedding model = %+v, want gpt-embed/embedding", embed)
+	}
+	if embed.Enable {
+		t.Fatal("embedding model enable = true, want new registry models disabled")
 	}
 }
 
@@ -494,6 +501,9 @@ func TestSyncMatchesLegacyProviderByBaseURL(t *testing.T) {
 	}
 	if models[0].Name.String != "GPT Test" {
 		t.Fatalf("model name = %q, want registry name", models[0].Name.String)
+	}
+	if !models[0].Enable {
+		t.Fatal("model enable = false, want existing user choice preserved")
 	}
 }
 
