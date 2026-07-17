@@ -8,32 +8,42 @@ import (
 // UserMessageMeta holds the structured metadata attached to every user
 // message. It is the single source of truth for the XML message tag sent to the LLM.
 type UserMessageMeta struct {
-	MessageID         string   `json:"message-id,omitempty"`
-	ChannelIdentityID string   `json:"channel-identity-id"`
-	DisplayName       string   `json:"display-name"`
-	Channel           string   `json:"channel"`
-	ConversationType  string   `json:"conversation-type"`
-	ConversationName  string   `json:"conversation-name,omitempty"`
-	Target            string   `json:"target,omitempty"`
-	Time              string   `json:"time"`
-	Timezone          string   `json:"timezone,omitempty"`
-	AttachmentPaths   []string `json:"attachments"`
+	MessageID          string   `json:"message-id,omitempty"`
+	ChannelIdentityID  string   `json:"channel-identity-id"`
+	DisplayName        string   `json:"display-name"`
+	Channel            string   `json:"channel"`
+	ConversationType   string   `json:"conversation-type"`
+	ConversationName   string   `json:"conversation-name,omitempty"`
+	Target             string   `json:"target,omitempty"`
+	Time               string   `json:"time"`
+	Timezone           string   `json:"timezone,omitempty"`
+	AttachmentPaths    []string `json:"attachments"`
+	ReplyToMessageID   string   `json:"reply-to-message-id,omitempty"`
+	ReplySender        string   `json:"reply-sender,omitempty"`
+	ReplyPreview       string   `json:"reply-preview,omitempty"`
+	ForwardedFrom      string   `json:"forwarded-from,omitempty"`
+	ForwardedMessageID string   `json:"forwarded-message-id,omitempty"`
 }
 
 // UserMessageHeaderInput is the unified input for building user message headers.
 // Keeping this as a struct avoids long positional argument lists and makes
 // future metadata extension backward-compatible for call sites.
 type UserMessageHeaderInput struct {
-	MessageID         string
-	ChannelIdentityID string
-	DisplayName       string
-	Channel           string
-	ConversationType  string
-	ConversationName  string
-	Target            string
-	AttachmentPaths   []string
-	Time              time.Time
-	Timezone          string
+	MessageID          string
+	ChannelIdentityID  string
+	DisplayName        string
+	Channel            string
+	ConversationType   string
+	ConversationName   string
+	Target             string
+	AttachmentPaths    []string
+	Time               time.Time
+	Timezone           string
+	ReplyToMessageID   string
+	ReplySender        string
+	ReplyPreview       string
+	ForwardedFrom      string
+	ForwardedMessageID string
 }
 
 // BuildUserMessageMetaFromInput constructs metadata from one cohesive input.
@@ -43,16 +53,21 @@ func BuildUserMessageMetaFromInput(input UserMessageHeaderInput) UserMessageMeta
 		attachmentPaths = []string{}
 	}
 	meta := UserMessageMeta{
-		MessageID:         input.MessageID,
-		ChannelIdentityID: input.ChannelIdentityID,
-		DisplayName:       input.DisplayName,
-		Channel:           input.Channel,
-		ConversationType:  input.ConversationType,
-		ConversationName:  input.ConversationName,
-		Target:            strings.TrimSpace(input.Target),
-		Time:              time.Now().UTC().Format(time.RFC3339),
-		Timezone:          strings.TrimSpace(input.Timezone),
-		AttachmentPaths:   attachmentPaths,
+		MessageID:          input.MessageID,
+		ChannelIdentityID:  input.ChannelIdentityID,
+		DisplayName:        input.DisplayName,
+		Channel:            input.Channel,
+		ConversationType:   input.ConversationType,
+		ConversationName:   input.ConversationName,
+		Target:             strings.TrimSpace(input.Target),
+		Time:               time.Now().UTC().Format(time.RFC3339),
+		Timezone:           strings.TrimSpace(input.Timezone),
+		AttachmentPaths:    attachmentPaths,
+		ReplyToMessageID:   strings.TrimSpace(input.ReplyToMessageID),
+		ReplySender:        strings.TrimSpace(input.ReplySender),
+		ReplyPreview:       strings.TrimSpace(input.ReplyPreview),
+		ForwardedFrom:      strings.TrimSpace(input.ForwardedFrom),
+		ForwardedMessageID: strings.TrimSpace(input.ForwardedMessageID),
 	}
 	if !input.Time.IsZero() {
 		meta.Time = input.Time.Format(time.RFC3339)
@@ -104,6 +119,21 @@ func (m UserMessageMeta) ToMap() map[string]any {
 	if strings.TrimSpace(m.Timezone) != "" {
 		result["timezone"] = m.Timezone
 	}
+	if m.ReplyToMessageID != "" {
+		result["reply-to-message-id"] = m.ReplyToMessageID
+	}
+	if m.ReplySender != "" {
+		result["reply-sender"] = m.ReplySender
+	}
+	if m.ReplyPreview != "" {
+		result["reply-preview"] = m.ReplyPreview
+	}
+	if m.ForwardedFrom != "" {
+		result["forwarded-from"] = m.ForwardedFrom
+	}
+	if m.ForwardedMessageID != "" {
+		result["forwarded-message-id"] = m.ForwardedMessageID
+	}
 	return result
 }
 
@@ -137,7 +167,23 @@ func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 	if meta.Target != "" {
 		writeXMLAttr(&sb, "target", meta.Target)
 	}
+	if meta.ForwardedFrom != "" {
+		writeXMLAttr(&sb, "forwarded_from", meta.ForwardedFrom)
+	}
+	if meta.ForwardedMessageID != "" {
+		writeXMLAttr(&sb, "forwarded_message_id", meta.ForwardedMessageID)
+	}
 	sb.WriteString(">\n")
+	if meta.ReplyToMessageID != "" {
+		sb.WriteString("<in-reply-to")
+		writeXMLAttr(&sb, "id", meta.ReplyToMessageID)
+		if meta.ReplySender != "" {
+			writeXMLAttr(&sb, "sender", meta.ReplySender)
+		}
+		sb.WriteString(">")
+		sb.WriteString(escapeXMLText(meta.ReplyPreview))
+		sb.WriteString("</in-reply-to>\n")
+	}
 
 	if len(meta.AttachmentPaths) > 0 {
 		for _, p := range meta.AttachmentPaths {
@@ -161,6 +207,14 @@ func escapeXMLAttr(s string) string {
 		"\"", "&quot;",
 	)
 	return r.Replace(s)
+}
+
+func escapeXMLText(s string) string {
+	return strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+	).Replace(s)
 }
 
 func writeXMLAttr(sb *strings.Builder, key, value string) {

@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/contextlimit"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/models"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/workspace"
@@ -337,35 +335,7 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	stream := r.agent.Stream(ctx, cfg)
-	stored := false
-	for event := range stream {
-		data, err := json.Marshal(event)
-		if err != nil {
-			continue
-		}
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if snap, ok := extractTerminalSnapshot(data); ok {
-				if storeErr := r.persistTerminalSnapshot(
-					context.WithoutCancel(ctx),
-					req,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
-					snap,
-				); storeErr != nil {
-					return storeErr
-				}
-				stored = true
-			}
-		}
-		if eventCh != nil {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-	return nil
+	return r.streamContinuation(ctx, cfg, req, resolved.ModelID, eventCh)
 }
 
 func withLocalWebReplyTarget(req toolapproval.Request) toolapproval.Request {

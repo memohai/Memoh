@@ -26,6 +26,7 @@ DROP TABLE IF EXISTS tool_approval_requests CASCADE;
 DROP VIEW IF EXISTS bot_visible_history_messages CASCADE;
 DROP TABLE IF EXISTS bot_history_messages CASCADE;
 DROP TABLE IF EXISTS bot_session_events CASCADE;
+DROP SEQUENCE IF EXISTS bot_session_event_cursor_seq;
 DROP TABLE IF EXISTS bot_session_discuss_cursors CASCADE;
 DROP TABLE IF EXISTS bot_sessions CASCADE;
 DROP SEQUENCE IF EXISTS session_runtime_fencing_token_seq;

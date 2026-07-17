@@ -131,6 +131,10 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
   AND session_id = $2
   AND status = 'pending'
+  AND (
+    prompt_delivered_at IS NOT NULL
+    OR prompt_external_message_id <> ''
+  )
   AND (expires_at IS NULL OR expires_at > now())
 ORDER BY created_at DESC, short_id DESC
 LIMIT 1;
@@ -153,6 +157,16 @@ SET prompt_message_id = sqlc.narg(prompt_message_id),
     prompt_external_message_id = sqlc.arg(prompt_external_message_id),
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id)
+RETURNING *;
+
+-- name: MarkUserInputPromptDelivered :one
+UPDATE user_input_requests
+SET prompt_delivered_at = COALESCE(prompt_delivered_at, now()),
+    updated_at = CASE WHEN prompt_delivered_at IS NULL THEN now() ELSE updated_at END
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
 RETURNING *;
 
 -- name: UpdateUserInputInteraction :one

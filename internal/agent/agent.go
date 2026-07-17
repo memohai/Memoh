@@ -216,6 +216,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	initialMsgCount := len(cfg.Messages)
+	injectedMsgCount := 0
 
 	if cfg.InjectCh != nil {
 		basePrepare := prepareStep
@@ -236,7 +237,10 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 						text = strings.TrimSpace(injected.Text)
 					}
 					if text != "" || (cfg.SupportsImageInput && len(injected.ImageParts) > 0) {
-						insertAfter := len(p.Messages) - initialMsgCount
+						insertAfter := len(p.Messages) - initialMsgCount - injectedMsgCount
+						if insertAfter < 0 {
+							insertAfter = 0
+						}
 						var extra []sdk.MessagePart
 						if cfg.SupportsImageInput {
 							for _, img := range injected.ImageParts {
@@ -246,6 +250,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 							}
 						}
 						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
+						injectedMsgCount++
 						if cfg.InjectedRecorder != nil {
 							cfg.InjectedRecorder(text, insertAfter)
 						}

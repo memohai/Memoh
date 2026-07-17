@@ -201,48 +201,16 @@ func (r *Resolver) streamReplacementWS(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) error {
-	_, err := r.streamChatWSResultWithHooks(
-		ctx,
-		req,
-		eventCh,
-		abortCh,
-		func(ctx context.Context) error {
-			return r.ensureLatestVisibleTurn(ctx, req.SessionID, oldTurnID)
-		},
-		func(ctx context.Context, persisted []messagepkg.Message) error {
-			return r.replacePersistedTurn(ctx, req, oldTurnID, requestMessageID, reason, persisted)
-		},
-	)
+	if err := r.ensureLatestVisibleTurn(ctx, req.SessionID, oldTurnID); err != nil {
+		return err
+	}
+	req.TurnReplacement = &conversation.TurnReplacementSpec{
+		OldTurnID:                oldTurnID,
+		ExistingRequestMessageID: requestMessageID,
+		Reason:                   reason,
+	}
+	_, err := r.streamChatWSResultWithHooks(ctx, req, eventCh, abortCh, nil, nil)
 	return err
-}
-
-func (r *Resolver) replacePersistedTurn(
-	ctx context.Context,
-	req conversation.ChatRequest,
-	oldTurnID string,
-	requestMessageID string,
-	reason string,
-	persisted []messagepkg.Message,
-) error {
-	replacementID := firstAssistantID(persisted)
-	if replacementID == "" {
-		replacementID = latestPersistedID(persisted)
-	}
-	if replacementID == "" {
-		return errors.New("replacement message was not persisted")
-	}
-	if strings.TrimSpace(requestMessageID) == "" {
-		requestMessageID = firstUserID(persisted)
-	}
-	forkAnchorUpdate := r.prepareForkAnchorUpdate(ctx, req.SessionID, req.HistoryCutoffBeforeMessageID)
-	if _, err := r.messageService.ReplaceTurn(context.WithoutCancel(ctx), req.SessionID, oldTurnID, requestMessageID, replacementID, reason); err != nil {
-		r.logger.Error("replace history turn failed", slog.String("reason", reason), slog.Any("error", err))
-		r.cleanupReplacementMessages(ctx, persisted)
-		return fmt.Errorf("replace history turn: %w", err)
-	}
-	r.applyForkAnchorUpdate(context.WithoutCancel(ctx), req.SessionID, forkAnchorUpdate)
-	r.publishReplacementMessageCreated(req.BotID, persisted)
-	return nil
 }
 
 func (r *Resolver) publishReplacementMessageCreated(botID string, persisted []messagepkg.Message) {
@@ -422,24 +390,6 @@ func (r *Resolver) logForkAnchorUpdateWarning(message string, sessionID string, 
 	}
 }
 
-func (r *Resolver) cleanupReplacementMessages(ctx context.Context, persisted []messagepkg.Message) {
-	if r == nil || r.messageService == nil || len(persisted) == 0 {
-		return
-	}
-	ids := make([]string, 0, len(persisted))
-	for _, msg := range persisted {
-		if id := strings.TrimSpace(msg.ID); id != "" {
-			ids = append(ids, id)
-		}
-	}
-	if len(ids) == 0 {
-		return
-	}
-	if err := r.messageService.DeleteByIDs(context.WithoutCancel(ctx), ids); err != nil {
-		r.logger.Error("cleanup replacement messages failed", slog.Any("error", err), slog.Int("message_count", len(ids)))
-	}
-}
-
 func visibleMessageText(msg messagepkg.Message) string {
 	if text := strings.TrimSpace(msg.DisplayContent); text != "" {
 		return text
@@ -451,31 +401,4 @@ func visibleMessageText(msg messagepkg.Message) string {
 		}
 	}
 	return strings.TrimSpace(string(msg.Content))
-}
-
-func firstAssistantID(messages []messagepkg.Message) string {
-	for _, msg := range messages {
-		if strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
-			return strings.TrimSpace(msg.ID)
-		}
-	}
-	return ""
-}
-
-func firstUserID(messages []messagepkg.Message) string {
-	for _, msg := range messages {
-		if strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
-			return strings.TrimSpace(msg.ID)
-		}
-	}
-	return ""
-}
-
-func latestPersistedID(messages []messagepkg.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if id := strings.TrimSpace(messages[i].ID); id != "" {
-			return id
-		}
-	}
-	return ""
 }

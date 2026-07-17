@@ -501,6 +501,23 @@ func (s *Service) UpdatePromptMessage(ctx context.Context, requestID, promptMess
 	return requestFromRowOrErr(row, err)
 }
 
+func (s *Service) MarkPromptDelivered(ctx context.Context, requestID string) (Request, error) {
+	id, err := db.ParseUUID(requestID)
+	if err != nil {
+		return Request{}, err
+	}
+	var row sqlc.UserInputRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateUserInputFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var markErr error
+		row, markErr = queries.MarkUserInputPromptDelivered(ctx, id)
+		return markErr
+	})
+	return requestFromRowOrErr(row, err)
+}
+
 func (s *Service) UpdateAssistantMessage(ctx context.Context, requestID, messageID string) (Request, error) {
 	id, err := db.ParseUUID(requestID)
 	if err != nil {
@@ -859,6 +876,10 @@ func requestFromRow(row sqlc.UserInputRequest) Request {
 	if row.RespondedAt.Valid {
 		responded := row.RespondedAt.Time
 		req.RespondedAt = &responded
+	}
+	if row.PromptDeliveredAt.Valid {
+		delivered := row.PromptDeliveredAt.Time
+		req.PromptDeliveredAt = &delivered
 	}
 	if row.CanceledAt.Valid {
 		canceled := row.CanceledAt.Time

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -117,7 +118,7 @@ func TestRouteDispatcher_InjectWhenActive(t *testing.T) {
 	}
 
 	msg := InjectMessage{Text: "hello", HeaderifiedText: "[User] hello"}
-	if !d.Inject(routeID, msg) {
+	if d.Inject(routeID, msg) != InjectAccepted {
 		t.Fatal("expected inject to succeed when route is active")
 	}
 
@@ -136,7 +137,7 @@ func TestRouteDispatcher_InjectWhenInactive(t *testing.T) {
 	routeID := "route-1"
 
 	msg := InjectMessage{Text: "hello"}
-	if d.Inject(routeID, msg) {
+	if d.Inject(routeID, msg) != InjectUnavailable {
 		t.Fatal("expected inject to fail when route is inactive")
 	}
 }
@@ -162,6 +163,75 @@ func TestRouteDispatcher_QueueAndDrain(t *testing.T) {
 	}
 }
 
+func TestRouteDispatcherTryAcquireActiveAllowsOneOwner(t *testing.T) {
+	t.Parallel()
+
+	d := NewRouteDispatcher(slog.Default())
+	const contenders = 32
+	var acquired atomic.Int32
+	var wg sync.WaitGroup
+	wg.Add(contenders)
+	for range contenders {
+		go func() {
+			defer wg.Done()
+			if _, ok := d.TryAcquireActive("route"); ok {
+				acquired.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := acquired.Load(); got != 1 {
+		t.Fatalf("acquired owners = %d, want 1", got)
+	}
+}
+
+func TestRouteDispatcherTryEnqueueIfActiveDoesNotOrphanInactiveTask(t *testing.T) {
+	t.Parallel()
+
+	d := NewRouteDispatcher(slog.Default())
+	if d.TryEnqueueIfActive("route", QueuedTask{Text: "orphan"}) {
+		t.Fatal("inactive route accepted queued task")
+	}
+	if _, ok := d.TryAcquireActive("route"); !ok {
+		t.Fatal("failed to acquire inactive route")
+	}
+	if !d.TryEnqueueIfActive("route", QueuedTask{Text: "owned"}) {
+		t.Fatal("active route rejected queued task")
+	}
+}
+
+func TestRouteDispatcherFinishActiveTransfersQueueInFIFOOrder(t *testing.T) {
+	t.Parallel()
+
+	d := NewRouteDispatcher(slog.Default())
+	if _, ok := d.TryAcquireActive("route"); !ok {
+		t.Fatal("failed to acquire route")
+	}
+	if !d.TryEnqueueIfActive("route", QueuedTask{Text: "B1"}) ||
+		!d.TryEnqueueIfActive("route", QueuedTask{Text: "B2"}) {
+		t.Fatal("failed to enqueue initial tasks")
+	}
+	first := d.FinishActive("route")
+	if len(first.QueuedTasks) != 1 || first.QueuedTasks[0].Text != "B1" {
+		t.Fatalf("first transfer = %#v, want B1", first.QueuedTasks)
+	}
+	if !d.TryEnqueueIfActive("route", QueuedTask{Text: "B3"}) {
+		t.Fatal("failed to enqueue B3 while B1 owned the route")
+	}
+	second := d.FinishActive("route")
+	third := d.FinishActive("route")
+	if len(second.QueuedTasks) != 1 || second.QueuedTasks[0].Text != "B2" {
+		t.Fatalf("second transfer = %#v, want B2", second.QueuedTasks)
+	}
+	if len(third.QueuedTasks) != 1 || third.QueuedTasks[0].Text != "B3" {
+		t.Fatalf("third transfer = %#v, want B3", third.QueuedTasks)
+	}
+	d.FinishActive("route")
+	if d.IsActive("route") {
+		t.Fatal("route remained active after queue drained")
+	}
+}
+
 func TestRouteDispatcher_OverlappingActiveOwners(t *testing.T) {
 	d := NewRouteDispatcher(slog.Default())
 	routeID := "route-1"
@@ -181,7 +251,7 @@ func TestRouteDispatcher_OverlappingActiveOwners(t *testing.T) {
 	if !d.IsActive(routeID) {
 		t.Fatal("expected route to stay active until the last owner exits")
 	}
-	if !d.Inject(routeID, InjectMessage{Text: "still active"}) {
+	if d.Inject(routeID, InjectMessage{Text: "still active"}) != InjectAccepted {
 		t.Fatal("expected inject to remain available while an owner remains active")
 	}
 
@@ -300,13 +370,13 @@ func TestRouteDispatcher_InjectChannelFull(t *testing.T) {
 
 	// Fill the inject channel to capacity
 	for i := 0; i < injectChBuffer; i++ {
-		if !d.Inject(routeID, InjectMessage{Text: "fill"}) {
+		if d.Inject(routeID, InjectMessage{Text: "fill"}) != InjectAccepted {
 			t.Fatalf("expected inject %d to succeed", i)
 		}
 	}
 
 	// Next inject should fail (channel full)
-	if d.Inject(routeID, InjectMessage{Text: "overflow"}) {
+	if d.Inject(routeID, InjectMessage{Text: "overflow"}) != InjectUnavailable {
 		t.Fatal("expected inject to fail when channel is full")
 	}
 }

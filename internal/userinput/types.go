@@ -102,6 +102,7 @@ type Request struct {
 	Result                  map[string]any       `json:"result,omitempty"`
 	ProviderMetadata        map[string]any       `json:"-"`
 	PromptExternalMessageID string               `json:"prompt_external_message_id,omitempty"`
+	PromptDeliveredAt       *time.Time           `json:"prompt_delivered_at,omitempty"`
 	SourcePlatform          string               `json:"source_platform,omitempty"`
 	ReplyTarget             string               `json:"reply_target,omitempty"`
 	ConversationType        string               `json:"conversation_type,omitempty"`

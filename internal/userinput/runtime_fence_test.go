@@ -15,7 +15,8 @@ import (
 
 type staleUserInputQueries struct {
 	dbstore.Queries
-	cancelCalled bool
+	cancelCalled              bool
+	markPromptDeliveredCalled bool
 }
 
 func (*staleUserInputQueries) SupportsTransactions() bool { return true }
@@ -37,6 +38,11 @@ func (q *staleUserInputQueries) CancelUserInputRequest(context.Context, sqlc.Can
 	return sqlc.UserInputRequest{}, nil
 }
 
+func (q *staleUserInputQueries) MarkUserInputPromptDelivered(context.Context, pgtype.UUID) (sqlc.UserInputRequest, error) {
+	q.markPromptDeliveredCalled = true
+	return sqlc.UserInputRequest{}, nil
+}
+
 func TestCancelRejectsStaleRuntimeFence(t *testing.T) {
 	t.Parallel()
 
@@ -53,5 +59,24 @@ func TestCancelRejectsStaleRuntimeFence(t *testing.T) {
 	}
 	if queries.cancelCalled {
 		t.Fatal("stale user input response updated the request")
+	}
+}
+
+func TestMarkPromptDeliveredRejectsStaleRuntimeFence(t *testing.T) {
+	t.Parallel()
+
+	queries := &staleUserInputQueries{}
+	service := NewService(nil, queries)
+	ctx := runtimefence.WithContext(context.Background(), runtimefence.Fence{
+		BotID:     "11111111-1111-1111-1111-111111111111",
+		SessionID: "22222222-2222-2222-2222-222222222222",
+		Token:     4,
+	})
+	_, err := service.MarkPromptDelivered(ctx, "33333333-3333-3333-3333-333333333333")
+	if !errors.Is(err, runtimefence.ErrStale) {
+		t.Fatalf("MarkPromptDelivered() error = %v, want ErrStale", err)
+	}
+	if queries.markPromptDeliveredCalled {
+		t.Fatal("stale runtime marked the user input prompt delivered")
 	}
 }

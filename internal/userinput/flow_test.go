@@ -134,3 +134,29 @@ func TestRunFlowTimeoutCancels(t *testing.T) {
 		t.Fatalf("cancelCalls = %+v, want one timeout cancel", svc.cancelCalls)
 	}
 }
+
+func TestRunFlowUndeliveredPendingCancelsAndEmitsTerminalState(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeFlowService{}
+	var emitted []Request
+	flow := testFlowRequest()
+	flow.Emit = func(req Request) bool {
+		emitted = append(emitted, req)
+		return false
+	}
+
+	result, err := RunFlow(context.Background(), svc, flow)
+	if err != nil || result.Request.Status != StatusCanceled {
+		t.Fatalf("RunFlow() = %+v, %v; want canceled", result, err)
+	}
+	if svc.waitCalls != 0 {
+		t.Fatalf("wait calls = %d, want 0 after delivery failure", svc.waitCalls)
+	}
+	if len(svc.cancelCalls) != 1 || !strings.Contains(svc.cancelCalls[0], "not delivered") {
+		t.Fatalf("cancelCalls = %+v, want one undelivered cancel", svc.cancelCalls)
+	}
+	if len(emitted) != 2 || emitted[0].Status != StatusPending || emitted[1].Status != StatusCanceled {
+		t.Fatalf("emitted = %+v, want pending then canceled", emitted)
+	}
+}

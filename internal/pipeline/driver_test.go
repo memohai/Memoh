@@ -2,7 +2,7 @@ package pipeline
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -13,564 +13,26 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
-	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
-func TestExtractNewImageRefs(t *testing.T) {
-	rc := RenderedContext{
-		{ReceivedAtMs: 100, ImageRefs: []ImageAttachmentRef{{ContentHash: "old-hash", Mime: "image/png"}}},
-		{ReceivedAtMs: 200, IsMyself: true, ImageRefs: []ImageAttachmentRef{{ContentHash: "self-hash"}}},
-		{ReceivedAtMs: 300, ImageRefs: []ImageAttachmentRef{{ContentHash: "new-hash", Mime: "image/jpeg"}}},
-		{ReceivedAtMs: 400, ImageRefs: nil},
-	}
-
-	refs := extractNewImageRefs(rc, 150)
-	if len(refs) != 1 {
-		t.Fatalf("expected 1 ref, got %d", len(refs))
-	}
-	if refs[0].ContentHash != "new-hash" {
-		t.Fatalf("expected new-hash, got %q", refs[0].ContentHash)
-	}
-	if refs[0].Mime != "image/jpeg" {
-		t.Fatalf("expected image/jpeg, got %q", refs[0].Mime)
-	}
-}
-
-func TestExtractNewImageRefs_IncludesMultiple(t *testing.T) {
-	rc := RenderedContext{
-		{ReceivedAtMs: 100},
-		{ReceivedAtMs: 200, ImageRefs: []ImageAttachmentRef{
-			{ContentHash: "a"},
-			{ContentHash: "b"},
-		}},
-		{ReceivedAtMs: 300, ImageRefs: []ImageAttachmentRef{{ContentHash: "c"}}},
-	}
-	refs := extractNewImageRefs(rc, 50)
-	if len(refs) != 3 {
-		t.Fatalf("expected 3 refs, got %d", len(refs))
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage(t *testing.T) {
-	msgs := []sdk.Message{
-		sdk.UserMessage("hello"),
-		sdk.AssistantMessage("hi"),
-		sdk.UserMessage("look at this"),
-	}
-	parts := []sdk.ImagePart{
-		{Image: "data:image/png;base64,abc", MediaType: "image/png"},
-	}
-
-	injectImagePartsIntoLastUserMessage(msgs, parts)
-
-	lastUser := msgs[2]
-	if len(lastUser.Content) != 2 {
-		t.Fatalf("expected 2 content parts, got %d", len(lastUser.Content))
-	}
-	imgPart, ok := lastUser.Content[1].(sdk.ImagePart)
-	if !ok {
-		t.Fatalf("expected ImagePart, got %T", lastUser.Content[1])
-	}
-	if imgPart.Image != "data:image/png;base64,abc" {
-		t.Fatalf("unexpected image: %q", imgPart.Image)
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage_Empty(t *testing.T) {
-	msgs := []sdk.Message{sdk.UserMessage("hello")}
-	injectImagePartsIntoLastUserMessage(msgs, nil)
-	if len(msgs[0].Content) != 1 {
-		t.Fatalf("expected no change, got %d parts", len(msgs[0].Content))
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage_SkipsEmptyImage(t *testing.T) {
-	msgs := []sdk.Message{sdk.UserMessage("hello")}
-	parts := []sdk.ImagePart{{Image: "", MediaType: "image/png"}}
-	injectImagePartsIntoLastUserMessage(msgs, parts)
-	if len(msgs[0].Content) != 1 {
-		t.Fatalf("expected no change, got %d parts", len(msgs[0].Content))
-	}
-}
-
-func TestHandleReplyWithAgent_InlinesImages(t *testing.T) {
-	rc := RenderedContext{
-		{
-			ReceivedAtMs: 200,
-			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="1">photo</message>`}},
-			ImageRefs:    []ImageAttachmentRef{{ContentHash: "img-hash", Mime: "image/jpeg"}},
-		},
-	}
-
-	fakeAgent := &fakeDiscussStreamer{}
-
-	resolver := &fakeRunConfigResolver{
-		resolveResult: ResolveRunConfigResult{
-			RunConfig: agentpkg.RunConfig{
-				SupportsImageInput: true,
-			},
-			ModelID: "model-1",
-		},
-		inlineFn: func(_ context.Context, _ string, refs []ImageAttachmentRef) []sdk.ImagePart {
-			if len(refs) != 1 || refs[0].ContentHash != "img-hash" {
-				t.Fatalf("unexpected refs: %v", refs)
-			}
-			return []sdk.ImagePart{{Image: "data:image/jpeg;base64,FAKE", MediaType: "image/jpeg"}}
-		},
-	}
-
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline: NewPipeline(RenderParams{}),
-		Resolver: resolver,
-	})
-
-	sess := &discussSession{
-		config: DiscussSessionConfig{
-			BotID:     "bot-1",
-			SessionID: "sess-1",
-		},
-		lastProcessedMs: 0,
-	}
-
-	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
-
-	if fakeAgent.lastConfig == nil {
-		t.Fatal("expected agent to be called")
-	}
-
-	msgs := fakeAgent.lastConfig.Messages
-	var userMsgs []sdk.Message
-	for _, m := range msgs {
-		if m.Role == sdk.MessageRoleUser {
-			userMsgs = append(userMsgs, m)
-		}
-	}
-	if len(userMsgs) < 2 {
-		t.Fatalf("expected at least 2 user messages (rc + late binding), got %d", len(userMsgs))
-	}
-	rcMsg := userMsgs[0]
-	hasImage := false
-	for _, part := range rcMsg.Content {
-		if imgPart, ok := part.(sdk.ImagePart); ok {
-			hasImage = true
-			if !strings.HasPrefix(imgPart.Image, "data:image/jpeg;base64,") {
-				t.Fatalf("unexpected image data: %q", imgPart.Image)
-			}
-		}
-	}
-	if !hasImage {
-		t.Fatal("expected image part in RC user message")
-	}
-}
-
-func TestHandleReplyWithAgent_NoInlineWhenNoVision(t *testing.T) {
-	rc := RenderedContext{
-		{
-			ReceivedAtMs: 200,
-			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="1">photo</message>`}},
-			ImageRefs:    []ImageAttachmentRef{{ContentHash: "img-hash", Mime: "image/jpeg"}},
-		},
-	}
-
-	fakeAgent := &fakeDiscussStreamer{}
-
-	resolver := &fakeRunConfigResolver{
-		resolveResult: ResolveRunConfigResult{
-			RunConfig: agentpkg.RunConfig{
-				SupportsImageInput: false,
-			},
-			ModelID: "model-1",
-		},
-		inlineFn: func(_ context.Context, _ string, _ []ImageAttachmentRef) []sdk.ImagePart {
-			t.Fatal("should not be called when model doesn't support vision")
-			return nil
-		},
-	}
-
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline: NewPipeline(RenderParams{}),
-		Resolver: resolver,
-	})
-
-	sess := &discussSession{
-		config: DiscussSessionConfig{
-			BotID:     "bot-1",
-			SessionID: "sess-1",
-		},
-		lastProcessedMs: 0,
-	}
-
-	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
-
-	if fakeAgent.lastConfig == nil {
-		t.Fatal("expected agent to be called")
-	}
-	for _, m := range fakeAgent.lastConfig.Messages {
-		for _, part := range m.Content {
-			if _, ok := part.(sdk.ImagePart); ok {
-				t.Fatal("should not have image parts when vision is not supported")
-			}
-		}
-	}
-}
-
-func TestHandleReplyWithAgent_UsesRuntimeStreamerForACPDiscuss(t *testing.T) {
-	rc := RenderedContext{
-		{
-			ReceivedAtMs: 200,
-			MentionsMe:   true,
-			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="1">please inspect the app</message>`}},
-		},
-	}
-	fakeAgent := &fakeDiscussStreamer{}
-	runtime := &fakeDiscussRuntimeStreamer{}
-	resolver := &fakeRunConfigResolver{
-		resolveResult: ResolveRunConfigResult{
-			RunConfig:   agentpkg.RunConfig{},
-			ModelID:     "model-1",
-			RuntimeType: sessionpkg.RuntimeACPAgent,
-		},
-	}
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:        NewPipeline(RenderParams{}),
-		Resolver:        resolver,
-		RuntimeStreamer: runtime,
-	})
-	sess := &discussSession{
-		config: DiscussSessionConfig{
-			BotID:             "bot-1",
-			SessionID:         "sess-1",
-			RouteID:           "route-1",
-			ChannelIdentityID: "acct-1",
-			CurrentPlatform:   "telegram",
-			ReplyTarget:       "chat-1",
-			ConversationType:  "group",
-			SessionToken:      "Bearer owner-token",
-			ChatToken:         "chat-token",
-			ToolHTTPURL:       "http://example.test/bots/bot-1/tools",
-		},
-	}
-
-	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
-
-	if fakeAgent.lastConfig != nil {
-		t.Fatal("ordinary agent should not be invoked for ACP discuss runtime")
-	}
-	if runtime.calls != 1 {
-		t.Fatalf("runtime calls = %d, want 1", runtime.calls)
-	}
-	if runtime.lastReq.BotID != "bot-1" || runtime.lastReq.SessionID != "sess-1" || runtime.lastReq.SourceChannelIdentityID != "acct-1" {
-		t.Fatalf("runtime request = %#v", runtime.lastReq)
-	}
-	if runtime.lastReq.RouteID != "route-1" || runtime.lastReq.ChatToken != "chat-token" || runtime.lastReq.Token != "Bearer owner-token" {
-		t.Fatalf("runtime context = route %q chat token %q token %q", runtime.lastReq.RouteID, runtime.lastReq.ChatToken, runtime.lastReq.Token)
-	}
-	if runtime.lastReq.ToolHTTPURL != "http://example.test/bots/bot-1/tools" {
-		t.Fatalf("ToolHTTPURL = %q", runtime.lastReq.ToolHTTPURL)
-	}
-	if !strings.Contains(runtime.lastReq.Query, "please inspect the app") || !strings.Contains(runtime.lastReq.Query, "reset each turn") || !strings.Contains(runtime.lastReq.Query, "MUST use the `send` tool") {
-		t.Fatalf("runtime query = %q, want full discuss context", runtime.lastReq.Query)
-	}
-	if !runtime.lastReq.UserMessagePersisted {
-		t.Fatal("runtime request should avoid duplicating the full-context prompt as a user history message")
-	}
-	if !runtime.lastReq.ForceFreshRuntime {
-		t.Fatal("discuss ACP runtime request should force a fresh runtime each turn")
-	}
-	if sess.lastProcessedMs != 200 {
-		t.Fatalf("lastProcessedMs = %d, want 200", sess.lastProcessedMs)
-	}
-}
-
-func TestNotifyRCRefreshesExistingDiscussSessionConfig(t *testing.T) {
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline: NewPipeline(RenderParams{}),
-	})
-	defer driver.StopSession("sess-1")
-
-	driver.NotifyRC(context.Background(), "sess-1", RenderedContext{}, DiscussSessionConfig{
-		BotID:        "bot-1",
-		SessionID:    "sess-1",
-		RouteID:      "route-old",
-		ChatToken:    "chat-token-old",
-		SessionToken: "session-token-old",
-		ToolHTTPURL:  "http://old.example/tools",
-	})
-	driver.NotifyRC(context.Background(), "sess-1", RenderedContext{}, DiscussSessionConfig{
-		BotID:        "bot-1",
-		SessionID:    "sess-1",
-		RouteID:      "route-new",
-		ChatToken:    "chat-token-new",
-		SessionToken: "session-token-new",
-		ToolHTTPURL:  "http://new.example/tools",
-	})
-
-	driver.mu.Lock()
-	got := driver.sessions["sess-1"].config
-	driver.mu.Unlock()
-	if got.RouteID != "route-new" || got.ChatToken != "chat-token-new" || got.SessionToken != "session-token-new" || got.ToolHTTPURL != "http://new.example/tools" {
-		t.Fatalf("config = %#v, want latest NotifyRC config", got)
-	}
-}
-
-func TestHandleReplyWithAgentReadsConfigUnderDriverLock(t *testing.T) {
-	rc := RenderedContext{
-		{
-			ReceivedAtMs: 200,
-			MentionsMe:   true,
-			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="1">please inspect the app</message>`}},
-		},
-	}
-	calls := make(chan string, 1)
-	resolver := &fakeRunConfigResolver{
-		resolveFn: func(botID, _, _, _, _, _, _ string) (ResolveRunConfigResult, error) {
-			calls <- botID
-			return ResolveRunConfigResult{}, nil
-		},
-	}
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline: NewPipeline(RenderParams{}),
-		Resolver: resolver,
-	})
-	sess := &discussSession{
-		config: DiscussSessionConfig{
-			BotID:     "bot-old",
-			SessionID: "sess-1",
-		},
-	}
-
-	driver.mu.Lock()
-	done := make(chan struct{})
-	go func() {
-		driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, &fakeDiscussStreamer{})
-		close(done)
-	}()
-
-	select {
-	case got := <-calls:
-		driver.mu.Unlock()
-		t.Fatalf("resolver called before config lock released with bot %q", got)
-	case <-time.After(25 * time.Millisecond):
-	}
-
-	sess.config = DiscussSessionConfig{
-		BotID:     "bot-new",
-		SessionID: "sess-1",
-	}
-	driver.mu.Unlock()
-
-	select {
-	case got := <-calls:
-		if got != "bot-new" {
-			t.Fatalf("resolver bot id = %q, want refreshed config", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for resolver call")
-	}
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for handler")
-	}
-}
-
-func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorWithoutRuntimeStreamer(t *testing.T) {
-	rc := RenderedContext{
-		{
-			ReceivedAtMs: 200,
-			MentionsMe:   true,
-			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="1">please inspect the app</message>`}},
-		},
-	}
-	fakeAgent := &fakeDiscussStreamer{}
-	resolver := &fakeRunConfigResolver{
-		resolveResult: ResolveRunConfigResult{
-			RuntimeType: sessionpkg.RuntimeACPAgent,
-		},
-	}
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline: NewPipeline(RenderParams{}),
-		Resolver: resolver,
-	})
-	sess := &discussSession{
-		config: DiscussSessionConfig{
-			BotID:     "bot-1",
-			SessionID: "sess-1",
-		},
-	}
-
-	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
-
-	if fakeAgent.lastConfig != nil {
-		t.Fatal("ordinary agent should not be invoked for ACP discuss runtime")
-	}
-	if sess.lastProcessedMs != 0 {
-		t.Fatalf("lastProcessedMs = %d, want 0 when ACP runtime streamer is missing", sess.lastProcessedMs)
-	}
-}
-
-func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorOnRuntimeError(t *testing.T) {
-	rc := RenderedContext{
-		{
-			ReceivedAtMs: 200,
-			MentionsMe:   true,
-			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="1">please inspect the app</message>`}},
-		},
-	}
-	fakeAgent := &fakeDiscussStreamer{}
-	runtime := &fakeDiscussRuntimeStreamer{streamErr: errors.New("runtime failed")}
-	resolver := &fakeRunConfigResolver{
-		resolveResult: ResolveRunConfigResult{
-			RuntimeType: sessionpkg.RuntimeACPAgent,
-		},
-	}
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:        NewPipeline(RenderParams{}),
-		Resolver:        resolver,
-		RuntimeStreamer: runtime,
-	})
-	sess := &discussSession{
-		config: DiscussSessionConfig{
-			BotID:     "bot-1",
-			SessionID: "sess-1",
-		},
-	}
-
-	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
-
-	if runtime.calls != 1 {
-		t.Fatalf("runtime calls = %d, want 1", runtime.calls)
-	}
-	if sess.lastProcessedMs != 0 {
-		t.Fatalf("lastProcessedMs = %d, want 0 when ACP runtime stream fails", sess.lastProcessedMs)
-	}
-}
-
-func TestHandleReplyWithAgent_ACPDiscussSkipsRuntimeForPassiveMessage(t *testing.T) {
-	// Passive group chatter that does not address the bot must NOT spin up the
-	// external ACP runtime, but the consumed cursor must still advance so the
-	// same batch is not re-evaluated and stays covered as context next turn.
-	rc := RenderedContext{
-		{
-			ReceivedAtMs: 200,
-			MentionsMe:   false,
-			RepliesToMe:  false,
-			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="1">just chatting amongst ourselves</message>`}},
-		},
-	}
-	fakeAgent := &fakeDiscussStreamer{}
-	runtime := &fakeDiscussRuntimeStreamer{}
-	resolver := &fakeRunConfigResolver{
-		resolveResult: ResolveRunConfigResult{
-			RuntimeType: sessionpkg.RuntimeACPAgent,
-		},
-	}
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:        NewPipeline(RenderParams{}),
-		Resolver:        resolver,
-		RuntimeStreamer: runtime,
-	})
-	sess := &discussSession{
-		config: DiscussSessionConfig{
-			BotID:            "bot-1",
-			SessionID:        "sess-1",
-			ConversationType: channel.ConversationTypeGroup,
-		},
-	}
-
-	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
-
-	if runtime.calls != 0 {
-		t.Fatalf("runtime calls = %d, want 0 for a passive (unmentioned) group message", runtime.calls)
-	}
-	if fakeAgent.lastConfig != nil {
-		t.Fatal("ordinary agent should not be invoked for ACP discuss runtime")
-	}
-	if sess.lastProcessedMs != 200 {
-		t.Fatalf("lastProcessedMs = %d, want 200 (cursor advanced on silent path)", sess.lastProcessedMs)
-	}
-}
-
-func TestHandleReplyWithAgent_ACPDiscussRepliesInDirectConversation(t *testing.T) {
-	// A direct/1:1 conversation is always addressed, so a DM discuss-ACP session
-	// must start the runtime even without an explicit @-mention or reply-to.
-	rc := RenderedContext{
-		{
-			ReceivedAtMs: 200,
-			MentionsMe:   false,
-			RepliesToMe:  false,
-			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="1">hey, can you look at this?</message>`}},
-		},
-	}
-	fakeAgent := &fakeDiscussStreamer{}
-	runtime := &fakeDiscussRuntimeStreamer{}
-	resolver := &fakeRunConfigResolver{
-		resolveResult: ResolveRunConfigResult{
-			RuntimeType: sessionpkg.RuntimeACPAgent,
-		},
-	}
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:        NewPipeline(RenderParams{}),
-		Resolver:        resolver,
-		RuntimeStreamer: runtime,
-	})
-	sess := &discussSession{
-		config: DiscussSessionConfig{
-			BotID:            "bot-1",
-			SessionID:        "sess-1",
-			ConversationType: channel.ConversationTypePrivate,
-		},
-	}
-
-	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
-
-	if runtime.calls != 1 {
-		t.Fatalf("runtime calls = %d, want 1 for a direct (1:1) message even without a mention", runtime.calls)
-	}
-	if sess.lastProcessedMs != 200 {
-		t.Fatalf("lastProcessedMs = %d, want 200 (cursor advanced after direct reply)", sess.lastProcessedMs)
-	}
-	// A direct conversation is "addressed", so the late-binding prompt must nudge
-	// the agent to respond.
-	if !strings.Contains(runtime.lastReq.Query, "addressed directly") {
-		t.Fatalf("direct-conversation prompt missing the addressed-directly nudge: %q", runtime.lastReq.Query)
-	}
-}
-
-func TestAnchorFromTRs(t *testing.T) {
+func TestLatestRCEventAtMs(t *testing.T) {
 	t.Parallel()
 
-	if got := anchorFromTRs(nil); got != 0 {
-		t.Fatalf("empty TRs anchor = %d, want 0", got)
-	}
-	got := anchorFromTRs([]TurnResponseEntry{
-		{RequestedAtMs: 100},
-		{RequestedAtMs: 500},
-		{RequestedAtMs: 300},
-	})
-	if got != 500 {
-		t.Fatalf("anchor = %d, want 500", got)
-	}
-}
-
-func TestLatestRCReceivedAtMs(t *testing.T) {
-	t.Parallel()
-
-	if got := latestRCReceivedAtMs(nil); got != 0 {
+	if got := latestRCEventCursor(nil); got != 0 {
 		t.Fatalf("empty RC = %d, want 0", got)
 	}
-	got := latestRCReceivedAtMs(RenderedContext{
+	got := latestRCEventCursor(RenderedContext{
 		{ReceivedAtMs: 100},
 		{ReceivedAtMs: 900},
-		{ReceivedAtMs: 500, IsMyself: true},
+		{ReceivedAtMs: 500, LastEventAtMs: 1_100, IsMyself: true},
 	})
-	if got != 900 {
-		t.Fatalf("latest = %d, want 900", got)
+	if got != 1_100 {
+		t.Fatalf("latest = %d, want 1100", got)
 	}
 }
 
 // TestHandleReplyWithAgent_ColdStartAnchoredByTR simulates idle-timeout
-// restart: the session's in-memory lastProcessedMs is 0, but RC replay has
+// restart: the session's in-memory lastProcessedCursor is 0, but RC replay has
 // brought back old user messages that were already answered in prior
 // LLM rounds (represented by TRs). The driver MUST NOT re-answer them.
 func TestHandleReplyWithAgent_ColdStartAnchoredByTR(t *testing.T) {
@@ -585,30 +47,26 @@ func TestHandleReplyWithAgent_ColdStartAnchoredByTR(t *testing.T) {
 	resolver := &fakeRunConfigResolver{}
 
 	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:       NewPipeline(RenderParams{}),
-		Resolver:       resolver,
-		MessageService: nil,
+		Resolver: resolver,
 	})
 
 	sess := &discussSession{
-		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
-		lastProcessedMs: 0,
+		config:              DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedCursor: 0,
 	}
 
-	// Simulate a previously answered round by pre-stuffing a TR newer than
-	// the RC segment's ReceivedAtMs. Since we cannot inject MessageService
-	// easily, we instead pre-set lastProcessedMs as the anchor would.
-	sess.lastProcessedMs = 200 // mimic anchorFromTRs result
+	// Simulate the cursor after a previously answered round.
+	sess.lastProcessedCursor = 200
 
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
 
 	if fakeAgent.lastConfig != nil {
-		t.Fatal("agent must not be invoked when all RC segments predate lastProcessedMs")
+		t.Fatal("agent must not be invoked when all RC segments predate lastProcessedCursor")
 	}
 }
 
 // TestHandleReplyWithAgent_CursorAdvancesToRCNotWallClock ensures that after
-// a turn we set lastProcessedMs to the max ReceivedAtMs actually consumed in
+// a turn we set lastProcessedCursor to the max ReceivedAtMs actually consumed in
 // the RC snapshot, not time.Now(). This matters for messages that arrive
 // mid-turn: they end up in a fresher RC with ReceivedAtMs > cursor, which
 // correctly triggers the next round.
@@ -622,12 +80,11 @@ func TestHandleReplyWithAgent_CursorAdvancesToRCNotWallClock(t *testing.T) {
 	fakeAgent := &fakeDiscussStreamer{}
 	resolver := &fakeRunConfigResolver{}
 	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline: NewPipeline(RenderParams{}),
 		Resolver: resolver,
 	})
 	sess := &discussSession{
-		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
-		lastProcessedMs: 0,
+		config:              DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedCursor: 0,
 	}
 
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
@@ -635,16 +92,15 @@ func TestHandleReplyWithAgent_CursorAdvancesToRCNotWallClock(t *testing.T) {
 	if fakeAgent.lastConfig == nil {
 		t.Fatal("expected agent to be invoked")
 	}
-	if sess.lastProcessedMs != 777 {
-		t.Fatalf("lastProcessedMs = %d, want 777 (max RC ReceivedAtMs)", sess.lastProcessedMs)
+	if sess.lastProcessedCursor != 777 {
+		t.Fatalf("lastProcessedCursor = %d, want 777 (max RC ReceivedAtMs)", sess.lastProcessedCursor)
 	}
 }
 
 func TestHandleReplyWithAgent_UsesPersistedDiscussCursor(t *testing.T) {
-	store := &fakeDiscussCursorStore{cursor: 500}
+	store := &fakeDiscussCursorStore{cursor: 500, sourceCursor: 400}
 	fakeAgent := &fakeDiscussStreamer{}
 	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:    NewPipeline(RenderParams{}),
 		Resolver:    &fakeRunConfigResolver{},
 		CursorStore: store,
 	})
@@ -664,8 +120,8 @@ func TestHandleReplyWithAgent_UsesPersistedDiscussCursor(t *testing.T) {
 	if fakeAgent.lastConfig != nil {
 		t.Fatal("agent must not be invoked for RC covered by persisted cursor")
 	}
-	if sess.lastProcessedMs != 500 {
-		t.Fatalf("lastProcessedMs = %d, want persisted cursor 500", sess.lastProcessedMs)
+	if sess.lastProcessedCursor != 500 {
+		t.Fatalf("lastProcessedCursor = %d, want persisted cursor 500", sess.lastProcessedCursor)
 	}
 
 	driver.handleReplyWithAgent(context.Background(), sess, RenderedContext{
@@ -675,14 +131,79 @@ func TestHandleReplyWithAgent_UsesPersistedDiscussCursor(t *testing.T) {
 	if fakeAgent.lastConfig == nil {
 		t.Fatal("expected agent to be invoked for RC past persisted cursor")
 	}
-	if store.upsertCursor != 700 {
-		t.Fatalf("persisted cursor = %d, want 700", store.upsertCursor)
+	if store.upsertCursor.EventCursor != 700 || store.upsertCursor.SourceCursor != 700 {
+		t.Fatalf("persisted cursor = %#v, want event/source 700", store.upsertCursor)
 	}
 	if store.upsertScope != "route:route-1" {
 		t.Fatalf("scope = %q, want route:route-1", store.upsertScope)
 	}
 	if store.upsertRouteID != "route-1" {
 		t.Fatalf("route id = %q, want route-1", store.upsertRouteID)
+	}
+}
+
+func TestHandleReplyWithAgent_DoesNotCompareLegacySourceCursorToEventOrder(t *testing.T) {
+	store := &fakeDiscussCursorStore{sourceCursor: 500}
+	fakeAgent := &fakeDiscussStreamer{}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Resolver:    &fakeRunConfigResolver{},
+		CursorStore: store,
+	})
+	sess := &discussSession{
+		config: DiscussSessionConfig{BotID: "b", SessionID: "s"},
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, RenderedContext{
+		{
+			MessageID:       "old",
+			ReceivedAtMs:    400,
+			EventCursor:     100,
+			LastEventCursor: 100,
+			Content:         []RenderedContentPiece{{Type: "text", Text: `<message id="old">old</message>`}},
+		},
+		{
+			MessageID:       "new",
+			ReceivedAtMs:    700,
+			EventCursor:     200,
+			LastEventCursor: 200,
+			Content:         []RenderedContentPiece{{Type: "text", Text: `<message id="new">new</message>`}},
+		},
+	}, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig == nil {
+		t.Fatal("expected event 200 past the legacy source boundary to trigger a reply")
+	}
+	if sess.lastProcessedCursor != 200 {
+		t.Fatalf("lastProcessedCursor = %d, want exact event cursor 200", sess.lastProcessedCursor)
+	}
+	if store.upsertCursor.EventCursor != 200 || store.upsertCursor.SourceCursor != 700 {
+		t.Fatalf("persisted cursor = %#v, want event:200 source:700", store.upsertCursor)
+	}
+}
+
+func TestHandleReplyWithAgent_DoesNotCompareEventCursorToHistoryWindow(t *testing.T) {
+	nowMs := time.Date(2026, time.July, 16, 12, 0, 0, 0, time.UTC).UnixMilli()
+	fakeAgent := &fakeDiscussStreamer{}
+	resolver := &fakeRunConfigResolver{windowStartAtMs: nowMs - (24 * time.Hour).Milliseconds()}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
+	sess := &discussSession{
+		config:              DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedCursor: 100,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, RenderedContext{{
+		MessageID:       "new",
+		ReceivedAtMs:    nowMs,
+		EventCursor:     101,
+		LastEventCursor: 101,
+		Content:         []RenderedContentPiece{{Type: "text", Text: `<message id="new">new</message>`}},
+	}}, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig == nil {
+		t.Fatal("recent event with a sequence cursor did not trigger the agent")
+	}
+	if sess.lastProcessedCursor != 101 {
+		t.Fatalf("lastProcessedCursor = %d, want 101", sess.lastProcessedCursor)
 	}
 }
 
@@ -739,12 +260,11 @@ func TestHandleReplyWithAgentRefreshesContextFragAfterLateBinding(t *testing.T) 
 		},
 	}
 	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline: NewPipeline(RenderParams{}),
 		Resolver: resolver,
 	})
 	sess := &discussSession{
-		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
-		lastProcessedMs: 0,
+		config:              DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedCursor: 0,
 	}
 
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
@@ -765,31 +285,54 @@ func TestHandleReplyWithAgentRefreshesContextFragAfterLateBinding(t *testing.T) 
 
 type fakeDiscussStreamer struct {
 	lastConfig *agentpkg.RunConfig
+	endUsage   []byte
+	events     []agentpkg.StreamEvent
 }
 
 func (f *fakeDiscussStreamer) Stream(_ context.Context, cfg agentpkg.RunConfig) <-chan agentpkg.StreamEvent {
 	f.lastConfig = &cfg
-	ch := make(chan agentpkg.StreamEvent, 1)
-	ch <- agentpkg.StreamEvent{Type: agentpkg.EventAgentEnd}
+	events := f.events
+	if events == nil {
+		events = []agentpkg.StreamEvent{{Type: agentpkg.EventAgentEnd, Usage: f.endUsage}}
+	}
+	ch := make(chan agentpkg.StreamEvent, len(events))
+	for _, event := range events {
+		ch <- event
+	}
 	close(ch)
 	return ch
 }
 
 type fakeDiscussRuntimeStreamer struct {
-	calls     int
-	lastReq   conversation.ChatRequest
-	streamErr error
+	calls             int
+	lastReq           conversation.ChatRequest
+	streamErr         error
+	noDurableResponse bool
+	abort             bool
+	emitErrorEvent    bool
+	postTerminalErr   error
 }
 
 func (f *fakeDiscussRuntimeStreamer) StreamChat(_ context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
 	f.calls++
 	f.lastReq = req
-	chunks := make(chan conversation.StreamChunk, 1)
+	chunks := make(chan conversation.StreamChunk, 2)
 	errs := make(chan error, 1)
 	if f.streamErr != nil {
 		errs <- f.streamErr
 	} else {
-		chunks <- conversation.StreamChunk(`{"type":"agent_end"}`)
+		if f.emitErrorEvent {
+			chunks <- conversation.StreamChunk(`{"type":"error","error":"runtime failed after partial output"}`)
+		}
+		terminalType := "agent_end"
+		if f.abort {
+			terminalType = "agent_abort"
+		}
+		committed := !f.noDurableResponse
+		chunks <- conversation.StreamChunk(fmt.Sprintf(`{"type":%q,"metadata":{"discuss_cursor_committed":%t}}`, terminalType, committed))
+		if f.postTerminalErr != nil {
+			errs <- f.postTerminalErr
+		}
 	}
 	close(chunks)
 	close(errs)
@@ -797,9 +340,35 @@ func (f *fakeDiscussRuntimeStreamer) StreamChat(_ context.Context, req conversat
 }
 
 type fakeRunConfigResolver struct {
-	resolveResult ResolveRunConfigResult
-	resolveFn     func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
-	inlineFn      func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	resolveResult         ResolveRunConfigResult
+	resolveFn             func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
+	inlineFn              func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	turnResponses         []TurnResponseEntry
+	artifacts             []CompactionArtifact
+	windowStartAtMs       int64
+	artifactErr           error
+	compactionCalls       int
+	compactionInputTokens int
+	compactionBudget      int
+	compactionUserID      string
+	compactionDone        chan struct{}
+	compactionStarted     chan struct{}
+	compactionBlock       <-chan struct{}
+	trimCalls             int
+	trimBudget            int
+	trimFn                func(messages []ContextMessage, contextTokenBudget int, afterCursor int64) ([]ContextMessage, int)
+	storeRoundErr         error
+	storeRoundCursor      DiscussCursorCommit
+	storeRoundNoResponse  bool
+}
+
+func (f *fakeRunConfigResolver) TrimDiscussContext(messages []ContextMessage, contextTokenBudget int, afterCursor int64) ([]ContextMessage, int) {
+	f.trimCalls++
+	f.trimBudget = contextTokenBudget
+	if f.trimFn != nil {
+		return f.trimFn(messages, contextTokenBudget, afterCursor)
+	}
+	return messages, 0
 }
 
 func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
@@ -816,22 +385,84 @@ func (f *fakeRunConfigResolver) InlineImageAttachments(ctx context.Context, botI
 	return nil
 }
 
-func (*fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
-	return nil
+func (f *fakeRunConfigResolver) LoadContextHistoryProjection(context.Context, string, string) (ContextHistoryProjection, error) {
+	latestTurnResponseAtMs := int64(0)
+	for _, response := range f.turnResponses {
+		if response.RequestedAtMs > latestTurnResponseAtMs {
+			latestTurnResponseAtMs = response.RequestedAtMs
+		}
+	}
+	return ContextHistoryProjection{
+		TurnResponses:          f.turnResponses,
+		CompactionArtifacts:    f.artifacts,
+		LatestTurnResponseAtMs: latestTurnResponseAtMs,
+		WindowStartAtMs:        f.windowStartAtMs,
+	}, f.artifactErr
+}
+
+func (f *fakeRunConfigResolver) ScheduleCompaction(_ context.Context, _, _, userID string, inputTokens, contextTokenBudget int) {
+	go func() {
+		if f.compactionStarted != nil {
+			select {
+			case f.compactionStarted <- struct{}{}:
+			default:
+			}
+		}
+		if f.compactionBlock != nil {
+			<-f.compactionBlock
+		}
+		f.compactionCalls++
+		f.compactionInputTokens = inputTokens
+		f.compactionBudget = contextTokenBudget
+		f.compactionUserID = userID
+		if f.compactionDone != nil {
+			f.compactionDone <- struct{}{}
+		}
+	}()
+}
+
+func waitForFakeCompaction(t *testing.T, resolver *fakeRunConfigResolver) {
+	t.Helper()
+	if resolver.compactionDone == nil {
+		t.Fatal("fake compaction completion channel is not configured")
+	}
+	select {
+	case <-resolver.compactionDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for discuss compaction")
+	}
+}
+
+func (f *fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _, _ string, _ []sdk.Message, _ string) error {
+	return f.storeRoundErr
+}
+
+func (f *fakeRunConfigResolver) StoreRoundWithCursor(
+	_ context.Context,
+	_, _, _, _, _ string,
+	_ []sdk.Message,
+	_ string,
+	cursor DiscussCursorCommit,
+) (bool, error) {
+	f.storeRoundCursor = cursor
+	return f.storeRoundErr == nil && !f.storeRoundNoResponse, f.storeRoundErr
 }
 
 type fakeDiscussCursorStore struct {
 	cursor        int64
-	upsertCursor  int64
+	sourceCursor  int64
+	upsertCalls   int
+	upsertCursor  DiscussCursorPosition
 	upsertScope   string
 	upsertRouteID string
 }
 
-func (f *fakeDiscussCursorStore) GetDiscussConsumedCursor(_ context.Context, _, _ string) (int64, error) {
-	return f.cursor, nil
+func (f *fakeDiscussCursorStore) GetDiscussCursor(_ context.Context, _, _ string) (DiscussCursorPosition, error) {
+	return DiscussCursorPosition{EventCursor: f.cursor, SourceCursor: f.sourceCursor}, nil
 }
 
-func (f *fakeDiscussCursorStore) UpsertDiscussConsumedCursor(_ context.Context, _, scopeKey, routeID, _ string, cursor int64) error {
+func (f *fakeDiscussCursorStore) UpsertDiscussCursor(_ context.Context, _, scopeKey, routeID, _ string, cursor DiscussCursorPosition) error {
+	f.upsertCalls++
 	f.upsertScope = scopeKey
 	f.upsertRouteID = routeID
 	f.upsertCursor = cursor
@@ -852,4 +483,14 @@ func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) boo
 		return false
 	}
 	return false
+}
+
+func TestContextMessagesToSDKEntriesPreservesSystemRole(t *testing.T) {
+	t.Parallel()
+
+	entries := contextMessagesToSDKEntries([]ContextMessage{{Role: "system", Content: "[System Notice] history trimmed"}})
+
+	if len(entries) != 1 || entries[0].Message.Role != sdk.MessageRoleSystem {
+		t.Fatalf("system context message reached the model as %q, want system role", entries[0].Message.Role)
+	}
 }

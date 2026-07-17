@@ -198,7 +198,7 @@ func TestGuardedSelectionCompactsAroundMustKeepAskExchange(t *testing.T) {
 		}
 	}
 
-	if _, ratioIDs := buildEntriesAndIDs(splitByRatio(items, 800, 80)); len(ratioIDs) == 0 {
+	if _, ratioIDs := buildEntriesAndIDs(splitByRatio(items, 80)); len(ratioIDs) == 0 {
 		t.Fatal("ratio-based selection must also compact around the must-keep island")
 	}
 }
@@ -368,19 +368,53 @@ func TestSplitByTargetCompactsOldestBeyondTarget(t *testing.T) {
 func TestSplitByRatioKeepsNewestByRatio(t *testing.T) {
 	t.Parallel()
 
-	// total=300, ratio=50 -> keepTokens=150 -> keep newest one, compact oldest two.
+	// total=300, ratio=50 -> keepTokens=150. The middle item takes the kept tail
+	// to 200, so it stays with the newest item and only the oldest is compacted.
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "user", `"a"`, 100),
 		mkRow(t, "assistant", `"b"`, 100),
 		mkRow(t, "user", `"c"`, 100),
 	}
 	items, _ := itemsFromRows(rows)
-	toCompact := splitByRatio(items, 300, 50)
-	if len(toCompact) != 2 {
-		t.Fatalf("compact count = %d, want 2", len(toCompact))
+	toCompact := splitByRatio(items, 50)
+	if len(toCompact) != 1 {
+		t.Fatalf("compact count = %d, want 1", len(toCompact))
 	}
-	if toCompact[0].ID != rows[0].ID || toCompact[1].ID != rows[1].ID {
+	if toCompact[0].ID != rows[0].ID {
 		t.Fatalf("compacted the wrong messages")
+	}
+}
+
+func TestSplitByRatioKeepsBoundaryItemThatReachesTailTarget(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `"old large response"`, 99),
+		mkRow(t, "assistant", `"latest response"`, 1),
+	}
+	items, _ := itemsFromRows(rows)
+
+	if got := splitByRatio(items, 1); len(got) != 0 {
+		t.Fatalf("compact count = %d, want 0 when the boundary item belongs to the kept tail", len(got))
+	}
+}
+
+func TestSplitByRatioUsesCandidateWeight(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"current"`, 100),
+		mkRow(t, "assistant", `"step 1"`, 100),
+		mkRow(t, "assistant", `"step 2"`, 100),
+		mkRow(t, "assistant", `"step 3"`, 100),
+		mkRow(t, "assistant", `"step 4"`, 100),
+		mkRow(t, "assistant", `"latest"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+
+	toCompact := splitByRatio(items, 50)
+	if len(toCompact) != 2 {
+		t.Fatalf("compact count = %d, want 2 from candidate history weight", len(toCompact))
 	}
 }
 
@@ -390,13 +424,10 @@ func TestSplitByRatioBoundaryConditions(t *testing.T) {
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{mkRow(t, "user", `"a"`, 100)}
 	items, _ := itemsFromRows(rows)
 
-	if got := splitByRatio(items, 0, 50); got != nil {
-		t.Fatalf("zero total tokens should yield nil, got %d", len(got))
-	}
-	if got := splitByRatio(items, 100, 0); got != nil {
+	if got := splitByRatio(items, 0); got != nil {
 		t.Fatalf("zero ratio should yield nil, got %d", len(got))
 	}
-	if got := splitByRatio(items, 100, 100); len(got) != 0 {
+	if got := splitByRatio(items, 100); len(got) != 0 {
 		t.Fatalf("ratio 100 should preserve the only recent candidate, got %d", len(got))
 	}
 }

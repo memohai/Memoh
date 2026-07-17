@@ -381,3 +381,73 @@ func TestPrependMissingCompactionSummariesKeepsUnanchoredSummariesFirst(t *testi
 		t.Fatalf("unanchored summary not kept first:\n got %v\nwant %v", recordSequenceIDs(got), want)
 	}
 }
+
+func TestReplaceCompactedHistoryRecordsUsesDurableArtifactAnchor(t *testing.T) {
+	t.Parallel()
+
+	scope := contextfrag.Scope{BotID: "bot-1", SessionID: "session-1"}
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	middle := historyRecord("middle", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("middle")}, nil)
+	middle.CreatedAt = base.Add(20 * time.Minute)
+	covered := historyRecord("covered", conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("covered")}, nil)
+	covered.CreatedAt = base.Add(30 * time.Minute)
+	covered.CompactID = "artifact-span"
+	artifact := compaction.Artifact{
+		ID:            "artifact-span",
+		BotID:         scope.BotID,
+		SessionID:     scope.SessionID,
+		Summary:       "spanning summary",
+		AnchorStartMs: base.Add(10 * time.Minute).UnixMilli(),
+	}
+
+	got := replaceCompactedHistoryRecordsWithResolver(
+		[]historyfrag.HistoryRecord{middle, covered},
+		scope,
+		func(record historyfrag.HistoryRecord) (compaction.Artifact, bool) {
+			return artifact, record.CompactID == artifact.ID
+		},
+	)
+
+	want := []string{"artifact-span", "middle"}
+	if !reflect.DeepEqual(recordSequenceIDs(got), want) {
+		t.Fatalf("straddling artifact ignored durable anchor:\n got %v\nwant %v", recordSequenceIDs(got), want)
+	}
+}
+
+func TestReplaceCompactedHistoryRecordsKeepsEqualTimeSummaryAtCoveredSlot(t *testing.T) {
+	t.Parallel()
+
+	scope := contextfrag.Scope{BotID: "bot-1", SessionID: "session-1"}
+	at := time.Date(2026, 7, 1, 0, 0, 0, 123_000, time.UTC)
+	user := historyRecord("user", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("current instruction")}, nil)
+	user.CreatedAt = at
+	middle := historyRecord("middle", conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("middle tool work")}, nil)
+	middle.CreatedAt = at
+	middle.CompactID = "artifact-middle"
+	tail := historyRecord("tail", conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("latest tail")}, nil)
+	tail.CreatedAt = at
+	artifact := compaction.Artifact{
+		ID:            "artifact-middle",
+		BotID:         scope.BotID,
+		SessionID:     scope.SessionID,
+		Summary:       "middle summary",
+		AnchorStartMs: at.UnixMilli(),
+		Coverage: []compaction.CoveredSource{{
+			Ref:         middle.Ref,
+			CreatedAtMs: at.UnixMilli(),
+		}},
+	}
+
+	got := replaceCompactedHistoryRecordsWithResolver(
+		[]historyfrag.HistoryRecord{user, middle, tail},
+		scope,
+		func(record historyfrag.HistoryRecord) (compaction.Artifact, bool) {
+			return artifact, record.CompactID == artifact.ID
+		},
+	)
+
+	want := []string{"user", "artifact-middle", "tail"}
+	if !reflect.DeepEqual(recordSequenceIDs(got), want) {
+		t.Fatalf("equal-time summary left its covered slot:\n got %v\nwant %v", recordSequenceIDs(got), want)
+	}
+}

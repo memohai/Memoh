@@ -957,7 +957,7 @@ func (c *clientCallbacks) emitToolApprovalRequest(req toolapproval.Request) bool
 	if c == nil || c.events == nil {
 		return false
 	}
-	c.events.emit(event.StreamEvent{
+	return c.events.emit(event.StreamEvent{
 		Type:       event.ToolApprovalRequest,
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
@@ -969,7 +969,6 @@ func (c *clientCallbacks) emitToolApprovalRequest(req toolapproval.Request) bool
 			"approval": toolapproval.RequestMetadata(req),
 		},
 	})
-	return true
 }
 
 func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotification) error {

@@ -16,13 +16,27 @@ import (
 )
 
 type recordingMessageService struct {
-	persisted []messagepkg.PersistInput
-	replaced  int
+	persisted    []messagepkg.PersistInput
+	roundOptions []messagepkg.RoundPersistenceOptions
+	replaced     int
+	persistErr   error
 }
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	if s.persistErr != nil {
+		return messagepkg.Message{}, s.persistErr
+	}
 	s.persisted = append(s.persisted, input)
 	return messagepkg.Message{ID: "message-id", SessionID: input.SessionID, Role: input.Role, Content: input.Content, DisplayContent: input.DisplayText}, nil
+}
+
+func (s *recordingMessageService) PersistRound(_ context.Context, inputs []messagepkg.PersistInput, options messagepkg.RoundPersistenceOptions) ([]messagepkg.Message, bool, error) {
+	if s.persistErr != nil {
+		return nil, true, s.persistErr
+	}
+	s.persisted = append(s.persisted, inputs...)
+	s.roundOptions = append(s.roundOptions, options)
+	return recordedMessages(inputs), true, nil
 }
 
 func (*recordingMessageService) List(context.Context, string) ([]messagepkg.Message, error) {
@@ -119,7 +133,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 		logger:         slog.New(slog.DiscardHandler),
 	}
 
-	resolver.persistPartialResult(
+	persisted, err := resolver.persistPartialResult(
 		context.Background(),
 		conversation.ChatRequest{
 			BotID:     "bot-1",
@@ -127,11 +141,17 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 			Query:     "hello",
 		},
 		resolvedContext{},
-		nil,
+		terminalSnapshot{},
 		0,
 		false,
 		true,
 	)
+	if err != nil {
+		t.Fatalf("persistPartialResult() error = %v", err)
+	}
+	if len(persisted) != 0 {
+		t.Fatalf("persisted result = %#v, want none", persisted)
+	}
 
 	if len(messages.persisted) != 0 {
 		t.Fatalf("expected failed stream not to persist user-only history, got %#v", messages.persisted)

@@ -3,16 +3,37 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
+
+type getSessionQueries struct {
+	dbstore.Queries
+	err error
+}
+
+func (q *getSessionQueries) GetSessionByID(context.Context, pgtype.UUID) (sqlc.BotSession, error) {
+	return sqlc.BotSession{}, q.err
+}
+
+func TestGetReturnsSessionNotFound(t *testing.T) {
+	service := NewService(slog.Default(), &getSessionQueries{err: pgx.ErrNoRows}, nil)
+
+	_, err := service.Get(context.Background(), "00000000-0000-0000-0000-000000000001")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get() error = %v, want ErrNotFound", err)
+	}
+}
 
 func TestIsKnownTypeIncludesACPAgent(t *testing.T) {
 	for _, typ := range []string{TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent} {

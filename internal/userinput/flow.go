@@ -75,6 +75,7 @@ func RunFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult
 		if err != nil {
 			return FlowResult{}, err
 		}
+		_ = emit(canceled)
 		return FlowResult{Request: canceled}, nil
 	}
 

@@ -16,7 +16,7 @@ type ToolSessionContextStore struct {
 }
 
 type toolEventSinkEntry struct {
-	sink func(ToolStreamEvent)
+	sink func(ToolStreamEvent) bool
 }
 
 func NewToolSessionContextStore() *ToolSessionContextStore {
@@ -161,13 +161,12 @@ func (s *ToolSessionContextStore) AppendToolEvent(session ToolSessionContext, ev
 	entry := s.sinks[key]
 	s.mu.RUnlock()
 	if entry != nil && entry.sink != nil {
-		entry.sink(event)
-		return true
+		return entry.sink(event)
 	}
 	return false
 }
 
-func (s *ToolSessionContextStore) RegisterToolEventSink(session ToolSessionContext, sink func(ToolStreamEvent)) func() {
+func (s *ToolSessionContextStore) RegisterToolEventSink(session ToolSessionContext, sink func(ToolStreamEvent) bool) func() {
 	if s == nil || sink == nil {
 		return func() {}
 	}

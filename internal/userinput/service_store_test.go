@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -37,7 +38,8 @@ const (
 //     GetUserInputRequestBySessionToolCall.
 //   - Submit/Cancel are guarded by status='pending' AND (expires_at IS NULL
 //     OR expires_at > now()) and yield pgx.ErrNoRows when the guard fails.
-//   - Pending lookups exclude expired rows.
+//   - Pending lookups exclude expired rows; the implicit latest lookup also
+//     excludes prompts that have not been delivered.
 type fakeUserInputQueries struct {
 	dbstore.Queries
 
@@ -186,6 +188,21 @@ func (q *fakeUserInputQueries) GetUserInputRequestBySessionToolCall(_ context.Co
 	return *q.rows[id], nil
 }
 
+func (q *fakeUserInputQueries) MarkUserInputPromptDelivered(_ context.Context, id pgtype.UUID) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := time.Now()
+	row, ok := q.rows[storeUUIDKey(id)]
+	if !ok || !storeRowIsLivePending(row, now) {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	if !row.PromptDeliveredAt.Valid {
+		row.PromptDeliveredAt = pgtype.Timestamptz{Time: now, Valid: true}
+		row.UpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}
+	}
+	return *row, nil
+}
+
 func (q *fakeUserInputQueries) SubmitUserInputRequest(_ context.Context, arg sqlc.SubmitUserInputRequestParams) (sqlc.UserInputRequest, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -227,7 +244,8 @@ func (q *fakeUserInputQueries) GetLatestPendingUserInputBySession(_ context.Cont
 	now := time.Now()
 	var latest *sqlc.UserInputRequest
 	for _, row := range q.rows {
-		if row.BotID != arg.BotID || row.SessionID != arg.SessionID || !storeRowIsLivePending(row, now) {
+		if row.BotID != arg.BotID || row.SessionID != arg.SessionID || !storeRowIsLivePending(row, now) ||
+			(!row.PromptDeliveredAt.Valid && strings.TrimSpace(row.PromptExternalMessageID) == "") {
 			continue
 		}
 		if latest == nil || row.ShortID > latest.ShortID {
@@ -761,6 +779,27 @@ func TestServiceResolveTargetKeepsClaimedRequestRespondableAfterExpiry(t *testin
 	}
 }
 
+func TestServiceMarksPromptDeliveryIdempotently(t *testing.T) {
+	t.Parallel()
+
+	svc := newStoreUserInputService(t)
+	req := createStorePending(t, svc, nil, "call-1")
+	first, err := svc.MarkPromptDelivered(context.Background(), req.ID)
+	if err != nil {
+		t.Fatalf("mark prompt delivered: %v", err)
+	}
+	if first.PromptDeliveredAt == nil {
+		t.Fatal("prompt delivered timestamp is nil")
+	}
+	second, err := svc.MarkPromptDelivered(context.Background(), req.ID)
+	if err != nil {
+		t.Fatalf("mark prompt delivered again: %v", err)
+	}
+	if second.PromptDeliveredAt == nil || !second.PromptDeliveredAt.Equal(*first.PromptDeliveredAt) {
+		t.Fatalf("prompt delivery timestamp changed: first=%v second=%v", first.PromptDeliveredAt, second.PromptDeliveredAt)
+	}
+}
+
 func TestServiceACPMCPMarkerRoundtrip(t *testing.T) {
 	t.Parallel()
 
@@ -868,4 +907,60 @@ func TestServiceAdvanceTextPersistsWizardState(t *testing.T) {
 	if _, err := svc.Submit(context.Background(), SubmitInput{RequestID: req.ID, Answers: reloaded.Interaction.Answers}); err != nil {
 		t.Fatalf("submit persisted answers: %v", err)
 	}
+}
+
+func TestServiceAdvanceTextImplicitTargetRequiresDeliveredPrompt(t *testing.T) {
+	t.Run("ignores an undelivered request", func(t *testing.T) {
+		svc := newStoreUserInputService(t)
+		_ = createStorePending(t, svc, nil, "undelivered")
+
+		result, err := svc.AdvanceText(context.Background(), AdvanceTextInput{
+			BotID: storeTestBotID, SessionID: storeTestSessionID, Text: "1",
+		})
+		if err != nil {
+			t.Fatalf("advance undelivered request: %v", err)
+		}
+		if result.Handled {
+			t.Fatalf("undelivered request was selected: %#v", result.Request)
+		}
+	})
+
+	t.Run("selects the latest delivered request", func(t *testing.T) {
+		svc := newStoreUserInputService(t)
+		delivered := createStorePending(t, svc, nil, "delivered")
+		if _, err := svc.MarkPromptDelivered(context.Background(), delivered.ID); err != nil {
+			t.Fatalf("mark prompt delivered: %v", err)
+		}
+		_ = createStorePending(t, svc, nil, "newer-undelivered")
+
+		result, err := svc.AdvanceText(context.Background(), AdvanceTextInput{
+			BotID: storeTestBotID, SessionID: storeTestSessionID, Text: "1",
+		})
+		if err != nil {
+			t.Fatalf("advance delivered request: %v", err)
+		}
+		if !result.Handled || result.Request.ID != delivered.ID {
+			t.Fatalf("selected request = %#v, want delivered request %s", result.Request, delivered.ID)
+		}
+	})
+
+	t.Run("selects an externally delivered request before its marker is written", func(t *testing.T) {
+		queries := newFakeUserInputQueries()
+		svc := NewService(slog.New(slog.DiscardHandler), queries)
+		delivered := createStorePending(t, svc, nil, "externally-delivered")
+		queries.mu.Lock()
+		queries.rows[delivered.ID].PromptExternalMessageID = "telegram-message"
+		queries.mu.Unlock()
+		_ = createStorePending(t, svc, nil, "newer-undelivered")
+
+		result, err := svc.AdvanceText(context.Background(), AdvanceTextInput{
+			BotID: storeTestBotID, SessionID: storeTestSessionID, Text: "1",
+		})
+		if err != nil {
+			t.Fatalf("advance externally delivered request: %v", err)
+		}
+		if !result.Handled || result.Request.ID != delivered.ID {
+			t.Fatalf("selected request = %#v, want externally delivered request %s", result.Request, delivered.ID)
+		}
+	})
 }

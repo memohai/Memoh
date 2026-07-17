@@ -38,3 +38,5 @@ const (
 	EventProgress            = event.Progress
 	EventError               = event.Error
 )
+
+const MetadataKeyDiscussCursorCommitted = event.MetadataKeyDiscussCursorCommitted

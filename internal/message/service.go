@@ -22,6 +22,8 @@ import (
 	"github.com/memohai/memoh/internal/runtimefence"
 )
 
+var ErrEventAlreadyPersisted = errors.New("event already has a persisted history message")
+
 // DBService persists and reads bot history messages.
 type DBService struct {
 	queries   dbstore.Queries
@@ -98,12 +100,28 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 			}
 			return result, nil
 		}
+		if isEventLinkUniqueViolation(err) {
+			return Message{}, fmt.Errorf("%w: %w", ErrEventAlreadyPersisted, err)
+		}
 		if !isTurnSequenceUniqueViolation(err) {
 			return Message{}, err
 		}
 		lastErr = err
 	}
 	return Message{}, lastErr
+}
+
+func isEventLinkUniqueViolation(err error) bool {
+	if !dbpkg.IsUniqueViolation(err) {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_bot_history_messages_event_id_unique" {
+		return true
+	}
+	text := err.Error()
+	return strings.Contains(text, "idx_bot_history_messages_event_id_unique") ||
+		strings.Contains(text, "bot_history_messages.event_id")
 }
 
 func (s *DBService) persistOnce(ctx context.Context, input PersistInput) (Message, error) {
@@ -271,14 +289,52 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 	if s == nil || s.queries == nil || len(inputs) == 0 {
 		return nil, false, nil
 	}
+	deliveryClaims, err := parseDeliveryClaims(options.DeliveryClaims)
+	if err != nil {
+		return nil, true, err
+	}
+	if len(deliveryClaims) > 0 {
+		if options.Replacement != nil {
+			return nil, true, errors.New("delivery claims cannot be combined with turn replacement")
+		}
+		if err := validateClaimBackedRound(inputs); err != nil {
+			return nil, true, err
+		}
+	}
 	_, fenced := runtimefence.FromContext(ctx)
-	if !fenced && options.Replacement == nil {
+	if !fenced && options.Replacement == nil && len(inputs) < 2 && len(deliveryClaims) == 0 {
 		return nil, false, nil
+	}
+	if options.Replacement != nil {
+		if err := validateReplacementRound(ReplacementRoundRequest{
+			Messages:                 inputs,
+			OldTurnID:                options.Replacement.OldTurnID,
+			ExistingRequestMessageID: options.Replacement.RequestMessageID,
+			Reason:                   options.Replacement.Reason,
+		}); err != nil {
+			return nil, true, err
+		}
+	} else if len(inputs) > 1 {
+		if err := validateRound(inputs); err != nil {
+			return nil, true, err
+		}
 	}
 	botID := strings.TrimSpace(inputs[0].BotID)
 	sessionID := strings.TrimSpace(inputs[0].SessionID)
 	if botID == "" || sessionID == "" {
 		return nil, true, errors.New("atomic round requires bot and session ids")
+	}
+	pgBotID := pgtype.UUID{}
+	pgSessionID := pgtype.UUID{}
+	if len(deliveryClaims) > 0 {
+		pgBotID, err = dbpkg.ParseUUID(botID)
+		if err != nil {
+			return nil, true, fmt.Errorf("invalid delivery claim bot id: %w", err)
+		}
+		pgSessionID, err = dbpkg.ParseUUID(sessionID)
+		if err != nil {
+			return nil, true, fmt.Errorf("invalid delivery claim session id: %w", err)
+		}
 	}
 	for _, input := range inputs[1:] {
 		if strings.TrimSpace(input.BotID) != botID || strings.TrimSpace(input.SessionID) != sessionID {
@@ -304,7 +360,7 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 				if err != nil {
 					return err
 				}
-				if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn {
+				if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn && !input.ContinueHistoryTurn {
 					turnRequestMessageID = message.ID
 				}
 				persisted = append(persisted, message)
@@ -314,14 +370,14 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 					return err
 				}
 			}
-			return nil
+			return lockDeliveryClaims(ctx, queries, pgBotID, pgSessionID, deliveryClaims)
 		}
 		var err error
 		if fenced {
 			err = runtimefence.InTransaction(ctx, s.queries, botID, sessionID, persist)
 		} else {
-			txer, ok := s.queries.(transactionalQueries)
-			if !ok {
+			txer, ok := s.queries.(atomicTransactionalQueries)
+			if !ok || !txer.SupportsTransactions() {
 				return nil, true, runtimefence.ErrTransactionsUnsupported
 			}
 			err = txer.InTx(ctx, persist)
@@ -446,6 +502,14 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 		}
 		prepared.turnRequestMessageID = pgTurnRequestMessageID
 	}
+	if input.ContinueHistoryTurn {
+		if input.SkipHistoryTurn || !strings.EqualFold(strings.TrimSpace(input.Role), "user") {
+			return preparedPersistMessage{}, errors.New("only persisted user messages can continue a history turn")
+		}
+		if !prepared.turnRequestMessageID.Valid {
+			return preparedPersistMessage{}, errors.New("continuing a history turn requires a request message id")
+		}
+	}
 
 	return prepared, nil
 }
@@ -469,7 +533,7 @@ func (s *DBService) persistDirectWithoutTx(ctx context.Context, input PersistInp
 	if !prepared.sessionID.Valid {
 		return Message{}, false, nil
 	}
-	result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, prepared.createArg, prepared.metadata, input.Role, prepared.turnRequestMessageID)
+	result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, prepared.createArg, prepared.metadata, input.Role, prepared.turnRequestMessageID, input.ContinueHistoryTurn)
 	if err != nil {
 		return Message{}, true, err
 	}
@@ -494,7 +558,7 @@ func (s *DBService) persist(ctx context.Context, input PersistInput) (Message, e
 	if !input.SkipHistoryTurn {
 		pgTurnRequestMessageID = prepared.turnRequestMessageID
 		if direct, ok := s.queries.(directHistoryTurnWriter); ok && prepared.sessionID.Valid {
-			result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, createArg, prepared.metadata, input.Role, pgTurnRequestMessageID)
+			result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, createArg, prepared.metadata, input.Role, pgTurnRequestMessageID, input.ContinueHistoryTurn)
 			if err != nil {
 				return Message{}, err
 			}
@@ -511,7 +575,7 @@ func (s *DBService) persist(ctx context.Context, input PersistInput) (Message, e
 
 	result := toMessageFromCreate(row)
 	if !input.SkipHistoryTurn {
-		if err := s.persistHistoryTurn(ctx, prepared.botID, prepared.sessionID, row.ID, input.Role, pgTurnRequestMessageID); err != nil {
+		if err := s.persistHistoryTurn(ctx, prepared.botID, prepared.sessionID, row.ID, input.Role, pgTurnRequestMessageID, input.ContinueHistoryTurn); err != nil {
 			s.cleanupPersistedMessage(ctx, row.ID)
 			return Message{}, err
 		}
@@ -527,35 +591,39 @@ func persistDirectHistoryMessage(
 	metadata map[string]any,
 	role string,
 	requestMessageID pgtype.UUID,
+	continueHistoryTurn bool,
 ) (Message, pgtype.UUID, bool, error) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "user":
-		messageID := newPGUUID()
-		turnID := newPGUUID()
-		row, err := writer.CreateMessageWithHistoryTurn(ctx, sqlc.CreateMessageWithHistoryTurnParams{
-			MessageID:               messageID,
-			BotID:                   createArg.BotID,
-			SessionID:               createArg.SessionID,
-			SenderChannelIdentityID: createArg.SenderChannelIdentityID,
-			SenderUserID:            createArg.SenderUserID,
-			ExternalMessageID:       createArg.ExternalMessageID,
-			SourceReplyToMessageID:  createArg.SourceReplyToMessageID,
-			Role:                    createArg.Role,
-			Content:                 createArg.Content,
-			Metadata:                createArg.Metadata,
-			Usage:                   createArg.Usage,
-			SessionMode:             createArg.SessionMode,
-			RuntimeType:             createArg.RuntimeType,
-			ModelID:                 createArg.ModelID,
-			EventID:                 createArg.EventID,
-			DisplayText:             createArg.DisplayText,
-			TurnID:                  turnID,
-			TurnMessageSeq:          pgtype.Int8{Int64: 1, Valid: true},
-		})
-		if err != nil {
-			return Message{}, pgtype.UUID{}, true, err
+		if !continueHistoryTurn {
+			messageID := newPGUUID()
+			turnID := newPGUUID()
+			row, err := writer.CreateMessageWithHistoryTurn(ctx, sqlc.CreateMessageWithHistoryTurnParams{
+				MessageID:               messageID,
+				BotID:                   createArg.BotID,
+				SessionID:               createArg.SessionID,
+				SenderChannelIdentityID: createArg.SenderChannelIdentityID,
+				SenderUserID:            createArg.SenderUserID,
+				ExternalMessageID:       createArg.ExternalMessageID,
+				SourceReplyToMessageID:  createArg.SourceReplyToMessageID,
+				Role:                    createArg.Role,
+				Content:                 createArg.Content,
+				Metadata:                createArg.Metadata,
+				Usage:                   createArg.Usage,
+				SessionMode:             createArg.SessionMode,
+				RuntimeType:             createArg.RuntimeType,
+				ModelID:                 createArg.ModelID,
+				EventID:                 createArg.EventID,
+				DisplayText:             createArg.DisplayText,
+				TurnID:                  turnID,
+				TurnMessageSeq:          pgtype.Int8{Int64: 1, Valid: true},
+			})
+			if err != nil {
+				return Message{}, pgtype.UUID{}, true, err
+			}
+			return toMessageFromCreateWithHistoryTurn(row, createArg, metadata), messageID, true, nil
 		}
-		return toMessageFromCreateWithHistoryTurn(row, createArg, metadata), messageID, true, nil
+		fallthrough
 	case "assistant", "tool":
 		if !requestMessageID.Valid {
 			return Message{}, pgtype.UUID{}, false, nil
@@ -658,7 +726,7 @@ func (s *DBService) cleanupPersistedMessage(ctx context.Context, messageID pgtyp
 	}
 }
 
-func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, sessionID pgtype.UUID, messageID pgtype.UUID, role string, requestMessageID pgtype.UUID) error {
+func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, sessionID pgtype.UUID, messageID pgtype.UUID, role string, requestMessageID pgtype.UUID, continueHistoryTurn bool) error {
 	if s == nil || s.queries == nil || !sessionID.Valid {
 		return nil
 	}
@@ -668,6 +736,15 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 	}
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "user":
+		if continueHistoryTurn {
+			if err := lockHistoryTurnAppendByRequest(ctx, writer, sessionID, requestMessageID); err != nil {
+				return fmt.Errorf("lock continued history turn: %w", err)
+			}
+			if err := appendMessageToHistoryTurnByRequest(ctx, writer, sessionID, requestMessageID, messageID); err != nil {
+				return fmt.Errorf("append user message to continued history turn: %w", err)
+			}
+			return nil
+		}
 		turn, err := writer.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
 			BotID:            botID,
 			SessionID:        sessionID,
@@ -688,18 +765,11 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 			if err := lockHistoryTurnAppendByRequest(ctx, writer, sessionID, requestMessageID); err != nil {
 				return fmt.Errorf("lock requested history turn append: %w", err)
 			}
-			if turn, err := writer.BindHistoryTurnAssistantByRequest(ctx, sqlc.BindHistoryTurnAssistantByRequestParams{
+			if _, err := writer.BindHistoryTurnAssistantByRequest(ctx, sqlc.BindHistoryTurnAssistantByRequestParams{
 				SessionID:          sessionID,
 				RequestMessageID:   requestMessageID,
 				AssistantMessageID: messageID,
 			}); err == nil {
-				if _, err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
-					MessageID:      messageID,
-					TurnID:         turn.ID,
-					TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
-				}); err != nil {
-					return fmt.Errorf("link assistant message to requested history turn: %w", err)
-				}
 				return nil
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("bind history turn assistant by request: %w", err)
@@ -1216,7 +1286,11 @@ func (s *DBService) replacePersistedRound(ctx context.Context, sessionID string,
 	if assistantMessageID == "" {
 		return errors.New("replacement assistant message was not persisted")
 	}
-	if _, err := replaceHistoryTurn(ctx, s.queries, sessionID, replacement.OldTurnID, requestMessageID, assistantMessageID, replacement.Reason); err != nil {
+	orderedMessageIDs, err := orderedPersistedReplacementMessageIDs(requestMessageID, assistantMessageID, persisted)
+	if err != nil {
+		return err
+	}
+	if _, err := replaceHistoryTurn(ctx, s.queries, sessionID, replacement.OldTurnID, requestMessageID, assistantMessageID, orderedMessageIDs, replacement.Reason); err != nil {
 		return fmt.Errorf("replace persisted history turn: %w", err)
 	}
 	if replacement.SessionMetadata == nil {
@@ -1270,6 +1344,46 @@ func firstPersistedRoleID(messages []Message, role string) string {
 	return ""
 }
 
+func orderedPersistedReplacementMessageIDs(requestMessageID string, assistantMessageID string, persisted []Message) ([]string, error) {
+	requestMessageID = strings.TrimSpace(requestMessageID)
+	assistantMessageID = strings.TrimSpace(assistantMessageID)
+	if requestMessageID == "" {
+		return nil, errors.New("replacement request message was not persisted")
+	}
+	if assistantMessageID == "" {
+		return nil, errors.New("replacement assistant message was not persisted")
+	}
+	if requestMessageID == assistantMessageID {
+		return nil, errors.New("replacement anchors must be different messages")
+	}
+
+	messageIDs := make([]string, 0, len(persisted)+1)
+	seen := make(map[string]struct{}, len(persisted)+1)
+	requestPresent := false
+	for _, message := range persisted {
+		messageID := strings.TrimSpace(message.ID)
+		if messageID == "" {
+			return nil, errors.New("replacement contains a message without an id")
+		}
+		if _, exists := seen[messageID]; exists {
+			return nil, fmt.Errorf("replacement contains duplicate message id %q", messageID)
+		}
+		seen[messageID] = struct{}{}
+		messageIDs = append(messageIDs, messageID)
+		requestPresent = requestPresent || messageID == requestMessageID
+	}
+	if _, ok := seen[assistantMessageID]; !ok {
+		return nil, errors.New("replacement assistant message is not in the persisted sequence")
+	}
+	if !requestPresent {
+		messageIDs = append([]string{requestMessageID}, messageIDs...)
+	}
+	if messageIDs[0] != requestMessageID {
+		return nil, errors.New("replacement request message must be first in the sequence")
+	}
+	return messageIDs, nil
+}
+
 func replaceHistoryTurn(
 	ctx context.Context,
 	queries dbstore.Queries,
@@ -1277,6 +1391,7 @@ func replaceHistoryTurn(
 	oldTurnID string,
 	requestMessageID string,
 	assistantMessageID string,
+	orderedMessageIDs []string,
 	reason string,
 ) (sqlc.ReplaceHistoryTurnRow, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
@@ -1287,43 +1402,101 @@ func replaceHistoryTurn(
 	if err != nil {
 		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid old turn id: %w", err)
 	}
-	pgRequestMessageID, err := parseOptionalUUID(requestMessageID)
+	pgRequestMessageID, err := dbpkg.ParseUUID(strings.TrimSpace(requestMessageID))
 	if err != nil {
 		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid request message id: %w", err)
 	}
-	pgAssistantMessageID, err := parseOptionalUUID(assistantMessageID)
+	pgAssistantMessageID, err := dbpkg.ParseUUID(strings.TrimSpace(assistantMessageID))
 	if err != nil {
 		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid assistant message id: %w", err)
+	}
+	pgOrderedMessageIDs, err := parseOrderedReplacementMessageIDs(orderedMessageIDs, pgRequestMessageID, pgAssistantMessageID)
+	if err != nil {
+		return sqlc.ReplaceHistoryTurnRow{}, err
 	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "replace"
 	}
 	return queries.ReplaceHistoryTurn(ctx, sqlc.ReplaceHistoryTurnParams{
-		OldTurnID:          pgOldTurnID,
-		SessionID:          pgSessionID,
-		RequestMessageID:   pgRequestMessageID,
-		AssistantMessageID: pgAssistantMessageID,
-		SupersededAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-		SupersededReason:   pgtype.Text{String: reason, Valid: true},
+		OldTurnID:             pgOldTurnID,
+		SessionID:             pgSessionID,
+		ReplacementMessageIds: pgOrderedMessageIDs,
+		RequestMessageID:      pgRequestMessageID,
+		AssistantMessageID:    pgAssistantMessageID,
+		SupersededAt:          pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		SupersededReason:      pgtype.Text{String: reason, Valid: true},
 	})
 }
 
 func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error) {
+	return s.ReplaceTurnOrdered(ctx, sessionID, oldTurnID, requestMessageID, assistantMessageID, []string{requestMessageID, assistantMessageID}, reason)
+}
+
+func (s *DBService) ReplaceTurnOrdered(
+	ctx context.Context,
+	sessionID string,
+	oldTurnID string,
+	requestMessageID string,
+	assistantMessageID string,
+	orderedMessageIDs []string,
+	reason string,
+) (HistoryTurn, error) {
 	var row sqlc.ReplaceHistoryTurnRow
 	var err error
 	if _, fenced := runtimefence.FromContext(ctx); fenced {
 		err = runtimefence.InTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
-			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, orderedMessageIDs, reason)
 			return err
 		})
 	} else {
-		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, orderedMessageIDs, reason)
 	}
 	if err != nil {
 		return HistoryTurn{}, err
 	}
 	return toHistoryTurnFromReplaceRow(row), nil
+}
+
+func parseOrderedReplacementMessageIDs(orderedMessageIDs []string, requestMessageID pgtype.UUID, assistantMessageID pgtype.UUID) ([]pgtype.UUID, error) {
+	if len(orderedMessageIDs) == 0 {
+		return nil, errors.New("replacement message sequence is empty")
+	}
+	if requestMessageID.Bytes == assistantMessageID.Bytes {
+		return nil, errors.New("replacement anchors must be different messages")
+	}
+
+	parsed := make([]pgtype.UUID, 0, len(orderedMessageIDs))
+	seen := make(map[[16]byte]struct{}, len(orderedMessageIDs))
+	requestCount := 0
+	assistantCount := 0
+	for i, messageID := range orderedMessageIDs {
+		pgMessageID, err := dbpkg.ParseUUID(strings.TrimSpace(messageID))
+		if err != nil {
+			return nil, fmt.Errorf("invalid replacement message id at index %d: %w", i, err)
+		}
+		if _, exists := seen[pgMessageID.Bytes]; exists {
+			return nil, fmt.Errorf("duplicate replacement message id at index %d", i)
+		}
+		seen[pgMessageID.Bytes] = struct{}{}
+		parsed = append(parsed, pgMessageID)
+		if pgMessageID.Bytes == requestMessageID.Bytes {
+			requestCount++
+		}
+		if pgMessageID.Bytes == assistantMessageID.Bytes {
+			assistantCount++
+		}
+	}
+	if requestCount != 1 {
+		return nil, errors.New("replacement request message is not in the sequence")
+	}
+	if assistantCount != 1 {
+		return nil, errors.New("replacement assistant message is not in the sequence")
+	}
+	if parsed[0].Bytes != requestMessageID.Bytes {
+		return nil, errors.New("replacement request message must be first in the sequence")
+	}
+	return parsed, nil
 }
 
 // LinkAssets links asset refs to an existing persisted message.
@@ -1680,6 +1853,8 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 	if row.CompactID.Valid {
 		m.CompactID = row.CompactID.String()
 	}
+	m.TurnPosition = row.TurnPosition
+	m.TurnMessageSequence = row.TurnMessageSeq
 	return m
 }
 

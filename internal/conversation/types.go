@@ -99,6 +99,7 @@ type ModelMessage struct {
 	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
 	Name       string          `json:"name,omitempty"`
+	Injected   *InjectMessage  `json:"-"`
 }
 
 // TextContent extracts the plain text from the message content.
@@ -220,6 +221,17 @@ type OutboundAssetRef struct {
 	Metadata    map[string]any
 }
 
+type TurnReplacementSpec struct {
+	OldTurnID                string
+	ExistingRequestMessageID string
+	Reason                   string
+}
+
+type DeliveryClaim struct {
+	EventID    string
+	ClaimToken string
+}
+
 // ChatRequest is the input for Chat and StreamChat.
 type ChatRequest struct {
 	BotID                        string           `json:"-"`
@@ -251,6 +263,7 @@ type ChatRequest struct {
 	PersistedUserMessageID       string           `json:"-"`
 	ReusePersistedUserMessage    bool             `json:"-"`
 	EventID                      string           `json:"-"`
+	EventDeliveryClaim           *DeliveryClaim   `json:"-"`
 	RawQuery                     string           `json:"-"`
 	ModelQuery                   string           `json:"-"`
 	UserMessageKind              string           `json:"-"`
@@ -263,9 +276,15 @@ type ChatRequest struct {
 	SkipHistoryTurn              bool             `json:"-"`
 	SkipTitleGeneration          bool             `json:"-"`
 	ForceFreshRuntime            bool             `json:"-"`
+	DiscussCursorScope           string           `json:"-"`
+	DiscussConsumedCursor        int64            `json:"-"`
+	DiscussConsumedEventCursor   int64            `json:"-"`
+	DiscussDeliveryClaims        []DeliveryClaim  `json:"-"`
 	HistoryCutoffBeforeMessageID string           `json:"-"`
 	RequiredHistoryMessageID     string           `json:"-"`
 	WorkspaceTarget              *WorkspaceTarget `json:"-"`
+
+	TurnReplacement *TurnReplacementSpec `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
 	// Set by the inbound channel processor; called by the resolver at persist time.
@@ -326,20 +345,46 @@ type SkillActivation struct {
 // InjectMessage carries a user message to be injected into a running agent
 // stream between tool rounds.
 type InjectMessage struct {
-	Text            string
-	Attachments     []ChatAttachment
-	HeaderifiedText string
-	Applied         func()
+	Text             string
+	Attachments      []ChatAttachment
+	HeaderifiedText  string
+	Source           InjectedMessageSource
+	Applied          func()
+	OnPersisted      func(error) `json:"-"`
+	OnStreamFinished func(error) `json:"-"`
+}
+
+type InjectedMessageSource struct {
+	ExternalMessageID         string
+	EventID                   string
+	DeliveryClaim             *DeliveryClaim `json:"-"`
+	EventCursor               int64
+	ReceivedAtMs              int64
+	SenderChannelIdentityID   string
+	SenderUserID              string
+	SenderDisplayName         string
+	RouteID                   string
+	Platform                  string
+	ReplyTarget               string
+	ConversationType          string
+	ConversationName          string
+	SourceReplyToMessageID    string
+	ReplySender               string
+	ReplyPreview              string
+	ReplyAttachments          []ChatAttachment
+	ForwardMessageID          string
+	ForwardFromUserID         string
+	ForwardFromConversationID string
+	ForwardSender             string
+	ForwardDate               int64
 }
 
 // InjectedMessageRecord records a message that was injected via PrepareStep,
 // together with its position in the output message sequence.
 type InjectedMessageRecord struct {
-	HeaderifiedText string
-	// InsertAfter is the number of SDK output messages that existed before
-	// this injection. Used to determine the correct insertion position when
-	// interleaving injected messages into the persisted round.
-	InsertAfter int
+	Message     InjectMessage
+	AfterOutput int
+	Sequence    int
 }
 
 // ChatResponse is the output of a non-streaming chat call.

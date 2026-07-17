@@ -226,6 +226,41 @@ func TestSessionPoolPromptKeepsRuntimeWhenImageCapabilityUnsupported(t *testing.
 	}
 }
 
+func TestSessionPoolPromptErrorRecoversCanceledDecisionSnapshots(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_PROMPT_ERROR", "1")
+	pool := newFakeScriptPool(t)
+	pool.SetToolApprovalService(&fakeToolApprovalService{cancelRequests: []toolapproval.Request{{
+		ID:         "approval-1",
+		ToolCallID: "call-approval",
+		ToolName:   "write",
+		Status:     toolapproval.StatusRejected,
+	}}})
+	pool.SetUserInputService(&fakeUserInputCanceller{cancelRequests: []userinput.Request{{
+		ID:         "input-1",
+		ToolCallID: "call-input",
+		ToolName:   "ask_user",
+		Status:     userinput.StatusCanceled,
+	}}})
+
+	result, err := pool.Prompt(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		StreamID:              "stream-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		Prompt:                "fail after pending decisions",
+		RuntimeOwnerAccountID: "user-1",
+	})
+	if err == nil {
+		t.Fatal("Prompt() error = nil, want transport failure")
+	}
+	if len(result.Events) != 2 ||
+		result.Events[0].Type != event.ToolApprovalRequest || result.Events[0].Status != toolapproval.StatusRejected ||
+		result.Events[1].Type != event.UserInputRequest || result.Events[1].Status != userinput.StatusCanceled {
+		t.Fatalf("terminal decision events = %#v, want rejected approval and canceled user input", result.Events)
+	}
+}
+
 func TestSessionPoolPromptFallsBackToAttachmentReferenceWhenImageUnsupported(t *testing.T) {
 	pool := newFakeScriptPool(t)
 
@@ -1869,6 +1904,90 @@ func TestPromptToolEventSinkPreservesACPAndHTTPToolEventOrder(t *testing.T) {
 	}
 }
 
+func TestPromptToolEventSinkReturnsDownstreamAcknowledgementAfterRecording(t *testing.T) {
+	sink := newPromptToolEventSink(acpclient.EventSinkFunc(func(event.StreamEvent) bool {
+		return false
+	}))
+
+	for _, status := range []string{toolapproval.StatusPending, toolapproval.StatusRejected} {
+		if acknowledged := sink.EmitToolStreamEvent(mcp.ToolStreamEvent{
+			Type:       "tool_approval_request",
+			ToolCallID: "call-1",
+			ToolName:   "write",
+			ApprovalID: "approval-1",
+			Status:     status,
+		}); acknowledged {
+			t.Fatalf("EmitToolStreamEvent(%s) acknowledged = true, want false", status)
+		}
+	}
+
+	result := acpclient.PromptResult{}
+	sink.ApplyToResult(&result)
+	if len(result.Output) != 1 || len(result.Output[0].Content) != 1 {
+		t.Fatalf("result output = %#v, want one recorded tool call", result.Output)
+	}
+	toolCall, ok := result.Output[0].Content[0].(sdk.ToolCallPart)
+	if !ok {
+		t.Fatalf("result output = %#v, want tool call", result.Output)
+	}
+	approval, _ := toolCall.ProviderMetadata["approval"].(map[string]any)
+	if approval["status"] != toolapproval.StatusRejected {
+		t.Fatalf("recorded approval = %#v, want rejected terminal state", approval)
+	}
+}
+
+func TestPromptToolEventSinkCloseWaitsForInFlightAndRejectsLateEvents(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	next := acpclient.EventSinkFunc(func(event.StreamEvent) bool {
+		close(entered)
+		<-release
+		return true
+	})
+	sink := newPromptToolEventSink(next)
+	emitDone := make(chan bool, 1)
+	go func() {
+		emitDone <- sink.EmitStreamEvent(event.StreamEvent{Type: event.TextDelta, Delta: "before close"})
+	}()
+	<-entered
+
+	closeDone := make(chan struct{})
+	go func() {
+		sink.CloseAndWait()
+		close(closeDone)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		sink.mu.Lock()
+		closed := sink.closed
+		sink.mu.Unlock()
+		if closed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("sink did not begin closing")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case <-closeDone:
+		t.Fatal("CloseAndWait returned while an event was in flight")
+	default:
+	}
+
+	close(release)
+	if acknowledged := <-emitDone; !acknowledged {
+		t.Fatal("in-flight event acknowledgement = false, want true")
+	}
+	<-closeDone
+	if acknowledged := sink.EmitStreamEvent(event.StreamEvent{Type: event.TextDelta, Delta: "late"}); acknowledged {
+		t.Fatal("late event acknowledgement = true, want false")
+	}
+	if events := sink.Events(); len(events) != 1 || events[0].Delta != "before close" {
+		t.Fatalf("recorded events = %#v, want only in-flight event", events)
+	}
+}
+
 // Resolving a bound runtime (e.g. the UI keeping it ensured while the user
 // types) counts as activity and must defer idle reaping.
 func TestSessionPoolEnsureRefreshesIdleClock(t *testing.T) {
@@ -2108,6 +2227,7 @@ type fakeToolApprovalService struct {
 	cancelFence     runtimefence.Fence
 	cancelStarted   chan<- struct{}
 	cancelRelease   <-chan struct{}
+	cancelRequests  []toolapproval.Request
 }
 
 func (*fakeToolApprovalService) EvaluatePolicy(context.Context, toolapproval.CreatePendingInput) (toolapproval.Evaluation, error) {
@@ -2146,7 +2266,9 @@ func (f *fakeToolApprovalService) CancelPendingForSession(ctx context.Context, b
 	f.cancelReason = reason
 	f.cancelCount++
 	f.cancelFence, _ = runtimefence.FromContext(ctx)
-	return nil, nil
+	requests := append([]toolapproval.Request(nil), f.cancelRequests...)
+	f.cancelRequests = nil
+	return requests, nil
 }
 
 type fakeUserInputCanceller struct {
@@ -2156,6 +2278,7 @@ type fakeUserInputCanceller struct {
 	cancelCount     int
 	cancelFence     runtimefence.Fence
 	cancelStarted   chan<- struct{}
+	cancelRequests  []userinput.Request
 }
 
 func (f *fakeUserInputCanceller) CancelPendingForSession(ctx context.Context, botID, sessionID, reason string) ([]userinput.Request, error) {
@@ -2167,7 +2290,9 @@ func (f *fakeUserInputCanceller) CancelPendingForSession(ctx context.Context, bo
 	f.cancelReason = reason
 	f.cancelCount++
 	f.cancelFence, _ = runtimefence.FromContext(ctx)
-	return nil, nil
+	requests := append([]userinput.Request(nil), f.cancelRequests...)
+	f.cancelRequests = nil
+	return requests, nil
 }
 
 type recordingRunner struct {
@@ -2456,6 +2581,9 @@ func (a *sessionPoolFakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) 
 			_ = os.WriteFile(path, []byte("cancelled"), 0o600) //nolint:gosec // test helper writes to env-provided temp path.
 		}
 		return acp.PromptResponse{}, ctx.Err()
+	}
+	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_PROMPT_ERROR") == "1" {
+		return acp.PromptResponse{}, errors.New("forced prompt transport failure")
 	}
 	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_EXPECT_IMAGE") == "1" {
 		if len(p.Prompt) != 1 || p.Prompt[0].Image == nil {

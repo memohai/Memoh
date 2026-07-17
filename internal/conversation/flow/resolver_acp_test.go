@@ -590,12 +590,14 @@ func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testin
 		},
 		logger: slog.New(slog.DiscardHandler),
 	}
+	resolver.userInput = &fakeUserInputService{}
 
 	if err := resolver.StreamChatWS(
 		context.Background(),
 		conversation.ChatRequest{
 			BotID:          "bot-1",
 			SessionID:      "session-1",
+			StreamID:       "stream-1",
 			Query:          "inspect the app",
 			CurrentChannel: "web",
 		},
@@ -717,6 +719,7 @@ func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
 		conversation.ChatRequest{
 			BotID:          "bot-1",
 			SessionID:      "session-1",
+			StreamID:       "stream-1",
 			Query:          "write the review",
 			CurrentChannel: "web",
 		},
@@ -1045,7 +1048,13 @@ func TestFilterACPProjectedOutputKeepsToolResults(t *testing.T) {
 		{
 			Role: sdk.MessageRoleAssistant,
 			Content: []sdk.MessagePart{
-				sdk.ToolCallPart{ToolCallID: "ask-1", ToolName: "ask_user"},
+				sdk.ToolCallPart{
+					ToolCallID: "ask-1",
+					ToolName:   "ask_user",
+					ProviderMetadata: map[string]any{
+						"user_input": map[string]any{"status": userinput.StatusPending},
+					},
+				},
 				sdk.TextPart{Text: "done"},
 			},
 		},
@@ -1059,7 +1068,7 @@ func TestFilterACPProjectedOutputKeepsToolResults(t *testing.T) {
 				},
 			},
 		},
-	}, map[string]struct{}{"ask-1": {}})
+	}, acpTranscriptCoveredStatuses{"ask-1": {userinput.StatusPending: {}}})
 
 	if len(filtered) != 2 {
 		t.Fatalf("filtered messages = %d, want assistant + tool result", len(filtered))
@@ -1075,6 +1084,63 @@ func TestFilterACPProjectedOutputKeepsToolResults(t *testing.T) {
 	result, ok := filtered[1].Content[0].(sdk.ToolResultPart)
 	if !ok || result.ToolCallID != "ask-1" || result.Result != "answer: A" {
 		t.Fatalf("tool result was not preserved: %#v", filtered[1].Content[0])
+	}
+}
+
+func TestFilterACPProjectedOutputKeepsNewerTerminalDecision(t *testing.T) {
+	t.Parallel()
+
+	filtered := filterACPProjectedOutput([]sdk.Message{{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			ProviderMetadata: map[string]any{
+				"approval": map[string]any{"status": toolapproval.StatusApproved},
+			},
+		}},
+	}}, acpTranscriptCoveredStatuses{"write-1": {toolapproval.StatusPending: {}}})
+
+	if len(filtered) != 1 || len(filtered[0].Content) != 1 {
+		t.Fatalf("filtered output = %#v, want newer approved decision retained", filtered)
+	}
+	if _, ok := filtered[0].Content[0].(sdk.ToolCallPart); !ok {
+		t.Fatalf("filtered output = %#v, want newer approved tool call", filtered)
+	}
+}
+
+func TestFilterACPProjectedOutputRemovesEveryDurableDecisionSnapshot(t *testing.T) {
+	t.Parallel()
+
+	decisionCall := func(status string) sdk.Message {
+		return sdk.Message{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ToolCallPart{
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				ProviderMetadata: map[string]any{
+					"approval": map[string]any{"status": status},
+				},
+			}},
+		}
+	}
+	filtered := filterACPProjectedOutput(
+		[]sdk.Message{
+			decisionCall(toolapproval.StatusPending),
+			decisionCall(toolapproval.StatusApproved),
+			{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "done"}}},
+		},
+		acpTranscriptCoveredStatuses{"write-1": {
+			toolapproval.StatusPending:  {},
+			toolapproval.StatusApproved: {},
+		}},
+	)
+
+	if len(filtered) != 1 || len(filtered[0].Content) != 1 {
+		t.Fatalf("filtered output = %#v, want only final text", filtered)
+	}
+	if text, ok := filtered[0].Content[0].(sdk.TextPart); !ok || text.Text != "done" {
+		t.Fatalf("filtered output = %#v, want only final text", filtered)
 	}
 }
 

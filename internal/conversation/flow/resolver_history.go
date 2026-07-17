@@ -327,40 +327,45 @@ func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.His
 	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].ModelMessage.Role), "tool") {
 		cutoff++
 	}
-	cutoff, totalTokens := fitRequiredMessagesWithinBudget(messages, cutoff, maxTokens)
+	cutoff, _ = fitRequiredMessagesWithinBudget(messages, cutoff, maxTokens)
 
+	forceKeptPrefix := forceKeptMessagesBeforeCutoff(messages, cutoff)
+	retained := make([]historyfrag.HistoryRecord, 0, len(messages)-cutoff+len(forceKeptPrefix))
+	retained = append(retained, forceKeptPrefix...)
+	retained = append(retained, messages[cutoff:]...)
+	result := make([]conversation.ModelMessage, 0, len(retained))
+	if cutoff > 0 {
+		notice := historyTruncationNotice()
+		result = append(result, notice)
+	}
+	for _, m := range retained {
+		result = append(result, m.ModelMessage)
+	}
+	totalTokens := 0
+	for _, message := range result {
+		totalTokens += estimateMessageTokens(message)
+	}
 	if cutoff > 0 && log != nil {
 		log.Info("trimMessagesByTokens: context trimmed",
 			slog.Int("total_messages", len(messages)),
 			slog.Int("estimated_tokens", totalTokens),
 			slog.Int("max_tokens", maxTokens),
 			slog.Int("cutoff_index", cutoff),
-			slog.Int("kept_messages", len(messages)-cutoff),
+			slog.Int("kept_messages", len(retained)),
 		)
 	}
-
-	requiredPrefix := requiredMessagesBeforeCutoff(messages, cutoff)
-	retained := make([]historyfrag.HistoryRecord, 0, len(messages)-cutoff+len(requiredPrefix))
-	retained = append(retained, requiredPrefix...)
-	retained = append(retained, messages[cutoff:]...)
-	result := make([]conversation.ModelMessage, 0, len(retained))
-	if cutoff > 0 {
-		// Add a truncation notice at the beginning so the LLM knows earlier
-		// context was trimmed and it can use tools (memory, search) to look up
-		// past information if needed.
-		result = append(result, conversation.ModelMessage{
-			Role: "system",
-			Content: conversation.NewTextContent(
-				"[System Notice] Earlier conversation history has been trimmed to fit the context window. " +
-					"If you need information from earlier in the conversation, use the available tools " +
-					"(such as memory_read or web search) to retrieve it.",
-			),
-		})
-	}
-	for _, m := range retained {
-		result = append(result, m.ModelMessage)
-	}
 	return result, retained, totalTokens
+}
+
+func historyTruncationNotice() conversation.ModelMessage {
+	return conversation.ModelMessage{
+		Role: "system",
+		Content: conversation.NewTextContent(
+			"[System Notice] Earlier conversation history has been trimmed to fit the context window. " +
+				"If you need information from earlier in the conversation, use the available tools " +
+				"(such as memory_read or web search) to retrieve it.",
+		),
+	}
 }
 
 func fitRequiredMessagesWithinBudget(messages []historyfrag.HistoryRecord, cutoff int, maxTokens int) (int, int) {
@@ -386,14 +391,6 @@ func fitRequiredMessagesWithinBudget(messages []historyfrag.HistoryRecord, cutof
 	}
 }
 
-func estimateMessagesTokens(messages []historyfrag.HistoryRecord) int {
-	total := 0
-	for _, m := range messages {
-		total += estimateMessageTokens(m.ModelMessage)
-	}
-	return total
-}
-
 func requiredMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff int) []historyfrag.HistoryRecord {
 	if cutoff <= 0 {
 		return nil
@@ -402,10 +399,34 @@ func requiredMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff i
 		cutoff = len(messages)
 	}
 	var required []historyfrag.HistoryRecord
-	for _, m := range messages[:cutoff] {
-		if m.Required {
-			required = append(required, m)
+	for _, message := range messages[:cutoff] {
+		if message.Required {
+			required = append(required, message)
 		}
 	}
 	return required
+}
+
+func estimateMessagesTokens(messages []historyfrag.HistoryRecord) int {
+	total := 0
+	for _, m := range messages {
+		total += estimateMessageTokens(m.ModelMessage)
+	}
+	return total
+}
+
+func forceKeptMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff int) []historyfrag.HistoryRecord {
+	if cutoff <= 0 {
+		return nil
+	}
+	if cutoff > len(messages) {
+		cutoff = len(messages)
+	}
+	var forceKept []historyfrag.HistoryRecord
+	for _, m := range messages[:cutoff] {
+		if m.Required || m.Kind == contextfrag.KindConversationSummary || m.Lifecycle == historyfrag.LifecycleActiveSummary {
+			forceKept = append(forceKept, m)
+		}
+	}
+	return forceKept
 }

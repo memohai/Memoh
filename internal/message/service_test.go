@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -13,6 +14,87 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 )
+
+type uncoveredTurnResponseQueries struct {
+	dbstore.Queries
+	arg  sqlc.ListUncoveredTurnResponsesBySessionParams
+	rows []sqlc.ListUncoveredTurnResponsesBySessionRow
+}
+
+type pendingDeliveryQueriesStub struct {
+	dbstore.Queries
+
+	messageID pgtype.UUID
+	updated   int64
+	err       error
+}
+
+func (q *pendingDeliveryQueriesStub) CompletePendingHistoryDelivery(_ context.Context, messageID pgtype.UUID) (int64, error) {
+	q.messageID = messageID
+	return q.updated, q.err
+}
+
+func TestCompletePendingDeliveryUpdatesExactlyOneMessage(t *testing.T) {
+	queries := &pendingDeliveryQueriesStub{updated: 1}
+	service := NewService(nil, queries)
+
+	err := service.CompletePendingDelivery(context.Background(), "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	if err != nil {
+		t.Fatalf("CompletePendingDelivery() error = %v", err)
+	}
+	if got := queries.messageID.String(); got != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+		t.Fatalf("completion message id = %q", got)
+	}
+}
+
+func TestCompletePendingDeliveryRejectsMissingMessage(t *testing.T) {
+	service := NewService(nil, &pendingDeliveryQueriesStub{})
+
+	if err := service.CompletePendingDelivery(context.Background(), "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"); err == nil {
+		t.Fatal("CompletePendingDelivery() error = nil, want missing-message error")
+	}
+}
+
+func (q *uncoveredTurnResponseQueries) ListUncoveredTurnResponsesBySession(
+	_ context.Context,
+	arg sqlc.ListUncoveredTurnResponsesBySessionParams,
+) ([]sqlc.ListUncoveredTurnResponsesBySessionRow, error) {
+	q.arg = arg
+	return q.rows, nil
+}
+
+func TestListUncoveredTurnResponsesBySessionUsesAcceptedCoverage(t *testing.T) {
+	t.Parallel()
+
+	createdAt := time.UnixMilli(1_000).UTC()
+	since := createdAt.Add(-time.Hour)
+	queries := &uncoveredTurnResponseQueries{rows: []sqlc.ListUncoveredTurnResponsesBySessionRow{{
+		ID:        testMessageUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+		Role:      "assistant",
+		Content:   []byte(`{"role":"assistant","content":"response"}`),
+		CreatedAt: pgtype.Timestamptz{Time: createdAt, Valid: true},
+	}}}
+	service := NewService(nil, queries)
+
+	messages, err := service.ListUncoveredTurnResponsesBySession(
+		context.Background(),
+		"22222222-2222-2222-2222-222222222222",
+		since,
+		[]string{"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"},
+	)
+	if err != nil {
+		t.Fatalf("ListUncoveredTurnResponsesBySession() error = %v", err)
+	}
+	if len(messages) != 1 || messages[0].ID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" || !messages[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("uncovered turn responses = %#v", messages)
+	}
+	if queries.arg.SessionID.String() != "22222222-2222-2222-2222-222222222222" ||
+		!queries.arg.CreatedAt.Time.Equal(since) ||
+		len(queries.arg.CoveredMessageIds) != 1 ||
+		queries.arg.CoveredMessageIds[0].String() != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" {
+		t.Fatalf("query args = %#v", queries.arg)
+	}
+}
 
 type runtimeSnapshotQueries struct {
 	dbstore.Queries
@@ -230,6 +312,38 @@ func (p *recordingPublisher) Publish(event messageevent.Event) {
 	p.events = append(p.events, event)
 }
 
+type duplicateEventMessageQueries struct {
+	dbstore.Queries
+}
+
+func (*duplicateEventMessageQueries) CreateMessage(context.Context, sqlc.CreateMessageParams) (sqlc.CreateMessageRow, error) {
+	return sqlc.CreateMessageRow{}, &pgconn.PgError{
+		Code:           "23505",
+		ConstraintName: "idx_bot_history_messages_event_id_unique",
+	}
+}
+
+func TestPersistMapsDuplicateEventLinkWithoutPublishing(t *testing.T) {
+	publisher := &recordingPublisher{}
+	svc := NewService(nil, &duplicateEventMessageQueries{}, publisher)
+
+	_, err := svc.Persist(context.Background(), PersistInput{
+		BotID:       "11111111-1111-1111-1111-111111111111",
+		SessionID:   "22222222-2222-2222-2222-222222222222",
+		Role:        "user",
+		Content:     []byte(`{"type":"text","text":"hello"}`),
+		SessionMode: "discuss",
+		RuntimeType: "model",
+		EventID:     "33333333-3333-3333-3333-333333333333",
+	})
+	if !errors.Is(err, ErrEventAlreadyPersisted) {
+		t.Fatalf("Persist() error = %v, want ErrEventAlreadyPersisted", err)
+	}
+	if len(publisher.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(publisher.events))
+	}
+}
+
 func TestPersistCleansUpMessageWhenHistoryTurnFails(t *testing.T) {
 	queries := &failingHistoryTurnQueries{}
 	publisher := &recordingPublisher{}
@@ -258,6 +372,7 @@ func TestPersistCleansUpMessageWhenHistoryTurnFails(t *testing.T) {
 type retryTurnSequenceQueries struct {
 	dbstore.Queries
 
+	bindAttempts int
 	linkAttempts int
 	deleted      []pgtype.UUID
 }
@@ -300,7 +415,11 @@ func (*retryTurnSequenceQueries) AppendMessageToHistoryTurnByRequest(context.Con
 	return pgtype.UUID{}, nil
 }
 
-func (*retryTurnSequenceQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error) {
+func (q *retryTurnSequenceQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error) {
+	q.bindAttempts++
+	if q.bindAttempts == 1 {
+		return dbstore.HistoryTurn{}, &pgconn.PgError{Code: "23505", ConstraintName: "idx_bot_history_messages_turn_seq_unique"}
+	}
 	return dbstore.HistoryTurn{
 		ID:                 testMessageUUID("66666666-6666-6666-6666-666666666666"),
 		SessionID:          arg.SessionID,
@@ -320,9 +439,6 @@ func (*retryTurnSequenceQueries) GetLatestVisibleHistoryTurnBySession(context.Co
 
 func (q *retryTurnSequenceQueries) LinkMessageToHistoryTurn(_ context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
 	q.linkAttempts++
-	if q.linkAttempts == 1 {
-		return pgtype.UUID{}, &pgconn.PgError{Code: "23505", ConstraintName: "idx_bot_history_messages_turn_seq_unique"}
-	}
 	return arg.MessageID, nil
 }
 
@@ -357,8 +473,11 @@ func TestPersistRetriesTurnSequenceUniqueViolation(t *testing.T) {
 	if msg.ID != "55555555-5555-5555-5555-555555555555" {
 		t.Fatalf("message id = %s", msg.ID)
 	}
-	if queries.linkAttempts != 2 {
-		t.Fatalf("link attempts = %d, want 2", queries.linkAttempts)
+	if queries.bindAttempts != 2 {
+		t.Fatalf("bind attempts = %d, want 2", queries.bindAttempts)
+	}
+	if queries.linkAttempts != 0 {
+		t.Fatalf("link attempts = %d, want 0", queries.linkAttempts)
 	}
 	if len(queries.deleted) != 1 {
 		t.Fatalf("deleted messages = %d, want 1", len(queries.deleted))

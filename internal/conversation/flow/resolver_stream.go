@@ -3,14 +3,17 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
@@ -159,7 +162,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		cfg = r.prepareRunConfig(streamCtx, cfg)
 
 		// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
-		idleCtx, idleCancel := withIdleTimeout(streamCtx)
+		idleCtx, idleCancel := withIdleTimeout(streamCtx, r.idleTimeoutOptions)
 		defer idleCancel.Stop()
 
 		eventCh := r.agent.Stream(idleCtx, cfg)
@@ -169,8 +172,25 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		var hasSnapshot bool
 		var toolCallCount int
 		var hasVisibleOutput bool
+		var persistenceErr error
+		var gate userInputStreamGate
+		forwardChunk := func(chunk conversation.StreamChunk) {
+			if clientGone || streamCtx.Err() != nil {
+				clientGone = true
+				return
+			}
+			select {
+			case chunkCh <- chunk:
+			case <-streamCtx.Done():
+				clientGone = true
+			}
+		}
 		for event := range eventCh {
-			idleCancel.Reset() // each event resets the idle timer
+			if event.IsTerminal() {
+				idleCancel.Finish()
+			} else {
+				idleCancel.Reset()
+			}
 
 			// Track tool calls for adaptive idle timeout and progress events
 			if event.Type == agentpkg.EventToolCallStart {
@@ -194,6 +214,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			if err != nil {
 				continue
 			}
+			held := gate.hold(event, data)
 			if event.IsTerminal() && len(event.Messages) > 0 {
 				if snap, ok := extractTerminalSnapshot(data); ok {
 					snap.visibleOutput = hasVisibleOutput
@@ -203,26 +224,31 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 						// Use WithoutCancel so persistence still succeeds even
 						// when the parent ctx has already been cancelled by a
 						// client disconnect or idle timeout.
-						if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(streamCtx), streamReq, rc, snap); storeErr != nil {
+						_, snapshotStored, storeErr := r.persistTerminalSnapshotWithStatus(
+							context.WithoutCancel(streamCtx),
+							streamReq,
+							rc,
+							snap,
+						)
+						stored = snapshotStored
+						if storeErr != nil {
+							if !stored {
+								persistenceErr = storeErr
+							}
 							r.logger.Error("stream persist failed", slog.Any("error", storeErr))
-						} else {
-							stored = true
 						}
 					}
 				}
+			}
+			if held {
+				continue
 			}
 
 			// Forward to the client unless the client is already gone. Once
 			// the client disconnects we keep draining eventCh so the agent
 			// goroutine can finish and the terminal event (with partial
 			// messages) is captured for persistence above.
-			if !clientGone {
-				select {
-				case chunkCh <- conversation.StreamChunk(data):
-				case <-streamCtx.Done():
-					clientGone = true
-				}
-			}
+			forwardChunk(conversation.StreamChunk(data))
 		}
 
 		// Intermediate persistence on abort/error: persist only concrete
@@ -231,8 +257,13 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		// without polluting history.
 		if !stored {
 			switch {
-			case hasSnapshot:
-				_ = r.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+			case hasSnapshot && (persistenceErr == nil || dbstore.IsPersistenceRetrySafe(persistenceErr)):
+				var persisted []messagepkg.Message
+				persisted, persistenceErr = r.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+				stored = len(persisted) > 0
+				if stored {
+					persistenceErr = nil
+				}
 			default:
 				r.logger.Info("skip persisting failed startup stream",
 					slog.String("bot_id", streamReq.BotID),
@@ -240,27 +271,43 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				)
 			}
 		}
+		if stored {
+			notifyInjectedPersistence(rc.injectedRecords, nil)
+		} else {
+			injectErr := persistenceErr
+			if injectErr == nil {
+				injectErr = errors.New("agent stream ended before injected messages were persisted")
+			}
+			notifyInjectedPersistence(rc.injectedRecords, injectErr)
+		}
+		idleFired := idleCancel.DidFire()
+		if gate.active {
+			if stored {
+				if !idleFired {
+					_ = gate.release(func(data json.RawMessage) error {
+						forwardChunk(data)
+						return nil
+					})
+				}
+			} else if persistenceErr == nil && !idleFired {
+				persistenceErr = errors.New("ask_user terminal response was not persisted")
+			}
+		}
 
-		if idleCancel.DidFire() {
+		var idleErr error
+		if idleFired {
+			idleErr = fmt.Errorf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount)
 			r.logger.Warn("agent stream aborted: idle timeout (no events from provider)",
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("chat_id", streamReq.ChatID),
 				slog.String("model_id", rc.model.ID),
 				slog.Int("tool_calls", toolCallCount),
 			)
-			// Notify the client that the stream was terminated due to idle timeout.
-			if !clientGone {
-				timeoutEvent := agentpkg.StreamEvent{
-					Type:  agentpkg.EventError,
-					Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
-				}
-				if data, err := json.Marshal(timeoutEvent); err == nil {
-					select {
-					case chunkCh <- conversation.StreamChunk(data):
-					case <-streamCtx.Done():
-					}
-				}
-			}
+		}
+		if persistenceErr != nil {
+			errCh <- fmt.Errorf("persist model stream result: %w", persistenceErr)
+		} else if idleErr != nil {
+			errCh <- idleErr
 		}
 	}()
 	return chunkCh, errCh
@@ -352,6 +399,18 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		return nil, fmt.Errorf("resolve: %w", err)
 	}
 	req.Query = rc.query
+	stored := false
+	var injectionPersistenceErr error
+	defer func() {
+		if stored {
+			notifyInjectedPersistence(rc.injectedRecords, nil)
+			return
+		}
+		if injectionPersistenceErr == nil {
+			injectionPersistenceErr = errors.New("agent stream ended before injected messages were persisted")
+		}
+		notifyInjectedPersistence(rc.injectedRecords, injectionPersistenceErr)
+	}()
 
 	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
@@ -372,21 +431,37 @@ func (r *Resolver) streamChatWSResultWithHooks(
 	cfg = r.prepareRunConfig(streamCtx, cfg)
 
 	// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
-	idleCtx, idleCancel := withIdleTimeout(streamCtx)
+	idleCtx, idleCancel := withIdleTimeout(streamCtx, r.idleTimeoutOptions)
 	defer idleCancel.Stop()
 
 	agentEventCh := r.agent.Stream(idleCtx, cfg)
 	modelID := rc.model.ID
-	stored := false
 	clientGone := false
 	var lastSnapshot terminalSnapshot
 	var hasSnapshot bool
 	var toolCallCount int
 	var hasVisibleOutput bool
 	var persistedMessages []messagepkg.Message
+	var persistenceErr error
 	postPersistApplied := false
+	var gate userInputStreamGate
+	forwardEvent := func(data WSStreamEvent) {
+		if clientGone || streamCtx.Err() != nil {
+			clientGone = true
+			return
+		}
+		select {
+		case eventCh <- data:
+		case <-streamCtx.Done():
+			clientGone = true
+		}
+	}
 	for event := range agentEventCh {
-		idleCancel.Reset() // each event resets the idle timer
+		if event.IsTerminal() {
+			idleCancel.Finish()
+		} else {
+			idleCancel.Reset()
+		}
 
 		// Track tool calls for adaptive idle timeout
 		if event.Type == agentpkg.EventToolCallStart {
@@ -410,6 +485,7 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		if err != nil {
 			continue
 		}
+		held := gate.hold(event, data)
 
 		if event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
@@ -417,12 +493,19 @@ func (r *Resolver) streamChatWSResultWithHooks(
 				lastSnapshot = snap
 				hasSnapshot = true
 				if !stored {
-					persisted, storeErr := r.persistTerminalSnapshotResult(context.WithoutCancel(ctx), req, rc, snap)
+					persisted, snapshotStored, storeErr := r.persistTerminalSnapshotWithStatus(
+						context.WithoutCancel(ctx),
+						req,
+						rc,
+						snap,
+					)
+					persistedMessages = persisted
+					stored = snapshotStored
 					if storeErr != nil {
+						if !stored {
+							persistenceErr = storeErr
+						}
 						r.logger.Error("ws persist failed", slog.Any("error", storeErr))
-					} else {
-						persistedMessages = persisted
-						stored = true
 					}
 				}
 			}
@@ -434,21 +517,26 @@ func (r *Resolver) streamChatWSResultWithHooks(
 			}
 			postPersistApplied = true
 		}
-
-		if !clientGone {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
-				clientGone = true
-			}
+		if held {
+			continue
 		}
+
+		forwardEvent(WSStreamEvent(data))
 	}
 
 	// Intermediate persistence on abort/error
 	if !stored {
 		switch {
-		case hasSnapshot:
-			persistedMessages = r.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+		case hasSnapshot && (persistenceErr == nil || dbstore.IsPersistenceRetrySafe(persistenceErr)):
+			persistedMessages, persistenceErr = r.persistPartialResult(ctx, req, rc, lastSnapshot, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+			stored = len(persistedMessages) > 0
+			if stored {
+				persistenceErr = nil
+			}
+			if persistenceErr != nil && !stored {
+				injectionPersistenceErr = persistenceErr
+				return persistedMessages, fmt.Errorf("persist model stream result: %w", persistenceErr)
+			}
 		default:
 			r.logger.Info("skip persisting failed startup ws stream",
 				slog.String("bot_id", req.BotID),
@@ -457,32 +545,45 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		}
 	}
 
-	if idleCancel.DidFire() {
+	idleFired := idleCancel.DidFire()
+	var idleErr error
+	if idleFired {
+		idleErr = fmt.Errorf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount)
 		r.logger.Warn("agent ws stream aborted: idle timeout (no events from provider)",
 			slog.String("bot_id", req.BotID),
 			slog.String("chat_id", req.ChatID),
 			slog.String("model_id", modelID),
 			slog.Int("tool_calls", toolCallCount),
 		)
-		// Notify the client that the stream was terminated due to idle timeout.
-		if !clientGone {
-			timeoutEvent := agentpkg.StreamEvent{
-				Type:  agentpkg.EventError,
-				Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
-			}
-			if data, err := json.Marshal(timeoutEvent); err == nil {
-				select {
-				case eventCh <- json.RawMessage(data):
-				case <-ctx.Done():
-				}
-			}
-		}
 	}
 
 	if postPersist != nil && !postPersistApplied {
 		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 			return persistedMessages, err
 		}
+	}
+	if gate.active {
+		if !stored {
+			if persistenceErr != nil {
+				return persistedMessages, fmt.Errorf("persist model stream result: %w", persistenceErr)
+			}
+			if idleErr != nil {
+				return persistedMessages, idleErr
+			}
+			return persistedMessages, errors.New("ask_user terminal response was not persisted")
+		}
+		if !idleFired {
+			_ = gate.release(func(data json.RawMessage) error {
+				forwardEvent(data)
+				return nil
+			})
+		}
+	}
+	if persistenceErr != nil {
+		return persistedMessages, fmt.Errorf("persist model stream result: %w", persistenceErr)
+	}
+	if idleErr != nil {
+		return persistedMessages, idleErr
 	}
 
 	return persistedMessages, nil
@@ -492,8 +593,18 @@ func (r *Resolver) streamChatWSResultWithHooks(
 // (or partial run) into bot history. Triggers compaction when usage data
 // indicates the context is large.
 func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) error {
-	_, err := r.persistTerminalSnapshotResult(ctx, req, rc, snap)
+	_, _, err := r.persistTerminalSnapshotWithStatus(ctx, req, rc, snap)
 	return err
+}
+
+func (r *Resolver) persistTerminalSnapshotWithStatus(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	rc resolvedContext,
+	snap terminalSnapshot,
+) ([]messagepkg.Message, bool, error) {
+	persisted, err := r.persistTerminalSnapshotResult(ctx, req, rc, snap)
+	return persisted, len(persisted) > 0, err
 }
 
 func (r *Resolver) persistTerminalSnapshotResult(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) ([]messagepkg.Message, error) {
@@ -529,11 +640,11 @@ func (r *Resolver) persistTerminalSnapshotResult(ctx context.Context, req conver
 		AllowPendingToolCalls: snap.deferredToolID != "",
 	})
 	if err != nil {
-		return nil, err
+		return persisted, err
 	}
 	if len(persisted) > 0 {
 		if err := r.persistSessionWorkspaceTarget(ctx, storeReq); err != nil {
-			return nil, err
+			return persisted, err
 		}
 	}
 
@@ -566,42 +677,40 @@ func (r *Resolver) persistPartialResult(
 	ctx context.Context,
 	req conversation.ChatRequest,
 	rc resolvedContext,
-	partialMessages []sdk.Message,
+	snap terminalSnapshot,
 	toolCallCount int,
 	wasIdleTimeout bool,
 	hasVisibleOutput bool,
-) []messagepkg.Message {
+) ([]messagepkg.Message, error) {
 	persistCtx := context.WithoutCancel(ctx)
 
-	if len(partialMessages) > 0 {
-		// AllowPendingToolCalls=false → repairToolCallClosures will inject
-		// synthetic error tool_results for any tool_calls that never received
-		// a real result, preserving the assistant ↔ tool pairing required by
-		// downstream provider serializers (especially Anthropic).
-		persisted, err := r.persistTerminalSnapshotResult(persistCtx, req, rc, terminalSnapshot{
-			sdkMessages:   partialMessages,
-			aborted:       !hasVisibleOutput,
-			visibleOutput: hasVisibleOutput,
-		})
+	if len(snap.sdkMessages) > 0 {
+		// Ordinary interrupted runs close orphaned tool calls with synthetic
+		// errors. A deferred request keeps its pending tool call open so a
+		// transient first persistence failure cannot invalidate the prompt.
+		snap.aborted = !hasVisibleOutput
+		snap.visibleOutput = hasVisibleOutput
+		persisted, err := r.persistTerminalSnapshotResult(persistCtx, req, rc, snap)
 		if err == nil {
 			r.logger.Info("persisted partial agent result",
 				slog.String("bot_id", req.BotID),
 				slog.Int("tool_calls", toolCallCount),
-				slog.Int("partial_messages", len(partialMessages)),
+				slog.Int("partial_messages", len(snap.sdkMessages)),
 				slog.Bool("idle_timeout", wasIdleTimeout),
 			)
 			// Trigger compaction on the failure path so that oversized
 			// contexts don't deadlock (where the LLM can never succeed and
 			// therefore compaction never fires).
-			if rc.estimatedTokens > 0 {
+			if rc.estimatedTokens > 0 && extractInputTokensFromUsage(snap.usage) == 0 {
 				go r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 			}
-			return persisted
+			return persisted, nil
 		}
 		r.logger.Error("failed to persist partial agent messages",
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
+		return persisted, err
 	}
 
 	r.logger.Info("skip persisting failed stream without terminal snapshot",
@@ -614,35 +723,46 @@ func (r *Resolver) persistPartialResult(
 	if rc.estimatedTokens > 0 {
 		go r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 	}
-	return nil
+	return nil, nil
 }
 
 // interleaveInjectedMessages inserts injected user messages at their correct
-// positions within the round. Each record's InsertAfter value indicates how
+// positions within the round. Each record's AfterOutput value indicates how
 // many output messages preceded the injection.
 //
 // round layout: [user_A, output_0, output_1, ..., output_N]
-// InsertAfter=K → insert after round[K] (i.e. after the K-th output message).
+// AfterOutput=K → insert after round[K] (i.e. after the K-th output message).
 func interleaveInjectedMessages(round []conversation.ModelMessage, injections []conversation.InjectedMessageRecord) []conversation.ModelMessage {
 	if len(injections) == 0 {
 		return round
 	}
+	injections = append([]conversation.InjectedMessageRecord(nil), injections...)
+	sort.SliceStable(injections, func(i, j int) bool {
+		if injections[i].AfterOutput != injections[j].AfterOutput {
+			return injections[i].AfterOutput < injections[j].AfterOutput
+		}
+		return injections[i].Sequence < injections[j].Sequence
+	})
 	result := make([]conversation.ModelMessage, 0, len(round)+len(injections))
 	injIdx := 0
 	for i, msg := range round {
 		result = append(result, msg)
-		for injIdx < len(injections) && injections[injIdx].InsertAfter == i {
+		for injIdx < len(injections) && injections[injIdx].AfterOutput == i {
+			injected := injections[injIdx].Message
 			result = append(result, conversation.ModelMessage{
-				Role:    "user",
-				Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+				Role:     "user",
+				Content:  conversation.NewTextContent(injected.HeaderifiedText),
+				Injected: &injected,
 			})
 			injIdx++
 		}
 	}
 	for ; injIdx < len(injections); injIdx++ {
+		injected := injections[injIdx].Message
 		result = append(result, conversation.ModelMessage{
-			Role:    "user",
-			Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+			Role:     "user",
+			Content:  conversation.NewTextContent(injected.HeaderifiedText),
+			Injected: &injected,
 		})
 	}
 	return result

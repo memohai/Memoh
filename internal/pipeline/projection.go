@@ -8,6 +8,9 @@ type ICMessage struct {
 	MessageID        string           `json:"message_id"`
 	Sender           *CanonicalUser   `json:"sender,omitempty"`
 	ReceivedAtMs     int64            `json:"received_at_ms"`
+	EventCursor      int64            `json:"event_cursor,omitempty"`
+	LastEventAtMs    int64            `json:"last_event_at_ms,omitempty"`
+	LastEventCursor  int64            `json:"last_event_cursor,omitempty"`
 	TimestampSec     int64            `json:"timestamp_sec"`
 	UTCOffsetMin     int              `json:"utc_offset_min"`
 	Content          []ContentNode    `json:"content"`
@@ -30,9 +33,11 @@ type ICSystemEvent struct {
 	Type         string         `json:"type"` // always "system_event"
 	Kind         string         `json:"kind"`
 	ReceivedAtMs int64          `json:"received_at_ms"`
+	EventCursor  int64          `json:"event_cursor,omitempty"`
 	TimestampSec int64          `json:"timestamp_sec"`
 	UTCOffsetMin int            `json:"utc_offset_min"`
 	Actor        *CanonicalUser `json:"actor,omitempty"`
+	IsSelfSent   bool           `json:"is_self_sent,omitempty"`
 
 	// Kind-specific fields
 	UserID   string          `json:"user_id,omitempty"`
@@ -185,8 +190,10 @@ func reduceMessage(ic *IntermediateContext, event MessageEvent) {
 				Type:         "system_event",
 				Kind:         "user_renamed",
 				ReceivedAtMs: event.ReceivedAtMs,
+				EventCursor:  event.EventCursor,
 				TimestampSec: event.TimestampSec,
 				UTCOffsetMin: event.UTCOffsetMin,
+				IsSelfSent:   event.IsSelfSent,
 				UserID:       event.Sender.ID,
 				OldUser:      &existing.User,
 				NewUser:      event.Sender,
@@ -196,18 +203,21 @@ func reduceMessage(ic *IntermediateContext, event MessageEvent) {
 	}
 
 	msg := &ICMessage{
-		Type:         "message",
-		MessageID:    event.MessageID,
-		Sender:       event.Sender,
-		ReceivedAtMs: event.ReceivedAtMs,
-		TimestampSec: event.TimestampSec,
-		UTCOffsetMin: event.UTCOffsetMin,
-		Content:      event.Content,
-		Attachments:  event.Attachments,
-		IsSelfSent:   event.IsSelfSent,
-		MentionsMe:   event.MentionsMe,
-		RepliesToMe:  event.RepliesToMe,
-		Conversation: event.Conversation,
+		Type:            "message",
+		MessageID:       event.MessageID,
+		Sender:          event.Sender,
+		ReceivedAtMs:    event.ReceivedAtMs,
+		EventCursor:     event.EventCursor,
+		LastEventAtMs:   event.ReceivedAtMs,
+		LastEventCursor: event.EventCursor,
+		TimestampSec:    event.TimestampSec,
+		UTCOffsetMin:    event.UTCOffsetMin,
+		Content:         event.Content,
+		Attachments:     event.Attachments,
+		IsSelfSent:      event.IsSelfSent,
+		MentionsMe:      event.MentionsMe,
+		RepliesToMe:     event.RepliesToMe,
+		Conversation:    event.Conversation,
 	}
 
 	if event.ReplyToMessageID != "" {
@@ -265,6 +275,13 @@ func reduceEdit(ic *IntermediateContext, event EditEvent) {
 	}
 	msg.Content = event.Content
 	msg.Attachments = event.Attachments
+	msg.IsSelfSent = msg.IsSelfSent || event.IsSelfSent
+	if event.AddressingKnown {
+		msg.MentionsMe = event.MentionsMe
+		msg.RepliesToMe = event.RepliesToMe
+	}
+	msg.LastEventAtMs = event.ReceivedAtMs
+	msg.LastEventCursor = event.EventCursor
 	msg.EditedAtSec = event.TimestampSec
 	msg.EditUTCOffsetMin = event.UTCOffsetMin
 }
@@ -277,6 +294,8 @@ func reduceDelete(ic *IntermediateContext, event DeleteEvent) {
 		}
 		if msg := ic.Nodes[idx].Message; msg != nil {
 			msg.Deleted = true
+			msg.LastEventAtMs = event.ReceivedAtMs
+			msg.LastEventCursor = event.EventCursor
 		}
 	}
 }
@@ -285,9 +304,11 @@ func reduceService(ic *IntermediateContext, event ServiceEvent) {
 	base := ICSystemEvent{
 		Type:         "system_event",
 		ReceivedAtMs: event.ReceivedAtMs,
+		EventCursor:  event.EventCursor,
 		TimestampSec: event.TimestampSec,
 		UTCOffsetMin: event.UTCOffsetMin,
 		Actor:        event.Actor,
+		IsSelfSent:   event.IsSelfSent,
 	}
 
 	switch event.Action {

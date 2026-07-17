@@ -11,6 +11,132 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimSessionEventDelivery = `-- name: ClaimSessionEventDelivery :one
+UPDATE bot_session_events event
+SET delivery_claim_token = $1::uuid,
+    delivery_claimed_until = now() + $2::bigint * INTERVAL '1 millisecond'
+WHERE event.team_id = public.memoh_current_team_id()
+  AND event.id = $3::uuid
+  AND event.delivery_completed_at IS NULL
+  AND (
+    event.delivery_claim_token = $1::uuid
+    OR event.delivery_claimed_until IS NULL
+    OR event.delivery_claimed_until <= now()
+  )
+RETURNING event.delivery_claimed_until
+`
+
+type ClaimSessionEventDeliveryParams struct {
+	ClaimToken pgtype.UUID `json:"claim_token"`
+	LeaseMs    int64       `json:"lease_ms"`
+	EventID    pgtype.UUID `json:"event_id"`
+}
+
+func (q *Queries) ClaimSessionEventDelivery(ctx context.Context, arg ClaimSessionEventDeliveryParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, claimSessionEventDelivery, arg.ClaimToken, arg.LeaseMs, arg.EventID)
+	var delivery_claimed_until pgtype.Timestamptz
+	err := row.Scan(&delivery_claimed_until)
+	return delivery_claimed_until, err
+}
+
+const completeSessionEventDelivery = `-- name: CompleteSessionEventDelivery :execrows
+WITH locked AS MATERIALIZED (
+  SELECT event.id,
+         event.session_id,
+         event.delivery_claim_token,
+         event.delivery_claimed_until,
+         event.delivery_completed_at
+  FROM bot_session_events event
+  WHERE event.team_id = public.memoh_current_team_id()
+    AND event.id = $2::uuid
+  FOR NO KEY UPDATE
+)
+UPDATE bot_session_events event
+SET delivery_completed_at = clock_timestamp(),
+    delivery_claim_token = NULL,
+    delivery_claimed_until = NULL
+FROM locked
+WHERE event.id = locked.id
+  AND locked.delivery_claim_token = $1::uuid
+  AND locked.delivery_claimed_until > clock_timestamp()
+  AND locked.delivery_completed_at IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_messages history
+    WHERE history.team_id = public.memoh_current_team_id()
+      AND history.event_id = locked.id
+      AND history.session_id = locked.session_id
+      AND history.role = 'user'
+      AND (
+        COALESCE(history.metadata->>'pipeline_delivery_state', '') <> 'pending'
+        OR EXISTS (
+          SELECT 1
+          FROM bot_history_messages response
+          WHERE response.team_id = public.memoh_current_team_id()
+            AND response.session_id = locked.session_id
+            AND response.turn_id = history.turn_id
+            AND response.role IN ('assistant', 'tool')
+            AND response.turn_message_seq > history.turn_message_seq
+        )
+      )
+  )
+`
+
+type CompleteSessionEventDeliveryParams struct {
+	ClaimToken pgtype.UUID `json:"claim_token"`
+	EventID    pgtype.UUID `json:"event_id"`
+}
+
+func (q *Queries) CompleteSessionEventDelivery(ctx context.Context, arg CompleteSessionEventDeliveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeSessionEventDelivery, arg.ClaimToken, arg.EventID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const completeSessionEventDeliveryWithResponse = `-- name: CompleteSessionEventDeliveryWithResponse :execrows
+UPDATE bot_session_events event
+SET delivery_completed_at = now(),
+    delivery_claim_token = NULL,
+    delivery_claimed_until = NULL
+WHERE event.team_id = public.memoh_current_team_id()
+  AND event.id = $1::uuid
+  AND event.delivery_claim_token = $2::uuid
+  AND event.delivery_claimed_until > clock_timestamp()
+  AND event.delivery_completed_at IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_messages history
+    WHERE history.team_id = public.memoh_current_team_id()
+      AND history.event_id = event.id
+      AND history.session_id = event.session_id
+      AND history.role = 'user'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_messages response
+    WHERE response.team_id = public.memoh_current_team_id()
+      AND response.id = $3::uuid
+      AND response.session_id = event.session_id
+      AND response.role IN ('assistant', 'tool')
+  )
+`
+
+type CompleteSessionEventDeliveryWithResponseParams struct {
+	EventID           pgtype.UUID `json:"event_id"`
+	ClaimToken        pgtype.UUID `json:"claim_token"`
+	ResponseMessageID pgtype.UUID `json:"response_message_id"`
+}
+
+func (q *Queries) CompleteSessionEventDeliveryWithResponse(ctx context.Context, arg CompleteSessionEventDeliveryWithResponseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeSessionEventDeliveryWithResponse, arg.EventID, arg.ClaimToken, arg.ResponseMessageID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countSessionEvents = `-- name: CountSessionEvents :one
 SELECT COUNT(*) FROM bot_session_events
 WHERE team_id = public.memoh_current_team_id() AND session_id = $1
@@ -72,8 +198,153 @@ func (q *Queries) DeleteSessionEventsByBot(ctx context.Context, botID pgtype.UUI
 	return err
 }
 
+const getSessionEventDeliveryState = `-- name: GetSessionEventDeliveryState :one
+SELECT
+  event.id,
+  event.event_kind,
+  event.event_data,
+  (event.delivery_completed_at IS NOT NULL)::bool AS delivery_completed,
+  history.id AS history_message_id,
+  COALESCE(history.metadata->>'pipeline_delivery_state' = 'pending', FALSE)::bool AS history_delivery_pending,
+  CASE
+    WHEN history.id IS NULL THEN FALSE
+    WHEN history.metadata->>'pipeline_delivery_state' = 'pending' THEN EXISTS (
+      SELECT 1
+      FROM bot_history_messages response
+      WHERE response.team_id = public.memoh_current_team_id()
+        AND response.session_id = event.session_id
+        AND response.turn_id = history.turn_id
+        AND response.role IN ('assistant', 'tool')
+        AND response.turn_message_seq > history.turn_message_seq
+    )
+    ELSE TRUE
+  END AS history_persisted,
+  (CASE
+    WHEN history.id IS NULL THEN FALSE
+    ELSE EXISTS (
+      SELECT 1
+      FROM bot_history_messages response
+      WHERE response.team_id = public.memoh_current_team_id()
+        AND response.session_id = event.session_id
+        AND response.turn_id = history.turn_id
+        AND response.role IN ('assistant', 'tool')
+        AND response.turn_message_seq > history.turn_message_seq
+    )
+  END)::bool AS response_persisted,
+  (CASE
+    WHEN history.id IS NULL THEN FALSE
+    ELSE EXISTS (
+      SELECT 1
+      FROM bot_history_messages visible_history
+      JOIN bot_history_messages response
+        ON response.team_id = public.memoh_current_team_id()
+       AND response.session_id = event.session_id
+       AND response.turn_id = visible_history.turn_id
+       AND response.role IN ('assistant', 'tool')
+       AND response.turn_visible = TRUE
+       AND response.turn_message_seq > visible_history.turn_message_seq
+      WHERE visible_history.team_id = public.memoh_current_team_id()
+        AND visible_history.session_id = event.session_id
+        AND visible_history.id = history.id
+        AND visible_history.role = 'user'
+        AND visible_history.turn_visible = TRUE
+        AND NOT EXISTS (
+          SELECT 1
+          FROM bot_history_messages next_request
+          WHERE next_request.team_id = public.memoh_current_team_id()
+            AND next_request.session_id = event.session_id
+            AND next_request.turn_id = visible_history.turn_id
+            AND next_request.role = 'user'
+            AND next_request.event_id IS NOT NULL
+            AND next_request.turn_message_seq > visible_history.turn_message_seq
+            AND next_request.turn_message_seq < response.turn_message_seq
+        )
+    )
+  END)::bool AS replay_response_persisted
+FROM bot_session_events event
+LEFT JOIN LATERAL (
+  SELECT message.id, message.metadata, message.turn_id, message.turn_message_seq
+  FROM bot_history_messages message
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.event_id = event.id
+    AND message.session_id = event.session_id
+    AND message.role = 'user'
+  ORDER BY message.created_at, message.id
+  LIMIT 1
+) history ON TRUE
+WHERE event.team_id = public.memoh_current_team_id()
+  AND event.id = $1::uuid
+LIMIT 1
+`
+
+type GetSessionEventDeliveryStateRow struct {
+	ID                      pgtype.UUID `json:"id"`
+	EventKind               string      `json:"event_kind"`
+	EventData               []byte      `json:"event_data"`
+	DeliveryCompleted       bool        `json:"delivery_completed"`
+	HistoryMessageID        pgtype.UUID `json:"history_message_id"`
+	HistoryDeliveryPending  bool        `json:"history_delivery_pending"`
+	HistoryPersisted        bool        `json:"history_persisted"`
+	ResponsePersisted       bool        `json:"response_persisted"`
+	ReplayResponsePersisted bool        `json:"replay_response_persisted"`
+}
+
+func (q *Queries) GetSessionEventDeliveryState(ctx context.Context, eventID pgtype.UUID) (GetSessionEventDeliveryStateRow, error) {
+	row := q.db.QueryRow(ctx, getSessionEventDeliveryState, eventID)
+	var i GetSessionEventDeliveryStateRow
+	err := row.Scan(
+		&i.ID,
+		&i.EventKind,
+		&i.EventData,
+		&i.DeliveryCompleted,
+		&i.HistoryMessageID,
+		&i.HistoryDeliveryPending,
+		&i.HistoryPersisted,
+		&i.ResponsePersisted,
+		&i.ReplayResponsePersisted,
+	)
+	return i, err
+}
+
+const getSessionEventIDByIdentity = `-- name: GetSessionEventIDByIdentity :one
+SELECT event.id
+FROM bot_session_events event
+WHERE event.team_id = public.memoh_current_team_id()
+  AND event.session_id = $1::uuid
+  AND event.event_kind = $2
+  AND event.external_message_id = $3::text
+LIMIT 1
+`
+
+type GetSessionEventIDByIdentityParams struct {
+	SessionID         pgtype.UUID `json:"session_id"`
+	EventKind         string      `json:"event_kind"`
+	ExternalMessageID string      `json:"external_message_id"`
+}
+
+func (q *Queries) GetSessionEventIDByIdentity(ctx context.Context, arg GetSessionEventIDByIdentityParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getSessionEventIDByIdentity, arg.SessionID, arg.EventKind, arg.ExternalMessageID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const isSessionEventDeliveryCompleted = `-- name: IsSessionEventDeliveryCompleted :one
+SELECT (delivery_completed_at IS NOT NULL)::bool
+FROM bot_session_events
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1::uuid
+`
+
+func (q *Queries) IsSessionEventDeliveryCompleted(ctx context.Context, eventID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, isSessionEventDeliveryCompleted, eventID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listSessionEventsByBot = `-- name: ListSessionEventsByBot :many
-SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at, team_id FROM bot_session_events
+SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, delivery_claim_token, delivery_claimed_until, delivery_completed_at, created_at, team_id FROM bot_session_events
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY received_at_ms ASC, id ASC
 `
@@ -96,6 +367,9 @@ func (q *Queries) ListSessionEventsByBot(ctx context.Context, botID pgtype.UUID)
 			&i.ExternalMessageID,
 			&i.SenderChannelIdentityID,
 			&i.ReceivedAtMs,
+			&i.DeliveryClaimToken,
+			&i.DeliveryClaimedUntil,
+			&i.DeliveryCompletedAt,
 			&i.CreatedAt,
 			&i.TeamID,
 		); err != nil {
@@ -110,9 +384,22 @@ func (q *Queries) ListSessionEventsByBot(ctx context.Context, botID pgtype.UUID)
 }
 
 const listSessionEventsBySession = `-- name: ListSessionEventsBySession :many
-SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at, team_id FROM bot_session_events
-WHERE team_id = public.memoh_current_team_id() AND session_id = $1
-ORDER BY received_at_ms ASC
+SELECT event.id, event.bot_id, event.session_id, event.event_kind, event.event_data, event.external_message_id, event.sender_channel_identity_id, event.received_at_ms, event.delivery_claim_token, event.delivery_claimed_until, event.delivery_completed_at, event.created_at, event.team_id
+FROM bot_session_events event
+WHERE event.team_id = public.memoh_current_team_id()
+  AND event.session_id = $1
+  AND (
+    event.delivery_completed_at IS NOT NULL
+    OR EXISTS (
+      SELECT 1
+      FROM bot_history_messages history
+      WHERE history.team_id = public.memoh_current_team_id()
+        AND history.event_id = event.id
+        AND history.session_id = event.session_id
+        AND history.role = 'user'
+    )
+  )
+ORDER BY event.received_at_ms ASC, event.created_at ASC, event.id ASC
 `
 
 func (q *Queries) ListSessionEventsBySession(ctx context.Context, sessionID pgtype.UUID) ([]BotSessionEvent, error) {
@@ -133,6 +420,9 @@ func (q *Queries) ListSessionEventsBySession(ctx context.Context, sessionID pgty
 			&i.ExternalMessageID,
 			&i.SenderChannelIdentityID,
 			&i.ReceivedAtMs,
+			&i.DeliveryClaimToken,
+			&i.DeliveryClaimedUntil,
+			&i.DeliveryCompletedAt,
 			&i.CreatedAt,
 			&i.TeamID,
 		); err != nil {
@@ -147,9 +437,9 @@ func (q *Queries) ListSessionEventsBySession(ctx context.Context, sessionID pgty
 }
 
 const listSessionEventsBySessionAfter = `-- name: ListSessionEventsBySessionAfter :many
-SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at, team_id FROM bot_session_events
+SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, delivery_claim_token, delivery_claimed_until, delivery_completed_at, created_at, team_id FROM bot_session_events
 WHERE team_id = public.memoh_current_team_id() AND session_id = $1 AND received_at_ms >= $2
-ORDER BY received_at_ms ASC
+ORDER BY received_at_ms ASC, created_at ASC, id ASC
 `
 
 type ListSessionEventsBySessionAfterParams struct {
@@ -175,6 +465,9 @@ func (q *Queries) ListSessionEventsBySessionAfter(ctx context.Context, arg ListS
 			&i.ExternalMessageID,
 			&i.SenderChannelIdentityID,
 			&i.ReceivedAtMs,
+			&i.DeliveryClaimToken,
+			&i.DeliveryClaimedUntil,
+			&i.DeliveryCompletedAt,
 			&i.CreatedAt,
 			&i.TeamID,
 		); err != nil {
@@ -186,4 +479,107 @@ func (q *Queries) ListSessionEventsBySessionAfter(ctx context.Context, arg ListS
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockSessionEventDeliveryClaim = `-- name: LockSessionEventDeliveryClaim :one
+WITH locked AS MATERIALIZED (
+  SELECT event.delivery_claim_token,
+         event.delivery_claimed_until,
+         event.delivery_completed_at
+  FROM bot_session_events event
+  WHERE event.team_id = public.memoh_current_team_id()
+    AND event.id = $2::uuid
+    AND event.bot_id = $3::uuid
+    AND event.session_id = $4::uuid
+  FOR NO KEY UPDATE
+)
+SELECT TRUE::bool
+FROM locked
+WHERE delivery_claim_token = $1::uuid
+  AND delivery_claimed_until > clock_timestamp()
+  AND delivery_completed_at IS NULL
+`
+
+type LockSessionEventDeliveryClaimParams struct {
+	ClaimToken pgtype.UUID `json:"claim_token"`
+	EventID    pgtype.UUID `json:"event_id"`
+	BotID      pgtype.UUID `json:"bot_id"`
+	SessionID  pgtype.UUID `json:"session_id"`
+}
+
+func (q *Queries) LockSessionEventDeliveryClaim(ctx context.Context, arg LockSessionEventDeliveryClaimParams) (bool, error) {
+	row := q.db.QueryRow(ctx, lockSessionEventDeliveryClaim,
+		arg.ClaimToken,
+		arg.EventID,
+		arg.BotID,
+		arg.SessionID,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const nextSessionEventCursor = `-- name: NextSessionEventCursor :one
+SELECT nextval('bot_session_event_cursor_seq')::bigint
+`
+
+func (q *Queries) NextSessionEventCursor(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, nextSessionEventCursor)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const releaseSessionEventDelivery = `-- name: ReleaseSessionEventDelivery :execrows
+UPDATE bot_session_events
+SET delivery_claim_token = NULL,
+    delivery_claimed_until = NULL
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1::uuid
+  AND delivery_claim_token = $2::uuid
+`
+
+type ReleaseSessionEventDeliveryParams struct {
+	EventID    pgtype.UUID `json:"event_id"`
+	ClaimToken pgtype.UUID `json:"claim_token"`
+}
+
+func (q *Queries) ReleaseSessionEventDelivery(ctx context.Context, arg ReleaseSessionEventDeliveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseSessionEventDelivery, arg.EventID, arg.ClaimToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renewSessionEventDelivery = `-- name: RenewSessionEventDelivery :one
+WITH locked AS MATERIALIZED (
+  SELECT id,
+         delivery_claim_token,
+         delivery_claimed_until
+  FROM bot_session_events
+  WHERE team_id = public.memoh_current_team_id()
+    AND id = $3::uuid
+  FOR NO KEY UPDATE
+)
+UPDATE bot_session_events event
+SET delivery_claimed_until = clock_timestamp() + $1::bigint * INTERVAL '1 millisecond'
+FROM locked
+WHERE event.id = locked.id
+  AND locked.delivery_claim_token = $2::uuid
+  AND locked.delivery_claimed_until > clock_timestamp()
+RETURNING event.delivery_claimed_until
+`
+
+type RenewSessionEventDeliveryParams struct {
+	LeaseMs    int64       `json:"lease_ms"`
+	ClaimToken pgtype.UUID `json:"claim_token"`
+	EventID    pgtype.UUID `json:"event_id"`
+}
+
+func (q *Queries) RenewSessionEventDelivery(ctx context.Context, arg RenewSessionEventDeliveryParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, renewSessionEventDelivery, arg.LeaseMs, arg.ClaimToken, arg.EventID)
+	var delivery_claimed_until pgtype.Timestamptz
+	err := row.Scan(&delivery_claimed_until)
+	return delivery_claimed_until, err
 }

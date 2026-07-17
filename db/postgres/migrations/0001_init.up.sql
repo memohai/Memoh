@@ -525,6 +525,20 @@ ALTER TABLE bot_channel_routes
   ADD CONSTRAINT fk_bot_channel_routes_active_session
   FOREIGN KEY (active_session_id) REFERENCES bot_sessions(id) ON DELETE SET NULL;
 
+CREATE SEQUENCE IF NOT EXISTS bot_session_event_cursor_seq
+  AS BIGINT
+  MINVALUE 1
+  MAXVALUE 9007199254740991;
+
+SELECT setval(
+  'bot_session_event_cursor_seq',
+  GREATEST(
+    (SELECT last_value FROM bot_session_event_cursor_seq),
+    FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint
+  ),
+  true
+);
+
 -- bot_session_events: DCP pipeline event store for cold-start replay.
 CREATE TABLE IF NOT EXISTS bot_session_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -535,6 +549,9 @@ CREATE TABLE IF NOT EXISTS bot_session_events (
   external_message_id TEXT,
   sender_channel_identity_id UUID,
   received_at_ms BIGINT NOT NULL,
+  delivery_claim_token UUID,
+  delivery_claimed_until TIMESTAMPTZ,
+  delivery_completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -575,6 +592,9 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_messages(bot_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_compact ON bot_history_messages(compact_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_event_id_unique
+  ON bot_history_messages(event_id)
+  WHERE event_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
   ON bot_history_messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_role_created
@@ -638,6 +658,7 @@ CREATE TABLE IF NOT EXISTS bot_session_discuss_cursors (
   route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   source TEXT NOT NULL DEFAULT '',
   consumed_cursor BIGINT NOT NULL DEFAULT 0,
+  consumed_event_cursor BIGINT NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (session_id, scope_key)
 );
@@ -709,6 +730,7 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   tool_result_message_id UUID REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_message_id UUID REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   prompt_external_message_id TEXT NOT NULL DEFAULT '',
+  prompt_delivered_at TIMESTAMPTZ,
   source_platform TEXT NOT NULL DEFAULT '',
   reply_target TEXT NOT NULL DEFAULT '',
   conversation_type TEXT NOT NULL DEFAULT '',

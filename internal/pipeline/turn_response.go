@@ -8,15 +8,15 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
-// DecodeTurnResponseEntry converts a persisted bot message into a TR entry for
-// pipeline context composition.
+// DecodeTurnResponseEntry converts a persisted in-turn message into a TR entry
+// for pipeline context composition.
 //
 // Tool calls and tool results are preserved as native structured content
 // parts. They must not be rendered as assistant-visible pseudo-protocol text:
 // models may imitate that text instead of emitting real provider tool calls.
 func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 	role := strings.TrimSpace(msg.Role)
-	if role != "assistant" && role != "tool" {
+	if role != "assistant" && role != "tool" && role != "user" {
 		return TurnResponseEntry{}, false
 	}
 
@@ -27,6 +27,11 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 
 	var rawContent json.RawMessage
 	switch role {
+	case "user":
+		if !modelMsg.HasContent() {
+			return TurnResponseEntry{}, false
+		}
+		rawContent = append(json.RawMessage(nil), modelMsg.Content...)
 	case "tool":
 		rawContent = nativeToolRoleContent(modelMsg)
 	default:
@@ -38,10 +43,11 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 	}
 
 	return TurnResponseEntry{
-		RequestedAtMs: msg.CreatedAt.UnixMilli(),
-		Role:          role,
-		Content:       debugContent(rawContent),
-		RawContent:    rawContent,
+		RequestedAtMs:   msg.CreatedAt.UnixMilli(),
+		Role:            role,
+		Content:         debugContent(rawContent),
+		RawContent:      rawContent,
+		SourceMessageID: strings.TrimSpace(msg.ID),
 	}, true
 }
 

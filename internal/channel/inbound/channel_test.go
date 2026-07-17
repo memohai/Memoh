@@ -36,19 +36,28 @@ import (
 )
 
 type fakeChatGateway struct {
-	resp             conversation.ChatResponse
-	err              error
-	gotReq           conversation.ChatRequest
-	onChat           func(conversation.ChatRequest)
-	userInputCalls   int
-	userInputInput   flow.UserInputResponseInput
-	userInputErr     error
-	userInputStarted chan struct{}
-	userInputRelease chan struct{}
-	advanceCalls     int
-	advanceInput     userinput.AdvanceTextInput
-	advanceResult    userinput.AdvanceTextResult
-	advanceErr       error
+	resp                  conversation.ChatResponse
+	err                   error
+	gotReq                conversation.ChatRequest
+	onChat                func(conversation.ChatRequest)
+	streamChunks          []conversation.StreamChunk
+	pendingInputs         map[string]userinput.Request
+	pendingInputErr       error
+	pendingInputCalls     int
+	pendingInputBotID     string
+	pendingInputSessionID string
+	pendingInputRequestID string
+	promptDeliveryCalls   int
+	promptDeliveryErr     error
+	userInputCalls        int
+	userInputInput        flow.UserInputResponseInput
+	userInputErr          error
+	userInputStarted      chan struct{}
+	userInputRelease      chan struct{}
+	advanceCalls          int
+	advanceInput          userinput.AdvanceTextInput
+	advanceResult         userinput.AdvanceTextResult
+	advanceErr            error
 }
 
 func (f *fakeChatGateway) AdvancePlainTextUserInput(_ context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error) {
@@ -133,6 +142,14 @@ func (f *fakeChatGateway) StreamChat(_ context.Context, req conversation.ChatReq
 		close(errs)
 		return chunks, errs
 	}
+	if len(f.streamChunks) > 0 {
+		for _, chunk := range f.streamChunks {
+			chunks <- chunk
+		}
+		close(chunks)
+		close(errs)
+		return chunks, errs
+	}
 	payload := map[string]any{
 		"type":     "agent_end",
 		"messages": f.resp.Messages,
@@ -144,6 +161,38 @@ func (f *fakeChatGateway) StreamChat(_ context.Context, req conversation.ChatReq
 	close(chunks)
 	close(errs)
 	return chunks, errs
+}
+
+func (f *fakeChatGateway) ResolvePendingUserInput(_ context.Context, botID, sessionID, requestID string) (userinput.Request, error) {
+	f.pendingInputCalls++
+	f.pendingInputBotID = botID
+	f.pendingInputSessionID = sessionID
+	f.pendingInputRequestID = requestID
+	if f.pendingInputErr != nil {
+		return userinput.Request{}, f.pendingInputErr
+	}
+	req, ok := f.pendingInputs[requestID]
+	if !ok || req.BotID != botID || req.SessionID != sessionID || req.Status != userinput.StatusPending {
+		return userinput.Request{}, userinput.ErrNotFound
+	}
+	return req, nil
+}
+
+func (f *fakeChatGateway) MarkUserInputPromptDelivered(_ context.Context, requestID string) (userinput.Request, error) {
+	f.promptDeliveryCalls++
+	if f.promptDeliveryErr != nil {
+		return userinput.Request{}, f.promptDeliveryErr
+	}
+	req, ok := f.pendingInputs[requestID]
+	if !ok || req.Status != userinput.StatusPending {
+		return userinput.Request{}, userinput.ErrNotFound
+	}
+	if req.PromptDeliveredAt == nil {
+		delivered := req.CreatedAt
+		req.PromptDeliveredAt = &delivered
+		f.pendingInputs[requestID] = req
+	}
+	return req, nil
 }
 
 func (*fakeChatGateway) TriggerSchedule(_ context.Context, _ string, _ schedule.TriggerPayload, _ string) (schedule.TriggerResult, error) {
@@ -271,6 +320,7 @@ func (a *fakeProcessingStatusAdapter) ProcessingFailed(ctx context.Context, cfg 
 type fakeChatService struct {
 	resolveResult route.ResolveConversationResult
 	resolveErr    error
+	persistedID   string
 	persisted     []messagepkg.Message
 	persistedIn   []messagepkg.PersistInput
 }
@@ -298,6 +348,7 @@ type fakeSessionEnsurer struct {
 	activeSession SessionResult
 	activeErr     error
 	createErr     error
+	sessions      map[string]SessionResult
 	lastRouteID   string
 	lastSpec      NewSessionSpec
 }
@@ -316,6 +367,16 @@ func (f *fakeSessionEnsurer) GetActiveSession(_ context.Context, routeID string)
 		return SessionResult{}, f.activeErr
 	}
 	return f.activeSession, nil
+}
+
+func (f *fakeSessionEnsurer) GetSession(_ context.Context, sessionID string) (SessionResult, error) {
+	if session, ok := f.sessions[sessionID]; ok {
+		return session, nil
+	}
+	if strings.TrimSpace(f.activeSession.ID) == strings.TrimSpace(sessionID) {
+		return f.activeSession, nil
+	}
+	return SessionResult{}, errors.New("session not found")
 }
 
 func (f *fakeSessionEnsurer) CreateNewSession(_ context.Context, _, routeID, _ string, spec NewSessionSpec) (SessionResult, error) {
@@ -612,7 +673,12 @@ func (f *fakeChatService) ResolveConversation(_ context.Context, _ route.Resolve
 
 func (f *fakeChatService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
 	f.persistedIn = append(f.persistedIn, input)
+	persistedID := f.persistedID
+	if persistedID == "" {
+		persistedID = "persisted-message"
+	}
 	msg := messagepkg.Message{
+		ID:                      persistedID,
 		BotID:                   input.BotID,
 		SessionID:               input.SessionID,
 		SenderChannelIdentityID: input.SenderChannelIdentityID,
@@ -1301,7 +1367,7 @@ func TestChannelInboundProcessorDiscussACPAllowsNonOwnerMemberThroughACL(t *test
 		"bot-1:" + actorID + ":" + bots.PermissionWorkspaceExec: true,
 	}})
 	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	driver := pipelinepkg.NewDiscussDriver(pipelinepkg.DiscussDriverDeps{Pipeline: pipeline})
+	driver := pipelinepkg.NewDiscussDriver(pipelinepkg.DiscussDriverDeps{})
 	defer driver.StopAll()
 	processor.SetPipeline(pipeline, nil, driver)
 	sender := &fakeReplySender{}
@@ -2460,6 +2526,8 @@ func TestChannelInboundProcessorDoesNotPersistBeforeOpenStream(t *testing.T) {
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-openstream", RouteID: "route-openstream"}}
 	gateway := &fakeChatGateway{}
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	dispatcher := NewRouteDispatcher(slog.Default())
+	processor.SetDispatcher(dispatcher)
 	sender := &failingOpenStreamSender{err: errors.New("stream unavailable")}
 
 	cfg := channel.ChannelConfig{ID: "cfg-openstream", BotID: "bot-1", ChannelType: channel.ChannelType("qq")}
@@ -2484,6 +2552,17 @@ func TestChannelInboundProcessorDoesNotPersistBeforeOpenStream(t *testing.T) {
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("runner should not be called when stream open fails")
+	}
+	if dispatcher.IsActive("route-openstream") {
+		t.Fatal("route remained active after stream open failed")
+	}
+
+	msg.Message.ID = "msg-openstream-2"
+	if err := processor.HandleInbound(context.Background(), cfg, msg, &fakeReplySender{}); err != nil {
+		t.Fatalf("second message after stream open failure: %v", err)
+	}
+	if gateway.gotReq.ExternalMessageID != "msg-openstream-2" {
+		t.Fatalf("second message was not processed: request id = %q", gateway.gotReq.ExternalMessageID)
 	}
 }
 

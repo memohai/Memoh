@@ -38,6 +38,10 @@ type testWorkspace struct {
 	info   bridge.WorkspaceInfo
 }
 
+func testAcknowledgingEventSink() EventSink {
+	return EventSinkFunc(func(event.StreamEvent) bool { return true })
+}
+
 func (w testWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
 	return w.client, nil
 }
@@ -161,13 +165,14 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 		ProjectPath: "/data/project",
 		Command:     agentPath,
 		Timeout:     10 * time.Second,
-	}, EventSinkFunc(func(ev event.StreamEvent) {
+	}, EventSinkFunc(func(ev event.StreamEvent) bool {
 		streamedMu.Lock()
 		defer streamedMu.Unlock()
 		streamedEvents = append(streamedEvents, ev)
 		if ev.Type == event.TextDelta {
 			streamed.WriteString(ev.Delta)
 		}
+		return true
 	}))
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -1191,7 +1196,7 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 		events: &toolEventEmitter{},
 	}
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -1284,7 +1289,7 @@ func TestReadTextFileUsesPromptToolOutputLimit(t *testing.T) {
 				cwd:    root,
 				events: &toolEventEmitter{},
 			}
-			callbacks.setPromptState(newEventCollector(limit), nil, ToolSessionContext{}, limit)
+			callbacks.setPromptState(newEventCollector(limit), testAcknowledgingEventSink(), ToolSessionContext{}, limit)
 
 			resp, err := callbacks.ReadTextFile(context.Background(), tc.request)
 			if err != nil {
@@ -1368,7 +1373,7 @@ func TestCallbackToolApprovalRejectionErrorsUsePromptToolOutputLimit(t *testing.
 				},
 				acpprofile.DefaultToolQuirks(),
 			)
-			callbacks.setPromptState(newEventCollector(limit), nil, callbacks.baseSession, limit)
+			callbacks.setPromptState(newEventCollector(limit), testAcknowledgingEventSink(), callbacks.baseSession, limit)
 
 			err := tc.run(context.Background(), callbacks)
 			if err == nil {
@@ -1616,7 +1621,7 @@ func TestRequestPermissionUnmappedToolAllowsWithoutApproval(t *testing.T) {
 				},
 				events: &toolEventEmitter{},
 			}
-			callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+			callbacks.setPromptState(newEventCollector(), testAcknowledgingEventSink(), callbacks.baseSession)
 
 			resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 				ToolCall: tc.toolCall,
@@ -1807,7 +1812,7 @@ func TestRequestPermissionUnknownUnmappedToolCancels(t *testing.T) {
 				},
 				events: &toolEventEmitter{},
 			}
-			callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+			callbacks.setPromptState(newEventCollector(), testAcknowledgingEventSink(), callbacks.baseSession)
 
 			resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 				ToolCall: tc.toolCall,
@@ -1853,7 +1858,7 @@ func TestRequestPermissionRejectedByMemohToolApprovalSelectsRejectOption(t *test
 		events: &toolEventEmitter{},
 	}
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -1914,7 +1919,7 @@ func TestRequestPermissionSystemRejectedByMemohToolApprovalCancels(t *testing.T)
 		events: &toolEventEmitter{},
 	}
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -1970,7 +1975,7 @@ func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
 		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	term, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
 		Command: "printf",
@@ -2044,7 +2049,7 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	_, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
 		Command: "pwd",
@@ -2121,7 +2126,7 @@ func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
 		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	if _, err := callbacks.WriteTextFile(context.Background(), acp.WriteTextFileRequest{
 		Path:    "/data/review.txt",
@@ -2186,7 +2191,7 @@ func TestACPFileCallbacksRecheckRuntimeGuardAfterApproval(t *testing.T) {
 				},
 				acpprofile.DefaultToolQuirks(),
 			)
-			callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+			callbacks.setPromptState(newEventCollector(), testAcknowledgingEventSink(), callbacks.baseSession)
 
 			if err := tt.run(context.Background(), callbacks); !errors.Is(err, guardErr) {
 				t.Fatalf("%s error = %v, want runtime guard error", tt.name, err)
@@ -2216,7 +2221,7 @@ func TestACPCreateTerminalRechecksRuntimeGuardAfterApproval(t *testing.T) {
 		},
 		acpprofile.DefaultToolQuirks(),
 	)
-	callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+	callbacks.setPromptState(newEventCollector(), testAcknowledgingEventSink(), callbacks.baseSession)
 
 	if _, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{Command: "echo stale"}); !errors.Is(err, guardErr) {
 		t.Fatalf("CreateTerminal() error = %v, want runtime guard error", err)
@@ -2365,7 +2370,7 @@ func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing
 		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	_, err := callbacks.WriteTextFile(context.Background(), acp.WriteTextFileRequest{
 		Path:    "/data/review.txt",
@@ -2411,7 +2416,7 @@ func TestRequestPermissionNonInteractiveCancels(t *testing.T) {
 		},
 		events: &toolEventEmitter{},
 	}
-	callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+	callbacks.setPromptState(newEventCollector(), testAcknowledgingEventSink(), callbacks.baseSession)
 
 	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -2520,7 +2525,7 @@ func TestRequestPermissionScopeRejectsOutOfRootPaths(t *testing.T) {
 				},
 				events: &toolEventEmitter{},
 			}
-			callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+			callbacks.setPromptState(newEventCollector(), testAcknowledgingEventSink(), callbacks.baseSession)
 
 			resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 				ToolCall: tc.toolCall,
@@ -2575,7 +2580,7 @@ func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
 		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	permission, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -2644,7 +2649,7 @@ func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
 		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	if _, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -2707,7 +2712,7 @@ func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
 		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, testAcknowledgingEventSink(), callbacks.baseSession)
 
 	// The permission request carries the raw command with loose spacing and no
 	// cwd; the terminal create rebuilds it from Command+Args and adds a cwd.

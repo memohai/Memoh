@@ -399,7 +399,8 @@ func compatibleCoveredSource(candidate, expected CoveredSource) bool {
 	return compatibleCoverageRef(candidate.Ref, expected.Ref) &&
 		candidate.ExternalMessageID == expected.ExternalMessageID &&
 		candidate.SourceReplyToMessageID == expected.SourceReplyToMessageID &&
-		candidate.CreatedAtMs == expected.CreatedAtMs
+		candidate.CreatedAtMs == expected.CreatedAtMs &&
+		(expected.EventCursor == 0 || candidate.EventCursor == expected.EventCursor)
 }
 
 func compatibleCoverageRef(candidate contextfrag.ContextRef, expected contextfrag.ContextRef) bool {

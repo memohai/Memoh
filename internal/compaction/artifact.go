@@ -15,13 +15,17 @@ import (
 	"github.com/memohai/memoh/internal/historyfrag"
 )
 
-const ArtifactVersion = 1
+const (
+	ArtifactVersion        = 1
+	maxArtifactEventCursor = 1<<53 - 1
+)
 
 type CoveredSource struct {
 	Ref                    contextfrag.ContextRef `json:"ref"`
 	ExternalMessageID      string                 `json:"external_message_id,omitempty"`
 	SourceReplyToMessageID string                 `json:"source_reply_to_message_id,omitempty"`
 	CreatedAtMs            int64                  `json:"created_at_ms,omitempty"`
+	EventCursor            int64                  `json:"event_cursor,omitempty"`
 }
 
 type Artifact struct {
@@ -105,6 +109,7 @@ func artifactMetadataFor(items []CompactionCandidate, ids []pgtype.UUID) (artifa
 			ExternalMessageID:      item.Record.ExternalMessageID,
 			SourceReplyToMessageID: item.Record.SourceReplyToMessageID,
 			CreatedAtMs:            createdAtMs,
+			EventCursor:            item.Record.EventCursor,
 		})
 	}
 	sort.SliceStable(covered, func(i, j int) bool {
@@ -141,6 +146,9 @@ func validatePersistedArtifactCoverage(covered []CoveredSource) error {
 	for i, source := range covered {
 		if err := validatePersistedCoverageRef(source.Ref); err != nil {
 			return fmt.Errorf("ref %d: %w", i, err)
+		}
+		if source.EventCursor < 0 || source.EventCursor > maxArtifactEventCursor {
+			return fmt.Errorf("ref %d: event_cursor %d is outside the JSON-safe range", i, source.EventCursor)
 		}
 		key := source.Ref.StableKey()
 		if _, ok := seen[key]; ok {
