@@ -1227,8 +1227,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}, text)
 
 			queueMessage := inboundMode == ModeQueue
-			switch inboundMode {
-			case ModeInject:
+			if inboundMode == ModeInject {
 				// Don't persist here — the injected message will be interleaved
 				// at the correct position within the round by
 				// interleaveInjectedMessages in storeRound.
