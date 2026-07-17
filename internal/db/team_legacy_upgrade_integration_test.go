@@ -18,7 +18,7 @@ func TestMigrateLegacyInstallPreservesRows(t *testing.T) {
 	dsn := teamMigrationDSN(t)
 	pool := resetToEmpty(t)
 
-	teamSteps := countTeamMigrations(t)
+	teamSteps := countMigrationsFromTeamCore(t)
 
 	// Apply the chain up to (but not including) the team migrations — the
 	// "legacy install" state.
@@ -113,7 +113,7 @@ func TestMigrateDownFailClosedForMultiTeam(t *testing.T) {
 		t.Fatalf("insert non-default team: %v", err)
 	}
 	// Stepping the team migrations down must fail closed.
-	if downErr := tryStepDown(t, dsn, countTeamMigrations(t)); downErr == nil {
+	if downErr := tryStepDown(t, dsn, countMigrationsFromTeamCore(t)); downErr == nil {
 		t.Fatal("stepping team migrations down must fail closed with a non-default team present")
 	}
 }
@@ -125,7 +125,7 @@ func TestMigrateDownSingletonSafe(t *testing.T) {
 	dsn := teamMigrationDSN(t)
 	pool := freshMigratedDB(t)
 
-	steps := countTeamMigrations(t)
+	steps := countMigrationsFromTeamCore(t)
 	stepDown(t, dsn, steps)
 	var teamsExists bool
 	if err := pool.QueryRow(ctx, `
@@ -143,7 +143,7 @@ func TestTeamMigrationsLeaveUserTablesUntouched(t *testing.T) {
 	ctx := context.Background()
 	dsn := teamMigrationDSN(t)
 	pool := resetToEmpty(t)
-	teamSteps := countTeamMigrations(t)
+	teamSteps := countMigrationsFromTeamCore(t)
 	stepUpToPreTeam(t, dsn, teamSteps)
 
 	if _, err := pool.Exec(ctx, `

@@ -20,6 +20,7 @@ on:
       - "pnpm-workspace.yaml"
       - "eslint.config.mjs"
       - "tsconfig.json"
+      - "vitest.config.ts"
       - ".github/workflows/eslint.yml"
   pull_request:
     branches: ["main"]
@@ -40,6 +41,7 @@ on:
       - "pnpm-workspace.yaml"
       - "eslint.config.mjs"
       - "tsconfig.json"
+      - "vitest.config.ts"
       - ".github/workflows/eslint.yml"
   workflow_dispatch:
 
@@ -70,3 +72,25 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run ESLint
         run: pnpm lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run Vitest
+        run: pnpm test --run --testTimeout=15000 apps/web/src/composables/api/useChat.ws.test.ts apps/web/src/store/chat-list.test.ts
+      - name: Typecheck Web
+        run: pnpm --filter @memohai/web typecheck

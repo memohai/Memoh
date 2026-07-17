@@ -41,7 +41,15 @@ type terminalManager struct {
 	terminals map[string]*terminal
 }
 
-type terminalApprovalFunc func(toolCallID string, input map[string]any) (terminalApprovalResult, error)
+type (
+	terminalApprovalFunc func(toolCallID string, input map[string]any) (terminalApprovalResult, error)
+	terminalRuntimeGuard func(context.Context) error
+)
+
+type terminalRuntimeScope struct {
+	validate   terminalRuntimeGuard
+	runContext context.Context
+}
 
 type terminalApprovalResult struct {
 	Approved   bool
@@ -51,10 +59,11 @@ type terminalApprovalResult struct {
 }
 
 type terminal struct {
-	stream      *bridge.ExecStream
-	outputLimit ToolOutputLimit
-	id          string
-	input       map[string]any
+	stream         *bridge.ExecStream
+	outputLimit    ToolOutputLimit
+	id             string
+	input          map[string]any
+	releaseContext func()
 
 	mu        sync.Mutex
 	output    string
@@ -103,7 +112,7 @@ func (m *terminalManager) setToolOutputLimit(limit ToolOutputLimit) {
 	m.mu.Unlock()
 }
 
-func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminalRequest, approve terminalApprovalFunc) (acp.CreateTerminalResponse, error) {
+func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest, approve terminalApprovalFunc, runtimeScope terminalRuntimeScope) (acp.CreateTerminalResponse, error) {
 	cwd := m.defaultCwd
 	if p.Cwd != nil && strings.TrimSpace(*p.Cwd) != "" {
 		resolved, err := m.resolvePath(*p.Cwd)
@@ -175,17 +184,38 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 		}
 		env = append(env, name+"="+item.Value)
 	}
-	stream, err := m.client.ExecStreamWithOptions(m.ctx, command, cwd, m.timeout, bridge.ExecOptions{ //nolint:contextcheck // use the ACP turn context so terminal output survives the create RPC.
+	if runtimeScope.validate != nil {
+		if err := runtimeScope.validate(ctx); err != nil {
+			m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
+			return acp.CreateTerminalResponse{}, err
+		}
+	}
+	execCtx := m.ctx
+	releaseExecContext := func() {}
+	if runtimeScope.runContext != nil {
+		var cancelExec context.CancelFunc
+		execCtx, cancelExec = context.WithCancel(m.ctx)
+		stopRunCancel := context.AfterFunc(runtimeScope.runContext, cancelExec) //nolint:contextcheck // The owning run is deliberately independent from the ACP callback context.
+		if runtimeScope.runContext.Err() != nil {
+			cancelExec()
+		}
+		releaseExecContext = func() {
+			stopRunCancel()
+			cancelExec()
+		}
+	}
+	stream, err := m.client.ExecStreamWithOptions(execCtx, command, cwd, m.timeout, bridge.ExecOptions{ //nolint:contextcheck // execution outlives the create RPC but not its owning run.
 		Env:      env,
 		CleanEnv: m.cleanEnv,
 		UnsetEnv: m.unsetEnv,
 	})
 	if err != nil {
+		releaseExecContext()
 		m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
 		return acp.CreateTerminalResponse{}, err
 	}
 
-	term := &terminal{stream: stream, outputLimit: outputLimit, id: toolCallID, input: input, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
+	term := &terminal{stream: stream, outputLimit: outputLimit, id: toolCallID, input: input, releaseContext: releaseExecContext, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
 	m.mu.Lock()
 	m.terminals[id] = term
 	m.mu.Unlock()
@@ -495,6 +525,9 @@ func (t *terminal) kill(signal string) {
 
 func (t *terminal) finish(code *int, signal *string) {
 	t.doneOnce.Do(func() {
+		if t.releaseContext != nil {
+			t.releaseContext()
+		}
 		t.mu.Lock()
 		if code != nil {
 			v := *code

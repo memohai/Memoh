@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/message/event"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 // DBService persists and reads bot history messages.
@@ -65,6 +66,10 @@ type transactionalQueries interface {
 	InTx(ctx context.Context, fn func(dbstore.Queries) error) error
 }
 
+type runtimeFencedSessionMetadataWriter interface {
+	UpdateSessionMetadataWithRuntimeFence(ctx context.Context, arg sqlc.UpdateSessionMetadataWithRuntimeFenceParams) (sqlc.BotSession, error)
+}
+
 // NewService creates a message service.
 func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.Publisher) *DBService {
 	if log == nil {
@@ -102,6 +107,19 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 }
 
 func (s *DBService) persistOnce(ctx context.Context, input PersistInput) (Message, error) {
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		var result Message
+		if err := runtimefence.InTransaction(ctx, s.queries, input.BotID, input.SessionID, func(queries dbstore.Queries) error {
+			txService := *s
+			txService.queries = queries
+			var err error
+			result, err = txService.persist(ctx, input)
+			return err
+		}); err != nil {
+			return Message{}, err
+		}
+		return result, nil
+	}
 	if result, handled, err := s.persistDirectWithoutTx(ctx, input); handled || err != nil {
 		if err != nil {
 			return Message{}, err
@@ -243,6 +261,85 @@ func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistIn
 		s.publishMessageCreated(messages[i])
 	}
 	return messages, true, nil
+}
+
+// PersistRound writes all messages and history links under one PostgreSQL
+// transaction. Distributed callers additionally validate their runtime fence
+// in that transaction; local replacements use the same atomic write without a
+// distributed ownership token.
+func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions) ([]Message, bool, error) {
+	if s == nil || s.queries == nil || len(inputs) == 0 {
+		return nil, false, nil
+	}
+	_, fenced := runtimefence.FromContext(ctx)
+	if !fenced && options.Replacement == nil {
+		return nil, false, nil
+	}
+	botID := strings.TrimSpace(inputs[0].BotID)
+	sessionID := strings.TrimSpace(inputs[0].SessionID)
+	if botID == "" || sessionID == "" {
+		return nil, true, errors.New("atomic round requires bot and session ids")
+	}
+	for _, input := range inputs[1:] {
+		if strings.TrimSpace(input.BotID) != botID || strings.TrimSpace(input.SessionID) != sessionID {
+			return nil, true, errors.New("atomic round spans multiple sessions")
+		}
+	}
+
+	const maxTurnSequenceRetries = 3
+	var lastErr error
+	for attempt := 0; attempt < maxTurnSequenceRetries; attempt++ {
+		persisted := make([]Message, 0, len(inputs))
+		persist := func(queries dbstore.Queries) error {
+			txService := *s
+			txService.queries = queries
+			txService.publisher = nil
+			turnRequestMessageID := strings.TrimSpace(inputs[0].TurnRequestMessageID)
+			for _, original := range inputs {
+				input := original
+				if !input.SkipHistoryTurn {
+					input.TurnRequestMessageID = turnRequestMessageID
+				}
+				message, err := txService.persist(ctx, input)
+				if err != nil {
+					return err
+				}
+				if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn {
+					turnRequestMessageID = message.ID
+				}
+				persisted = append(persisted, message)
+			}
+			if options.Replacement != nil {
+				if err := txService.replacePersistedRound(ctx, sessionID, persisted, *options.Replacement); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		var err error
+		if fenced {
+			err = runtimefence.InTransaction(ctx, s.queries, botID, sessionID, persist)
+		} else {
+			txer, ok := s.queries.(transactionalQueries)
+			if !ok {
+				return nil, true, runtimefence.ErrTransactionsUnsupported
+			}
+			err = txer.InTx(ctx, persist)
+		}
+		if err == nil {
+			for i, message := range persisted {
+				if !inputs[i].SkipHistoryTurn {
+					s.publishMessageCreated(message)
+				}
+			}
+			return persisted, true, nil
+		}
+		lastErr = err
+		if !isTurnSequenceUniqueViolation(err) {
+			return nil, true, err
+		}
+	}
+	return nil, true, lastErr
 }
 
 func isToolTailRoundShape(inputs []PersistInput) bool {
@@ -515,7 +612,7 @@ func (s *DBService) finishPersistedMessage(ctx context.Context, result Message, 
 			Name:        ref.Name,
 			Metadata:    marshalMetadata(ref.Metadata),
 		}); assetErr != nil {
-			s.logger.Warn("create message asset link failed", slog.String("message_id", result.ID), slog.Any("error", assetErr))
+			return Message{}, fmt.Errorf("create message asset link for %s: %w", result.ID, assetErr)
 		}
 	}
 
@@ -1110,28 +1207,99 @@ func (s *DBService) GetLatestVisibleTurnBySession(ctx context.Context, sessionID
 	return toHistoryTurn(row), nil
 }
 
-func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error) {
+func (s *DBService) replacePersistedRound(ctx context.Context, sessionID string, persisted []Message, replacement TurnReplacement) error {
+	requestMessageID := strings.TrimSpace(replacement.RequestMessageID)
+	if requestMessageID == "" {
+		requestMessageID = firstPersistedRoleID(persisted, "user")
+	}
+	assistantMessageID := firstPersistedRoleID(persisted, "assistant")
+	if assistantMessageID == "" {
+		return errors.New("replacement assistant message was not persisted")
+	}
+	if _, err := replaceHistoryTurn(ctx, s.queries, sessionID, replacement.OldTurnID, requestMessageID, assistantMessageID, replacement.Reason); err != nil {
+		return fmt.Errorf("replace persisted history turn: %w", err)
+	}
+	if replacement.SessionMetadata == nil {
+		return nil
+	}
+	metadata, err := json.Marshal(replacement.SessionMetadata)
+	if err != nil {
+		return fmt.Errorf("marshal replacement session metadata: %w", err)
+	}
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
-		return HistoryTurn{}, err
+		return err
+	}
+	fence, fenced := runtimefence.FromContext(ctx)
+	if !fenced {
+		if _, err := s.queries.UpdateSessionMetadata(ctx, sqlc.UpdateSessionMetadataParams{
+			Metadata: metadata,
+			ID:       pgSessionID,
+		}); err != nil {
+			return fmt.Errorf("update replacement session metadata: %w", err)
+		}
+		return nil
+	}
+	writer, ok := s.queries.(runtimeFencedSessionMetadataWriter)
+	if !ok {
+		return errors.New("message store does not support fenced session metadata updates")
+	}
+	pgBotID, err := dbpkg.ParseUUID(fence.BotID)
+	if err != nil {
+		return err
+	}
+	if _, err := writer.UpdateSessionMetadataWithRuntimeFence(ctx, sqlc.UpdateSessionMetadataWithRuntimeFenceParams{
+		Metadata:            metadata,
+		ID:                  pgSessionID,
+		BotID:               pgBotID,
+		RuntimeFencingToken: fence.Token,
+	}); errors.Is(err, pgx.ErrNoRows) {
+		return runtimefence.ErrStale
+	} else if err != nil {
+		return fmt.Errorf("update replacement session metadata: %w", err)
+	}
+	return nil
+}
+
+func firstPersistedRoleID(messages []Message, role string) string {
+	for _, message := range messages {
+		if strings.EqualFold(strings.TrimSpace(message.Role), role) && strings.TrimSpace(message.ID) != "" {
+			return strings.TrimSpace(message.ID)
+		}
+	}
+	return ""
+}
+
+func replaceHistoryTurn(
+	ctx context.Context,
+	queries dbstore.Queries,
+	sessionID string,
+	oldTurnID string,
+	requestMessageID string,
+	assistantMessageID string,
+	reason string,
+) (sqlc.ReplaceHistoryTurnRow, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return sqlc.ReplaceHistoryTurnRow{}, err
 	}
 	pgOldTurnID, err := dbpkg.ParseUUID(oldTurnID)
 	if err != nil {
-		return HistoryTurn{}, fmt.Errorf("invalid old turn id: %w", err)
+		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid old turn id: %w", err)
 	}
 	pgRequestMessageID, err := parseOptionalUUID(requestMessageID)
 	if err != nil {
-		return HistoryTurn{}, fmt.Errorf("invalid request message id: %w", err)
+		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid request message id: %w", err)
 	}
 	pgAssistantMessageID, err := parseOptionalUUID(assistantMessageID)
 	if err != nil {
-		return HistoryTurn{}, fmt.Errorf("invalid assistant message id: %w", err)
+		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid assistant message id: %w", err)
 	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "replace"
 	}
-	row, err := s.queries.ReplaceHistoryTurn(ctx, sqlc.ReplaceHistoryTurnParams{
+	return queries.ReplaceHistoryTurn(ctx, sqlc.ReplaceHistoryTurnParams{
 		OldTurnID:          pgOldTurnID,
 		SessionID:          pgSessionID,
 		RequestMessageID:   pgRequestMessageID,
@@ -1139,6 +1307,19 @@ func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID
 		SupersededAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 		SupersededReason:   pgtype.Text{String: reason, Valid: true},
 	})
+}
+
+func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error) {
+	var row sqlc.ReplaceHistoryTurnRow
+	var err error
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		err = runtimefence.InTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
+			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+			return err
+		})
+	} else {
+		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+	}
 	if err != nil {
 		return HistoryTurn{}, err
 	}
@@ -1151,30 +1332,49 @@ func (s *DBService) LinkAssets(ctx context.Context, messageID string, assets []A
 	if err != nil {
 		return fmt.Errorf("invalid message id: %w", err)
 	}
-	for _, ref := range assets {
-		contentHash := strings.TrimSpace(ref.ContentHash)
-		if contentHash == "" {
-			continue
+	link := func(queries dbstore.Queries) error {
+		if fence, fenced := runtimefence.FromContext(ctx); fenced {
+			pgSessionID, parseErr := dbpkg.ParseUUID(fence.SessionID)
+			if parseErr != nil {
+				return parseErr
+			}
+			row, loadErr := queries.GetMessageByIDBySession(ctx, sqlc.GetMessageByIDBySessionParams{SessionID: pgSessionID, MessageID: pgMsgID})
+			if loadErr != nil {
+				return loadErr
+			}
+			if row.BotID.String() != fence.BotID {
+				return runtimefence.ErrStale
+			}
 		}
-		role := ref.Role
-		if strings.TrimSpace(role) == "" {
-			role = "attachment"
+		for _, ref := range assets {
+			contentHash := strings.TrimSpace(ref.ContentHash)
+			if contentHash == "" {
+				continue
+			}
+			role := ref.Role
+			if strings.TrimSpace(role) == "" {
+				role = "attachment"
+			}
+			if ref.Ordinal < math.MinInt32 || ref.Ordinal > math.MaxInt32 {
+				return fmt.Errorf("asset ordinal out of range: %d", ref.Ordinal)
+			}
+			if _, assetErr := queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
+				MessageID:   pgMsgID,
+				Role:        role,
+				Ordinal:     int32(ref.Ordinal),
+				ContentHash: contentHash,
+				Name:        ref.Name,
+				Metadata:    marshalMetadata(ref.Metadata),
+			}); assetErr != nil {
+				return fmt.Errorf("link asset to message %s: %w", messageID, assetErr)
+			}
 		}
-		if ref.Ordinal < math.MinInt32 || ref.Ordinal > math.MaxInt32 {
-			return fmt.Errorf("asset ordinal out of range: %d", ref.Ordinal)
-		}
-		if _, assetErr := s.queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
-			MessageID:   pgMsgID,
-			Role:        role,
-			Ordinal:     int32(ref.Ordinal),
-			ContentHash: contentHash,
-			Name:        ref.Name,
-			Metadata:    marshalMetadata(ref.Metadata),
-		}); assetErr != nil {
-			s.logger.Warn("link asset failed", slog.String("message_id", messageID), slog.Any("error", assetErr))
-		}
+		return nil
 	}
-	return nil
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		return runtimefence.InTransaction(ctx, s.queries, "", "", link)
+	}
+	return link(s.queries)
 }
 
 // DeleteByBot deletes all messages for a bot.

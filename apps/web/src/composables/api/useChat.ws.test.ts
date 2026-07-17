@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { client } from '@memohai/sdk/client'
 import { connectWebSocket } from './useChat.ws'
 
@@ -36,6 +36,10 @@ class MockWebSocket {
     this.readyState = MockWebSocket.OPEN
     this.onopen?.()
   }
+
+  emit(payload: unknown) {
+    this.onmessage?.({ data: JSON.stringify(payload) })
+  }
 }
 
 describe('useChat.ws', () => {
@@ -53,6 +57,10 @@ describe('useChat.ws', () => {
       getItem: vi.fn(() => ''),
     })
     vi.stubGlobal('WebSocket', MockWebSocket)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('queues outbound messages until socket opens', () => {
@@ -85,6 +93,56 @@ describe('useChat.ws', () => {
     expect(JSON.parse(socket.sent[0]!)).toEqual({
       type: 'abort',
       stream_id: 'stream-1',
+    })
+  })
+
+  it('lets scripted server events drive each websocket client independently', () => {
+    const firstHandler = vi.fn()
+    const secondHandler = vi.fn()
+    connectWebSocket('bot-1', firstHandler)
+    connectWebSocket('bot-1', secondHandler)
+    const first = MockWebSocket.instances[0]!
+    const second = MockWebSocket.instances[1]!
+    first.open()
+    second.open()
+
+    first.emit({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' })
+    second.emit({ type: 'message', stream_id: 'stream-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
+
+    expect(firstHandler).toHaveBeenCalledTimes(1)
+    expect(firstHandler).toHaveBeenCalledWith({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' })
+    expect(secondHandler).toHaveBeenCalledTimes(1)
+    expect(secondHandler).toHaveBeenCalledWith({ type: 'message', stream_id: 'stream-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
+  })
+
+  it('reconnects after disconnect and flushes queued messages on the new socket', () => {
+    vi.useFakeTimers()
+    const ws = connectWebSocket('bot-1', vi.fn())
+    const first = MockWebSocket.instances[0]!
+    first.open()
+
+    first.close()
+    expect(ws.connected).toBe(false)
+
+    ws.send({
+      type: 'message',
+      stream_id: 'stream-after-reconnect',
+      session_id: 'session-1',
+      text: 'resume',
+    })
+
+    vi.advanceTimersByTime(1000)
+    const second = MockWebSocket.instances[1]!
+    expect(second).toBeDefined()
+    expect(second.sent).toEqual([])
+
+    second.open()
+
+    expect(JSON.parse(second.sent[0]!)).toEqual({
+      type: 'message',
+      stream_id: 'stream-after-reconnect',
+      session_id: 'session-1',
+      text: 'resume',
     })
   })
 

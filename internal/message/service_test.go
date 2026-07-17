@@ -3,6 +3,7 @@ package message
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -16,7 +17,12 @@ import (
 type runtimeSnapshotQueries struct {
 	dbstore.Queries
 
-	created sqlc.CreateMessageParams
+	created  sqlc.CreateMessageParams
+	assetErr error
+}
+
+func (q *runtimeSnapshotQueries) CreateMessageAsset(context.Context, sqlc.CreateMessageAssetParams) (sqlc.CreateMessageAssetRow, error) {
+	return sqlc.CreateMessageAssetRow{}, q.assetErr
 }
 
 func (*runtimeSnapshotQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
@@ -96,6 +102,55 @@ func TestPersistResolvesRuntimeSnapshotFromSession(t *testing.T) {
 	}
 	if msg.SessionMode != "chat" || msg.RuntimeType != "acp_agent" {
 		t.Fatalf("message runtime snapshot = %q/%q, want chat/acp_agent", msg.SessionMode, msg.RuntimeType)
+	}
+}
+
+func TestPersistPropagatesMessageAssetCreationFailure(t *testing.T) {
+	queries := &runtimeSnapshotQueries{assetErr: errors.New("asset link failed")}
+	svc := NewService(nil, queries)
+
+	_, err := svc.Persist(context.Background(), PersistInput{
+		BotID:     "11111111-1111-1111-1111-111111111111",
+		SessionID: "22222222-2222-2222-2222-222222222222",
+		Role:      "user",
+		Content:   []byte(`{"type":"text","text":"hello"}`),
+		Assets:    []AssetRef{{ContentHash: "sha256:asset", Role: "attachment"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "asset link failed") {
+		t.Fatalf("Persist() error = %v, want asset creation failure", err)
+	}
+}
+
+type clearHistoryQueries struct {
+	dbstore.Queries
+	botID     pgtype.UUID
+	sessionID pgtype.UUID
+}
+
+func (q *clearHistoryQueries) ClearHistoryByBot(_ context.Context, id pgtype.UUID) error {
+	q.botID = id
+	return nil
+}
+
+func (q *clearHistoryQueries) ClearHistoryBySession(_ context.Context, id pgtype.UUID) error {
+	q.sessionID = id
+	return nil
+}
+
+func TestDeleteByScopeClearsCanonicalHistory(t *testing.T) {
+	queries := &clearHistoryQueries{}
+	svc := NewService(nil, queries)
+	const botID = "11111111-1111-1111-1111-111111111111"
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+
+	if err := svc.DeleteByBot(context.Background(), botID); err != nil {
+		t.Fatalf("DeleteByBot() error = %v", err)
+	}
+	if err := svc.DeleteBySession(context.Background(), sessionID); err != nil {
+		t.Fatalf("DeleteBySession() error = %v", err)
+	}
+	if queries.botID.String() != botID || queries.sessionID.String() != sessionID {
+		t.Fatalf("cleared scopes = bot:%s session:%s", queries.botID.String(), queries.sessionID.String())
 	}
 }
 

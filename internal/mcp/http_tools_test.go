@@ -3,12 +3,88 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/memohai/memoh/internal/runtimefence"
 )
+
+type fenceCapturingToolSource struct {
+	fence runtimefence.Fence
+	calls int
+}
+
+func (*fenceCapturingToolSource) ListTools(context.Context, ToolSessionContext) ([]ToolDescriptor, error) {
+	return []ToolDescriptor{{Name: "fenced_tool", InputSchema: map[string]any{"type": "object"}}}, nil
+}
+
+func (s *fenceCapturingToolSource) CallTool(ctx context.Context, _ ToolSessionContext, _ string, _ map[string]any) (map[string]any, error) {
+	s.calls++
+	s.fence, _ = runtimefence.FromContext(ctx)
+	return BuildToolSuccessResult(map[string]any{"ok": true}), nil
+}
+
+func TestToolGatewayMiddlewareChecksRuntimeGuardBeforeToolEffect(t *testing.T) {
+	guardErr := errors.New("runtime ownership lost")
+	source := &fenceCapturingToolSource{}
+	service := NewToolGatewayService(nil, []ToolSource{source})
+	middleware := ToolGatewayMiddleware(service, nil, ToolSessionContext{
+		BotID: "bot-1", RuntimeID: "rt-guarded", RuntimeActive: true,
+		RuntimeGuard: func(context.Context) error { return guardErr },
+	})(nil)
+
+	if _, err := middleware(context.Background(), "tools/call", callToolRequest("fenced_tool")); !errors.Is(err, guardErr) {
+		t.Fatalf("tools/call error = %v, want runtime guard error", err)
+	}
+	if source.calls != 0 {
+		t.Fatalf("tool source calls = %d, want zero after guard rejection", source.calls)
+	}
+}
+
+func TestToolGatewayMiddlewareStopsWhenOwningRunIsCanceled(t *testing.T) {
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	cancelRun()
+	source := &fenceCapturingToolSource{}
+	service := NewToolGatewayService(nil, []ToolSource{source})
+	middleware := ToolGatewayMiddleware(service, nil, ToolSessionContext{
+		BotID: "bot-1", RuntimeID: "rt-canceled", RuntimeActive: true, RunContext: runCtx,
+	})(nil)
+
+	if _, err := middleware(context.Background(), "tools/call", callToolRequest("fenced_tool")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("tools/call error = %v, want context.Canceled", err)
+	}
+	if source.calls != 0 {
+		t.Fatalf("tool source calls = %d, want zero for canceled run", source.calls)
+	}
+}
+
+func TestValidateRuntimeGuardRejectsCancellationDuringGuard(t *testing.T) {
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	session := ToolSessionContext{RunContext: runCtx}
+	bound, cancelBound := BindRuntimeContext(context.Background(), session)
+	defer cancelBound()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		session.RuntimeGuard = func(context.Context) error {
+			close(started)
+			<-release
+			return nil
+		}
+		done <- ValidateRuntimeGuard(bound, session)
+	}()
+	<-started
+	cancelRun()
+	close(release)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("runtime guard error = %v, want context.Canceled", err)
+	}
+}
 
 func TestToolGatewayMiddlewareScopesRuntimeToolCallsToActivePrompts(t *testing.T) {
 	provider := &gatewayTestProvider{
@@ -39,6 +115,26 @@ func TestToolGatewayMiddlewareScopesRuntimeToolCallsToActivePrompts(t *testing.T
 	}
 	if _, ok := result.(*sdkmcp.CallToolResult); !ok {
 		t.Fatalf("tools/call result = %#v", result)
+	}
+}
+
+func TestToolGatewayMiddlewareRestoresRuntimeFenceForToolCall(t *testing.T) {
+	want := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 19}
+	source := &fenceCapturingToolSource{}
+	service := NewToolGatewayService(nil, []ToolSource{source})
+	middleware := ToolGatewayMiddleware(service, nil, ToolSessionContext{
+		BotID:         want.BotID,
+		SessionID:     want.SessionID,
+		RuntimeID:     "rt-fenced",
+		RuntimeActive: true,
+		RuntimeFence:  want,
+	})(nil)
+
+	if _, err := middleware(context.Background(), "tools/call", callToolRequest("fenced_tool")); err != nil {
+		t.Fatalf("tools/call error = %v", err)
+	}
+	if source.fence != want {
+		t.Fatalf("tool call fence = %#v, want %#v", source.fence, want)
 	}
 }
 
