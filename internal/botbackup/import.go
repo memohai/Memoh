@@ -1375,9 +1375,10 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 	if err != nil {
 		return err
 	}
+	eventLinkWinners := restoredHistoryEventLinkWinners(messages, eventMap)
 	messageMap := map[string]pgtype.UUID{}
 	restoredMessages := make([]restoredHistoryMessage, 0, len(messages))
-	for _, item := range messages {
+	for i, item := range messages {
 		sessionID := pgtype.UUID{}
 		var descriptor restoredHistoryDescriptor
 		if item.SessionID.Valid {
@@ -1399,7 +1400,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			runtimeType = sessionpkg.RuntimeModel
 		}
 		eventID := pgtype.UUID{}
-		if item.EventID.Valid {
+		if eventLinkWinners[i] {
 			eventID = eventMap[item.EventID.String()]
 		}
 		created, err := q.CreateMessage(ctx, sqlc.CreateMessageParams{
@@ -1409,7 +1410,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			SourceReplyToMessageID: item.SourceReplyToMessageID,
 			Role:                   item.Role,
 			Content:                item.Content,
-			Metadata:               item.Metadata,
+			Metadata:               stripRestoredHistoryEventDedupMarker(item.Metadata),
 			Usage:                  item.Usage,
 			SessionMode:            sessionMode,
 			RuntimeType:            runtimeType,
