@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -136,6 +137,70 @@ func TestStreamChatACPDoesNotPublishUnpersistedPendingDecision(t *testing.T) {
 		if isACPDecisionProjectionEvent(streamed) {
 			t.Fatalf("unpersisted decision was published: %#v", streamed)
 		}
+	}
+}
+
+func TestStreamChatACPDeliversExternalChannelDecisionWithoutStreamID(t *testing.T) {
+	t.Parallel()
+
+	streamed := []event.StreamEvent{
+		{
+			Type:       event.ToolApprovalRequest,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			ApprovalID: "approval-1",
+			Status:     toolapproval.StatusPending,
+		},
+		{
+			Type:       event.ToolApprovalRequest,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			ApprovalID: "approval-1",
+			Status:     toolapproval.StatusRejected,
+		},
+		{
+			Type:        event.UserInputRequest,
+			ToolCallID:  "ask-1",
+			ToolName:    userinput.ToolNameAskUser,
+			UserInputID: "input-1",
+			Status:      userinput.StatusPending,
+		},
+		{
+			Type:        event.UserInputRequest,
+			ToolCallID:  "ask-1",
+			ToolName:    userinput.ToolNameAskUser,
+			UserInputID: "input-1",
+			Status:      userinput.StatusCanceled,
+		},
+	}
+	pool := &recordingACPPrompter{
+		result:       withTranscriptOutput(acpclient.PromptResult{Events: streamed}),
+		streamEvents: streamed,
+	}
+	resolver := &Resolver{
+		messageService: &recordingMessageService{},
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: acpRuntimeSessionServiceForTest("user-1"),
+		userInput:      &fakeUserInputService{},
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	chunks, errs := resolver.StreamChat(context.Background(), conversation.ChatRequest{
+		BotID:          "bot-1",
+		SessionID:      "session-1",
+		Query:          "inspect the app",
+		CurrentChannel: "telegram",
+	})
+	events := drainStreamChunks(t, chunks)
+	if err := <-errs; err != nil {
+		t.Fatalf("StreamChat() error = %v", err)
+	}
+	if pool.input.StreamID != "" || !pool.input.CanRequestUserInput {
+		t.Fatalf("ACP prompt stream/capability = %q/%t, want empty/true", pool.input.StreamID, pool.input.CanRequestUserInput)
+	}
+	if !containsStreamEvent(events, agentpkg.EventToolApprovalRequest) || !containsStreamEvent(events, agentpkg.EventUserInputRequest) {
+		t.Fatalf("events = %#v, want external approval and ask_user delivery", events)
 	}
 }
 

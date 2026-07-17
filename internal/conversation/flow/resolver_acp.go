@@ -156,7 +156,6 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	defer cancel()
 	canDeliverDecisions := eventCh != nil &&
 		sessionmode.IsInteractive(sess.Type) &&
-		strings.TrimSpace(req.StreamID) != "" &&
 		req.TurnReplacement == nil &&
 		len(req.DiscussDeliveryClaims) == 0
 	canRequestUserInput := canDeliverDecisions && r.userInput != nil
