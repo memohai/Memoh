@@ -20,6 +20,19 @@ func TestListIncludesClaudeCode(t *testing.T) {
 	if len(profile.SetupModes) != 3 || profile.SetupModes[0] != setupModeAPIKey || profile.SetupModes[1] != setupModeOAuth || profile.SetupModes[2] != setupModeSelf {
 		t.Fatalf("Claude Code setup modes = %#v", profile.SetupModes)
 	}
+	if profile.ReasoningConfigID != "effort" || profile.DefaultReasoningEffort != "high" {
+		t.Fatalf("Claude Code reasoning mapping = %q / %q", profile.ReasoningConfigID, profile.DefaultReasoningEffort)
+	}
+	if len(profile.LocalArgs) != 2 || profile.LocalArgs[1] != "@agentclientprotocol/claude-agent-acp@0.59.0" {
+		t.Fatalf("Claude Code local args = %#v", profile.LocalArgs)
+	}
+	codex, ok := Lookup(AgentCodexID)
+	if !ok || codex.DefaultReasoningEffort != "xhigh" || codex.ReasoningConfigID != "" {
+		t.Fatalf("Codex reasoning profile = %#v", codex)
+	}
+	if len(codex.LocalArgs) != 2 || codex.LocalArgs[1] != "@agentclientprotocol/codex-acp@1.1.4" {
+		t.Fatalf("Codex local args = %#v", codex.LocalArgs)
+	}
 }
 
 func TestListIncludesHermes(t *testing.T) {

@@ -512,6 +512,28 @@ func TestSessionPoolSetRuntimeModelEmptyResetsToDefault(t *testing.T) {
 	}
 }
 
+func TestSessionPoolSetRuntimeReasoningUpdatesEffort(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_REASONING", "1")
+	pool := newFakeScriptPool(t)
+
+	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
+		BotID:                 "bot-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		RuntimeOwnerAccountID: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	status, err := pool.SetRuntimeReasoning(context.Background(), "bot-1", created.RuntimeID, "low")
+	if err != nil {
+		t.Fatalf("SetRuntimeReasoning() error = %v", err)
+	}
+	if status.Reasoning == nil || status.Reasoning.CurrentEffort != "low" {
+		t.Fatalf("reasoning after set = %#v", status.Reasoning)
+	}
+}
+
 func TestSessionPoolBindRuntimeRejectsMismatches(t *testing.T) {
 	pool := newSessionPool(nil, nil, nil)
 	live := &acpclient.Session{}
@@ -802,6 +824,168 @@ func TestSessionPoolSetModelUpdatesRuntimeModel(t *testing.T) {
 	if status.Models == nil || !status.Models.Supported || status.Models.CurrentModelID != "gpt-5.1-codex-high" {
 		t.Fatalf("SetModel() models = %#v, want selected model", status.Models)
 	}
+}
+
+func TestSessionPoolSetReasoningUpdatesRuntimeEffort(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_REASONING", "1")
+	pool := newFakeScriptPool(t)
+
+	status, err := pool.SetReasoning(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		RuntimeOwnerAccountID: "user-1",
+	}, "low")
+	if err != nil {
+		t.Fatalf("SetReasoning() error = %v", err)
+	}
+	if status.State != "idle" || status.Reasoning == nil || status.Reasoning.CurrentEffort != "low" {
+		t.Fatalf("SetReasoning() status = %#v", status)
+	}
+}
+
+func TestSessionPoolPromptAppliesModelThenReasoningAndSkipsMatchingValues(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_REASONING", "1")
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODEL_RESETS_REASONING", "1")
+	configLog := filepath.Join(t.TempDir(), "config.log")
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_CONFIG_LOG", configLog)
+	pool := newFakeScriptPool(t)
+
+	input := PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		ModelID:               "gpt-5.1-codex-high",
+		ReasoningEffort:       "xhigh",
+		Prompt:                "first",
+		RuntimeOwnerAccountID: "user-1",
+	}
+	if _, err := pool.Prompt(context.Background(), input); err != nil {
+		t.Fatalf("Prompt(first) error = %v", err)
+	}
+	lines := nonEmptyLines(readOptionalFile(t, configLog))
+	if len(lines) < 3 {
+		t.Fatalf("first turn config log = %#v, want model, reasoning, and prompt entries", lines)
+	}
+	if got, want := lines[len(lines)-3:], []string{
+		"config:model=gpt-5.1-codex-high",
+		"config:thinking=xhigh",
+		"prompt:model=gpt-5.1-codex-high,reasoning=xhigh",
+	}; !equalStrings(got, want) {
+		t.Fatalf("first turn config log = %#v, want suffix %#v (all %#v)", got, want, lines)
+	}
+
+	if err := os.Truncate(configLog, 0); err != nil {
+		t.Fatal(err)
+	}
+	input.Prompt = "same config"
+	if _, err := pool.Prompt(context.Background(), input); err != nil {
+		t.Fatalf("Prompt(same config) error = %v", err)
+	}
+	if got, want := nonEmptyLines(readOptionalFile(t, configLog)), []string{
+		"prompt:model=gpt-5.1-codex-high,reasoning=xhigh",
+	}; !equalStrings(got, want) {
+		t.Fatalf("matching turn config log = %#v, want %#v", got, want)
+	}
+
+	if err := os.Truncate(configLog, 0); err != nil {
+		t.Fatal(err)
+	}
+	input.Prompt = "reasoning only"
+	input.ReasoningEffort = "low"
+	if _, err := pool.Prompt(context.Background(), input); err != nil {
+		t.Fatalf("Prompt(reasoning only) error = %v", err)
+	}
+	if got, want := nonEmptyLines(readOptionalFile(t, configLog)), []string{
+		"config:thinking=low",
+		"prompt:model=gpt-5.1-codex-high,reasoning=low",
+	}; !equalStrings(got, want) {
+		t.Fatalf("reasoning-only config log = %#v, want %#v", got, want)
+	}
+}
+
+func TestSessionPoolPromptRejectsUnavailableTurnConfigWithoutDroppingRuntime(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_REASONING", "1")
+	pool := newFakeScriptPool(t)
+
+	input := PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		ReasoningEffort:       "ultra",
+		Prompt:                "invalid config",
+		RuntimeOwnerAccountID: "user-1",
+	}
+	_, err := pool.Prompt(context.Background(), input)
+	if !errors.Is(err, acpclient.ErrReasoningEffortUnavailable) {
+		t.Fatalf("Prompt() error = %v, want ErrReasoningEffortUnavailable", err)
+	}
+	h := pool.sessionHandle("session-1")
+	if h == nil || h.session == nil || h.closed {
+		t.Fatalf("validation failure dropped reusable runtime: %#v", h)
+	}
+}
+
+func TestSessionPoolModelTransportFailureDropsUncertainRuntime(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_CONFIG_FAIL", "model")
+	pool := newFakeScriptPool(t)
+
+	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
+		BotID:                 "bot-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		RuntimeOwnerAccountID: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	_, err = pool.SetRuntimeModel(context.Background(), "bot-1", created.RuntimeID, "gpt-5.1-codex-high")
+	if !errors.Is(err, ErrRuntimeConfigUpdateFailed) {
+		t.Fatalf("SetRuntimeModel() error = %v, want ErrRuntimeConfigUpdateFailed", err)
+	}
+	if _, err := pool.RuntimeStatusByID("bot-1", created.RuntimeID); !errors.Is(err, ErrRuntimeNotFound) {
+		t.Fatalf("RuntimeStatusByID() error = %v, want dropped runtime", err)
+	}
+}
+
+func nonEmptyLines(value string) []string {
+	var out []string
+	for _, line := range strings.Split(value, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func readOptionalFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // reads a path created under t.TempDir.
+	if errors.Is(err, os.ErrNotExist) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestSessionPoolRuntimeStatusReportsActiveDuringColdStart(t *testing.T) {
@@ -2393,11 +2577,17 @@ func TestSessionPoolFakeAgentHelper(_ *testing.T) {
 }
 
 type sessionPoolFakeAgent struct {
-	conn *acp.AgentSideConnection
+	conn            *acp.AgentSideConnection
+	modelID         string
+	reasoningEffort string
 }
 
 func (*sessionPoolFakeAgent) Authenticate(context.Context, acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
 	return acp.AuthenticateResponse{}, nil
+}
+
+func (*sessionPoolFakeAgent) Logout(context.Context, acp.LogoutRequest) (acp.LogoutResponse, error) {
+	return acp.LogoutResponse{}, nil
 }
 
 func (*sessionPoolFakeAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
@@ -2421,29 +2611,16 @@ func (*sessionPoolFakeAgent) ListSessions(context.Context, acp.ListSessionsReque
 	return acp.ListSessionsResponse{}, nil
 }
 
-func (*sessionPoolFakeAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *sessionPoolFakeAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	resp := acp.NewSessionResponse{SessionId: acp.SessionId("session-pool-fake-session")}
 	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS") == "1" {
-		description := "Highest reasoning"
-		resp.Models = &acp.SessionModelState{
-			CurrentModelId: acp.ModelId("gpt-5.1-codex"),
-			AvailableModels: []acp.ModelInfo{
-				{ModelId: acp.ModelId("gpt-5.1-codex"), Name: "GPT-5.1 Codex"},
-				{ModelId: acp.ModelId("gpt-5.1-codex-high"), Name: "GPT-5.1 Codex High", Description: &description},
-			},
-		}
+		a.modelID = "gpt-5.1-codex"
 	}
+	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_REASONING") == "1" {
+		a.reasoningEffort = "high"
+	}
+	resp.ConfigOptions = a.configOptions()
 	return resp, nil
-}
-
-func (*sessionPoolFakeAgent) UnstableSetSessionModel(_ context.Context, p acp.UnstableSetSessionModelRequest) (acp.UnstableSetSessionModelResponse, error) {
-	if p.SessionId != acp.SessionId("session-pool-fake-session") {
-		return acp.UnstableSetSessionModelResponse{}, fmt.Errorf("unexpected session id %q", p.SessionId)
-	}
-	if p.ModelId == "" {
-		return acp.UnstableSetSessionModelResponse{}, errors.New("missing model id")
-	}
-	return acp.UnstableSetSessionModelResponse{}, nil
 }
 
 func (a *sessionPoolFakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
@@ -2466,6 +2643,7 @@ func (a *sessionPoolFakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) 
 			return acp.PromptResponse{}, fmt.Errorf("image block = %#v, want inline PNG", image)
 		}
 	}
+	a.appendConfigLog(fmt.Sprintf("prompt:model=%s,reasoning=%s", a.modelID, a.reasoningEffort))
 	_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{
 		SessionId: p.SessionId,
 		Update:    acp.UpdateAgentMessageText("session-pool-ok"),
@@ -2477,8 +2655,87 @@ func (*sessionPoolFakeAgent) ResumeSession(context.Context, acp.ResumeSessionReq
 	return acp.ResumeSessionResponse{}, nil
 }
 
-func (*sessionPoolFakeAgent) SetSessionConfigOption(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, nil
+func (a *sessionPoolFakeAgent) SetSessionConfigOption(_ context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	if p.ValueId == nil || p.ValueId.SessionId != acp.SessionId("session-pool-fake-session") {
+		return acp.SetSessionConfigOptionResponse{}, errors.New("unexpected config request")
+	}
+	value := string(p.ValueId.Value)
+	if strings.TrimSpace(os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_CONFIG_FAIL")) == string(p.ValueId.ConfigId) {
+		return acp.SetSessionConfigOptionResponse{}, errors.New("injected config transport failure")
+	}
+	switch string(p.ValueId.ConfigId) {
+	case "model":
+		if value != "gpt-5.1-codex" && value != "gpt-5.1-codex-high" {
+			return acp.SetSessionConfigOptionResponse{}, errors.New("unsupported model")
+		}
+		a.modelID = value
+		if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODEL_RESETS_REASONING") == "1" {
+			a.reasoningEffort = "low"
+		}
+	case "thinking":
+		if value != "low" && value != "high" && value != "xhigh" {
+			return acp.SetSessionConfigOptionResponse{}, errors.New("unsupported reasoning effort")
+		}
+		a.reasoningEffort = value
+	default:
+		return acp.SetSessionConfigOptionResponse{}, errors.New("unexpected config id")
+	}
+	a.appendConfigLog(fmt.Sprintf("config:%s=%s", p.ValueId.ConfigId, value))
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: a.configOptions()}, nil
+}
+
+func (*sessionPoolFakeAgent) appendConfigLog(line string) {
+	path := strings.TrimSpace(os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_CONFIG_LOG"))
+	if path == "" {
+		return
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // test helper writes to a temp path supplied by the test.
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintln(file, line)
+	_ = file.Close()
+}
+
+func (a *sessionPoolFakeAgent) reasoningConfigOptions() []acp.SessionConfigOption {
+	category := acp.SessionConfigOptionCategoryThoughtLevel
+	options := acp.SessionConfigSelectOptionsUngrouped{
+		{Value: acp.SessionConfigValueId("low"), Name: "Low"},
+		{Value: acp.SessionConfigValueId("high"), Name: "High"},
+		{Value: acp.SessionConfigValueId("xhigh"), Name: "X-High"},
+	}
+	return []acp.SessionConfigOption{{Select: &acp.SessionConfigOptionSelect{
+		Id:           acp.SessionConfigId("thinking"),
+		Name:         "Reasoning",
+		Type:         "select",
+		Category:     &category,
+		CurrentValue: acp.SessionConfigValueId(a.reasoningEffort),
+		Options:      acp.SessionConfigSelectOptions{Ungrouped: &options},
+	}}}
+}
+
+func (a *sessionPoolFakeAgent) configOptions() []acp.SessionConfigOption {
+	var options []acp.SessionConfigOption
+	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS") == "1" {
+		category := acp.SessionConfigOptionCategoryModel
+		description := "Highest reasoning"
+		models := acp.SessionConfigSelectOptionsUngrouped{
+			{Value: acp.SessionConfigValueId("gpt-5.1-codex"), Name: "GPT-5.1 Codex"},
+			{Value: acp.SessionConfigValueId("gpt-5.1-codex-high"), Name: "GPT-5.1 Codex High", Description: &description},
+		}
+		options = append(options, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{
+			Id:           acp.SessionConfigId("model"),
+			Name:         "Model",
+			Type:         "select",
+			Category:     &category,
+			CurrentValue: acp.SessionConfigValueId(a.modelID),
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &models},
+		}})
+	}
+	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_REASONING") == "1" {
+		options = append(options, a.reasoningConfigOptions()...)
+	}
+	return options
 }
 
 func (*sessionPoolFakeAgent) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {

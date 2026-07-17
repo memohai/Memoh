@@ -23,7 +23,7 @@
 #                       amd64/x86_64 or arm64/aarch64. Useful for emulated
 #                       workspace images in local development.
 #   CODEX_VERSION       Default: pinned @openai/codex version below
-#   CODEX_ACP_VERSION   Default: pinned @zed-industries/codex-acp version below
+#   CODEX_ACP_VERSION   Default: pinned @agentclientprotocol/codex-acp version below
 #   CLAUDE_AGENT_ACP_VERSION
 #                       Default: pinned @agentclientprotocol/claude-agent-acp version below
 #   HERMES_AGENT_VERSION
@@ -44,10 +44,10 @@ NODE_VERSION=24.14.0
 NPM_VERSION=10.9.2
 PYTHON_VERSION="${PYTHON_VERSION:-3.14.6}"
 PYTHON_STANDALONE_TAG="${PYTHON_STANDALONE_TAG:-20260623}"
-CODEX_VERSION="${CODEX_VERSION:-0.133.0}"
-CODEX_ACP_VERSION="${CODEX_ACP_VERSION:-0.15.0}"
-CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.44.0}"
-HERMES_AGENT_VERSION="${HERMES_AGENT_VERSION:-0.17.0}"
+CODEX_VERSION="${CODEX_VERSION:-0.144.5}"
+CODEX_ACP_VERSION="${CODEX_ACP_VERSION:-1.1.4}"
+CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.59.0}"
+HERMES_AGENT_VERSION="${HERMES_AGENT_VERSION:-0.18.2}"
 HERMES_AGENT_PACKAGE="${HERMES_AGENT_PACKAGE:-hermes-agent[acp,mcp]==$HERMES_AGENT_VERSION}"
 
 OUTDIR="${1:-.toolkit}"
@@ -584,7 +584,7 @@ install_acp_packages_with_toolkit_npm() {
     --cpu="$NPM_CPU" \
     --libc=glibc \
     "@openai/codex@$CODEX_VERSION" \
-    "@zed-industries/codex-acp@$CODEX_ACP_VERSION" \
+    "@agentclientprotocol/codex-acp@$CODEX_ACP_VERSION" \
     "@agentclientprotocol/claude-agent-acp@$CLAUDE_AGENT_ACP_VERSION"
 }
 
@@ -602,7 +602,7 @@ install_acp_packages_with_host_npm() {
     --cpu="$NPM_CPU" \
     --libc=glibc \
     "@openai/codex@$CODEX_VERSION" \
-    "@zed-industries/codex-acp@$CODEX_ACP_VERSION" \
+    "@agentclientprotocol/codex-acp@$CODEX_ACP_VERSION" \
     "@agentclientprotocol/claude-agent-acp@$CLAUDE_AGENT_ACP_VERSION"
 }
 
@@ -618,11 +618,11 @@ acp_package_at_version() {
 
 install_acp_packages() {
   codex_bin="$OUTDIR/acp/lib/node_modules/@openai/codex/bin/codex.js"
-  codex_acp_bin="$OUTDIR/acp/lib/node_modules/@zed-industries/codex-acp/bin/codex-acp.js"
+  codex_acp_bin="$OUTDIR/acp/lib/node_modules/@agentclientprotocol/codex-acp/dist/index.js"
   claude_agent_acp_bin="$OUTDIR/acp/lib/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"
   if [ -f "$codex_bin" ] && [ -f "$codex_acp_bin" ] && [ -f "$claude_agent_acp_bin" ] &&
     acp_package_at_version "@openai/codex" "$CODEX_VERSION" &&
-    acp_package_at_version "@zed-industries/codex-acp" "$CODEX_ACP_VERSION" &&
+    acp_package_at_version "@agentclientprotocol/codex-acp" "$CODEX_ACP_VERSION" &&
     acp_package_at_version "@agentclientprotocol/claude-agent-acp" "$CLAUDE_AGENT_ACP_VERSION"; then
     echo "ACP agent packages already installed at pinned versions; skipping npm install."
     return

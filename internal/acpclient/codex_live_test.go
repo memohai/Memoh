@@ -42,7 +42,7 @@ func TestCodexACPLiveLocal(t *testing.T) {
 		Command:     "npx",
 		Args: []string{
 			"-y",
-			"@zed-industries/codex-acp@0.15.0",
+			"@agentclientprotocol/codex-acp@1.1.4",
 		},
 		Timeout: 90 * time.Second,
 	})

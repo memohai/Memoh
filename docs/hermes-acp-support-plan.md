@@ -126,11 +126,10 @@ Hermes 的 ACP 入口包括：
 Hermes stdout 保留给 ACP JSON-RPC，普通日志写 stderr。Hermes 的 PyPI 包通过
 `hermes-agent[acp]` 暴露 `hermes-acp` 脚本，但 Memoh managed Hermes 必须使用
 `hermes-agent[acp,mcp]`：`acp` 只提供 ACP 入口，`mcp` 才会安装 Hermes 运行 ACP
-传入的 HTTP MCP server 所需的 Python SDK。上游 ACP Registry 在调研时使用 pinned
-`uvx` 分发方式：
+传入的 HTTP MCP server 所需的 Python SDK。Memoh 使用 pinned `uvx` 分发方式：
 
 ```text
-uvx --from 'hermes-agent[acp,mcp]==0.17.0' hermes-acp
+uvx --from 'hermes-agent[acp,mcp]==0.18.2' hermes-acp
 ```
 
 Hermes 使用 `HERMES_HOME` 作为 profile 和状态边界。一个 Hermes profile 通常
@@ -1281,8 +1280,8 @@ Phase 5：高级配置。
 
 ## 待确认问题
 
-- 第一版应该 pin 哪个 Hermes 版本？调研时上游 registry 使用 `0.17.0`，实现前要再
-  查一次最新稳定版本。
+- Hermes 当前固定为 `0.18.2`；后续升级前应重新核对其 ACP wire shape 与 Python
+  版本约束。
 - Hermes 是否有稳定的安全 session mode 或配置项可以强制所有危险操作走 ACP
   permission callback？
 - Hermes `custom` provider 当前按 named provider + `key_env` + `api_mode:

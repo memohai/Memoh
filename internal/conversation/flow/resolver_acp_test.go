@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/memohai/memoh/internal/acpfeedback"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -74,9 +77,11 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	if err := resolver.StreamChatWS(
 		context.Background(),
 		conversation.ChatRequest{
-			BotID:     "bot-1",
-			SessionID: "session-1",
-			Query:     "inspect the app",
+			BotID:           "bot-1",
+			SessionID:       "session-1",
+			Query:           "inspect the app",
+			Model:           "gpt-5.1-codex",
+			ReasoningEffort: "high",
 			Attachments: []conversation.ChatAttachment{{
 				Type:   "image",
 				Base64: "data:image/png;base64,aW1hZ2U=",
@@ -100,6 +105,9 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	}
 	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
 		t.Fatalf("ACP prompt input = %#v", pool.input)
+	}
+	if pool.input.ModelID != "gpt-5.1-codex" || pool.input.ReasoningEffort != "high" {
+		t.Fatalf("ACP turn config = model %q reasoning %q", pool.input.ModelID, pool.input.ReasoningEffort)
 	}
 	if pool.input.ContextURI != acpContextURI || !strings.Contains(pool.input.ContextMarkdown, "## Current Runtime") || !strings.Contains(pool.input.ContextMarkdown, "Bot ID: bot-1") {
 		t.Fatalf("ACP context = uri %q markdown %q, want dynamic Memoh context", pool.input.ContextURI, pool.input.ContextMarkdown)
@@ -1295,11 +1303,11 @@ func TestStreamACPAgentWSFeedbackErrorSkipsPersistence(t *testing.T) {
 	if !errors.Is(err, feedback) {
 		t.Fatalf("streamACPAgentWS() error = %v, want feedback error", err)
 	}
-	if len(messages.persisted) > 1 {
-		t.Fatalf("persisted %d messages, want at most the user turn for feedback error", len(messages.persisted))
+	if len(messages.persisted) != 1 || messages.persisted[0].Role != "user" {
+		t.Fatalf("staged messages = %#v, want only the user turn", messages.persisted)
 	}
-	if len(messages.persisted) == 1 && messages.persisted[0].Role != "user" {
-		t.Fatalf("persisted role = %q, want no assistant failure text for feedback error", messages.persisted[0].Role)
+	if len(messages.deleted) != 1 || !slices.Equal(messages.deleted[0], []string{"message-id"}) {
+		t.Fatalf("cleanup calls = %#v, want staged user deletion", messages.deleted)
 	}
 	events := drainAgentEvents(t, eventCh)
 	if !containsStreamEvent(events, agentpkg.EventStart) || containsStreamEvent(events, agentpkg.EventAbort) {
@@ -1353,7 +1361,54 @@ func TestStreamACPAgentWSImageCapabilityErrorUsesStructuredFeedback(t *testing.T
 		t.Fatalf("streamACPAgentWS() error = %#v, want image capability feedback", err)
 	}
 	if len(messages.persisted) != 1 || messages.persisted[0].Role != "user" {
-		t.Fatalf("persisted messages = %#v, want only the user turn", messages.persisted)
+		t.Fatalf("staged messages = %#v, want only the user turn", messages.persisted)
+	}
+	if len(messages.deleted) != 1 || !slices.Equal(messages.deleted[0], []string{"message-id"}) {
+		t.Fatalf("cleanup calls = %#v, want staged user deletion", messages.deleted)
+	}
+}
+
+func TestACPPromptConfigErrorsUseApplicationErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		code apperror.Code
+	}{
+		{
+			name: "model unsupported",
+			err:  acpclient.ErrModelSelectionUnsupported,
+			code: apperror.CodeACPModelSelectionUnsupported,
+		},
+		{
+			name: "model unavailable",
+			err:  fmt.Errorf("%w: stale", acpclient.ErrModelUnavailable),
+			code: apperror.CodeACPModelUnavailable,
+		},
+		{
+			name: "reasoning unsupported",
+			err:  acpclient.ErrReasoningSelectionUnsupported,
+			code: apperror.CodeACPReasoningUnsupported,
+		},
+		{
+			name: "reasoning unavailable",
+			err:  fmt.Errorf("%w: stale", acpclient.ErrReasoningEffortUnavailable),
+			code: apperror.CodeACPReasoningUnavailable,
+		},
+		{
+			name: "config transport failure",
+			err:  fmt.Errorf("%w: transport closed", acpagent.ErrRuntimeConfigUpdateFailed),
+			code: apperror.CodeACPConfigUpdateFailed,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			appErr := acpPromptConfigAppError(tt.err)
+			if got := apperror.CodeOf(appErr); got != tt.code {
+				t.Fatalf("acpPromptConfigAppError(%v) code = %q, want %q", tt.err, got, tt.code)
+			}
+		})
 	}
 }
 

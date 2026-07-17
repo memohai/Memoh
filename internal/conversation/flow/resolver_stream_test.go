@@ -18,6 +18,7 @@ import (
 type recordingMessageService struct {
 	persisted []messagepkg.PersistInput
 	replaced  int
+	deleted   [][]string
 }
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
@@ -94,7 +95,8 @@ func (s *recordingMessageService) ReplaceTurn(context.Context, string, string, s
 	return messagepkg.HistoryTurn{}, nil
 }
 
-func (*recordingMessageService) DeleteByIDs(context.Context, []string) error {
+func (s *recordingMessageService) DeleteByIDs(_ context.Context, ids []string) error {
+	s.deleted = append(s.deleted, append([]string(nil), ids...))
 	return nil
 }
 

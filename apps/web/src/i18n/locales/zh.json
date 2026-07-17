@@ -117,6 +117,14 @@
     "workspace": {
       "unreachable": "暂时无法连接工作区，请稍后重试。",
       "display_prepare_failed": "显示环境准备失败，请稍后重试。"
+    },
+    "acp": {
+      "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。",
+      "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
+      "model_unavailable": "所选模型已不再可用于这个外部 Agent。",
+      "reasoning_selection_unsupported": "这个外部 Agent 不支持选择推理强度。",
+      "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent。",
+      "config_update_failed": "外部 Agent 无法应用所选设置，请重试。"
     }
   },
   "auth": {
@@ -802,6 +810,7 @@
     "agentCodex": "Codex",
     "agentSwitchFailed": "切换 ACP Agent 失败",
     "modelSwitchFailed": "切换模型失败",
+    "reasoningSwitchFailed": "切换推理强度失败",
     "agentSwitchTimeout": "切换耗时过长，请重试。",
     "modelOptions": "选项",
     "modelEffort": "强度",

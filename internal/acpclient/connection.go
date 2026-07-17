@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 
@@ -25,8 +26,8 @@ func (c *clientConnection) Initialize(ctx context.Context, params acp.Initialize
 	return acp.SendRequest[acp.InitializeResponse](c.conn, ctx, acp.AgentMethodInitialize, params)
 }
 
-func (c *clientConnection) NewSession(ctx context.Context, params acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	return acp.SendRequest[acp.NewSessionResponse](c.conn, ctx, acp.AgentMethodSessionNew, params)
+func (c *clientConnection) NewSession(ctx context.Context, params acp.NewSessionRequest) (newSessionResponse, error) {
+	return acp.SendRequest[newSessionResponse](c.conn, ctx, acp.AgentMethodSessionNew, params)
 }
 
 func (c *clientConnection) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
@@ -50,11 +51,18 @@ func (c *clientConnection) SetSessionMode(ctx context.Context, params acp.SetSes
 }
 
 func (c *clientConnection) SetSessionConfigOption(ctx context.Context, params acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SendRequest[acp.SetSessionConfigOptionResponse](c.conn, ctx, acp.AgentMethodSessionSetConfigOption, params)
+	resp, err := acp.SendRequest[acp.SetSessionConfigOptionResponse](c.conn, ctx, acp.AgentMethodSessionSetConfigOption, params)
+	if err != nil {
+		return resp, err
+	}
+	if err := (&resp).Validate(); err != nil {
+		return resp, fmt.Errorf("validate session config response: %w", err)
+	}
+	return resp, nil
 }
 
-func (c *clientConnection) UnstableSetSessionModel(ctx context.Context, params acp.UnstableSetSessionModelRequest) (acp.UnstableSetSessionModelResponse, error) {
-	return acp.SendRequest[acp.UnstableSetSessionModelResponse](c.conn, ctx, acp.AgentMethodSessionSetModel, params)
+func (c *clientConnection) SetLegacySessionModel(ctx context.Context, params legacySetSessionModelRequest) (legacySetSessionModelResponse, error) {
+	return acp.SendRequest[legacySetSessionModelResponse](c.conn, ctx, legacyAgentMethodSessionSetModel, params)
 }
 
 func (c *clientConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {

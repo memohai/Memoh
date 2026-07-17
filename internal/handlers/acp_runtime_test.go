@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/acpclient"
 	"github.com/memohai/memoh/internal/acpfeedback"
 	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -31,21 +33,26 @@ type acpRuntimeQueries struct {
 }
 
 type fakeACPRuntimePool struct {
-	status          acpagent.RuntimeStatus
-	statusErr       error
-	ensureInput     acpagent.PromptInput
-	setModelInput   acpagent.PromptInput
-	setModelID      string
-	createInput     acpagent.CreateRuntimeInput
-	createErr       error
-	statusBotID     string
-	statusRuntimeID string
-	modelBotID      string
-	modelRuntimeID  string
-	modelID         string
-	closedBotID     string
-	closedRuntimeID string
-	closeErr        error
+	status             acpagent.RuntimeStatus
+	statusErr          error
+	ensureInput        acpagent.PromptInput
+	setModelInput      acpagent.PromptInput
+	setModelID         string
+	setReasoningInput  acpagent.PromptInput
+	setReasoningEffort string
+	createInput        acpagent.CreateRuntimeInput
+	createErr          error
+	statusBotID        string
+	statusRuntimeID    string
+	modelBotID         string
+	modelRuntimeID     string
+	modelID            string
+	reasoningBotID     string
+	reasoningRuntimeID string
+	reasoningEffort    string
+	closedBotID        string
+	closedRuntimeID    string
+	closeErr           error
 }
 
 func (*fakeACPRuntimePool) RuntimeStatus(sessionID, agentID, projectPath string) acpagent.RuntimeStatus {
@@ -68,6 +75,12 @@ func (p *fakeACPRuntimePool) SetModel(_ context.Context, input acpagent.PromptIn
 	return p.status, nil
 }
 
+func (p *fakeACPRuntimePool) SetReasoning(_ context.Context, input acpagent.PromptInput, effort string) (acpagent.RuntimeStatus, error) {
+	p.setReasoningInput = input
+	p.setReasoningEffort = effort
+	return p.status, nil
+}
+
 func (p *fakeACPRuntimePool) CreateRuntime(_ context.Context, input acpagent.CreateRuntimeInput) (acpagent.RuntimeStatus, error) {
 	p.createInput = input
 	return p.status, p.createErr
@@ -83,6 +96,13 @@ func (p *fakeACPRuntimePool) SetRuntimeModel(_ context.Context, botID, runtimeID
 	p.modelBotID = botID
 	p.modelRuntimeID = runtimeID
 	p.modelID = modelID
+	return p.status, p.statusErr
+}
+
+func (p *fakeACPRuntimePool) SetRuntimeReasoning(_ context.Context, botID, runtimeID, effort string) (acpagent.RuntimeStatus, error) {
+	p.reasoningBotID = botID
+	p.reasoningRuntimeID = runtimeID
+	p.reasoningEffort = effort
 	return p.status, p.statusErr
 }
 
@@ -462,6 +482,68 @@ func TestACPRuntimeHandlerSetModel(t *testing.T) {
 	}
 }
 
+func TestACPRuntimeHandlerSetReasoning(t *testing.T) {
+	t.Setenv("MEMOH_ACP_MCP_HTTP_BASE_URL", "http://example.com")
+
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "55555555-5555-5555-5555-555555555555"
+	queries := acpRuntimeQueries{
+		bot: testBotRow(botID, acpEnabledBotMetadata()),
+		session: sqlc.BotSession{
+			ID:    testUUID(sessionID),
+			BotID: testUUID(botID),
+			Type:  session.TypeACPAgent,
+			RuntimeMetadata: testJSON(map[string]any{
+				"acp_agent_id":             acpprofile.AgentCodexID,
+				"project_path":             "/data/app",
+				"runtime_owner_account_id": "user-1",
+			}),
+		},
+	}
+	pool := &fakeACPRuntimePool{status: acpagent.RuntimeStatus{
+		SessionID: sessionID,
+		AgentID:   acpprofile.AgentCodexID,
+		State:     "idle",
+		Reasoning: &acpclient.ReasoningState{
+			Supported:     true,
+			CurrentEffort: "low",
+			Available:     []acpclient.ReasoningEffortInfo{{ID: "low", Name: "Low"}},
+		},
+	}}
+	handler := newACPRuntimeHandler(
+		pool,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime/reasoning",
+		bytes.NewBufferString(`{"reasoning_effort":"low"}`),
+	)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime/reasoning")
+	ctx.SetParamNames("bot_id", "session_id")
+	ctx.SetParamValues(botID, sessionID)
+
+	if err := handler.SetReasoning(ctx); err != nil {
+		t.Fatalf("SetReasoning() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if pool.setReasoningInput.BotID != botID || pool.setReasoningInput.SessionID != sessionID || pool.setReasoningEffort != "low" {
+		t.Fatalf("SetReasoning call = %#v, %q", pool.setReasoningInput, pool.setReasoningEffort)
+	}
+	if pool.setReasoningInput.ToolHTTPURL != "http://example.com/bots/"+botID+"/tools" {
+		t.Fatalf("SetReasoning tool context = %#v", pool.setReasoningInput)
+	}
+}
+
 func acpEnabledBotMetadata() map[string]any {
 	return map[string]any{
 		acpprofile.MetadataKeyACP: map[string]any{
@@ -785,6 +867,43 @@ func TestACPRuntimeHandlerSetRuntimeModelAllowsReset(t *testing.T) {
 	}
 }
 
+func TestACPRuntimeHandlerSetRuntimeReasoning(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := acpRuntimeQueries{bot: testBotRow(botID, acpEnabledBotMetadata())}
+	pool := &fakeACPRuntimePool{status: acpagent.RuntimeStatus{
+		RuntimeID:             "rt_warm",
+		AgentID:               acpprofile.AgentCodexID,
+		State:                 "idle",
+		RuntimeOwnerAccountID: "user-1",
+	}}
+	handler := newACPRuntimeHandler(
+		pool,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/bots/"+botID+"/acp-runtimes/rt_warm/reasoning",
+		bytes.NewBufferString(`{"reasoning_effort":"low"}`),
+	)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx.SetPath("/bots/:bot_id/acp-runtimes/:runtime_id/reasoning")
+	ctx.SetParamNames("bot_id", "runtime_id")
+	ctx.SetParamValues(botID, "rt_warm")
+
+	if err := handler.SetRuntimeReasoning(ctx); err != nil {
+		t.Fatalf("SetRuntimeReasoning() error = %v", err)
+	}
+	if pool.reasoningBotID != botID || pool.reasoningRuntimeID != "rt_warm" || pool.reasoningEffort != "low" {
+		t.Fatalf("SetRuntimeReasoning call = %q %q %q", pool.reasoningBotID, pool.reasoningRuntimeID, pool.reasoningEffort)
+	}
+}
+
 func TestACPRuntimeHandlerRuntimeNotFoundMapsTo404(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := acpRuntimeQueries{
@@ -807,12 +926,71 @@ func TestACPRuntimeHandlerRuntimeNotFoundMapsTo404(t *testing.T) {
 	ctx.SetParamValues(botID, "rt_gone")
 
 	err := handler.GetRuntimeByID(ctx)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("GetRuntimeByID() error = %v, want %d", err, http.StatusNotFound)
+	if got := apperror.CodeOf(err); got != apperror.CodeACPRuntimeNotFound {
+		t.Fatalf("GetRuntimeByID() code = %q, want %q", got, apperror.CodeACPRuntimeNotFound)
 	}
 	if pool.statusBotID != botID || pool.statusRuntimeID != "rt_gone" {
 		t.Fatalf("RuntimeStatusByID call = %q %q", pool.statusBotID, pool.statusRuntimeID)
+	}
+}
+
+func TestRuntimePoolConfigFailureUsesApplicationError(t *testing.T) {
+	cause := fmt.Errorf("%w: transport closed", acpagent.ErrRuntimeConfigUpdateFailed)
+	err := runtimePoolError(cause)
+	if got := apperror.CodeOf(err); got != apperror.CodeACPConfigUpdateFailed {
+		t.Fatalf("runtimePoolError() code = %q, want %q", got, apperror.CodeACPConfigUpdateFailed)
+	}
+	if got := apperror.CauseOf(err); !errors.Is(got, cause) {
+		t.Fatalf("runtimePoolError() cause = %v, want private cause", got)
+	}
+}
+
+func TestRuntimePoolSelectionErrorsUseApplicationErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		code apperror.Code
+	}{
+		{
+			name: "unsupported",
+			err:  acpclient.ErrModelSelectionUnsupported,
+			code: apperror.CodeACPModelSelectionUnsupported,
+		},
+		{
+			name: "unavailable",
+			err:  fmt.Errorf("%w: stale-model", acpclient.ErrModelUnavailable),
+			code: apperror.CodeACPModelUnavailable,
+		},
+		{
+			name: "missing",
+			err:  acpclient.ErrModelIDRequired,
+			code: apperror.CodeACPModelUnavailable,
+		},
+		{
+			name: "reasoning unsupported",
+			err:  acpclient.ErrReasoningSelectionUnsupported,
+			code: apperror.CodeACPReasoningUnsupported,
+		},
+		{
+			name: "reasoning unavailable",
+			err:  fmt.Errorf("%w: stale-effort", acpclient.ErrReasoningEffortUnavailable),
+			code: apperror.CodeACPReasoningUnavailable,
+		},
+		{
+			name: "reasoning missing",
+			err:  acpclient.ErrReasoningEffortRequired,
+			code: apperror.CodeACPReasoningUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := apperror.CodeOf(runtimePoolError(tt.err)); got != tt.code {
+				t.Fatalf("runtimePoolError() code = %q, want %q", got, tt.code)
+			}
+		})
 	}
 }
 

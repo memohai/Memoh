@@ -88,7 +88,6 @@ import {
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
 import { isGuiToolName } from '@/utils/gui-tools'
 import { getBotsByBotIdSettings } from '@memohai/sdk'
-import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 
 export type {
   ACPAgentSessionInput,
@@ -219,10 +218,9 @@ export const useChatStore = defineStore('chat', () => {
     acpRuntimePending,
     acpRuntimeKey,
     clearACPRuntimeStatus,
-    ensureACPRuntimeFor,
     ensureACPRuntime,
-    setACPRuntimeModelFor,
     setACPRuntimeModel,
+    setACPRuntimeReasoning,
     resetACPRuntimeRegistry,
   } = acpRuntimeRegistry
 
@@ -830,7 +828,6 @@ export const useChatStore = defineStore('chat', () => {
     pendingACPSessionInput,
     pendingACPRuntimeId,
     pendingACPSessionMetadata,
-    pendingACPModelId,
     pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring,
     rememberDefaultACPInput,
@@ -842,6 +839,7 @@ export const useChatStore = defineStore('chat', () => {
     resetToEmptyComposer: resetFocusedEmptyComposer,
     ensurePendingACPRuntime: ensureFocusedPendingACPRuntime,
     setPendingACPModel: setFocusedPendingACPModel,
+    setPendingACPReasoning: setFocusedPendingACPReasoning,
     clearPendingACPSession,
     detachPendingACPSession,
     restorePendingACPSession,
@@ -965,7 +963,6 @@ export const useChatStore = defineStore('chat', () => {
     return {
       input: { ...saved.input },
       metadata: acpSessionMetadata(saved.input),
-      modelId: saved.input.modelId?.trim() ?? '',
       runtimeId: saved.runtimeId,
       runtimeStatus: runtimeKey ? acpRuntimeStatuses.value[runtimeKey] : undefined,
       ensuring: live ? pendingACPRuntimeEnsuring.value : false,
@@ -1032,7 +1029,18 @@ export const useChatStore = defineStore('chat', () => {
     invalidateDraftViewCommand(draft)
     activateDraftACPStage(draft)
     try {
-      await setFocusedPendingACPModel(modelId)
+      return await setFocusedPendingACPModel(modelId)
+    } finally {
+      syncLiveDraftACPStage()
+    }
+  }
+
+  async function setPendingACPReasoning(effort: string, target?: ChatViewTarget) {
+    const draft = targetDraftForACP(target)
+    invalidateDraftViewCommand(draft)
+    activateDraftACPStage(draft)
+    try {
+      return await setFocusedPendingACPReasoning(effort)
     } finally {
       syncLiveDraftACPStage()
     }
@@ -1271,7 +1279,7 @@ export const useChatStore = defineStore('chat', () => {
       case 'error': {
         const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid, bid)
         if (!session) break
-        const message = event.message || 'stream error'
+        const message = resolveApiErrorMessage(event, event.message || 'stream error')
         const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
         settleApprovalResponse(streamId, 'failed')
         rejectAssistantStream(streamId, new StreamFailureError(message, stage))
@@ -1666,34 +1674,10 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  async function configureCreatedACPRuntime(
-    created: SessionSummary,
-    input: ACPAgentSessionInput,
-    botId: string,
-    generation: number,
-  ): Promise<AcpagentRuntimeStatus | undefined> {
-    const modelId = input.modelId?.trim() ?? ''
-    if (!input.startRuntime && !modelId) return undefined
-    const assertCurrentScope = () => {
-      if (generation === userScopeGeneration && (currentBotId.value ?? '').trim() === botId) return
-      const error = new Error('Chat scope changed during ACP runtime setup')
-      error.name = 'AbortError'
-      throw error
-    }
-    assertCurrentScope()
-    let runtime = await ensureACPRuntimeFor(botId, created.id)
-    assertCurrentScope()
-    if (modelId && runtime.models?.current_model_id?.trim() !== modelId) {
-      runtime = await setACPRuntimeModelFor(botId, created.id, modelId)
-      assertCurrentScope()
-    }
-    return runtime
-  }
-
   async function createACPSessionForTarget(
     input: ACPAgentSessionInput,
     target: ChatViewTarget,
-  ): Promise<{ session: SessionSummary; runtime?: AcpagentRuntimeStatus }> {
+  ): Promise<{ session: SessionSummary }> {
     const draft = targetDraftForACP(target)
     const generation = userScopeGeneration
     const stagedBeforeCreate = pendingACPStateFor(draft)
@@ -1709,10 +1693,7 @@ export const useChatStore = defineStore('chat', () => {
       throw error
     }
 
-    let runtime: AcpagentRuntimeStatus | undefined
     try {
-      assertCurrentScope()
-      runtime = await configureCreatedACPRuntime(created, input, draft.botId, generation)
       assertCurrentScope()
     } catch (error) {
       await rollbackFailedACPSessionCreation(created, draft, stagedBeforeCreate?.input ?? input, runtimeId, generation)
@@ -1735,7 +1716,7 @@ export const useChatStore = defineStore('chat', () => {
       explicitSessionSelection.value = true
       draftIntent.value = false
     }
-    return { session: created, runtime }
+    return { session: created }
   }
 
   async function rollbackFailedACPSessionCreation(
@@ -1774,7 +1755,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function createACPSession(input: ACPAgentSessionInput): Promise<{ session: SessionSummary; runtime?: AcpagentRuntimeStatus }> {
+  async function createACPSession(input: ACPAgentSessionInput): Promise<{ session: SessionSummary }> {
     const bid = currentBotId.value ?? await ensureBot()
     if (!bid) throw new Error('Bot not ready')
     return createACPSessionForTarget(input, {
@@ -1787,7 +1768,7 @@ export const useChatStore = defineStore('chat', () => {
   async function updateCurrentSessionAgent(
     input: ACPAgentSessionInput,
     target?: ChatViewTarget,
-  ): Promise<{ session: SessionSummary; runtime?: AcpagentRuntimeStatus }> {
+  ): Promise<{ session: SessionSummary }> {
     const resolved = normalizedChatViewTarget(target)
     if (!resolved.sessionId) return createACPSessionForTarget(input, resolved)
     const bid = resolved.botId
@@ -1811,11 +1792,7 @@ export const useChatStore = defineStore('chat', () => {
       draftIntent.value = false
     }
     clearACPRuntimeStatus(bid, sid)
-    const runtime = input.startRuntime ? await ensureACPRuntimeFor(bid, sid) : undefined
-    if (generation !== userScopeGeneration || (currentBotId.value ?? '').trim() !== bid) {
-      return { session: updated }
-    }
-    return { session: updated, runtime }
+    return { session: updated }
   }
 
   async function updateCurrentSessionToMemoh(target?: ChatViewTarget): Promise<SessionSummary | null> {
@@ -2199,7 +2176,6 @@ export const useChatStore = defineStore('chat', () => {
       agentId: String(metadata.acp_agent_id ?? ''),
       projectPath: String(metadata.project_path ?? ''),
       projectMode: String(metadata.acp_project_mode ?? ''),
-      modelId: input.modelId?.trim() ?? '',
     }
   }
 
@@ -2537,6 +2513,8 @@ export const useChatStore = defineStore('chat', () => {
     loading.value = true
     const deferSessionCreation = serverSkillActivation && wasDraft
     try {
+      const modelId = options.modelId?.trim() || overrideModelId.value || undefined
+      const reasoningEffort = options.reasoningEffort?.trim() || overrideReasoningEffort.value || undefined
       if (!deferSessionCreation) {
         viewTarget = await ensureChatViewSession(viewTarget, wasDraft ? trimmed : undefined)
       }
@@ -2566,10 +2544,6 @@ export const useChatStore = defineStore('chat', () => {
         userTurn = sendTranscript.createOptimisticUserTurn(trimmed, attachments)
         sendTranscript.appendToView(userTurn, assistantTurn)
       }
-
-      const modelId = options.modelId?.trim() || overrideModelId.value || undefined
-      const effort = options.reasoningEffort?.trim() || overrideReasoningEffort.value
-      const reasoningEffort = effort || undefined
 
       if (!ensureWebSocketConnected(bid)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
@@ -2926,7 +2900,6 @@ export const useChatStore = defineStore('chat', () => {
     acpRuntimePending,
     pendingACPSessionInput,
     pendingACPSessionMetadata,
-    pendingACPModelId,
     pendingACPRuntimeId,
     pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring,
@@ -2971,6 +2944,7 @@ export const useChatStore = defineStore('chat', () => {
     resetToEmptyComposer,
     ensurePendingACPRuntime,
     setPendingACPModel,
+    setPendingACPReasoning,
     clearPendingACPSession,
     createACPSession,
     updateCurrentSessionAgent,
@@ -2978,6 +2952,7 @@ export const useChatStore = defineStore('chat', () => {
     acpRuntimeKey,
     ensureACPRuntime,
     setACPRuntimeModel,
+    setACPRuntimeReasoning,
     createNewSession,
     selectDraft,
     userSentInSession,

@@ -24,6 +24,12 @@ const (
 	CodeProfileRequestInvalid           Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid        Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed             Code = "profile.update_failed"
+	CodeACPRuntimeNotFound              Code = "acp.runtime_not_found"
+	CodeACPModelSelectionUnsupported    Code = "acp.model_selection_unsupported"
+	CodeACPModelUnavailable             Code = "acp.model_unavailable"
+	CodeACPReasoningUnsupported         Code = "acp.reasoning_selection_unsupported"
+	CodeACPReasoningUnavailable         Code = "acp.reasoning_effort_unavailable"
+	CodeACPConfigUpdateFailed           Code = "acp.config_update_failed"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -92,6 +98,30 @@ var catalog = map[Code]Definition{
 	CodeProfileUpdateFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The profile could not be updated.",
+	},
+	CodeACPRuntimeNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The ACP runtime is no longer available.",
+	},
+	CodeACPModelSelectionUnsupported: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "This external agent does not support model selection.",
+	},
+	CodeACPModelUnavailable: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The selected model is no longer available for this external agent.",
+	},
+	CodeACPReasoningUnsupported: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "This external agent does not support reasoning effort selection.",
+	},
+	CodeACPReasoningUnavailable: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The selected reasoning effort is no longer available for this external agent.",
+	},
+	CodeACPConfigUpdateFailed: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The external agent could not apply the selected settings. Please retry.",
 	},
 }
 

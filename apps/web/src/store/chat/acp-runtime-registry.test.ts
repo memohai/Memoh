@@ -30,6 +30,7 @@ function makeRegistry() {
   const transport: ACPRuntimeRegistryTransport = {
     ensureACPRuntime: vi.fn(),
     setACPRuntimeModel: vi.fn(),
+    setACPRuntimeReasoning: vi.fn(),
   }
   return {
     currentBotId,
@@ -119,6 +120,8 @@ describe('ACP runtime registry', () => {
 
     const first = registry.setACPRuntimeModel('older-model')
     const second = registry.setACPRuntimeModel('newer-model')
+    expect(transport.setACPRuntimeModel).toHaveBeenCalledTimes(2)
+
     const newer = runtime('newer-runtime')
     secondRequest.resolve(newer)
     await second
@@ -126,6 +129,16 @@ describe('ACP runtime registry', () => {
     await first
 
     expect(registry.acpRuntimeStatuses.value).toEqual({ 'bot-1:session-1': newer })
+  })
+
+  it('updates the selected session reasoning effort through the registry', async () => {
+    const { registry, transport } = makeRegistry()
+    const status = runtime('runtime-reasoning')
+    vi.mocked(transport.setACPRuntimeReasoning).mockResolvedValue(status)
+
+    await expect(registry.setACPRuntimeReasoning('low')).resolves.toBe(status)
+    expect(transport.setACPRuntimeReasoning).toHaveBeenCalledWith('bot-1', 'session-1', 'low')
+    expect(registry.acpRuntimeStatuses.value).toEqual({ 'bot-1:session-1': status })
   })
 
   it('does not restore a model response after the session cache is cleared', async () => {

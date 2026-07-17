@@ -60,6 +60,9 @@ var (
 	// ErrTooManyRuntimes reports that the per-bot budget for unbound
 	// runtimes is exhausted and every slot is busy.
 	ErrTooManyRuntimes = errors.New("too many unbound ACP runtimes for this bot")
+	// ErrRuntimeConfigUpdateFailed reports a transport or protocol failure
+	// while applying the model/reasoning values requested for a turn.
+	ErrRuntimeConfigUpdateFailed = errors.New("ACP runtime configuration update failed")
 )
 
 const (
@@ -127,7 +130,7 @@ type runtimeHandle struct {
 	projectPath           string
 	runtimeOwnerAccountID string
 
-	// op serializes operations (start, prompt, set-model, bind, close).
+	// op serializes operations (start, prompt, runtime config, bind, close).
 	op sync.Mutex
 
 	// state guards the mutable snapshot below. Leaf lock: never acquire
@@ -159,6 +162,8 @@ type PromptInput struct {
 	RouteID                  string
 	AgentID                  string
 	ProjectPath              string
+	ModelID                  string
+	ReasoningEffort          string
 	Prompt                   string
 	Images                   []acpclient.PromptImage
 	AttachmentReferences     []string
@@ -195,15 +200,16 @@ type CreateRuntimeInput struct {
 // RuntimeStatus describes the live state of a pooled ACP runtime as exposed
 // over the HTTP API.
 type RuntimeStatus struct {
-	RuntimeID             string                `json:"runtime_id,omitempty"`
-	SessionID             string                `json:"session_id,omitempty"`
-	AgentID               string                `json:"agent_id,omitempty"`
-	ProjectPath           string                `json:"project_path,omitempty"`
-	RuntimeOwnerAccountID string                `json:"-"`
-	State                 string                `json:"state"`
-	ACPSession            string                `json:"acp_session_id,omitempty"`
-	Models                *acpclient.ModelState `json:"models,omitempty"`
-	DefaultModelID        string                `json:"default_model_id,omitempty"`
+	RuntimeID             string                    `json:"runtime_id,omitempty"`
+	SessionID             string                    `json:"session_id,omitempty"`
+	AgentID               string                    `json:"agent_id,omitempty"`
+	ProjectPath           string                    `json:"project_path,omitempty"`
+	RuntimeOwnerAccountID string                    `json:"-"`
+	State                 string                    `json:"state"`
+	ACPSession            string                    `json:"acp_session_id,omitempty"`
+	Models                *acpclient.ModelState     `json:"models,omitempty"`
+	Reasoning             *acpclient.ReasoningState `json:"reasoning,omitempty"`
+	DefaultModelID        string                    `json:"default_model_id,omitempty"`
 }
 
 func NewSessionPool(log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionServices ...*session.Service) *SessionPool {
@@ -446,42 +452,96 @@ func (p *SessionPool) SetRuntimeModel(ctx context.Context, botID, runtimeID, mod
 	if err != nil {
 		return RuntimeStatus{}, err
 	}
-	if err := p.setModelOnHandle(ctx, h, modelID); err != nil {
-		return RuntimeStatus{}, err
-	}
-	return p.statusOf(h), nil
+	return p.setModelOnHandle(ctx, h, modelID)
 }
 
-func (*SessionPool) setModelOnHandle(ctx context.Context, h *runtimeHandle, modelID string) error {
-	modelID = strings.TrimSpace(modelID)
+// SetRuntimeReasoning switches the runtime's reasoning effort.
+func (p *SessionPool) SetRuntimeReasoning(ctx context.Context, botID, runtimeID, effort string) (RuntimeStatus, error) {
+	h, err := p.owned(botID, runtimeID)
+	if err != nil {
+		return RuntimeStatus{}, err
+	}
+	return p.setReasoningOnHandle(ctx, h, effort)
+}
 
+func (p *SessionPool) setModelOnHandle(ctx context.Context, h *runtimeHandle, modelID string) (RuntimeStatus, error) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		h.state.Lock()
+		modelID = h.defaultModelID
+		h.state.Unlock()
+	}
+	if modelID == "" {
+		// Reset requested but the agent never reported a default; nothing to do.
+		return p.statusOf(h), nil
+	}
+	return p.updateConfigOnHandle(ctx, h,
+		func(sess *acpclient.Session) bool {
+			return strings.TrimSpace(sess.ModelState().CurrentModelID) == modelID
+		},
+		func(ctx context.Context, sess *acpclient.Session) error {
+			_, err := sess.SetModel(ctx, modelID)
+			return err
+		},
+	)
+}
+
+func (p *SessionPool) setReasoningOnHandle(ctx context.Context, h *runtimeHandle, effort string) (RuntimeStatus, error) {
+	effort = strings.TrimSpace(effort)
+	if effort == "" {
+		return RuntimeStatus{}, acpclient.ErrReasoningEffortRequired
+	}
+	return p.updateConfigOnHandle(ctx, h,
+		func(sess *acpclient.Session) bool {
+			return strings.TrimSpace(sess.ReasoningState().CurrentEffort) == effort
+		},
+		func(ctx context.Context, sess *acpclient.Session) error {
+			_, err := sess.SetReasoningEffort(ctx, effort)
+			return err
+		},
+	)
+}
+
+func (p *SessionPool) updateConfigOnHandle(
+	ctx context.Context,
+	h *runtimeHandle,
+	matches func(*acpclient.Session) bool,
+	update func(context.Context, *acpclient.Session) error,
+) (RuntimeStatus, error) {
 	h.op.Lock()
 	defer h.op.Unlock()
 
 	h.state.Lock()
 	sess := h.session
 	closed := h.closed
-	if modelID == "" {
-		modelID = h.defaultModelID
-	}
 	h.state.Unlock()
 	if closed || sess == nil {
-		return ErrRuntimeNotFound
+		return RuntimeStatus{}, ErrRuntimeNotFound
 	}
-	if modelID == "" {
-		// Reset requested but the agent never reported a default; nothing to do.
-		return nil
-	}
-	if strings.TrimSpace(sess.ModelState().CurrentModelID) == modelID {
-		return nil
+	if matches(sess) {
+		return p.statusOf(h), nil
 	}
 
 	h.setStatus(stateActive)
-	_, err := sess.SetModel(ctx, modelID)
-	// Model selection errors are validation/protocol issues, not process
-	// failures; keep the runtime alive so the user can pick another model.
-	h.setStatus(stateIdle)
-	return err
+	err := update(ctx, sess)
+	if err == nil {
+		h.setStatus(stateIdle)
+		// Build the response before releasing h.op. Otherwise a concurrent
+		// setter can win the lock and make this request return its state.
+		return p.statusOf(h), nil
+	}
+	if isPromptConfigSelectionError(err) {
+		// A stale or invalid selection did not mutate the runtime. Keep it alive
+		// so the user can choose one of the newly advertised values.
+		h.setStatus(stateIdle)
+		return RuntimeStatus{}, err
+	}
+	// If the setter failed at the transport/protocol layer, the Agent may have
+	// accepted the value even though Memoh never received its new config
+	// snapshot. The cached state is no longer trustworthy, so rebuild rather
+	// than allowing the per-turn equality check to skip a required setter.
+	_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses background ctx.
+	return RuntimeStatus{}, fmt.Errorf("%w: %w", ErrRuntimeConfigUpdateFailed, err)
 }
 
 // CloseRuntime tears down an owned runtime, waiting out any in-flight
@@ -599,6 +659,17 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	// per-prompt context or sink behind.
 	defer h.clearActive()
 
+	if err := applyPromptConfig(ctx, sess, input); err != nil {
+		if isPromptConfigSelectionError(err) {
+			return acpclient.PromptResult{}, false, err
+		}
+		// A transport/protocol failure while mutating session config leaves the
+		// agent's effective state unknown. Drop the runtime so the next turn
+		// starts from a clean session.
+		_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses background ctx.
+		return acpclient.PromptResult{}, false, fmt.Errorf("%w: %w", ErrRuntimeConfigUpdateFailed, err)
+	}
+
 	toolSink := newPromptToolEventSink(input.Sink, input.ToolOutputLimit)
 	unregisterToolSink := p.registerToolEventSink(input, toolSink)
 	defer unregisterToolSink()
@@ -628,6 +699,35 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		return result, false, err
 	}
 	return result, false, nil
+}
+
+// applyPromptConfig applies the per-turn composer selection while the caller
+// holds the runtime operation lock. Model must be applied first because the
+// authoritative response can replace the available reasoning options.
+func applyPromptConfig(ctx context.Context, sess *acpclient.Session, input PromptInput) error {
+	desiredModel := strings.TrimSpace(input.ModelID)
+	if desiredModel != "" && strings.TrimSpace(sess.ModelState().CurrentModelID) != desiredModel {
+		if _, err := sess.SetModel(ctx, desiredModel); err != nil {
+			return err
+		}
+	}
+
+	desiredReasoning := strings.TrimSpace(input.ReasoningEffort)
+	if desiredReasoning != "" && strings.TrimSpace(sess.ReasoningState().CurrentEffort) != desiredReasoning {
+		if _, err := sess.SetReasoningEffort(ctx, desiredReasoning); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isPromptConfigSelectionError(err error) bool {
+	return errors.Is(err, acpclient.ErrModelIDRequired) ||
+		errors.Is(err, acpclient.ErrModelSelectionUnsupported) ||
+		errors.Is(err, acpclient.ErrModelUnavailable) ||
+		errors.Is(err, acpclient.ErrReasoningEffortRequired) ||
+		errors.Is(err, acpclient.ErrReasoningSelectionUnsupported) ||
+		errors.Is(err, acpclient.ErrReasoningEffortUnavailable)
 }
 
 // Ensure starts (or reuses) the runtime for a session without prompting it.
@@ -663,10 +763,27 @@ func (p *SessionPool) SetModel(ctx context.Context, input PromptInput, modelID s
 	if err != nil {
 		return RuntimeStatus{}, err
 	}
-	if err := p.setModelOnHandle(ctx, h, modelID); err != nil {
+	return p.setModelOnHandle(ctx, h, modelID)
+}
+
+// SetReasoning switches the reasoning effort of the runtime bound to a
+// session, cold starting one when needed.
+//
+//nolint:contextcheck // lifecycle close intentionally uses background ctx.
+func (p *SessionPool) SetReasoning(ctx context.Context, input PromptInput, effort string) (RuntimeStatus, error) {
+	if strings.TrimSpace(effort) == "" {
+		return RuntimeStatus{}, acpclient.ErrReasoningEffortRequired
+	}
+	input, err := p.prepareInput(ctx, input)
+	if err != nil {
 		return RuntimeStatus{}, err
 	}
-	return p.statusOf(h), nil
+	p.reapIdle(time.Now())
+	h, err := p.runtimeForSession(ctx, input)
+	if err != nil {
+		return RuntimeStatus{}, err
+	}
+	return p.setReasoningOnHandle(ctx, h, effort)
 }
 
 // runtimeForSession resolves the runtime bound to a session, cold starting
@@ -822,24 +939,25 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if err != nil {
 		return fail(err)
 	}
-
 	sess, err := p.runner.StartSession(startCtx, acpclient.StartRequest{
-		AgentID:             h.agentID,
-		BotID:               h.botID,
-		ProjectPath:         h.projectPath,
-		Command:             profile.Command,
-		Args:                profile.Args,
-		LocalCommand:        profile.LocalCommand,
-		LocalArgs:           profile.LocalArgs,
-		Env:                 env,
-		CleanEnv:            cleanEnv,
-		UnsetEnv:            unsetEnv,
-		Resolved:            &resolved,
-		SetupMode:           mode,
-		SessionMode:         profile.SessionModeID,
-		SessionConfigValues: profile.SessionConfigValues,
-		Timeout:             0,
-		ToolHTTPURL:         toolHTTPURL,
+		AgentID:                h.agentID,
+		BotID:                  h.botID,
+		ProjectPath:            h.projectPath,
+		Command:                profile.Command,
+		Args:                   profile.Args,
+		LocalCommand:           profile.LocalCommand,
+		LocalArgs:              profile.LocalArgs,
+		Env:                    env,
+		CleanEnv:               cleanEnv,
+		UnsetEnv:               unsetEnv,
+		Resolved:               &resolved,
+		SetupMode:              mode,
+		SessionMode:            profile.SessionModeID,
+		SessionConfigValues:    profile.SessionConfigValues,
+		ReasoningConfigID:      profile.ReasoningConfigID,
+		DefaultReasoningEffort: profile.DefaultReasoningEffort,
+		Timeout:                0,
+		ToolHTTPURL:            toolHTTPURL,
 		// The handler resolves identity from the handle per request, so the
 		// process configuration only ever carries stable runtime identity.
 		ToolHTTPHandler: p.toolHTTPHandler(h),
@@ -928,8 +1046,9 @@ func (*SessionPool) statusOf(h *runtimeHandle) RuntimeStatus {
 	}
 	if sess != nil {
 		status.ACPSession = sess.ID()
-		modelState := sess.ModelState()
+		modelState, reasoningState := sess.ConfigurationState()
 		status.Models = &modelState
+		status.Reasoning = &reasoningState
 	}
 	return status
 }

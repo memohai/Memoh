@@ -21,6 +21,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/apperror"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
@@ -975,7 +976,25 @@ func sendWSError(writer *wsWriter, streamID, sessionID, message string) {
 	})
 }
 
+func newWSAppErrorEvent(streamID, sessionID string, err error) (wsOutboundEvent, bool) {
+	public, ok := apperror.PublicFrom(err, "")
+	if !ok {
+		return wsOutboundEvent{}, false
+	}
+	return wsOutboundEvent{
+		Type:      "error",
+		StreamID:  strings.TrimSpace(streamID),
+		SessionID: strings.TrimSpace(sessionID),
+		Message:   public.Detail,
+		Feedback:  public,
+	}, true
+}
+
 func sendWSErrorFromError(writer *wsWriter, streamID, sessionID string, err error) {
+	if event, ok := newWSAppErrorEvent(streamID, sessionID, err); ok {
+		writer.SendJSON(event)
+		return
+	}
 	feedback := acpFeedbackError(err)
 	if feedback == nil {
 		sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
@@ -1085,7 +1104,16 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 			return runner(streamCtx, eventCh, abortCh)
 		}()
 		if err != nil && connCtx.Err() == nil {
-			h.logger.Error("ws stream error", slog.String("operation", logLabel), slog.Any("error", err), slog.String("bot_id", botID), slog.String("session_id", sessionID))
+			privateErr := err
+			if cause := apperror.CauseOf(err); cause != nil {
+				privateErr = cause
+			}
+			h.logger.Error("ws stream error",
+				slog.String("operation", logLabel),
+				slog.String("error_code", string(apperror.CodeOf(err))),
+				slog.Any("error", privateErr),
+				slog.String("bot_id", botID),
+				slog.String("session_id", sessionID))
 			sendWSErrorFromError(writer, streamID, sessionID, err)
 		}
 	}()
@@ -1143,7 +1171,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	connCtx, connCancel := context.WithCancel(context.Background())
 	defer connCancel()
 	streamBaseCtx := context.WithoutCancel(c.Request().Context())
-
 	activeStreams := newWSStreamRegistry()
 
 	for {

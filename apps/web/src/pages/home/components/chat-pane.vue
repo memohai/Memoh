@@ -538,7 +538,7 @@
                     <Button
                       type="button"
                       variant="ghost"
-                      :disabled="!currentBotId || activeChatReadOnly || agentChanging"
+                      :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
                       :title="$t('chat.composerActions')"
                       class="order-1 size-9 rounded-full text-foreground/85"
                       :class="isMultiline ? 'self-end' : 'self-center'"
@@ -672,12 +672,12 @@
                       <Button
                         type="button"
                         variant="ghost"
-                        :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
+                        :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
                         class="composer-pill-press h-9 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
                         :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
                         <Spinner
-                          v-if="acpModelChanging || acpModelsLoading"
+                          v-if="composerConfigPending || acpModelsLoading"
                           class="size-3.5 shrink-0"
                         />
                         <span
@@ -701,8 +701,9 @@
                       </InlineLoadingRow>
                       <ChatModelPicker
                         v-else
-                        :model-value="composerModelValue"
-                        :reasoning-effort="composerReasoningEffort"
+                        :model-value="overrideModelId"
+                        :reasoning-effort="overrideReasoningEffort"
+                        :reasoning-options="composerReasoningOptions"
                         :models="composerModels"
                         :providers="composerModelProviders"
                         model-type="chat"
@@ -743,7 +744,7 @@
                     <Button
                       type="button"
                       variant="brand"
-                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages)"
+                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending)"
                       :aria-label="streaming ? 'Stop generating response' : 'Send message'"
                       class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
@@ -820,7 +821,7 @@ import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
 import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets } from '@memohai/sdk'
-import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
+import type { AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
@@ -896,7 +897,7 @@ const pendingForkMessageId = ref('')
 const modelPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
 const agentChanging = ref(false)
-const acpModelChanging = ref(false)
+const acpConfigChangeScope = ref('')
 
 const {
   currentBotId,
@@ -913,10 +914,6 @@ const paneTarget = computed(() => ({
   viewId: props.tabId.trim() || 'chat',
 }))
 provideChatViewTarget(paneTarget)
-const pendingACPState = computed(() => chatStore.pendingACPStateFor(paneTarget.value))
-const pendingACPModelId = computed(() => pendingACPState.value?.modelId ?? '')
-const pendingACPRuntimeStatus = computed(() => pendingACPState.value?.runtimeStatus)
-const pendingACPRuntimeEnsuring = computed(() => pendingACPState.value?.ensuring ?? false)
 const paneView = computed(() => chatStore.chatView(paneTarget.value))
 const messages = computed(() => paneView.value.transcript.messages)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
@@ -1272,15 +1269,23 @@ watch([
   )
 }, { immediate: true })
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
+const activeACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
+const activeACPProjectMode = computed(() => String(activeSessionMetadata.value.acp_project_mode ?? '').trim())
+const acpOperationScope = computed(() => JSON.stringify([
+  paneTarget.value.botId,
+  paneTarget.value.sessionId,
+  paneTarget.value.viewId,
+  activeACPAgentId.value,
+  activeACPProjectPath.value,
+  activeACPProjectMode.value,
+]))
+const acpConfigChanging = computed(() => acpConfigChangeScope.value === acpOperationScope.value)
 const activeACPProjectLabel = computed(() => {
   if (isACPNoProject(activeSessionMetadata.value)) return t('chat.noProject')
-  const path = String(activeSessionMetadata.value.project_path ?? '').trim()
+  const path = activeACPProjectPath.value
   const parts = path.split('/').filter(Boolean)
   return path ? parts[parts.length - 1] ?? path : t('chat.noProject')
 })
-const canChangeAgent = computed(() => !streaming.value && !creatingSession.value && messages.value.length === 0)
-
-
 function messageMatchesForkSource(message: ChatMessage): boolean {
   const forkMessageId = forkSource.value?.forkMessageId?.trim()
   if (!forkMessageId) return false
@@ -1558,53 +1563,42 @@ function selectCommandResultItem(item: CommandActionListItem) {
   })
 }
 const {
-  runtime: acpRuntime,
+  runtime: acpCapabilityRuntime,
   models: acpModels,
   currentModelId: currentACPModelId,
+  reasoningEfforts: acpReasoningEfforts,
+  currentReasoningEffort: currentACPReasoningEffort,
   isEnsuring: acpRuntimeEnsuring,
-  ensure: ensureActiveACPRuntime,
-  setModel: setActiveACPModel,
+  isPreparing: acpConfigPreparing,
+  ensure: ensureACPRuntime,
+  setModel: setACPModel,
+  setReasoning: setACPReasoning,
 } = useACPRuntime({
-  botId: currentBotId,
-  sessionId: activeSessionId,
-  enabled: computed(() => activeIsACP.value && !!currentBotId.value && !!activeSessionId.value),
-  onError: (error) => {
-    if (activeIsACP.value) {
-      composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
-    }
-  },
+  target: paneTarget,
+  pending: activeIsPendingACP,
+  enabled: computed(() => activeUsesACPComposer.value && !!currentBotId.value),
+  agentId: activeACPAgentId,
+  projectPath: activeACPProjectPath,
 })
 
 const models = computed<ModelsGetResponse[]>(() => modelData.value ?? [])
 const providers = computed<ProvidersGetResponse[]>(() => providerData.value ?? [])
 const acpModelsLoading = computed(() =>
-  activeIsPendingACP.value
-    ? !pendingACPRuntimeStatus.value?.models && (agentChanging.value || pendingACPRuntimeEnsuring.value)
-    : activeIsACP.value && !acpRuntime.value?.models && (agentChanging.value || acpRuntimeEnsuring.value),
+  activeUsesACPComposer.value
+  && !acpCapabilityRuntime.value?.models
+  && (agentChanging.value || acpRuntimeEnsuring.value),
 )
-
-const pendingACPModelOptions = computed<AcpclientModelInfo[]>(() => {
-  return activeIsPendingACP.value ? pendingACPRuntimeStatus.value?.models?.available_models ?? [] : []
-})
-
-const activeACPModelPickerValue = computed(() =>
-  activeIsPendingACP.value ? pendingACPModelId.value : currentACPModelId.value,
-)
+const composerConfigPending = computed(() => activeUsesACPComposer.value && (
+  agentChanging.value || acpConfigChanging.value
+))
+const canChangeAgent = computed(() => !streaming.value
+  && !creatingSession.value
+  && !composerConfigPending.value
+  && messages.value.length === 0)
 
 const acpModelPickerModels = computed<ModelsGetResponse[]>(() => {
-  const source = activeIsPendingACP.value ? pendingACPModelOptions.value : acpModels.value
   const adapted: ModelsGetResponse[] = []
-  if (activeIsPendingACP.value) {
-    adapted.push({
-      id: '',
-      model_id: '',
-      name: t('chat.modelDefault'),
-      provider_id: '',
-      type: 'chat',
-      config: {},
-    })
-  }
-  for (const model of source) {
+  for (const model of acpModels.value) {
     const value = model.id?.trim() ?? ''
     if (!value) continue
     adapted.push({
@@ -1630,14 +1624,20 @@ const composerModels = computed(() =>
 const composerModelProviders = computed(() =>
   activeUsesACPComposer.value ? [] : providers.value,
 )
-const composerModelValue = computed(() =>
-  activeUsesACPComposer.value ? activeACPModelPickerValue.value : overrideModelId.value,
-)
-const composerReasoningEffort = computed(() =>
-  activeUsesACPComposer.value ? REASONING_EFFORT_DISABLE : overrideReasoningEffort.value,
-)
+const composerReasoningOptions = computed(() => {
+  if (!activeUsesACPComposer.value) return undefined
+  return acpReasoningEfforts.value.flatMap((effort) => {
+    const value = effort.id?.trim() ?? ''
+    if (!value) return []
+    return [{
+      value,
+      label: effort.name?.trim() || value,
+      description: effort.description?.trim() || undefined,
+    }]
+  })
+})
 const composerModelsLoading = computed(() =>
-  activeUsesACPComposer.value && acpModelsLoading.value,
+  activeUsesACPComposer.value && (acpModelsLoading.value || acpConfigPreparing.value),
 )
 
 const activeModel = computed(() => {
@@ -1722,33 +1722,28 @@ const availableReasoningEfforts = computed(() =>
 )
 
 const selectedModelLabel = computed(() => {
-  if (activeIsPendingACP.value) {
-    const pending = pendingACPModelId.value
-    if (pending) {
-      const current = pendingACPModelOptions.value.find(model => model.id === pending)
-      return current?.name || current?.id || pending
-    }
-    return t('chat.modelDefault')
-  }
-  if (activeIsACP.value) {
-    const current = acpModels.value.find(model => model.id === currentACPModelId.value)
-    return current?.name || current?.id || currentACPModelId.value || t('chat.modelDefault')
-  }
-  const m = models.value.find((m) => m.id === overrideModelId.value)
-  return m?.name || m?.model_id || t('chat.modelDefault')
+  const current = composerModels.value.find(model => model.id === overrideModelId.value)
+  return current?.name || current?.model_id || overrideModelId.value || t('chat.modelDefault')
 })
 
 const selectedReasoningLabel = computed(() => {
+  if (activeUsesACPComposer.value) {
+    const current = overrideReasoningEffort.value
+    return composerReasoningOptions.value?.find(option => option.value === current)?.label || current
+  }
   const v = overrideReasoningEffort.value
   return t(EFFORT_LABELS[v] ?? 'chat.modelDefault')
 })
 
 const reasoningActive = computed(() =>
-  !activeIsACP.value
-  && !activeIsPendingACP.value
-  && activeModelSupportsReasoning.value
-  && Boolean(overrideReasoningEffort.value)
-  && overrideReasoningEffort.value !== REASONING_EFFORT_DISABLE,
+  activeUsesACPComposer.value
+    ? Boolean(
+        overrideReasoningEffort.value
+        && composerReasoningOptions.value?.some(option => option.value === overrideReasoningEffort.value),
+      )
+    : activeModelSupportsReasoning.value
+      && Boolean(overrideReasoningEffort.value)
+      && overrideReasoningEffort.value !== REASONING_EFFORT_DISABLE,
 )
 
 const modelTriggerLabel = computed(() =>
@@ -1758,7 +1753,7 @@ const modelTriggerLabel = computed(() =>
 )
 
 function initFromBotSettings() {
-  if (!botSettings.value) return
+  if (activeUsesACPComposer.value || !botSettings.value) return
   if (!overrideModelId.value) {
     overrideModelId.value = botSettings.value.chat_model_id ?? ''
   }
@@ -1771,9 +1766,10 @@ function initFromBotSettings() {
   }
 }
 
-watch(botSettings, () => initFromBotSettings(), { immediate: true })
+watch([botSettings, activeUsesACPComposer], () => initFromBotSettings(), { immediate: true })
 
 watch(availableReasoningEfforts, (efforts) => {
+  if (activeUsesACPComposer.value) return
   const current = overrideReasoningEffort.value
   if (!current || current === REASONING_EFFORT_DISABLE || efforts.includes(current)) return
   overrideReasoningEffort.value = efforts.includes('medium') ? 'medium' : efforts[0] ?? REASONING_EFFORT_DISABLE
@@ -1783,6 +1779,71 @@ watch(currentBotId, () => {
   overrideModelId.value = ''
   overrideReasoningEffort.value = ''
 })
+
+watch(activeUsesACPComposer, (usesACP, previouslyUsedACP) => {
+  if (usesACP === previouslyUsedACP) return
+  overrideModelId.value = ''
+  overrideReasoningEffort.value = ''
+  if (!usesACP) initFromBotSettings()
+})
+
+watch(activeACPAgentId, (agentID, previousAgentID) => {
+  if (!activeUsesACPComposer.value || !previousAgentID || agentID === previousAgentID) return
+  overrideModelId.value = ''
+  overrideReasoningEffort.value = ''
+})
+
+function reconcileACPComposerConfig() {
+  const runtime = acpCapabilityRuntime.value
+  if (!activeUsesACPComposer.value || !runtime) return
+
+  if (runtime.models !== undefined) {
+    const availableModels = new Set(
+      acpModels.value.map(model => model.id?.trim() ?? '').filter(Boolean),
+    )
+    const selectedModel = overrideModelId.value.trim()
+    if (!selectedModel || !availableModels.has(selectedModel)) {
+      const currentModel = currentACPModelId.value.trim()
+      overrideModelId.value = availableModels.has(currentModel) ? currentModel : ''
+    }
+  }
+
+  if (runtime.reasoning !== undefined) {
+    const availableEfforts = new Set(
+      acpReasoningEfforts.value.map(effort => effort.id?.trim() ?? '').filter(Boolean),
+    )
+    const selectedEffort = overrideReasoningEffort.value.trim()
+    if (!selectedEffort || !availableEfforts.has(selectedEffort)) {
+      const currentEffort = currentACPReasoningEffort.value.trim()
+      overrideReasoningEffort.value = availableEfforts.has(currentEffort) ? currentEffort : ''
+    }
+  } else {
+    overrideReasoningEffort.value = ''
+  }
+}
+
+watch(acpCapabilityRuntime, () => {
+  if (!acpConfigPreparing.value) reconcileACPComposerConfig()
+}, { immediate: true })
+
+watch(
+  () => activeUsesACPComposer.value && isVisible.value ? acpOperationScope.value : '',
+  (scope) => {
+    if (!scope || !activeACPAgentId.value) return
+    void refreshACPComposerConfig().catch((error) => {
+      composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
+    })
+  },
+  { immediate: true },
+)
+
+async function refreshACPComposerConfig(): Promise<void> {
+  if (!activeUsesACPComposer.value) return
+  const desiredModelId = overrideModelId.value.trim()
+  const runtime = await ensureACPRuntime(true, desiredModelId)
+  if (!runtime || !activeUsesACPComposer.value) return
+  reconcileACPComposerConfig()
+}
 
 function pendingMatchesDefaultACP(input: ACPAgentSessionInput): boolean {
   const metadata = activeChatTarget.value.metadata
@@ -1823,17 +1884,9 @@ watch([defaultACPSessionInput, defaultACPLoading, currentBotId, hasExplicitSessi
   chatStore.stageDefaultACPSession(input, paneTarget.value)
 }, { immediate: true })
 
-watch([modelPopoverOpen, activeIsPendingACP, activeIsACP, activeSessionId], ([open, isPending, isACP, sessionID]) => {
-  if (!open) return
-  if (isPending) {
-    if (pendingACPRuntimeStatus.value || pendingACPRuntimeEnsuring.value) return
-    void chatStore.ensurePendingACPRuntime(paneTarget.value).catch((error) => {
-      composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
-    })
-    return
-  }
-  if (!isACP || !sessionID || acpRuntime.value || acpRuntimeEnsuring.value) return
-  void ensureActiveACPRuntime().catch((error) => {
+watch([modelPopoverOpen, activeUsesACPComposer, acpOperationScope], ([open, usesACP]) => {
+  if (!open || !usesACP) return
+  void refreshACPComposerConfig().catch((error) => {
     composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
   })
 })
@@ -1873,6 +1926,7 @@ async function selectACPAgent(profile: AcpprofilePublicProfile) {
   const agentId = normalizeACPAgentID(profile.id)
   if (!agentId || agentChanging.value || !canChangeAgent.value) return
   agentPopoverOpen.value = false
+  if (activeUsesACPComposer.value && agentId === activeACPAgentId.value) return
   agentChanging.value = true
   composerError.value = ''
   try {
@@ -1925,44 +1979,69 @@ function onModelSelected() {
 }
 
 async function onComposerModelValueSelected(value: string) {
-  if (activeUsesACPComposer.value) {
-    await onACPModelValueSelected(value)
-    return
-  }
+  if (activeUsesACPComposer.value && acpConfigChanging.value) return
+  const previousModel = overrideModelId.value
+  const previousReasoningEffort = overrideReasoningEffort.value
   overrideModelId.value = value
-  onModelSelected()
-}
-
-function onComposerReasoningEffortSelected(value: string) {
-  if (activeUsesACPComposer.value) return
-  overrideReasoningEffort.value = value
-}
-
-async function onACPModelValueSelected(value: string) {
-  const modelId = value.trim()
-  if (acpModelChanging.value) return
-  modelPopoverOpen.value = false
-  if (activeIsPendingACP.value) {
-    acpModelChanging.value = true
-    composerError.value = ''
-    try {
-      await chatStore.setPendingACPModel(modelId, paneTarget.value)
-    } catch (error) {
-      composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
-    } finally {
-      acpModelChanging.value = false
-    }
+  if (!activeUsesACPComposer.value) {
+    onModelSelected()
     return
   }
-  if (!modelId) return
-  acpModelChanging.value = true
+
+  const modelId = value.trim()
+  if (!modelId) {
+    overrideModelId.value = previousModel
+    return
+  }
+  const operationScope = acpOperationScope.value
+  acpConfigChangeScope.value = operationScope
   composerError.value = ''
   try {
-    await setActiveACPModel(modelId)
+    const runtime = await setACPModel(modelId)
+    if (runtime && acpOperationScope.value === operationScope) reconcileACPComposerConfig()
   } catch (error) {
-    composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
+    if (
+      activeUsesACPComposer.value
+      && acpOperationScope.value === operationScope
+      && overrideModelId.value === value
+    ) {
+      overrideModelId.value = previousModel
+      overrideReasoningEffort.value = previousReasoningEffort
+      composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
+    }
   } finally {
-    acpModelChanging.value = false
+    if (acpConfigChangeScope.value === operationScope) acpConfigChangeScope.value = ''
+  }
+}
+
+async function onComposerReasoningEffortSelected(value: string) {
+  if (activeUsesACPComposer.value && acpConfigChanging.value) return
+  const previousEffort = overrideReasoningEffort.value
+  overrideReasoningEffort.value = value
+  if (!activeUsesACPComposer.value) return
+
+  const effort = value.trim()
+  if (!effort) {
+    overrideReasoningEffort.value = previousEffort
+    return
+  }
+  const operationScope = acpOperationScope.value
+  acpConfigChangeScope.value = operationScope
+  composerError.value = ''
+  try {
+    const runtime = await setACPReasoning(effort)
+    if (runtime && acpOperationScope.value === operationScope) reconcileACPComposerConfig()
+  } catch (error) {
+    if (
+      activeUsesACPComposer.value
+      && acpOperationScope.value === operationScope
+      && overrideReasoningEffort.value === value
+    ) {
+      overrideReasoningEffort.value = previousEffort
+      composerError.value = resolveApiErrorMessage(error, t('chat.reasoningSwitchFailed'))
+    }
+  } finally {
+    if (acpConfigChangeScope.value === operationScope) acpConfigChangeScope.value = ''
   }
 }
 
@@ -2277,6 +2356,7 @@ function handleComposerKeydown(e: KeyboardEvent) {
 }
 
 async function handleRetryMessage(messageId: string) {
+  if (composerConfigPending.value) return
   composerError.value = ''
   const result = await chatStore.retryLatestAssistant(messageId, {
     target: paneTarget.value,
@@ -2290,6 +2370,10 @@ async function handleRetryMessage(messageId: string) {
 }
 
 async function handleEditMessage(messageId: string, text: string, done?: (started: boolean) => void) {
+  if (composerConfigPending.value) {
+    done?.(false)
+    return
+  }
   composerError.value = ''
   try {
     const result = await chatStore.editLatestUser(messageId, text, {
@@ -2315,7 +2399,13 @@ async function handleSend() {
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
   const skills = [...requestedSkills.value]
-  if ((!text && !files.length && !skills.length) || streaming.value || loadingMessages.value || activeChatReadOnly.value) return
+  if (
+    (!text && !files.length && !skills.length)
+    || streaming.value
+    || loadingMessages.value
+    || activeChatReadOnly.value
+    || composerConfigPending.value
+  ) return
   if (text.startsWith('/') && files.length) {
     composerError.value = ''
     chatStore.showCommandError('slash_attachments_unsupported', t('chat.slash.attachmentsUnsupported'), {

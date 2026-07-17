@@ -34,10 +34,17 @@ type Profile struct {
 	// agent-side configuration (e.g. a host ~/.claude/settings.json).
 	SessionModeID string
 	// SessionConfigValues are ACP session config options pinned after
-	// session/new when the agent advertises them (e.g. Claude Code's "effort"
-	// select, which gates extended thinking on newer models). Options the
-	// agent does not expose are skipped.
+	// session/new when the agent advertises them. Options the agent does not
+	// expose are skipped.
 	SessionConfigValues map[string]string
+	// ReasoningConfigID maps an agent-specific select to ACP's semantic
+	// thought_level category when the agent has not annotated the option yet.
+	// Categorized options always take precedence over this compatibility ID.
+	ReasoningConfigID string
+	// DefaultReasoningEffort is applied only when the session has no explicit
+	// user choice. The live option state returned by the agent remains the
+	// source of truth for support, available values, and the selected value.
+	DefaultReasoningEffort string
 	// ToolQuirks override the default title heuristics for this agent; nil
 	// means DefaultToolQuirks. See ToolQuirks for why this lives here.
 	ToolQuirks *ToolQuirks
@@ -187,14 +194,15 @@ func Register(profile Profile) {
 
 func codexProfile() Profile {
 	return Profile{
-		ID:           AgentCodexID,
-		DisplayName:  AgentCodexName,
-		Description:  "OpenAI Codex ACP adapter",
-		Command:      "codex-acp",
-		LocalCommand: "npx",
+		ID:                     AgentCodexID,
+		DisplayName:            AgentCodexName,
+		Description:            "OpenAI Codex ACP adapter",
+		Command:                "codex-acp",
+		LocalCommand:           "npx",
+		DefaultReasoningEffort: "xhigh",
 		LocalArgs: []string{
 			"-y",
-			"@zed-industries/codex-acp@0.15.0",
+			"@agentclientprotocol/codex-acp@1.1.4",
 		},
 		ManagedFields: []ManagedField{
 			{
@@ -229,17 +237,14 @@ func claudeCodeProfile() Profile {
 		// acceptEdits) silently bypasses Memoh's approval flow.
 		SessionModeID: "default",
 		// Newer Claude models gate extended thinking on the effort level, not
-		// MAX_THINKING_TOKENS; "high" is the counterpart of Codex's xhigh
-		// reasoning config. Models without effort support skip this pin.
-		SessionConfigValues: map[string]string{"effort": "high"},
-		LocalCommand:        "npx",
+		// MAX_THINKING_TOKENS. The ID remains as a compatibility fallback for
+		// older/custom adapters that omit ACP's thought_level category.
+		ReasoningConfigID:      "effort",
+		DefaultReasoningEffort: "high",
+		LocalCommand:           "npx",
 		LocalArgs: []string{
 			"-y",
-			// 0.40+ fixes two thinking bugs: MAX_THINKING_TOKENS now maps to a
-			// real thinking config (the old maxThinkingTokens option is
-			// deprecated and near-no-op on current models), and un-streamed
-			// thinking blocks are forwarded instead of silently dropped.
-			"@agentclientprotocol/claude-agent-acp@0.44.0",
+			"@agentclientprotocol/claude-agent-acp@0.59.0",
 		},
 		ManagedFields: []ManagedField{
 			{

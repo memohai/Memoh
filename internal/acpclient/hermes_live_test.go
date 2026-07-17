@@ -101,7 +101,7 @@ func TestHermesACPLiveLocalManagedProvider(t *testing.T) {
 			"tool",
 			"run",
 			"--from",
-			"hermes-agent[acp,mcp]==0.17.0",
+			"hermes-agent[acp,mcp]==0.18.2",
 			"hermes-acp",
 		},
 		SetupMode: SetupModeAPIKey,

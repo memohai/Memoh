@@ -107,7 +107,7 @@
                 class="size-3.5 shrink-0 text-muted-foreground"
                 :style="{ opacity: EFFORT_OPACITY[currentReasoningValue] ?? 0.5 }"
               />
-              <span class="min-w-0 flex-1 truncate text-foreground">{{ $t(currentReasoningLabel) }}</span>
+              <span class="min-w-0 flex-1 truncate text-foreground">{{ currentReasoningLabel || $t(currentReasoningLabelKey) }}</span>
             </span>
             <span class="flex shrink-0 items-center gap-1 pr-1">
               <ChevronRight class="size-3.5 shrink-0 text-muted-foreground" />
@@ -127,25 +127,39 @@
       class="w-44 p-1"
       @open-auto-focus.prevent
     >
-      <div class="flex flex-col gap-0.5">
-        <button
-          v-for="level in availableEfforts"
-          :key="level"
-          type="button"
-          class="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-control transition-colors hover:bg-[var(--overlay-hover-light)]"
-          :class="selectedReasoningValue === level ? 'font-medium text-foreground' : 'text-foreground'"
-          @click="setEffort(level)"
-        >
-          <Lightbulb
-            class="size-3.5 shrink-0 text-muted-foreground"
-            :style="{ opacity: EFFORT_OPACITY[level] ?? 0.5 }"
-          />
-          <span class="min-w-0 flex-1 truncate">{{ $t(EFFORT_LABELS[level] ?? 'chat.reasoningOff') }}</span>
-          <Check
-            v-if="selectedReasoningValue === level"
-            class="size-3.5 shrink-0 text-muted-foreground"
-          />
-        </button>
+      <div
+        ref="reasoningScrollHost"
+        class="reasoning-effort-list"
+        :style="{ height: `${reasoningMenuHeight}px` }"
+      >
+        <ScrollArea class="h-full">
+          <div class="flex flex-col gap-0.5">
+            <ModelDescriptionTooltip
+              v-for="option in availableReasoningOptions"
+              :key="option.value"
+              :description="option.description"
+              :open="openDescriptionTooltipKey === `reasoning:${option.value}`"
+              @update:open="setDescriptionTooltipOpen(`reasoning:${option.value}`, $event)"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-control transition-colors hover:bg-[var(--overlay-hover-light)]"
+                :class="selectedReasoningValue === option.value ? 'font-medium text-foreground' : 'text-foreground'"
+                @click="setEffort(option.value)"
+              >
+                <Lightbulb
+                  class="size-3.5 shrink-0 text-muted-foreground"
+                  :style="{ opacity: EFFORT_OPACITY[option.value] ?? 0.5 }"
+                />
+                <span class="min-w-0 flex-1 truncate">{{ option.label || $t(option.labelKey ?? 'chat.reasoningOff') }}</span>
+                <Check
+                  v-if="selectedReasoningValue === option.value"
+                  class="size-3.5 shrink-0 text-muted-foreground"
+                />
+              </button>
+            </ModelDescriptionTooltip>
+          </div>
+        </ScrollArea>
       </div>
     </PopoverContent>
   </Popover>
@@ -174,6 +188,11 @@ const props = defineProps<{
   providers: ProvidersGetResponse[]
   modelType: 'chat' | 'embedding'
   open?: boolean
+  reasoningOptions?: Array<{
+    value: string
+    label: string
+    description?: string
+  }>
 }>()
 
 const emit = defineEmits<{
@@ -185,6 +204,7 @@ const reasoningEffort = defineModel<string>('reasoningEffort', { default: '' })
 
 const searchTerm = ref('')
 const scrollHost = ref<HTMLElement | null>(null)
+const reasoningScrollHost = ref<HTMLElement | null>(null)
 const reasoningOpen = ref(false)
 const openDescriptionTooltipKey = ref<string | null>(null)
 // Sort order is captured when the picker opens. Changing models inside the same
@@ -346,7 +366,7 @@ const activeClientType = computed(() =>
   props.providers.find((p) => p.id === activeModel.value?.providerId)?.client_type,
 )
 
-const availableEfforts = computed(() => {
+const nativeAvailableEfforts = computed(() => {
   if (!activeModel.value) return []
   return availableEffortsForMode(
     resolveThinkingMode(activeModel.value.config),
@@ -354,8 +374,45 @@ const availableEfforts = computed(() => {
   )
 })
 
+interface ReasoningOption {
+  value: string
+  label?: string
+  labelKey?: string
+  description?: string
+}
+
+const availableReasoningOptions = computed<ReasoningOption[]>(() => {
+  if (props.reasoningOptions !== undefined) {
+    return props.reasoningOptions.flatMap((option) => {
+      const value = option.value.trim()
+      if (!value) return []
+      return [{
+        value,
+        label: option.label.trim() || value,
+        description: option.description?.trim() || undefined,
+      }]
+    })
+  }
+  return nativeAvailableEfforts.value.map(value => ({
+    value,
+    labelKey: EFFORT_LABELS[value] ?? 'chat.reasoningOff',
+  }))
+})
+
+const reasoningMenuHeight = computed(() =>
+  Math.min(288, Math.max(34, availableReasoningOptions.value.length * 34)),
+)
+
+const reasoningScrollViewport = computed(() =>
+  reasoningScrollHost.value?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null,
+)
+
+useEventListener(reasoningScrollViewport, 'scroll', () => {
+  openDescriptionTooltipKey.value = null
+}, { passive: true })
+
 const canSelectReasoning = computed(() =>
-  availableEfforts.value.length > 0,
+  availableReasoningOptions.value.length > 0,
 )
 
 const selectedReasoningValue = computed(() =>
@@ -366,10 +423,14 @@ const currentReasoningValue = computed(() =>
   canSelectReasoning.value ? selectedReasoningValue.value : REASONING_EFFORT_DISABLE,
 )
 
-const currentReasoningLabel = computed(() => {
-  const key = EFFORT_LABELS[currentReasoningValue.value] ?? 'chat.reasoningOff'
-  return key
-})
+const currentReasoningOption = computed(() =>
+  availableReasoningOptions.value.find(option => option.value === currentReasoningValue.value),
+)
+
+const currentReasoningLabel = computed(() => currentReasoningOption.value?.label ?? '')
+const currentReasoningLabelKey = computed(() =>
+  currentReasoningOption.value?.labelKey ?? EFFORT_LABELS[currentReasoningValue.value] ?? 'chat.reasoningOff',
+)
 
 // Picking a model by its name commits the choice and dismisses the menu.
 function commitModel(value: string) {

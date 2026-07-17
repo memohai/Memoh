@@ -20,8 +20,11 @@ const api = vi.hoisted(() => ({
   updateSessionAgent: vi.fn(),
   ensureACPRuntime: vi.fn(),
   createACPRuntime: vi.fn(),
+  fetchACPRuntimeByID: vi.fn(),
   setACPRuntimeModel: vi.fn(),
   setACPRuntimeModelByID: vi.fn(),
+  setACPRuntimeReasoning: vi.fn(),
+  setACPRuntimeReasoningByID: vi.fn(),
   closeACPRuntime: vi.fn(),
   streamSessionMessageEvents: vi.fn(),
   streamBotSessionsActivityEvents: vi.fn(),
@@ -314,6 +317,13 @@ describe('chat-list store', () => {
         current_model_id: 'gpt-5.1-codex',
         available_models: [{ id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' }],
       },
+      reasoning: {
+        current_effort: 'medium',
+        available_efforts: [
+          { id: 'medium', name: 'Medium' },
+          { id: 'high', name: 'High' },
+        ],
+      },
     })
     api.createACPRuntime.mockResolvedValue({
       runtime_id: 'rt_warm',
@@ -325,6 +335,33 @@ describe('chat-list store', () => {
         available_models: [
           { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' },
           { id: 'gpt-5.1-codex-high', name: 'GPT-5.1 Codex High' },
+        ],
+      },
+      reasoning: {
+        current_effort: 'medium',
+        available_efforts: [
+          { id: 'medium', name: 'Medium' },
+          { id: 'high', name: 'High' },
+        ],
+      },
+    })
+    api.fetchACPRuntimeByID.mockResolvedValue({
+      runtime_id: 'rt_warm',
+      agent_id: 'codex',
+      state: 'idle',
+      default_model_id: 'gpt-5.1-codex',
+      models: {
+        current_model_id: 'gpt-5.1-codex',
+        available_models: [
+          { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' },
+          { id: 'gpt-5.1-codex-high', name: 'GPT-5.1 Codex High' },
+        ],
+      },
+      reasoning: {
+        current_effort: 'medium',
+        available_efforts: [
+          { id: 'medium', name: 'Medium' },
+          { id: 'high', name: 'High' },
         ],
       },
     })
@@ -344,6 +381,26 @@ describe('chat-list store', () => {
       models: {
         current_model_id: 'gpt-5.1-codex-high',
         available_models: [{ id: 'gpt-5.1-codex-high', name: 'GPT-5.1 Codex High' }],
+      },
+    })
+    api.setACPRuntimeReasoning.mockResolvedValue({
+      session_id: 'session-1',
+      agent_id: 'codex',
+      reasoning: {
+        current_effort: 'low',
+        available_efforts: [{ id: 'low', name: 'Low' }],
+      },
+    })
+    api.setACPRuntimeReasoningByID.mockResolvedValue({
+      runtime_id: 'rt_warm',
+      agent_id: 'codex',
+      state: 'idle',
+      reasoning: {
+        current_effort: 'high',
+        available_efforts: [
+          { id: 'medium', name: 'Medium' },
+          { id: 'high', name: 'High' },
+        ],
       },
     })
     api.closeACPRuntime.mockResolvedValue(undefined)
@@ -510,6 +567,52 @@ describe('chat-list store', () => {
     expect(sentWSMessages.at(-1)).toMatchObject({
       type: 'message',
       workspace_target_id: 'computer-b',
+    })
+  })
+
+  it('localizes structured WebSocket errors by stable code', async () => {
+    const acpSession = {
+      id: 'session-1',
+      bot_id: 'bot-1',
+      title: 'Codex',
+      type: 'chat',
+      session_mode: 'chat',
+      runtime_type: 'acp_agent',
+      runtime_metadata: {
+        acp_agent_id: 'codex',
+        project_path: '/data',
+      },
+    }
+    api.fetchSessions.mockResolvedValue({ items: [acpSession], nextCursor: null })
+    api.fetchSession.mockResolvedValue(acpSession)
+    api.fetchMessagesUI.mockResolvedValue([])
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'error',
+        message: 'backend fallback',
+        feedback: {
+          code: 'acp.config_update_failed',
+          args: {},
+          detail: 'backend fallback',
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.selectSession('session-1')
+    const result = await store.sendMessage('hello')
+
+    expect(result).toMatchObject({
+      ok: false,
+      stage: 'startup',
+      error: 'The external agent could not apply the selected settings. Please retry.',
+    })
+    expect(store.messages).toHaveLength(0)
+    expect(store.startupSendFailure).toMatchObject({
+      error: 'The external agent could not apply the selected settings. Please retry.',
+      restoreInput: 'hello',
     })
   })
 
@@ -1769,19 +1872,19 @@ describe('chat-list store', () => {
     expect(store.pendingACPRuntimeStatus?.models?.available_models).toHaveLength(2)
 
     await store.setPendingACPModel('gpt-5.1-codex-high')
-    expect(store.pendingACPModelId).toBe('gpt-5.1-codex-high')
+    expect(store.pendingACPRuntimeStatus?.models?.current_model_id).toBe('gpt-5.1-codex-high')
     expect(api.setACPRuntimeModelByID).toHaveBeenCalledWith('bot-1', 'rt_warm', 'gpt-5.1-codex-high')
 
-    // Binding rides on session creation; ensure sees the warm runtime with
-    // the chosen model, so no model fix-up and no runtime close happen.
-    api.ensureACPRuntime.mockResolvedValueOnce({
-      runtime_id: 'rt_warm',
-      session_id: 'acp-session-1',
-      agent_id: 'codex',
-      state: 'idle',
-      models: { current_model_id: 'gpt-5.1-codex-high', available_models: [] },
+    await store.setPendingACPReasoning('high')
+    expect(store.pendingACPRuntimeStatus?.reasoning?.current_effort).toBe('high')
+    expect(api.setACPRuntimeReasoningByID).toHaveBeenCalledWith('bot-1', 'rt_warm', 'high')
+
+    // Binding rides on session creation. The turn carries the selected model,
+    // so send does not need another runtime setup request.
+    const result = await store.sendMessage('hello codex', undefined, {
+      modelId: 'gpt-5.1-codex-high',
+      reasoningEffort: 'high',
     })
-    const result = await store.sendMessage('hello codex')
 
     expect(result.ok).toBe(true)
     expect(api.createSession).toHaveBeenCalledTimes(1)
@@ -1795,77 +1898,67 @@ describe('chat-list store', () => {
     expect(api.closeACPRuntime).not.toHaveBeenCalled()
     expect(sentWSMessages[0]).toMatchObject({
       session_id: 'acp-session-1',
+      reasoning_effort: 'high',
       text: 'hello codex',
+      model_id: 'gpt-5.1-codex-high',
     })
   })
 
-  it('re-applies the staged model when the bind fell back to a cold start', async () => {
-    sendEvents = [{ type: 'end' } as UIStreamEvent]
-    api.createSession.mockResolvedValueOnce({
-      id: 'acp-session-1',
-      bot_id: 'bot-1',
-      title: '',
-      type: 'acp_agent',
-      metadata: {
-        acp_agent_id: 'codex',
-        project_path: '/data',
-        acp_project_mode: 'project',
-      },
-    })
+  it('refreshes a staged runtime instead of reusing a stale capability snapshot', async () => {
     const store = useChatStore()
 
     await store.selectBot('bot-1')
     store.stageACPSession({ agentId: 'codex' })
     await store.ensurePendingACPRuntime()
-    await store.setPendingACPModel('gpt-5.1-codex-high')
 
-    // The warm runtime was reaped before the send: the session-scoped ensure
-    // cold starts with the default model, so the staged model is re-applied.
-    api.ensureACPRuntime.mockResolvedValueOnce({
-      runtime_id: 'rt_cold',
-      session_id: 'acp-session-1',
+    api.fetchACPRuntimeByID.mockResolvedValueOnce({
+      runtime_id: 'rt_warm',
       agent_id: 'codex',
       state: 'idle',
-      models: { current_model_id: 'gpt-5.1-codex', available_models: [] },
+      models: {
+        current_model_id: 'gpt-5.1-codex-high',
+        available_models: [{ id: 'gpt-5.1-codex-high', name: 'GPT-5.1 Codex High' }],
+      },
+      reasoning: {
+        current_effort: 'xhigh',
+        available_efforts: [{ id: 'xhigh', name: 'Extra high' }],
+      },
     })
-    const result = await store.sendMessage('hello codex')
 
-    expect(result.ok).toBe(true)
-    expect(api.setACPRuntimeModel).toHaveBeenCalledWith('bot-1', 'acp-session-1', 'gpt-5.1-codex-high')
-    expect(sentWSMessages[0]).toMatchObject({
-      session_id: 'acp-session-1',
-      text: 'hello codex',
-    })
+    const refreshed = await store.ensurePendingACPRuntime()
+
+    expect(api.fetchACPRuntimeByID).toHaveBeenCalledWith('bot-1', 'rt_warm')
+    expect(api.createACPRuntime).toHaveBeenCalledTimes(1)
+    expect(refreshed?.models?.current_model_id).toBe('gpt-5.1-codex-high')
+    expect(store.pendingACPRuntimeStatus?.reasoning?.current_effort).toBe('xhigh')
   })
 
-  it('resets the warm runtime model when default is re-selected before first send', async () => {
+  it('recreates a staged runtime when capability refresh reports it was reaped', async () => {
+    api.createACPRuntime
+      .mockResolvedValueOnce({
+        runtime_id: 'rt_warm',
+        agent_id: 'codex',
+        state: 'idle',
+        models: { current_model_id: 'gpt-5.1-codex', available_models: [] },
+      })
+      .mockResolvedValueOnce({
+        runtime_id: 'rt_fresh',
+        agent_id: 'codex',
+        state: 'idle',
+        models: { current_model_id: 'gpt-5.1-codex-high', available_models: [] },
+      })
+    api.fetchACPRuntimeByID.mockRejectedValueOnce({ body: { code: 'acp.runtime_not_found' } })
     const store = useChatStore()
 
     await store.selectBot('bot-1')
     store.stageACPSession({ agentId: 'codex' })
     await store.ensurePendingACPRuntime()
+    const recreated = await store.ensurePendingACPRuntime()
 
-    await store.setPendingACPModel('gpt-5.1-codex-high')
-    expect(api.setACPRuntimeModelByID).toHaveBeenLastCalledWith('bot-1', 'rt_warm', 'gpt-5.1-codex-high')
-
-    // Back to default: the server resets the runtime to the agent default
-    // (empty model id), so the warm runtime always matches the picker.
-    await store.setPendingACPModel('')
-    expect(store.pendingACPModelId).toBe('')
-    expect(api.setACPRuntimeModelByID).toHaveBeenLastCalledWith('bot-1', 'rt_warm', '')
-  })
-
-  it('does not touch the warm runtime when default is selected without a prior pick', async () => {
-    const store = useChatStore()
-
-    await store.selectBot('bot-1')
-    store.stageACPSession({ agentId: 'codex' })
-    await store.ensurePendingACPRuntime()
-
-    await store.setPendingACPModel('')
-
-    expect(store.pendingACPModelId).toBe('')
-    expect(api.setACPRuntimeModelByID).not.toHaveBeenCalled()
+    expect(api.fetchACPRuntimeByID).toHaveBeenCalledWith('bot-1', 'rt_warm')
+    expect(api.createACPRuntime).toHaveBeenCalledTimes(2)
+    expect(recreated?.runtime_id).toBe('rt_fresh')
+    expect(store.pendingACPRuntimeId).toBe('rt_fresh')
   })
 
   it('starts a new runtime when the agent changes while a create is in flight', async () => {
@@ -2016,7 +2109,6 @@ describe('chat-list store', () => {
     expect(api.createACPRuntime).toHaveBeenCalledTimes(2)
     expect(api.setACPRuntimeModelByID).toHaveBeenCalledTimes(1)
     expect(store.pendingACPRuntimeId).toBe('rt_claude')
-    expect(store.pendingACPModelId).toBe('')
   })
 
   it('abandons a stale model heal when the same agent is re-staged mid-flight', async () => {
@@ -2056,43 +2148,10 @@ describe('chat-list store', () => {
     await pick
 
     expect(api.setACPRuntimeModelByID).toHaveBeenCalledTimes(1)
-    expect(store.pendingACPModelId).toBe('')
     expect(store.pendingACPRuntimeId).toBe('rt_new')
   })
 
-  it('ignores an older same-model response after a B-A-B model switch', async () => {
-    const firstB = deferred<unknown>()
-    api.setACPRuntimeModelByID
-      .mockReturnValueOnce(firstB.promise)
-      .mockResolvedValueOnce({
-        runtime_id: 'rt_warm', agent_id: 'codex', state: 'idle',
-        models: { current_model_id: 'model-a', available_models: [] },
-      })
-      .mockResolvedValueOnce({
-        runtime_id: 'rt_warm', agent_id: 'codex', state: 'idle',
-        models: { current_model_id: 'model-b', available_models: [] },
-      })
-    const store = useChatStore()
-
-    await store.selectBot('bot-1')
-    store.stageACPSession({ agentId: 'codex', modelId: 'model-a' })
-    await store.ensurePendingACPRuntime()
-
-    const oldB = store.setPendingACPModel('model-b')
-    await flushPromises()
-    await store.setPendingACPModel('model-a')
-    await store.setPendingACPModel('model-b')
-    firstB.resolve({
-      runtime_id: 'rt_warm', agent_id: 'codex', state: 'idle',
-      models: { current_model_id: 'stale-model-b', available_models: [] },
-    })
-    await oldB
-
-    expect(store.pendingACPModelId).toBe('model-b')
-    expect(store.pendingACPRuntimeStatus?.models?.current_model_id).toBe('model-b')
-  })
-
-  it('reverts the pending model if runtime creation fails for the current staging', async () => {
+  it('leaves staged runtime creation retryable when a model pick cannot start it', async () => {
     api.createACPRuntime.mockRejectedValueOnce({ message: 'runtime create failed' })
     const store = useChatStore()
 
@@ -2102,7 +2161,6 @@ describe('chat-list store', () => {
     await expect(store.setPendingACPModel('gpt-5.1-codex-high')).rejects.toMatchObject({
       message: 'runtime create failed',
     })
-    expect(store.pendingACPModelId).toBe('')
     expect(store.pendingACPRuntimeId).toBe('')
   })
 
@@ -2121,7 +2179,7 @@ describe('chat-list store', () => {
         models: { current_model_id: 'gpt-5.1-codex', available_models: [] },
       })
     api.setACPRuntimeModelByID
-      .mockRejectedValueOnce({ message: 'runtime not found' })
+      .mockRejectedValueOnce({ body: { code: 'acp.runtime_not_found' } })
       .mockResolvedValueOnce({
         runtime_id: 'rt_fresh',
         agent_id: 'codex',
@@ -2141,7 +2199,7 @@ describe('chat-list store', () => {
     expect(api.createACPRuntime).toHaveBeenCalledTimes(2)
     expect(api.setACPRuntimeModelByID).toHaveBeenLastCalledWith('bot-1', 'rt_fresh', 'gpt-5.1-codex-high')
     expect(store.pendingACPRuntimeId).toBe('rt_fresh')
-    expect(store.pendingACPModelId).toBe('gpt-5.1-codex-high')
+    expect(store.pendingACPRuntimeStatus?.models?.current_model_id).toBe('gpt-5.1-codex-high')
   })
 
   it('discards a staged runtime that finishes starting after the agent changed', async () => {
@@ -2168,41 +2226,6 @@ describe('chat-list store', () => {
     // The late runtime is closed instead of being adopted into empty staging.
     expect(store.pendingACPRuntimeId).toBe('')
     expect(api.closeACPRuntime).toHaveBeenCalledWith('bot-1', 'rt_late')
-  })
-
-  it('stores ACP runtime models when starting an ACP session', async () => {
-    api.createSession.mockResolvedValueOnce({
-      id: 'acp-session-1',
-      bot_id: 'bot-1',
-      title: '',
-      type: 'acp_agent',
-      metadata: {
-        acp_agent_id: 'codex',
-        project_path: '/data/app',
-      },
-    })
-    api.ensureACPRuntime.mockResolvedValueOnce({
-      session_id: 'acp-session-1',
-      agent_id: 'codex',
-      models: {
-        current_model_id: 'gpt-5.1-codex',
-        available_models: [{ id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' }],
-      },
-    })
-    const store = useChatStore()
-
-    await store.selectBot('bot-1')
-    await store.createACPSession({
-      agentId: 'codex',
-      projectPath: '/data/app',
-      projectMode: 'project',
-      startRuntime: true,
-    })
-
-    const key = store.acpRuntimeKey('bot-1', 'acp-session-1')
-    expect(api.ensureACPRuntime).toHaveBeenCalledTimes(1)
-    expect(store.acpRuntimeStatuses[key]?.models?.current_model_id).toBe('gpt-5.1-codex')
-    expect(store.acpRuntimePending[key]).toBeUndefined()
   })
 
   it('responds to user input over websocket and marks the block answered', async () => {
@@ -6168,19 +6191,17 @@ describe('chat-list store', () => {
     store.bindChatView(targetB.viewId, targetB, true)
 
     store.focusChatView(targetA.viewId)
-    store.stageACPSession({ agentId: 'codex', modelId: 'model-a' }, {}, targetA)
+    store.stageACPSession({ agentId: 'codex' }, {}, targetA)
     await store.ensurePendingACPRuntime(targetA)
     store.focusChatView(targetB.viewId)
-    store.stageACPSession({ agentId: 'claude', modelId: 'model-b' }, {}, targetB)
+    store.stageACPSession({ agentId: 'claude' }, {}, targetB)
 
     expect(store.pendingACPStateFor(targetA)).toMatchObject({
       metadata: { acp_agent_id: 'codex' },
-      modelId: 'model-a',
       runtimeId: 'rt_warm',
     })
     expect(store.pendingACPStateFor(targetB)).toMatchObject({
       metadata: { acp_agent_id: 'claude' },
-      modelId: 'model-b',
     })
     expect(api.closeACPRuntime).not.toHaveBeenCalled()
 
@@ -6311,43 +6332,6 @@ describe('chat-list store', () => {
 
     store.abort({ ...targetA, sessionId: 'session-1' })
     await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
-  })
-
-  it('does not resume an ACP Draft send on its old Bot after runtime setup resolves late', async () => {
-    api.fetchBots.mockResolvedValue([
-      { id: 'bot-1', status: 'active', name: 'Bot A' },
-      { id: 'bot-2', status: 'active', name: 'Bot B' },
-    ])
-    api.fetchSessions.mockResolvedValueOnce({ items: [], nextCursor: null })
-    const runtime = deferred<{
-      session_id: string
-      agent_id: string
-      models: { current_model_id: string; available_models: never[] }
-    }>()
-    api.ensureACPRuntime.mockReturnValueOnce(runtime.promise)
-    const store = useChatStore()
-    await store.selectBot('bot-1')
-    const target = { botId: 'bot-1', sessionId: null, viewId: 'chat:draft-a' }
-    store.bindChatView(target.viewId, target, true)
-    store.focusChatView(target.viewId)
-    store.stageACPSession({ agentId: 'codex', startRuntime: true }, {}, target)
-
-    const sending = store.sendMessage('send on A', undefined, { target })
-    await flushPromises()
-    await flushPromises()
-    expect(api.ensureACPRuntime).toHaveBeenCalledWith('bot-1', 'session-1')
-
-    api.fetchSessions.mockResolvedValueOnce({ items: [], nextCursor: null })
-    await store.selectBot('bot-2')
-    runtime.resolve({
-      session_id: 'session-1',
-      agent_id: 'codex',
-      models: { current_model_id: '', available_models: [] },
-    })
-
-    await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
-    expect(store.currentBotId).toBe('bot-2')
-    expect(sentWSMessages).toEqual([])
   })
 
   it('does not let a late session_created event steal focus from another Draft', async () => {
@@ -6599,33 +6583,6 @@ describe('chat-list store', () => {
     await expect(command).resolves.toMatchObject({ ok: true })
     expect(store.draftViewRequested).toBeNull()
     expect(store.currentBotId).toBeNull()
-  })
-
-  it('rolls back ACP Session creation when runtime setup fails', async () => {
-    api.ensureACPRuntime.mockRejectedValueOnce(new Error('runtime setup failed'))
-    const store = useChatStore()
-    await store.selectBot('bot-1')
-    const target = { botId: 'bot-1', sessionId: null, viewId: 'chat:draft-a' }
-    store.bindChatView(target.viewId, target, true)
-    store.focusChatView(target.viewId)
-    store.stageACPSession({ agentId: 'codex', startRuntime: true }, {}, target)
-
-    const result = await store.sendMessage('keep this input', undefined, { target })
-
-    expect(result).toMatchObject({
-      ok: false,
-      stage: 'startup',
-      restoreInput: 'keep this input',
-    })
-    expect(api.deleteSession).toHaveBeenCalledWith('bot-1', 'session-1')
-    expect(sentWSMessages).toEqual([])
-    expect(store.sessionId).toBeNull()
-    expect(store.chatView(target).kind).toBe('draft')
-    expect(store.knownSessionSummary('session-1')).toBeNull()
-    expect(store.pendingACPStateFor(target)).toMatchObject({
-      metadata: { acp_agent_id: 'codex' },
-      runtimeId: '',
-    })
   })
 
   it('keeps a manual Draft Agent choice made after a deferred /new command', async () => {

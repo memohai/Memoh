@@ -78,7 +78,7 @@ describe('ChatModelPicker', () => {
     root = undefined
   })
 
-  async function mountPicker() {
+  async function mountPicker(overrides: Record<string, unknown> = {}) {
     const ChatModelPicker = (await import('./chat-model-picker.vue')).default
     root = document.createElement('div')
     document.body.append(root)
@@ -96,6 +96,7 @@ describe('ChatModelPicker', () => {
       open: true,
       modelValue: 'model-1',
       reasoningEffort: 'disable',
+      ...overrides,
     })
     app.config.globalProperties.$t = (key: string) => key
     app.mount(root)
@@ -110,6 +111,51 @@ describe('ChatModelPicker', () => {
     const viewport = el.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
 
     expect(tooltip).not.toBeNull()
+    expect(viewport).not.toBeNull()
+
+    tooltip!.dispatchEvent(new Event('pointerenter'))
+    await nextTick()
+    expect(tooltip!.dataset.open).toBe('true')
+
+    viewport!.dispatchEvent(new Event('scroll'))
+    await nextTick()
+    expect(tooltip!.dataset.open).toBe('false')
+  })
+
+  it('renders and emits agent-provided reasoning options without guessing fixed levels', async () => {
+    const updateReasoning = vi.fn()
+    const el = await mountPicker({
+      reasoningEffort: 'ultra',
+      reasoningOptions: [
+        { value: 'balanced', label: 'Balanced by agent' },
+        { value: 'ultra', label: 'Maximal deliberation', description: 'Agent-defined option' },
+      ],
+      'onUpdate:reasoningEffort': updateReasoning,
+    })
+
+    expect(el.textContent).toContain('Maximal deliberation')
+    const option = Array.from(el.querySelectorAll('button')).find(button => button.textContent?.includes('Balanced by agent'))
+    expect(option).toBeDefined()
+    option!.click()
+    await nextTick()
+    expect(updateReasoning).toHaveBeenCalledWith('balanced')
+  })
+
+  it('bounds a long agent-provided reasoning list and dismisses its tooltip on scroll', async () => {
+    const el = await mountPicker({
+      reasoningOptions: Array.from({ length: 10 }, (_, index) => ({
+        value: `effort-${index}`,
+        label: `Effort ${index}`,
+        description: `Description ${index}`,
+      })),
+    })
+    const host = el.querySelector<HTMLElement>('.reasoning-effort-list')
+    const tooltip = Array.from(el.querySelectorAll<HTMLElement>('[data-model-tooltip]'))
+      .find(item => item.textContent?.includes('Effort 0'))
+    const viewport = host?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
+
+    expect(host?.style.height).toBe('288px')
+    expect(tooltip).toBeDefined()
     expect(viewport).not.toBeNull()
 
     tooltip!.dispatchEvent(new Event('pointerenter'))
