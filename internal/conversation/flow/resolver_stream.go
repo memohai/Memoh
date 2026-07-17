@@ -810,7 +810,7 @@ func bindRuntimeInjectedRecorder(cfg *agentpkg.RunConfig, rc resolvedContext, ro
 	if cfg == nil || rowTracker == nil || rc.recordInjectedMessage == nil {
 		return
 	}
-	cfg.InjectedRecorder = func(headerifiedText string, insertAfter int) {
+	cfg.InjectedRecorder = func(headerifiedText string, _ []sdk.ImagePart, insertAfter int) {
 		rc.recordInjectedMessage(conversation.InjectedMessageRecord{
 			HeaderifiedText: headerifiedText,
 			InsertAfter:     insertAfter,

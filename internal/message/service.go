@@ -658,6 +658,7 @@ func (s *DBService) withCanonicalTurnTransaction(
 		return runtimefence.ErrTransactionsUnsupported
 	}
 	return txer.InTx(ctx, run)
+}
 
 func hasRuntimeRowReservation(input PersistInput) bool {
 	return strings.TrimSpace(input.MessageID) != "" ||

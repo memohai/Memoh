@@ -4536,8 +4536,6 @@ export const useChatStore = defineStore('chat', () => {
     loading.value = true
     const deferSessionCreation = serverSkillActivation && wasDraft
     try {
-      const modelId = options.modelId?.trim() || overrideModelId.value || undefined
-      const reasoningEffort = options.reasoningEffort?.trim() || overrideReasoningEffort.value || undefined
       if (!deferSessionCreation) {
         viewTarget = await ensureChatViewSession(viewTarget, wasDraft ? trimmed : undefined)
       }
@@ -4717,7 +4715,6 @@ export const useChatStore = defineStore('chat', () => {
       const err = error instanceof Error ? error : new Error('Unknown error')
       const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
       const errorCode = parseMemohError(error)?.code
-||||||| parent of 5dbdfc7b1 (feat: chatview sync-layer refactor checkpoint (pre-review))
       intentCompletions.delete(intentCompletionKey(bid, streamId))
       const failedPendingIntent = chatIntents.failPending(bid, sid, streamId)
       const runtimeOwned = finishRuntimeOperationAdmission(streamId, bid, sid)
@@ -4792,7 +4789,6 @@ export const useChatStore = defineStore('chat', () => {
       const err = error instanceof Error ? error : new Error('Unknown error')
       const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
       const errorCode = parseMemohError(error)?.code
-||||||| parent of 5dbdfc7b1 (feat: chatview sync-layer refactor checkpoint (pre-review))
       intentCompletions.delete(intentCompletionKey(bid, streamId))
       const failedPendingIntent = chatIntents.failPending(bid, sid, streamId)
       const runtimeOwned = finishRuntimeOperationAdmission(streamId, bid, sid)
