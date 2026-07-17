@@ -4885,6 +4885,8 @@ SELECT
   m.id,
   m.role,
   m.content,
+  COALESCE(m.turn_position, 0)::bigint AS turn_position,
+  COALESCE(m.turn_message_seq, 0)::bigint AS turn_message_seq,
   m.created_at
 FROM bot_visible_history_messages m
 WHERE m.team_id = public.memoh_current_team_id()
@@ -4906,10 +4908,12 @@ type ListUncoveredTurnResponsesBySessionParams struct {
 }
 
 type ListUncoveredTurnResponsesBySessionRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	Role      string             `json:"role"`
-	Content   []byte             `json:"content"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID             pgtype.UUID        `json:"id"`
+	Role           string             `json:"role"`
+	Content        []byte             `json:"content"`
+	TurnPosition   int64              `json:"turn_position"`
+	TurnMessageSeq int64              `json:"turn_message_seq"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) ListUncoveredTurnResponsesBySession(ctx context.Context, arg ListUncoveredTurnResponsesBySessionParams) ([]ListUncoveredTurnResponsesBySessionRow, error) {
@@ -4925,6 +4929,8 @@ func (q *Queries) ListUncoveredTurnResponsesBySession(ctx context.Context, arg L
 			&i.ID,
 			&i.Role,
 			&i.Content,
+			&i.TurnPosition,
+			&i.TurnMessageSeq,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

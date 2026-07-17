@@ -69,10 +69,12 @@ func TestListUncoveredTurnResponsesBySessionUsesAcceptedCoverage(t *testing.T) {
 	createdAt := time.UnixMilli(1_000).UTC()
 	since := createdAt.Add(-time.Hour)
 	queries := &uncoveredTurnResponseQueries{rows: []sqlc.ListUncoveredTurnResponsesBySessionRow{{
-		ID:        testMessageUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-		Role:      "assistant",
-		Content:   []byte(`{"role":"assistant","content":"response"}`),
-		CreatedAt: pgtype.Timestamptz{Time: createdAt, Valid: true},
+		ID:             testMessageUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+		Role:           "assistant",
+		Content:        []byte(`{"role":"assistant","content":"response"}`),
+		TurnPosition:   3,
+		TurnMessageSeq: 2,
+		CreatedAt:      pgtype.Timestamptz{Time: createdAt, Valid: true},
 	}}}
 	service := NewService(nil, queries)
 
@@ -85,7 +87,11 @@ func TestListUncoveredTurnResponsesBySessionUsesAcceptedCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListUncoveredTurnResponsesBySession() error = %v", err)
 	}
-	if len(messages) != 1 || messages[0].ID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" || !messages[0].CreatedAt.Equal(createdAt) {
+	if len(messages) != 1 ||
+		messages[0].ID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" ||
+		messages[0].TurnPosition != 3 ||
+		messages[0].TurnMessageSequence != 2 ||
+		!messages[0].CreatedAt.Equal(createdAt) {
 		t.Fatalf("uncovered turn responses = %#v", messages)
 	}
 	if queries.arg.SessionID.String() != "22222222-2222-2222-2222-222222222222" ||

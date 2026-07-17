@@ -1707,6 +1707,8 @@ SELECT
   m.id,
   m.role,
   m.content,
+  COALESCE(m.turn_position, 0)::bigint AS turn_position,
+  COALESCE(m.turn_message_seq, 0)::bigint AS turn_message_seq,
   m.created_at
 FROM bot_visible_history_messages m
 WHERE m.team_id = public.memoh_current_team_id()

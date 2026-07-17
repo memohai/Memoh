@@ -57,10 +57,12 @@ func (s *DBService) ListUncoveredTurnResponsesBySession(ctx context.Context, ses
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, Message{
-			ID:        row.ID.String(),
-			Role:      row.Role,
-			Content:   row.Content,
-			CreatedAt: row.CreatedAt.Time,
+			ID:                  row.ID.String(),
+			Role:                row.Role,
+			Content:             row.Content,
+			TurnPosition:        row.TurnPosition,
+			TurnMessageSequence: row.TurnMessageSeq,
+			CreatedAt:           row.CreatedAt.Time,
 		})
 	}
 	return messages, nil
