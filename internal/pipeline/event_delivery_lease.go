@@ -66,10 +66,10 @@ func (s *EventStore) ClaimEventDelivery(ctx context.Context, eventID string) (*E
 	if renewInterval <= 0 || renewInterval >= duration {
 		renewInterval = duration / 4
 	}
-	claimStartedAt := time.Now()
 	claimedUntil, err := queries.ClaimSessionEventDelivery(ctx, sqlc.ClaimSessionEventDeliveryParams{
 		EventID: pgEventID, ClaimToken: claimToken, LeaseMs: duration.Milliseconds(),
 	})
+	claimedAt := time.Now()
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -92,7 +92,7 @@ func (s *EventStore) ClaimEventDelivery(ctx context.Context, eventID string) (*E
 		lost:          lifetimeCtx,
 		markLost:      markLost,
 	}
-	if !lease.armDeadline(claimStartedAt.Add(duration)) {
+	if !lease.armDeadline(conservativeLocalLeaseDeadline(claimedAt, claimedUntil.Time, duration)) {
 		return nil, errors.New("claim session event delivery returned an expired lease")
 	}
 	go lease.keepalive(lifetimeCtx)

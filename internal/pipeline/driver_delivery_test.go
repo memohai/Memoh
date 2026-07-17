@@ -476,8 +476,9 @@ func TestLatestDiscussNotificationRetainsEveryEventDelivery(t *testing.T) {
 func TestCompleteDiscussEventDeliveriesCompletesEveryLease(t *testing.T) {
 	t.Parallel()
 
-	firstQueries := &leaseQueries{now: time.Unix(1_700_000_000, 0), historyReady: true}
-	secondQueries := &leaseQueries{now: time.Unix(1_700_000_000, 0), historyReady: true}
+	now := time.Now()
+	firstQueries := &leaseQueries{now: now, historyReady: true}
+	secondQueries := &leaseQueries{now: now, historyReady: true}
 	first, err := newTestLeaseStore(firstQueries, time.Minute, time.Hour).ClaimEventDelivery(
 		context.Background(),
 		"33333333-3333-3333-3333-333333333333",

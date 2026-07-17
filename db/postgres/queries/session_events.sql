@@ -15,16 +15,26 @@ ON CONFLICT DO NOTHING
 RETURNING id;
 
 -- name: ClaimSessionEventDelivery :one
+WITH locked AS MATERIALIZED (
+  SELECT event.id,
+         event.delivery_claim_token,
+         event.delivery_claimed_until,
+         event.delivery_completed_at
+  FROM bot_session_events event
+  WHERE event.team_id = public.memoh_current_team_id()
+    AND event.id = sqlc.arg(event_id)::uuid
+  FOR NO KEY UPDATE
+)
 UPDATE bot_session_events event
 SET delivery_claim_token = sqlc.arg(claim_token)::uuid,
-    delivery_claimed_until = now() + sqlc.arg(lease_ms)::bigint * INTERVAL '1 millisecond'
-WHERE event.team_id = public.memoh_current_team_id()
-  AND event.id = sqlc.arg(event_id)::uuid
-  AND event.delivery_completed_at IS NULL
+    delivery_claimed_until = clock_timestamp() + sqlc.arg(lease_ms)::bigint * INTERVAL '1 millisecond'
+FROM locked
+WHERE event.id = locked.id
+  AND locked.delivery_completed_at IS NULL
   AND (
-    event.delivery_claim_token = sqlc.arg(claim_token)::uuid
-    OR event.delivery_claimed_until IS NULL
-    OR event.delivery_claimed_until <= now()
+    locked.delivery_claim_token = sqlc.arg(claim_token)::uuid
+    OR locked.delivery_claimed_until IS NULL
+    OR locked.delivery_claimed_until <= clock_timestamp()
   )
 RETURNING event.delivery_claimed_until;
 

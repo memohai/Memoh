@@ -73,7 +73,7 @@ func TestSessionEventIngestMigrationAddsDurableCursorAndLeaseContracts(t *testin
 		"-- name: NextSessionEventCursor :one",
 		"nextval('bot_session_event_cursor_seq')",
 		"-- name: ClaimSessionEventDelivery :one",
-		"delivery_claimed_until <= now()",
+		"locked.delivery_claimed_until <= clock_timestamp()",
 		"-- name: RenewSessionEventDelivery :one",
 		"-- name: CompleteSessionEventDelivery :execrows",
 		"AND event.delivery_claimed_until > clock_timestamp()",

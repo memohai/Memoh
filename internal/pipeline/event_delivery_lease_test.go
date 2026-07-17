@@ -20,6 +20,10 @@ type leaseQueries struct {
 	mu                sync.Mutex
 	now               time.Time
 	claimUntil        time.Time
+	claimStarted      chan struct{}
+	claimRelease      chan struct{}
+	claimOnce         sync.Once
+	claimFromReturn   time.Duration
 	renewStarted      chan struct{}
 	renewRelease      chan struct{}
 	renewOnce         sync.Once
@@ -36,6 +40,12 @@ type leaseQueries struct {
 }
 
 func (q *leaseQueries) ClaimSessionEventDelivery(_ context.Context, arg sqlc.ClaimSessionEventDeliveryParams) (pgtype.Timestamptz, error) {
+	if q.claimStarted != nil {
+		q.claimOnce.Do(func() { close(q.claimStarted) })
+	}
+	if q.claimRelease != nil {
+		<-q.claimRelease
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.completed {
@@ -46,10 +56,59 @@ func (q *leaseQueries) ClaimSessionEventDelivery(_ context.Context, arg sqlc.Cla
 	}
 	q.token = arg.ClaimToken
 	q.until = q.claimUntil
+	if q.claimFromReturn > 0 {
+		q.until = time.Now().Add(q.claimFromReturn)
+	}
 	if q.until.IsZero() {
 		q.until = q.now.Add(time.Duration(arg.LeaseMs) * time.Millisecond)
 	}
 	return pgtype.Timestamptz{Time: q.until, Valid: true}, nil
+}
+
+func TestEventDeliveryLeaseStartsLocalDeadlineAfterClaimReturns(t *testing.T) {
+	t.Parallel()
+
+	claimRelease := make(chan struct{})
+	queries := &leaseQueries{
+		now:             time.Now(),
+		claimStarted:    make(chan struct{}),
+		claimRelease:    claimRelease,
+		claimFromReturn: 200 * time.Millisecond,
+	}
+	result := make(chan struct {
+		lease *EventDeliveryLease
+		err   error
+	}, 1)
+	go func() {
+		lease, err := newTestLeaseStore(queries, 200*time.Millisecond, time.Hour).ClaimEventDelivery(
+			context.Background(),
+			"33333333-3333-3333-3333-333333333333",
+		)
+		result <- struct {
+			lease *EventDeliveryLease
+			err   error
+		}{lease: lease, err: err}
+	}()
+	select {
+	case <-queries.claimStarted:
+	case <-time.After(time.Second):
+		t.Fatal("claim did not start")
+	}
+	time.Sleep(250 * time.Millisecond)
+	close(claimRelease)
+
+	select {
+	case got := <-result:
+		if got.err != nil || got.lease == nil {
+			t.Fatalf("claim after query wait = %#v, %v", got.lease, got.err)
+		}
+		if !got.lease.Active() {
+			t.Fatal("claim returned an inactive lease")
+		}
+		got.lease.stopKeepalive()
+	case <-time.After(time.Second):
+		t.Fatal("claim did not return")
+	}
 }
 
 func (q *leaseQueries) CompleteSessionEventDelivery(_ context.Context, arg sqlc.CompleteSessionEventDeliveryParams) (int64, error) {

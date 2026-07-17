@@ -116,6 +116,51 @@ func TestRenewSessionEventDeliveryExtendsLeaseFromEventLockAcquisition(t *testin
 	}
 }
 
+func TestClaimSessionEventDeliveryExtendsLeaseFromEventLockAcquisition(t *testing.T) {
+	ctx := context.Background()
+	pool := openSessionEventDeliveryClaimTestPool(t, ctx, "")
+	eventID, seededToken := createSessionEventDeliveryClaimFixture(t, ctx, pool, false, time.Minute)
+	rows, err := sqlc.New(pool).ReleaseSessionEventDelivery(ctx, sqlc.ReleaseSessionEventDeliveryParams{
+		EventID: eventID, ClaimToken: seededToken,
+	})
+	if err != nil || rows != 1 {
+		t.Fatalf("release seeded claim = %d, %v, want 1/nil", rows, err)
+	}
+
+	blocker := lockSessionEventDeliveryRow(t, ctx, pool, eventID)
+	result := make(chan renewSessionEventDeliveryResult, 1)
+	applicationName := "claim-delivery-expiry-" + uuid.NewString()
+	queryPool := openSessionEventDeliveryClaimTestPool(t, ctx, applicationName)
+	claimToken := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	go func() {
+		claimedUntil, err := sqlc.New(queryPool).ClaimSessionEventDelivery(ctx, sqlc.ClaimSessionEventDeliveryParams{
+			EventID: eventID, ClaimToken: claimToken, LeaseMs: (500 * time.Millisecond).Milliseconds(),
+		})
+		result <- renewSessionEventDeliveryResult{claimedUntil: claimedUntil, err: err}
+	}()
+	waitForSessionEventDeliveryLock(t, ctx, pool, applicationName)
+	time.Sleep(700 * time.Millisecond)
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatalf("release event blocker: %v", err)
+	}
+
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("claim after lock wait: %v", got.err)
+		}
+		var databaseNow time.Time
+		if err := pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&databaseNow); err != nil {
+			t.Fatalf("read database clock: %v", err)
+		}
+		if remaining := got.claimedUntil.Time.Sub(databaseNow); remaining < 300*time.Millisecond {
+			t.Fatalf("claimed lease remaining after lock release = %s, want at least 300ms", remaining)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("claim remained blocked after event lock release")
+	}
+}
+
 type completeSessionEventDeliveryResult struct {
 	rows int64
 	err  error
