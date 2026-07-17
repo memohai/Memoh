@@ -284,14 +284,17 @@ func TestQueuedEventTransientFailureRetriesWithoutProviderRedelivery(t *testing.
 	if got := gateway.calls.Load(); got != 2 {
 		t.Fatalf("gateway calls = %d, want one failed attempt and one self-driven retry", got)
 	}
-	for !queries.deliveryIsCompleted() && time.Now().Before(deadline) {
+	for dispatcher.IsActive("route") && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
-	}
-	if !queries.deliveryIsCompleted() {
-		t.Fatal("queued delivery did not complete after transient retry")
 	}
 	if dispatcher.IsActive("route") {
 		t.Fatal("route remained active after retried queue drained")
+	}
+	if got := gateway.calls.Load(); got != 2 {
+		t.Fatalf("final gateway calls = %d, want one failed attempt and one self-driven retry", got)
+	}
+	if !queries.deliveryIsCompleted() {
+		t.Fatal("queued delivery did not complete after transient retry")
 	}
 }
 
