@@ -113,7 +113,7 @@ func TestIdentityResolverAllowGuestWithoutMembershipSideEffect(t *testing.T) {
 		ReplyTarget: "target-id",
 		Sender:      channel.Identity{SubjectID: "ext-1", DisplayName: "Guest"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestIdentityResolverResolveDisplayNameFromDirectory(t *testing.T) {
 			},
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestIdentityResolverMapsLinkedChannelIdentityToAccountUser(t *testing.T) {
 	}
 	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, nil, "")
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, channel.InboundMessage{
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, channel.InboundMessage{
 		BotID:   "bot-1",
 		Channel: channel.ChannelType("feishu"),
 		Sender:  channel.Identity{SubjectID: "ext-1"},
@@ -223,7 +223,7 @@ func TestIdentityResolverDirectoryLookupFailureDoesNotFallbackToOpenID(t *testin
 			},
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestIdentityResolverFeishuUsesOpenIDAsCanonicalSubject(t *testing.T) {
 			},
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestIdentityResolverDirectoryAvatarURLPropagated(t *testing.T) {
 			Attributes: map[string]string{"open_id": "ou-avatar"},
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestIdentityResolverExistingMemberPasses(t *testing.T) {
 		ReplyTarget: "chat-123",
 		Sender:      channel.Identity{SubjectID: "tg-user-1"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestIdentityResolverPublicBotGuestPasses(t *testing.T) {
 		ReplyTarget: "chat-123",
 		Sender:      channel.Identity{SubjectID: "stranger-1"},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestIdentityResolverNonOwnerGroupMessagePassesToACL(t *testing.T) {
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerInGroup(t *testing.T) {
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerDirectWithoutMembership(t *testin
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestIdentityResolverFeishuUnlinkedOpenIDPassesToACL(t *testing.T) {
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -500,7 +500,7 @@ func TestIdentityResolverNonOwnerDirectPassesToACL(t *testing.T) {
 		},
 	}
 
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -525,7 +525,7 @@ func TestIdentityResolverPublicBotGroupGuestPasses(t *testing.T) {
 			Type: "group",
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -550,7 +550,7 @@ func TestIdentityResolverPublicBotDirectGuestPasses(t *testing.T) {
 			Type: channel.ConversationTypePrivate,
 		},
 	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

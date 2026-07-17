@@ -1,22 +1,20 @@
-package flow
+package turn
 
 import (
 	"strings"
-
-	"github.com/memohai/memoh/internal/conversation"
 )
 
 // ExtractAssistantOutputs collects assistant-role outputs from a slice of ModelMessages.
-func ExtractAssistantOutputs(messages []conversation.ModelMessage) []conversation.AssistantOutput {
+func ExtractAssistantOutputs(messages []ModelMessage) []AssistantOutput {
 	if len(messages) == 0 {
 		return nil
 	}
-	outputs := make([]conversation.AssistantOutput, 0, len(messages))
+	outputs := make([]AssistantOutput, 0, len(messages))
 	for _, msg := range messages {
 		if msg.Role != "assistant" {
 			continue
 		}
-		if hasToolCallContent(msg) {
+		if HasToolCallContent(msg) {
 			continue
 		}
 		rawParts := msg.ContentParts()
@@ -28,12 +26,12 @@ func ExtractAssistantOutputs(messages []conversation.ModelMessage) []conversatio
 		if content == "" && len(parts) == 0 {
 			continue
 		}
-		outputs = append(outputs, conversation.AssistantOutput{Content: content, Parts: parts})
+		outputs = append(outputs, AssistantOutput{Content: content, Parts: parts})
 	}
 	return outputs
 }
 
-func hasToolCallContent(msg conversation.ModelMessage) bool {
+func HasToolCallContent(msg ModelMessage) bool {
 	if len(msg.ToolCalls) > 0 {
 		return true
 	}
@@ -45,11 +43,11 @@ func hasToolCallContent(msg conversation.ModelMessage) bool {
 	return false
 }
 
-func filterVisibleContentParts(parts []conversation.ContentPart) []conversation.ContentPart {
+func filterVisibleContentParts(parts []ContentPart) []ContentPart {
 	if len(parts) == 0 {
 		return nil
 	}
-	filtered := make([]conversation.ContentPart, 0, len(parts))
+	filtered := make([]ContentPart, 0, len(parts))
 	for _, p := range parts {
 		if isVisibleContentPart(p) {
 			filtered = append(filtered, p)
@@ -58,7 +56,7 @@ func filterVisibleContentParts(parts []conversation.ContentPart) []conversation.
 	return filtered
 }
 
-func isVisibleContentPart(part conversation.ContentPart) bool {
+func isVisibleContentPart(part ContentPart) bool {
 	if !part.HasValue() {
 		return false
 	}
@@ -70,7 +68,7 @@ func isVisibleContentPart(part conversation.ContentPart) bool {
 	}
 }
 
-func visibleContentText(parts []conversation.ContentPart) string {
+func visibleContentText(parts []ContentPart) string {
 	if len(parts) == 0 {
 		return ""
 	}
@@ -85,7 +83,7 @@ func visibleContentText(parts []conversation.ContentPart) string {
 	return strings.TrimSpace(strings.Join(texts, "\n"))
 }
 
-func visibleContentPartText(part conversation.ContentPart) string {
+func visibleContentPartText(part ContentPart) string {
 	if strings.TrimSpace(part.Text) != "" {
 		return part.Text
 	}

@@ -28,6 +28,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/background"
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	turninprocess "github.com/memohai/memoh/internal/agent/turn/inprocess"
 	"github.com/memohai/memoh/internal/agentpayload"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
@@ -655,7 +656,8 @@ func provideChannelRouter(
 	qqAdapter.SetChannelIdentityResolver(identityService)
 	qqAdapter.SetRouteResolver(routeService)
 
-	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, resolver, identityService, policyService, rc.JwtSecret, 5*time.Minute)
+	turnService := turninprocess.New(resolver)
+	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, turnService, identityService, policyService, rc.JwtSecret, 5*time.Minute)
 	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
 	processor.SetPipeline(pipeline, eventStore, discussDriver)
 	discussDriver.SetResolver(resolver)

@@ -13,12 +13,24 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 // ChatStreamer is the narrow slice of flow.Runner this adapter needs.
 // Satisfied by *flow.Resolver.
 type ChatStreamer interface {
 	StreamChat(ctx context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error)
+}
+
+// toolApprovalResponder matches flow.Resolver's tool-approval resume method.
+type toolApprovalResponder interface {
+	RespondToolApproval(ctx context.Context, input flow.ToolApprovalResponseInput, eventCh chan<- flow.WSStreamEvent) error
+}
+
+// userInputResponder matches flow.Resolver's user-input resume method.
+type userInputResponder interface {
+	RespondUserInput(ctx context.Context, input flow.UserInputResponseInput, eventCh chan<- flow.WSStreamEvent) error
 }
 
 // Adapter implements turn.Service by translating commands into
@@ -68,7 +80,7 @@ func (a *Adapter) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 		addAssets: func(refs []turn.OutboundAssetRef) {
 			assetMu.Lock()
 			defer assetMu.Unlock()
-			assets = append(assets, fromAssetRefs(refs)...)
+			assets = append(assets, refs...)
 		},
 	}
 	go h.pump(cmd, chunkCh, errCh)
@@ -92,13 +104,48 @@ func (h *runHandle) Cancel()                   { h.cancel() }
 
 func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	select {
-	case h.inject <- toInjectMessage(msg):
+	case h.inject <- msg:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-h.ctx.Done():
 		return h.ctx.Err()
 	}
+}
+
+// RespondToolApproval resumes a turn deferred on tool approval by
+// delegating to the resolver (RFC ResumeApprovalCommand).
+func (a *Adapter) RespondToolApproval(ctx context.Context, input turn.ToolApprovalResponse, eventCh chan<- json.RawMessage) error {
+	responder, ok := a.runner.(toolApprovalResponder)
+	if !ok {
+		return errors.New("turn: runner does not support tool approval resume")
+	}
+	return responder.RespondToolApproval(ctx, toolApprovalInputFromResponse(input), eventCh)
+}
+
+// RespondUserInput resumes a turn deferred on ask_user by delegating to
+// the resolver (RFC ResumeUserInputCommand).
+func (a *Adapter) RespondUserInput(ctx context.Context, input turn.UserInputResponse, eventCh chan<- json.RawMessage) error {
+	responder, ok := a.runner.(userInputResponder)
+	if !ok {
+		return errors.New("turn: runner does not support user input resume")
+	}
+	return responder.RespondUserInput(ctx, userInputInputFromResponse(input), eventCh)
+}
+
+// plainTextAdvancer matches flow.Resolver's plain-text ask_user advance method.
+type plainTextAdvancer interface {
+	AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error)
+}
+
+// AdvancePlainTextUserInput resumes a pending ask_user question from a plain
+// text reply by delegating to the resolver.
+func (a *Adapter) AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error) {
+	advancer, ok := a.runner.(plainTextAdvancer)
+	if !ok {
+		return userinput.AdvanceTextResult{}, errors.New("turn: runner does not support plain text user input")
+	}
+	return advancer.AdvancePlainTextUserInput(ctx, input)
 }
 
 func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {

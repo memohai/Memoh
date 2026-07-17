@@ -1,12 +1,21 @@
 // Package turn defines the application-level contract for starting and
-// observing agent turns. It is the only surface Channel may depend on;
-// it must not import Echo, fx, sqlc, or any channel package (guarded by
-// internal/arch tests).
+// observing agent turns. It is the only agent surface Channel may depend
+// on; it must not import Echo, fx, sqlc, or any channel package (guarded
+// by internal/arch tests).
+//
+// Data-carrier types are currently aliases of the conversation package's
+// wire shapes: consumers decode the same bytes either way, and the alias
+// keeps this migration behavior-preserving. When a cross-process transport
+// versions the payload format these aliases become owned types.
 package turn
 
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/memohai/memoh/internal/attachment"
+	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 // Mode selects the turn orchestration path.
@@ -17,64 +26,42 @@ const (
 	ModeDiscuss Mode = "discuss"
 )
 
-// Attachment mirrors conversation.ChatAttachment as boundary-owned data.
-type Attachment struct {
-	Type        string         `json:"type"`
-	Base64      string         `json:"base64,omitempty"`
-	Path        string         `json:"path,omitempty"`
-	URL         string         `json:"url,omitempty"`
-	PlatformKey string         `json:"platform_key,omitempty"`
-	ContentHash string         `json:"content_hash,omitempty"`
-	Name        string         `json:"name,omitempty"`
-	Mime        string         `json:"mime,omitempty"`
-	Size        int64          `json:"size,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
+// Data-carrier aliases (see package comment).
+type (
+	Attachment            = conversation.ChatAttachment
+	SkillActivation       = conversation.SkillActivation
+	SkillActivationSkill  = conversation.SkillActivationSkill
+	RequestedSkillContext = conversation.RequestedSkillContext
+	OutboundAssetRef      = conversation.OutboundAssetRef
+	InjectMessage         = conversation.InjectMessage
+	ModelMessage          = conversation.ModelMessage
+	AssistantOutput       = conversation.AssistantOutput
+	ContentPart           = conversation.ContentPart
+	ToolCall              = conversation.ToolCall
+	QuestionAnswer        = userinput.QuestionAnswer
+)
+
+// UserMessageKindSkillActivation re-exports the skill-activation message kind.
+const UserMessageKindSkillActivation = conversation.UserMessageKindSkillActivation
+
+// NewSkillActivation re-exports the deduplicating constructor.
+func NewSkillActivation(items []RequestedSkillContext, prompt string) *SkillActivation {
+	return conversation.NewSkillActivation(items, prompt)
 }
 
-// SkillActivationSkill mirrors conversation.SkillActivationSkill.
-type SkillActivationSkill struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name,omitempty"`
-	Description string `json:"description,omitempty"`
-	SourceKind  string `json:"source_kind,omitempty"`
-	State       string `json:"state,omitempty"`
+// SkillActivationModelQuery re-exports the model-query renderer.
+func SkillActivationModelQuery(activation *SkillActivation) string {
+	return conversation.SkillActivationModelQuery(activation)
 }
 
-// SkillActivation mirrors conversation.SkillActivation.
-type SkillActivation struct {
-	Skills []SkillActivationSkill `json:"skills,omitempty"`
-	Prompt string                 `json:"prompt,omitempty"`
+// NewTextContent re-exports the plain-text content encoder.
+func NewTextContent(text string) json.RawMessage {
+	return conversation.NewTextContent(text)
 }
 
-// RequestedSkillContext mirrors conversation.RequestedSkillContext.
-type RequestedSkillContext struct {
-	Name           string
-	Description    string
-	Content        string
-	SourceKind     string
-	OpaqueSourceID string
-	ContentHash    string
-	Identity       string
-}
-
-// OutboundAssetRef mirrors conversation.OutboundAssetRef.
-type OutboundAssetRef struct {
-	ContentHash string
-	Role        string
-	Ordinal     int
-	Mime        string
-	SizeBytes   int64
-	StorageKey  string
-	Name        string
-	Metadata    map[string]any
-}
-
-// InjectMessage carries a user message injected into a running turn
-// between tool rounds.
-type InjectMessage struct {
-	Text            string
-	Attachments     []Attachment
-	HeaderifiedText string
+// AttachmentFromBundle re-exports the bundle-to-attachment converter.
+func AttachmentFromBundle(bundle attachment.Bundle) Attachment {
+	return conversation.ChatAttachmentFromBundle(bundle)
 }
 
 // StartTurnCommand is a pure-data command. Field set mirrors exactly what
@@ -141,6 +128,40 @@ type StartTurnCommand struct {
 	ToolHTTPURL  string
 }
 
+// ToolApprovalResponse resumes a turn deferred on tool approval
+// (RFC ResumeApprovalCommand). Mirrors flow.ToolApprovalResponseInput.
+type ToolApprovalResponse struct {
+	BotID                      string
+	SessionID                  string
+	ActorChannelIdentityID     string
+	ActorUserID                string
+	ApprovalID                 string
+	ExplicitID                 string
+	ReplyExternalMessageID     string
+	Decision                   string
+	Reason                     string
+	ChatToken                  string
+	SuppressActivePromptAttach bool
+}
+
+// UserInputResponse resumes a turn deferred on ask_user
+// (RFC ResumeUserInputCommand). Mirrors flow.UserInputResponseInput.
+type UserInputResponse struct {
+	BotID                      string
+	SessionID                  string
+	ActorChannelIdentityID     string
+	ActorUserID                string
+	UserInputID                string
+	ExplicitID                 string
+	ReplyExternalMessageID     string
+	Answers                    []QuestionAnswer
+	TextAnswer                 string
+	Canceled                   bool
+	Reason                     string
+	ChatToken                  string
+	SuppressActivePromptAttach bool
+}
+
 // Event is one element of a turn's event stream. Payload is the raw JSON
 // chunk exactly as produced by the runtime; Kind is the parsed "type"
 // field (best effort, empty when unparsable). Seq is monotonically
@@ -165,8 +186,14 @@ type RunHandle interface {
 	Cancel()
 }
 
-// Service starts turns. Implementations: inprocess (wraps flow.Resolver);
-// a cross-process transport will implement the same contract later.
+// Service starts and resumes turns. Implementations: inprocess (wraps
+// flow.Resolver); a cross-process transport will implement the same
+// contract later. The eventCh parameters mirror the resolver's raw JSON
+// stream for resumed turns; they are an in-process surface, not part of
+// the serialized command shape.
 type Service interface {
 	StartTurn(ctx context.Context, cmd StartTurnCommand) (RunHandle, error)
+	RespondToolApproval(ctx context.Context, input ToolApprovalResponse, eventCh chan<- json.RawMessage) error
+	RespondUserInput(ctx context.Context, input UserInputResponse, eventCh chan<- json.RawMessage) error
+	AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error)
 }

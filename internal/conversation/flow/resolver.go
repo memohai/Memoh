@@ -23,6 +23,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextfrag"
@@ -460,7 +461,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if tz == nil {
 		tz = time.UTC
 	}
-	headerInput := UserMessageHeaderInput{
+	headerInput := turnpkg.UserMessageHeaderInput{
 		MessageID:         strings.TrimSpace(req.ExternalMessageID),
 		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 		DisplayName:       displayName,
@@ -474,11 +475,11 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 	headerifiedQuery := ""
 	if userQueryNeedsHeader(req, len(mergedAttachments)) {
-		headerifiedQuery = FormatUserHeader(headerInput, req.Query)
+		headerifiedQuery = turnpkg.FormatUserHeader(headerInput, req.Query)
 	}
 	headerifiedModelQuery := headerifiedQuery
 	if strings.TrimSpace(modelQuery) != strings.TrimSpace(req.Query) {
-		headerifiedModelQuery = FormatUserHeader(headerInput, modelQuery)
+		headerifiedModelQuery = turnpkg.FormatUserHeader(headerInput, modelQuery)
 	}
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))

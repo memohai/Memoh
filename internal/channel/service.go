@@ -507,7 +507,7 @@ func (s *Store) ResolveChannelIdentityBinding(ctx context.Context, channelType C
 
 func normalizeChannelConfigFromRow(row sqlc.BotChannelConfig) (ChannelConfig, error) {
 	return normalizeChannelConfigFields(
-		row.ID, row.BotID, row.ChannelType,
+		row.ID, row.TeamID, row.BotID, row.ChannelType,
 		row.Credentials, row.ExternalIdentity, row.SelfIdentity, row.Routing,
 		row.Disabled, row.VerifiedAt, row.CreatedAt, row.UpdatedAt,
 	)
@@ -515,7 +515,7 @@ func normalizeChannelConfigFromRow(row sqlc.BotChannelConfig) (ChannelConfig, er
 
 func normalizeChannelConfigFromGetRow(row sqlc.BotChannelConfig) (ChannelConfig, error) {
 	return normalizeChannelConfigFields(
-		row.ID, row.BotID, row.ChannelType,
+		row.ID, row.TeamID, row.BotID, row.ChannelType,
 		row.Credentials, row.ExternalIdentity, row.SelfIdentity, row.Routing,
 		row.Disabled, row.VerifiedAt, row.CreatedAt, row.UpdatedAt,
 	)
@@ -523,14 +523,14 @@ func normalizeChannelConfigFromGetRow(row sqlc.BotChannelConfig) (ChannelConfig,
 
 func normalizeChannelConfigFromListRow(row sqlc.BotChannelConfig) (ChannelConfig, error) {
 	return normalizeChannelConfigFields(
-		row.ID, row.BotID, row.ChannelType,
+		row.ID, row.TeamID, row.BotID, row.ChannelType,
 		row.Credentials, row.ExternalIdentity, row.SelfIdentity, row.Routing,
 		row.Disabled, row.VerifiedAt, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
 func normalizeChannelConfigFields(
-	id, botID pgtype.UUID, channelType string,
+	id, teamID, botID pgtype.UUID, channelType string,
 	credentials []byte, externalIdentity pgtype.Text, selfIdentity, routing []byte,
 	disabled bool, verifiedAt, createdAt, updatedAt pgtype.Timestamptz,
 ) (ChannelConfig, error) {
@@ -556,6 +556,7 @@ func normalizeChannelConfigFields(
 	}
 	return ChannelConfig{
 		ID:               id.String(),
+		TeamID:           teamID.String(),
 		BotID:            botID.String(),
 		ChannelType:      ChannelType(channelType),
 		Credentials:      credentialsMap,

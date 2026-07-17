@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -26,14 +26,11 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	if p.channelCaps(msg.Channel).NativeUserInput || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(text) == "" || !isDirectedAtBot(msg) {
 		return false, nil
 	}
-	advanceRunner, ok := p.runner.(PlainTextUserInputRunner)
-	if !ok {
+	if p.turnSvc == nil {
 		return false, nil
 	}
-	responseRunner, ok := p.runner.(UserInputRunner)
-	if !ok {
-		return false, nil
-	}
+	advanceRunner := PlainTextUserInputRunner(p.turnSvc)
+	responseRunner := UserInputRunner(p.turnSvc)
 	replyExternalID := ""
 	if msg.Message.Reply != nil {
 		replyExternalID = strings.TrimSpace(msg.Message.Reply.MessageID)
@@ -65,7 +62,7 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	}); err != nil {
 		return true, err
 	}
-	return true, p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, responseRunner, flow.UserInputResponseInput{
+	return true, p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, responseRunner, turn.UserInputResponse{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		SessionID:              strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),

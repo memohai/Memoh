@@ -398,6 +398,7 @@ func BindingCriteriaFromIdentity(identity Identity) BindingCriteria {
 // Disabled: true means the channel is stopped (not connected); false means enabled.
 type ChannelConfig struct {
 	ID               string         `json:"id"`
+	TeamID           string         `json:"team_id"`
 	BotID            string         `json:"bot_id"`
 	ChannelType      ChannelType    `json:"channel_type"`
 	Credentials      map[string]any `json:"credentials"`
