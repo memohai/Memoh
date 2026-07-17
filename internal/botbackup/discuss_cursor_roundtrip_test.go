@@ -3,12 +3,14 @@ package botbackup
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 )
 
 func TestHistoryBackupRoundTripRemapsEventAndDiscussCursors(t *testing.T) {
@@ -57,12 +59,12 @@ func TestHistoryBackupRoundTripRemapsEventAndDiscussCursors(t *testing.T) {
 			},
 		},
 		exportedEvents: []dbsqlc.BotSessionEvent{
-			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-30", `{"event_cursor":30,"text":"thirty"}`),
-			backupRoundTripEvent(sourceBotID, sourceSessionB, "b-15", `{"event_cursor":15,"text":"other session"}`),
-			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-invalid", `{"event_cursor":"invalid","text":"legacy invalid"}`),
-			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-10", `{"event_cursor":10,"text":"ten"}`),
-			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-missing", `{"text":"legacy missing"}`),
-			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-20", `{"event_cursor":20,"text":"twenty"}`),
+			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-30", `{"event_cursor":30,"text":"thirty"}`, 30),
+			backupRoundTripEvent(sourceBotID, sourceSessionB, "b-15", `{"event_cursor":15,"text":"other session"}`, 15),
+			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-invalid", `{"event_cursor":"invalid","text":"legacy invalid"}`, 40),
+			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-10", `{"event_cursor":10,"text":"ten"}`, 10),
+			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-missing", `{"text":"legacy missing"}`, 50),
+			backupRoundTripEvent(sourceBotID, sourceSessionA, "a-20", `{"event_cursor":20,"text":"twenty"}`, 20),
 		},
 		createdSessionIDsByTitle: map[string]pgtype.UUID{
 			"session-a": targetSessionA,
@@ -146,6 +148,90 @@ func TestHistoryBackupRoundTripRemapsEventAndDiscussCursors(t *testing.T) {
 	}
 }
 
+func TestRestoreHistoryKeepsMixedLegacyAndCursorEventReplayOrder(t *testing.T) {
+	ctx := context.Background()
+	sourceBotID := newBotBackupTestUUID()
+	targetBotID := newBotBackupTestUUID()
+	actorUserID := newBotBackupTestUUID()
+	sourceSessionID := newBotBackupTestUUID()
+	targetSessionID := newBotBackupTestUUID()
+
+	queries := &recordingDiscussCursorRoundTripQueries{
+		createdSessionIDsByTitle: map[string]pgtype.UUID{"mixed": targetSessionID},
+		nextEventCursors:         []int64{9001, 9002},
+	}
+	state := &importState{
+		entries: map[string]backupZipEntry{
+			"history/sessions.json": jsonBackupEntry(t, []dbsqlc.ListSessionsByBotRow{
+				backupRoundTripSession(sourceBotID, sourceSessionID, "mixed"),
+			}),
+			"history/messages.json": jsonBackupEntry(t, []dbsqlc.ListAllMessagesForBackupRow{}),
+			"history/session_events.json": jsonBackupEntry(t, []dbsqlc.BotSessionEvent{
+				{
+					ID:                newBotBackupTestUUID(),
+					BotID:             sourceBotID,
+					SessionID:         sourceSessionID,
+					EventKind:         string(pipelinepkg.EventEdit),
+					EventData:         []byte(`{"session_id":"source","message_id":"message","received_at_ms":200,"event_cursor":200,"content":[{"type":"text","text":"after"}],"attachments":[]}`),
+					ExternalMessageID: pgtype.Text{String: "edit", Valid: true},
+					ReceivedAtMs:      200,
+				},
+				{
+					ID:                newBotBackupTestUUID(),
+					BotID:             sourceBotID,
+					SessionID:         sourceSessionID,
+					EventKind:         string(pipelinepkg.EventMessage),
+					EventData:         []byte(`{"session_id":"source","message_id":"message","received_at_ms":100,"content":[{"type":"text","text":"before"}],"attachments":[],"conversation":{"channel":"local","conversation_type":"direct"}}`),
+					ExternalMessageID: pgtype.Text{String: "message", Valid: true},
+					ReceivedAtMs:      100,
+				},
+			}),
+			"history/discuss_cursors.json": jsonBackupEntry(t, []dbsqlc.BotSessionDiscussCursor{
+				{
+					SessionID:           sourceSessionID,
+					ScopeKey:            "source:telegram",
+					Source:              "telegram",
+					ConsumedEventCursor: 200,
+				},
+			}),
+		},
+		counts: map[Section]int{},
+	}
+
+	svc := &Service{queries: queries}
+	if err := svc.restoreHistory(ctx, actorUserID.String(), targetBotID.String(), state, false, false); err != nil {
+		t.Fatalf("restoreHistory() error = %v", err)
+	}
+
+	restoredEvents := make([]pipelinepkg.CanonicalEvent, 0, len(queries.createdEvents))
+	for _, created := range queries.createdEvents {
+		switch created.EventKind {
+		case string(pipelinepkg.EventMessage):
+			var event pipelinepkg.MessageEvent
+			if err := json.Unmarshal(created.EventData, &event); err != nil {
+				t.Fatalf("decode restored message event: %v", err)
+			}
+			restoredEvents = append(restoredEvents, event)
+		case string(pipelinepkg.EventEdit):
+			var event pipelinepkg.EditEvent
+			if err := json.Unmarshal(created.EventData, &event); err != nil {
+				t.Fatalf("decode restored edit event: %v", err)
+			}
+			restoredEvents = append(restoredEvents, event)
+		default:
+			t.Fatalf("unexpected restored event kind %q", created.EventKind)
+		}
+	}
+
+	rendered := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{}).ReplaySession(targetSessionID.String(), restoredEvents)
+	if len(rendered) != 1 || len(rendered[0].Content) != 1 || !strings.Contains(rendered[0].Content[0].Text, "after") {
+		t.Fatalf("restored replay = %#v, want message followed by edit", rendered)
+	}
+	if len(queries.upsertedCursors) != 1 || queries.upsertedCursors[0].ConsumedEventCursor != 9002 {
+		t.Fatalf("restored discuss cursors = %#v, want consumed event cursor 9002", queries.upsertedCursors)
+	}
+}
+
 func backupRoundTripSession(botID, sessionID pgtype.UUID, title string) dbsqlc.ListSessionsByBotRow {
 	return dbsqlc.ListSessionsByBotRow{
 		ID:              sessionID,
@@ -160,7 +246,7 @@ func backupRoundTripSession(botID, sessionID pgtype.UUID, title string) dbsqlc.L
 	}
 }
 
-func backupRoundTripEvent(botID, sessionID pgtype.UUID, externalID, data string) dbsqlc.BotSessionEvent {
+func backupRoundTripEvent(botID, sessionID pgtype.UUID, externalID, data string, receivedAtMs int64) dbsqlc.BotSessionEvent {
 	return dbsqlc.BotSessionEvent{
 		ID:                newBotBackupTestUUID(),
 		BotID:             botID,
@@ -168,6 +254,7 @@ func backupRoundTripEvent(botID, sessionID pgtype.UUID, externalID, data string)
 		EventKind:         "message",
 		EventData:         []byte(data),
 		ExternalMessageID: pgtype.Text{String: externalID, Valid: true},
+		ReceivedAtMs:      receivedAtMs,
 	}
 }
 

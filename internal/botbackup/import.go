@@ -1300,14 +1300,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			}
 		}
 		sort.SliceStable(restoredEvents, func(i, j int) bool {
-			left, right := restoredEvents[i], restoredEvents[j]
-			if left.sourceCursorValid != right.sourceCursorValid {
-				return left.sourceCursorValid
-			}
-			if left.sourceCursorValid && left.sourceCursor != right.sourceCursor {
-				return left.sourceCursor < right.sourceCursor
-			}
-			return left.archiveOrder < right.archiveOrder
+			return restoredSessionEventPrecedes(restoredEvents[i], restoredEvents[j])
 		})
 		allocator, ok := q.(restoredSessionEventCursorAllocator)
 		if len(restoredEvents) > 0 && !ok {
@@ -1467,6 +1460,36 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		}
 	}
 	return nil
+}
+
+func restoredSessionEventPrecedes(left, right restoredSessionEvent) bool {
+	leftReplayKey := left.item.ReceivedAtMs
+	if left.sourceCursorValid {
+		leftReplayKey = left.sourceCursor
+	}
+	rightReplayKey := right.item.ReceivedAtMs
+	if right.sourceCursorValid {
+		rightReplayKey = right.sourceCursor
+	}
+	if leftReplayKey != rightReplayKey {
+		return leftReplayKey < rightReplayKey
+	}
+	if left.item.ReceivedAtMs != right.item.ReceivedAtMs {
+		return left.item.ReceivedAtMs < right.item.ReceivedAtMs
+	}
+	if left.item.CreatedAt.Valid != right.item.CreatedAt.Valid {
+		return left.item.CreatedAt.Valid
+	}
+	if left.item.CreatedAt.Valid && !left.item.CreatedAt.Time.Equal(right.item.CreatedAt.Time) {
+		return left.item.CreatedAt.Time.Before(right.item.CreatedAt.Time)
+	}
+	if left.item.ID.Valid != right.item.ID.Valid {
+		return left.item.ID.Valid
+	}
+	if idOrder := bytes.Compare(left.item.ID.Bytes[:], right.item.ID.Bytes[:]); idOrder != 0 {
+		return idOrder < 0
+	}
+	return left.archiveOrder < right.archiveOrder
 }
 
 func archivedEventCursor(raw []byte) (int64, bool) {
