@@ -100,11 +100,9 @@ type CreateAccountInput struct {
 }
 
 type UpdateAccountAdminInput struct {
-	UserID      string
-	Role        string
-	DisplayName string
-	AvatarURL   string
-	IsActive    bool
+	UserID   string
+	Role     string
+	IsActive bool
 }
 
 type UpdateAccountProfileInput struct {

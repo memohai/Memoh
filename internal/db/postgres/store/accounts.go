@@ -103,11 +103,9 @@ func (s *Store) UpdateAdmin(ctx context.Context, input dbstore.UpdateAccountAdmi
 		return dbstore.AccountRecord{}, err
 	}
 	row, err := s.queries.UpdateAccountAdmin(ctx, dbsqlc.UpdateAccountAdminParams{
-		UserID:      userID,
-		Role:        input.Role,
-		DisplayName: optionalText(input.DisplayName),
-		AvatarUrl:   optionalText(input.AvatarURL),
-		IsActive:    input.IsActive,
+		UserID:   userID,
+		Role:     input.Role,
+		IsActive: input.IsActive,
 	})
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)

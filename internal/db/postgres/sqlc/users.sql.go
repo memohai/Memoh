@@ -397,26 +397,13 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) 
 }
 
 const updateAccountAdmin = `-- name: UpdateAccountAdmin :one
-WITH updated_user AS (
-  UPDATE users
-  SET display_name = $1,
-      avatar_url = $2,
-      updated_at = now()
-  WHERE users.id = $3
-    AND EXISTS (
-      SELECT 1 FROM team_members membership
-      WHERE membership.team_id = public.memoh_current_team_id()
-        AND membership.user_id = users.id
-    )
-  RETURNING users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
-), updated_membership AS (
+WITH updated_membership AS (
   UPDATE team_members membership
-  SET role = $4::user_role,
-      is_active = $5,
+  SET role = $1::user_role,
+      is_active = $2,
       updated_at = now()
-  FROM updated_user
   WHERE membership.team_id = public.memoh_current_team_id()
-    AND membership.user_id = updated_user.id
+    AND membership.user_id = $3
   RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.metadata, membership.created_at, membership.updated_at
 )
 SELECT
@@ -427,17 +414,14 @@ SELECT
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
   changed_membership.team_id
-FROM updated_user changed_user
-JOIN updated_membership changed_membership
-  ON changed_membership.user_id = changed_user.id
+FROM updated_membership changed_membership
+JOIN users changed_user ON changed_user.id = changed_membership.user_id
 `
 
 type UpdateAccountAdminParams struct {
-	DisplayName pgtype.Text `json:"display_name"`
-	AvatarUrl   pgtype.Text `json:"avatar_url"`
-	UserID      pgtype.UUID `json:"user_id"`
-	Role        string      `json:"role"`
-	IsActive    bool        `json:"is_active"`
+	Role     string      `json:"role"`
+	IsActive bool        `json:"is_active"`
+	UserID   pgtype.UUID `json:"user_id"`
 }
 
 type UpdateAccountAdminRow struct {
@@ -459,13 +443,7 @@ type UpdateAccountAdminRow struct {
 }
 
 func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdminParams) (UpdateAccountAdminRow, error) {
-	row := q.db.QueryRow(ctx, updateAccountAdmin,
-		arg.DisplayName,
-		arg.AvatarUrl,
-		arg.UserID,
-		arg.Role,
-		arg.IsActive,
-	)
+	row := q.db.QueryRow(ctx, updateAccountAdmin, arg.Role, arg.IsActive, arg.UserID)
 	var i UpdateAccountAdminRow
 	err := row.Scan(
 		&i.ID,

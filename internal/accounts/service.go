@@ -246,28 +246,15 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 			return Account{}, err
 		}
 	}
-	displayName := strings.TrimSpace(existing.DisplayName)
-	if req.DisplayName != nil {
-		displayName = strings.TrimSpace(*req.DisplayName)
-	}
-	if displayName == "" {
-		displayName = strings.TrimSpace(existing.Username)
-	}
-	avatarURL := strings.TrimSpace(existing.AvatarURL)
-	if req.AvatarURL != nil {
-		avatarURL = strings.TrimSpace(*req.AvatarURL)
-	}
 	isActive := existing.IsActive
 	if req.IsActive != nil {
 		isActive = *req.IsActive
 	}
 
 	row, err := s.store.UpdateAdmin(ctx, dbstore.UpdateAccountAdminInput{
-		UserID:      userID,
-		Role:        role,
-		DisplayName: displayName,
-		AvatarURL:   avatarURL,
-		IsActive:    isActive,
+		UserID:   userID,
+		Role:     role,
+		IsActive: isActive,
 	})
 	if err != nil {
 		return Account{}, err
@@ -341,24 +328,6 @@ func (s *Service) UpdatePassword(ctx context.Context, userID, currentPassword, n
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(existing.PasswordHash), []byte(currentPassword)); err != nil {
 		return ErrInvalidPassword
-	}
-	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	return s.store.UpdatePassword(ctx, dbstore.UpdateAccountPasswordInput{
-		UserID:       userID,
-		PasswordHash: string(hashed),
-	})
-}
-
-// ResetPassword sets a new password without requiring the current one.
-func (s *Service) ResetPassword(ctx context.Context, userID, newPassword string) error {
-	if s.store == nil {
-		return errors.New("account store not configured")
-	}
-	if strings.TrimSpace(newPassword) == "" {
-		return errors.New("new password is required")
 	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {

@@ -189,26 +189,13 @@ JOIN current_membership changed_membership
   ON changed_membership.user_id = changed_user.id;
 
 -- name: UpdateAccountAdmin :one
-WITH updated_user AS (
-  UPDATE users
-  SET display_name = sqlc.arg(display_name),
-      avatar_url = sqlc.arg(avatar_url),
-      updated_at = now()
-  WHERE users.id = sqlc.arg(user_id)
-    AND EXISTS (
-      SELECT 1 FROM team_members membership
-      WHERE membership.team_id = public.memoh_current_team_id()
-        AND membership.user_id = users.id
-    )
-  RETURNING users.*
-), updated_membership AS (
+WITH updated_membership AS (
   UPDATE team_members membership
   SET role = sqlc.arg(role)::user_role,
       is_active = sqlc.arg(is_active),
       updated_at = now()
-  FROM updated_user
   WHERE membership.team_id = public.memoh_current_team_id()
-    AND membership.user_id = updated_user.id
+    AND membership.user_id = sqlc.arg(user_id)
   RETURNING membership.*
 )
 SELECT
@@ -219,9 +206,8 @@ SELECT
   (changed_user.is_active AND changed_membership.is_active) AS is_active,
   changed_user.metadata, changed_user.created_at, changed_user.updated_at,
   changed_membership.team_id
-FROM updated_user changed_user
-JOIN updated_membership changed_membership
-  ON changed_membership.user_id = changed_user.id;
+FROM updated_membership changed_membership
+JOIN users changed_user ON changed_user.id = changed_membership.user_id;
 
 -- name: UpdateAccountPassword :one
 UPDATE users

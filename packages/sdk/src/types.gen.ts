@@ -35,13 +35,7 @@ export type AccountsListAccountsResponse = {
     items?: Array<AccountsAccount>;
 };
 
-export type AccountsResetPasswordRequest = {
-    new_password?: string;
-};
-
 export type AccountsUpdateAccountRequest = {
-    avatar_url?: string;
-    display_name?: string;
     is_active?: boolean;
     role?: string;
 };
@@ -752,6 +746,7 @@ export type ChannelChannelCapabilities = {
     markdown?: boolean;
     media?: boolean;
     native_commands?: boolean;
+    native_user_input?: boolean;
     polls?: boolean;
     reactions?: boolean;
     reply?: boolean;
@@ -13711,49 +13706,6 @@ export type PutUsersByIdResponses = {
 };
 
 export type PutUsersByIdResponse = PutUsersByIdResponses[keyof PutUsersByIdResponses];
-
-export type PutUsersByIdPasswordData = {
-    /**
-     * Password payload
-     */
-    body: AccountsResetPasswordRequest;
-    path: {
-        /**
-         * User ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/users/{id}/password';
-};
-
-export type PutUsersByIdPasswordErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutUsersByIdPasswordError = PutUsersByIdPasswordErrors[keyof PutUsersByIdPasswordErrors];
-
-export type PutUsersByIdPasswordResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
 
 export type GetVideoModelsData = {
     body?: never;

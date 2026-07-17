@@ -33,10 +33,8 @@ type CreateAccountRequest struct {
 
 // UpdateAccountRequest is the input for admin-level account updates.
 type UpdateAccountRequest struct {
-	Role        *string `json:"role,omitempty"`
-	DisplayName *string `json:"display_name,omitempty"`
-	AvatarURL   *string `json:"avatar_url,omitempty"`
-	IsActive    *bool   `json:"is_active,omitempty"`
+	Role     *string `json:"role,omitempty"`
+	IsActive *bool   `json:"is_active,omitempty"`
 }
 
 // UpdateProfileRequest is the input for self-service profile updates.
@@ -60,11 +58,6 @@ type UpdateProfileMetadata struct {
 type UpdatePasswordRequest struct {
 	CurrentPassword string `json:"current_password,omitempty"`
 	NewPassword     string `json:"new_password"`
-}
-
-// ResetPasswordRequest is the input for admin password reset.
-type ResetPasswordRequest struct {
-	NewPassword string `json:"new_password"`
 }
 
 // ListAccountsResponse wraps a list of accounts.

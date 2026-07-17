@@ -288,6 +288,71 @@ func TestAccountQueriesAttachExistingUserToAnotherTeam(t *testing.T) {
 	}
 }
 
+func TestAdminAccountUpdateOnlyChangesCurrentMembership(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+	const teamTwo = "00000000-0000-0000-0000-0000000000f2"
+
+	if _, err := pool.Exec(ctx, `INSERT INTO teams (id, slug) VALUES ($1, 'admin-update-team-two')`, teamTwo); err != nil {
+		t.Fatalf("seed second team: %v", err)
+	}
+	var userID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (username, display_name, avatar_url)
+		VALUES ('admin-update-shared', 'Original Name', 'https://example.com/original.png')
+		RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("seed global user: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO team_members (team_id, user_id, role, is_active)
+		VALUES ($1, $3, 'admin', true), ($2, $3, 'member', true)`,
+		team.DefaultTeamID, teamTwo, userID); err != nil {
+		t.Fatalf("seed memberships: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin admin update: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", teamTwo); err != nil {
+		t.Fatalf("bind admin-update team: %v", err)
+	}
+	updated, err := dbsqlc.New(tx).UpdateAccountAdmin(ctx, dbsqlc.UpdateAccountAdminParams{
+		UserID:   uuidValue(t, userID),
+		Role:     "admin",
+		IsActive: false,
+	})
+	if err != nil {
+		t.Fatalf("update current membership: %v", err)
+	}
+	if updated.Role != "admin" || updated.IsActive.Bool {
+		t.Fatalf("updated membership role/active = %q/%v", updated.Role, updated.IsActive.Bool)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit admin update: %v", err)
+	}
+
+	var displayName, avatarURL, teamOneRole string
+	var teamOneActive, teamTwoActive bool
+	if err := pool.QueryRow(ctx, `
+		SELECT u.display_name, u.avatar_url,
+		       one.role::text, one.is_active, two.is_active
+		FROM users u
+		JOIN team_members one ON one.user_id=u.id AND one.team_id=$1
+		JOIN team_members two ON two.user_id=u.id AND two.team_id=$2
+		WHERE u.id=$3`, team.DefaultTeamID, teamTwo, userID,
+	).Scan(&displayName, &avatarURL, &teamOneRole, &teamOneActive, &teamTwoActive); err != nil {
+		t.Fatalf("read post-update state: %v", err)
+	}
+	if displayName != "Original Name" || avatarURL != "https://example.com/original.png" {
+		t.Fatalf("admin membership update changed global profile: %q/%q", displayName, avatarURL)
+	}
+	if teamOneRole != "admin" || !teamOneActive || teamTwoActive {
+		t.Fatalf("membership states = team-one %q/%v, team-two active=%v", teamOneRole, teamOneActive, teamTwoActive)
+	}
+}
+
 func TestTeamMembershipRejectsCrossTeamOwnership(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
