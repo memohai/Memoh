@@ -1491,8 +1491,8 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 }
 
 const upsertRegistryModel = `-- name: UpsertRegistryModel :one
-INSERT INTO models (model_id, name, provider_id, type, config)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO models (model_id, name, provider_id, type, enable, config)
+VALUES ($1, $2, $3, $4, false, $5)
 ON CONFLICT (team_id, provider_id, model_id) DO UPDATE SET
   name = EXCLUDED.name,
   type = EXCLUDED.type,
