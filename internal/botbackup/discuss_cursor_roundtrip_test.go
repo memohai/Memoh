@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -232,6 +233,123 @@ func TestRestoreHistoryKeepsMixedLegacyAndCursorEventReplayOrder(t *testing.T) {
 	}
 }
 
+func TestRestoreHistoryPreservesCompletedEventWithoutClaims(t *testing.T) {
+	ctx := context.Background()
+	sourceBotID := newBotBackupTestUUID()
+	targetBotID := newBotBackupTestUUID()
+	actorUserID := newBotBackupTestUUID()
+	sourceSessionID := newBotBackupTestUUID()
+	targetSessionID := newBotBackupTestUUID()
+	targetCompletedEventID := newBotBackupTestUUID()
+	targetIncompleteEventID := newBotBackupTestUUID()
+	completedAt := time.Date(2026, time.July, 17, 19, 30, 45, 123456000, time.UTC)
+	claimUntil := completedAt.Add(time.Hour)
+
+	completed := backupRoundTripEvent(
+		sourceBotID,
+		sourceSessionID,
+		"completed",
+		`{"event_cursor":10,"text":"completed"}`,
+		10,
+	)
+	completed.DeliveryClaimToken = newBotBackupTestUUID()
+	completed.DeliveryClaimedUntil = pgtype.Timestamptz{Time: claimUntil, Valid: true}
+	completed.DeliveryCompletedAt = pgtype.Timestamptz{Time: completedAt, Valid: true}
+	incomplete := backupRoundTripEvent(
+		sourceBotID,
+		sourceSessionID,
+		"incomplete",
+		`{"event_cursor":20,"text":"incomplete"}`,
+		20,
+	)
+	incomplete.DeliveryClaimToken = newBotBackupTestUUID()
+	incomplete.DeliveryClaimedUntil = pgtype.Timestamptz{Time: claimUntil, Valid: true}
+
+	queries := &recordingDiscussCursorRoundTripQueries{
+		createdSessionIDsByTitle:    map[string]pgtype.UUID{"completion": targetSessionID},
+		nextEventCursors:            []int64{9001, 9002},
+		nextCreatedEventIDs:         []pgtype.UUID{targetCompletedEventID, targetIncompleteEventID},
+		restoredEventCompletionRows: 1,
+	}
+	state := &importState{
+		entries: map[string]backupZipEntry{
+			"history/sessions.json": jsonBackupEntry(t, []dbsqlc.ListSessionsByBotRow{
+				backupRoundTripSession(sourceBotID, sourceSessionID, "completion"),
+			}),
+			"history/messages.json":       jsonBackupEntry(t, []dbsqlc.ListAllMessagesForBackupRow{}),
+			"history/session_events.json": jsonBackupEntry(t, []dbsqlc.BotSessionEvent{incomplete, completed}),
+		},
+		counts: map[Section]int{},
+	}
+
+	if err := (&Service{queries: queries}).restoreHistory(
+		ctx,
+		actorUserID.String(),
+		targetBotID.String(),
+		state,
+		false,
+		false,
+	); err != nil {
+		t.Fatalf("restoreHistory() error = %v", err)
+	}
+	if len(queries.createdEvents) != 2 {
+		t.Fatalf("created events = %d, want 2", len(queries.createdEvents))
+	}
+	if len(queries.restoredEventCompletions) != 1 {
+		t.Fatalf("restored event completions = %d, want 1", len(queries.restoredEventCompletions))
+	}
+	restored := queries.restoredEventCompletions[0]
+	if restored.EventID != targetCompletedEventID || !restored.DeliveryCompletedAt.Valid || !restored.DeliveryCompletedAt.Time.Equal(completedAt) {
+		t.Fatalf("restored event completion = %#v, want event %s at %s", restored, targetCompletedEventID.String(), completedAt)
+	}
+}
+
+func TestRestoreHistoryRequiresCompletedEventUpdate(t *testing.T) {
+	sourceBotID := newBotBackupTestUUID()
+	targetBotID := newBotBackupTestUUID()
+	actorUserID := newBotBackupTestUUID()
+	sourceSessionID := newBotBackupTestUUID()
+	targetSessionID := newBotBackupTestUUID()
+	completed := backupRoundTripEvent(
+		sourceBotID,
+		sourceSessionID,
+		"completed",
+		`{"event_cursor":10}`,
+		10,
+	)
+	completed.DeliveryCompletedAt = pgtype.Timestamptz{
+		Time:  time.Date(2026, time.July, 17, 19, 30, 45, 0, time.UTC),
+		Valid: true,
+	}
+	queries := &recordingDiscussCursorRoundTripQueries{
+		createdSessionIDsByTitle: map[string]pgtype.UUID{"completion": targetSessionID},
+		nextEventCursors:         []int64{9001},
+		nextCreatedEventIDs:      []pgtype.UUID{newBotBackupTestUUID()},
+	}
+	state := &importState{
+		entries: map[string]backupZipEntry{
+			"history/sessions.json": jsonBackupEntry(t, []dbsqlc.ListSessionsByBotRow{
+				backupRoundTripSession(sourceBotID, sourceSessionID, "completion"),
+			}),
+			"history/messages.json":       jsonBackupEntry(t, []dbsqlc.ListAllMessagesForBackupRow{}),
+			"history/session_events.json": jsonBackupEntry(t, []dbsqlc.BotSessionEvent{completed}),
+		},
+		counts: map[Section]int{},
+	}
+
+	err := (&Service{queries: queries}).restoreHistory(
+		context.Background(),
+		actorUserID.String(),
+		targetBotID.String(),
+		state,
+		false,
+		false,
+	)
+	if err == nil || !strings.Contains(err.Error(), "updated 0 rows, want 1") {
+		t.Fatalf("restoreHistory() error = %v, want exact completion row error", err)
+	}
+}
+
 func backupRoundTripSession(botID, sessionID pgtype.UUID, title string) dbsqlc.ListSessionsByBotRow {
 	return dbsqlc.ListSessionsByBotRow{
 		ID:              sessionID,
@@ -269,14 +387,17 @@ func jsonBackupEntry(t *testing.T, value any) backupZipEntry {
 
 type recordingDiscussCursorRoundTripQueries struct {
 	dbstore.Queries
-	exportedSessions         []dbsqlc.ListSessionsByBotRow
-	exportedCursors          []dbsqlc.BotSessionDiscussCursor
-	exportedEvents           []dbsqlc.BotSessionEvent
-	createdSessionIDsByTitle map[string]pgtype.UUID
-	nextEventCursors         []int64
-	allocatedEventCursors    []int64
-	createdEvents            []dbsqlc.CreateSessionEventParams
-	upsertedCursors          []dbsqlc.UpsertSessionDiscussCursorParams
+	exportedSessions            []dbsqlc.ListSessionsByBotRow
+	exportedCursors             []dbsqlc.BotSessionDiscussCursor
+	exportedEvents              []dbsqlc.BotSessionEvent
+	createdSessionIDsByTitle    map[string]pgtype.UUID
+	nextEventCursors            []int64
+	allocatedEventCursors       []int64
+	nextCreatedEventIDs         []pgtype.UUID
+	createdEvents               []dbsqlc.CreateSessionEventParams
+	restoredEventCompletions    []dbsqlc.RestoreSessionEventDeliveryCompletionParams
+	restoredEventCompletionRows int64
+	upsertedCursors             []dbsqlc.UpsertSessionDiscussCursorParams
 }
 
 func (q *recordingDiscussCursorRoundTripQueries) ListSessionsByBot(context.Context, pgtype.UUID) ([]dbsqlc.ListSessionsByBotRow, error) {
@@ -308,7 +429,20 @@ func (q *recordingDiscussCursorRoundTripQueries) NextSessionEventCursor(context.
 
 func (q *recordingDiscussCursorRoundTripQueries) CreateSessionEvent(_ context.Context, arg dbsqlc.CreateSessionEventParams) (pgtype.UUID, error) {
 	q.createdEvents = append(q.createdEvents, arg)
+	if len(q.nextCreatedEventIDs) > 0 {
+		id := q.nextCreatedEventIDs[0]
+		q.nextCreatedEventIDs = q.nextCreatedEventIDs[1:]
+		return id, nil
+	}
 	return newBotBackupTestUUID(), nil
+}
+
+func (q *recordingDiscussCursorRoundTripQueries) RestoreSessionEventDeliveryCompletion(
+	_ context.Context,
+	arg dbsqlc.RestoreSessionEventDeliveryCompletionParams,
+) (int64, error) {
+	q.restoredEventCompletions = append(q.restoredEventCompletions, arg)
+	return q.restoredEventCompletionRows, nil
 }
 
 func (q *recordingDiscussCursorRoundTripQueries) UpsertSessionDiscussCursor(_ context.Context, arg dbsqlc.UpsertSessionDiscussCursorParams) (dbsqlc.BotSessionDiscussCursor, error) {

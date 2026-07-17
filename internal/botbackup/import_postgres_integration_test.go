@@ -109,6 +109,109 @@ func TestPostgresRestoreHistoryTurnPreservesDecoratedAssistantOrder(t *testing.T
 	}
 }
 
+func TestPostgresRestoreHistoryPreservesEventCompletionWithoutClaims(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresBotBackupTestTx(t, ctx)
+	userID := newBotBackupTestUUID()
+	targetBotID := newBotBackupTestUUID()
+	existingSessionID := newBotBackupTestUUID()
+	setupPostgresBotBackupTestFixtures(t, ctx, tx, userID, targetBotID, existingSessionID)
+
+	sourceBotID := newBotBackupTestUUID()
+	sourceSessionID := newBotBackupTestUUID()
+	completedAt := time.Date(2026, time.July, 17, 20, 15, 30, 123456000, time.UTC)
+	claimUntil := completedAt.Add(time.Hour)
+	completed := backupRoundTripEvent(
+		sourceBotID,
+		sourceSessionID,
+		"restore-completed",
+		`{"event_cursor":10}`,
+		10,
+	)
+	completed.DeliveryClaimToken = newBotBackupTestUUID()
+	completed.DeliveryClaimedUntil = pgtype.Timestamptz{Time: claimUntil, Valid: true}
+	completed.DeliveryCompletedAt = pgtype.Timestamptz{Time: completedAt, Valid: true}
+	incomplete := backupRoundTripEvent(
+		sourceBotID,
+		sourceSessionID,
+		"restore-incomplete",
+		`{"event_cursor":20}`,
+		20,
+	)
+	incomplete.DeliveryClaimToken = newBotBackupTestUUID()
+	incomplete.DeliveryClaimedUntil = pgtype.Timestamptz{Time: claimUntil, Valid: true}
+	state := &importState{
+		entries: map[string]backupZipEntry{
+			"history/sessions.json": jsonBackupEntry(t, []dbsqlc.ListSessionsByBotRow{
+				backupRoundTripSession(sourceBotID, sourceSessionID, "completion"),
+			}),
+			"history/messages.json":       jsonBackupEntry(t, []dbsqlc.ListAllMessagesForBackupRow{}),
+			"history/session_events.json": jsonBackupEntry(t, []dbsqlc.BotSessionEvent{incomplete, completed}),
+		},
+		counts: map[Section]int{},
+	}
+	queries := postgresstore.NewQueries(dbsqlc.New(tx))
+	if err := (&Service{queries: queries}).restoreHistory(
+		ctx,
+		userID.String(),
+		targetBotID.String(),
+		state,
+		false,
+		false,
+	); err != nil {
+		t.Fatalf("restoreHistory() error = %v", err)
+	}
+
+	type restoredEventState struct {
+		completedAt pgtype.Timestamptz
+		claimToken  pgtype.UUID
+		claimUntil  pgtype.Timestamptz
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT external_message_id, delivery_completed_at, delivery_claim_token, delivery_claimed_until
+		FROM bot_session_events
+		WHERE bot_id = $1
+		  AND external_message_id IN ('restore-completed', 'restore-incomplete')
+	`, targetBotID)
+	if err != nil {
+		t.Fatalf("query restored event state: %v", err)
+	}
+	defer rows.Close()
+	restored := make(map[string]restoredEventState, 2)
+	for rows.Next() {
+		var externalID string
+		var eventState restoredEventState
+		if err := rows.Scan(&externalID, &eventState.completedAt, &eventState.claimToken, &eventState.claimUntil); err != nil {
+			t.Fatalf("scan restored event state: %v", err)
+		}
+		restored[externalID] = eventState
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate restored event state: %v", err)
+	}
+	if len(restored) != 2 {
+		t.Fatalf("restored events = %d, want 2", len(restored))
+	}
+	completedState := restored["restore-completed"]
+	if !completedState.completedAt.Valid || !completedState.completedAt.Time.Equal(completedAt) {
+		t.Fatalf("completed event timestamp = %#v, want %s", completedState.completedAt, completedAt)
+	}
+	incompleteState := restored["restore-incomplete"]
+	if incompleteState.completedAt.Valid {
+		t.Fatalf("incomplete event timestamp = %#v, want NULL", incompleteState.completedAt)
+	}
+	for externalID, eventState := range restored {
+		if eventState.claimToken.Valid || eventState.claimUntil.Valid {
+			t.Fatalf(
+				"restored event %q claims = token:%#v until:%#v, want both NULL",
+				externalID,
+				eventState.claimToken,
+				eventState.claimUntil,
+			)
+		}
+	}
+}
+
 func beginPostgresBotBackupTestTx(t *testing.T, ctx context.Context) pgx.Tx {
 	t.Helper()
 	dsn := os.Getenv("TEST_POSTGRES_DSN")

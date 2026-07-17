@@ -593,3 +593,25 @@ func (q *Queries) RenewSessionEventDelivery(ctx context.Context, arg RenewSessio
 	err := row.Scan(&delivery_claimed_until)
 	return delivery_claimed_until, err
 }
+
+const restoreSessionEventDeliveryCompletion = `-- name: RestoreSessionEventDeliveryCompletion :execrows
+UPDATE bot_session_events
+SET delivery_completed_at = $1::timestamptz,
+    delivery_claim_token = NULL,
+    delivery_claimed_until = NULL
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2::uuid
+`
+
+type RestoreSessionEventDeliveryCompletionParams struct {
+	DeliveryCompletedAt pgtype.Timestamptz `json:"delivery_completed_at"`
+	EventID             pgtype.UUID        `json:"event_id"`
+}
+
+func (q *Queries) RestoreSessionEventDeliveryCompletion(ctx context.Context, arg RestoreSessionEventDeliveryCompletionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreSessionEventDeliveryCompletion, arg.DeliveryCompletedAt, arg.EventID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

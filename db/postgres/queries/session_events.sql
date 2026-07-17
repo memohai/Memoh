@@ -14,6 +14,14 @@ INSERT INTO bot_session_events (
 ON CONFLICT DO NOTHING
 RETURNING id;
 
+-- name: RestoreSessionEventDeliveryCompletion :execrows
+UPDATE bot_session_events
+SET delivery_completed_at = sqlc.arg(delivery_completed_at)::timestamptz,
+    delivery_claim_token = NULL,
+    delivery_claimed_until = NULL
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(event_id)::uuid;
+
 -- name: ClaimSessionEventDelivery :one
 WITH locked AS MATERIALIZED (
   SELECT event.id,

@@ -1149,6 +1149,13 @@ type restoredSessionEventCursorAllocator interface {
 	NextSessionEventCursor(context.Context) (int64, error)
 }
 
+type restoredSessionEventCompletionWriter interface {
+	RestoreSessionEventDeliveryCompletion(
+		context.Context,
+		sqlc.RestoreSessionEventDeliveryCompletionParams,
+	) (int64, error)
+}
+
 type restoredSessionEvent struct {
 	item              sqlc.BotSessionEvent
 	sessionID         pgtype.UUID
@@ -1326,6 +1333,25 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			})
 			if err != nil {
 				return fmt.Errorf("session event: %w", err)
+			}
+			if restored.item.DeliveryCompletedAt.Valid {
+				completionWriter, ok := q.(restoredSessionEventCompletionWriter)
+				if !ok {
+					return errors.New("session event completion restorer is not configured")
+				}
+				rows, completionErr := completionWriter.RestoreSessionEventDeliveryCompletion(
+					ctx,
+					sqlc.RestoreSessionEventDeliveryCompletionParams{
+						DeliveryCompletedAt: restored.item.DeliveryCompletedAt,
+						EventID:             created,
+					},
+				)
+				if completionErr != nil {
+					return fmt.Errorf("restore session event completion: %w", completionErr)
+				}
+				if rows != 1 {
+					return fmt.Errorf("restore session event completion: updated %d rows, want 1", rows)
+				}
 			}
 			eventMap[restored.item.ID.String()] = created
 			if restored.sourceCursorValid {
