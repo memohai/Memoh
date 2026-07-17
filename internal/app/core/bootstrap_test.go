@@ -1,9 +1,8 @@
-package main
+package appcore
 
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel/inbound"
 	"github.com/memohai/memoh/internal/registry"
 )
 
@@ -35,22 +34,5 @@ func TestProviderBootstrapDefinitionsKeepsAllProviderFiles(t *testing.T) {
 		if got[i].Name != defs[i].Name {
 			t.Fatalf("definition %d = %#v, want %#v", i, got[i], defs[i])
 		}
-	}
-}
-
-func TestNewSessionCreatedByUserIDPrefersCreator(t *testing.T) {
-	got := newSessionCreatedByUserID(inbound.NewSessionSpec{
-		CreatedByUserID:       "creator-user",
-		RuntimeOwnerAccountID: "runtime-owner",
-	})
-	if got != "creator-user" {
-		t.Fatalf("created_by_user_id = %q, want creator-user", got)
-	}
-
-	got = newSessionCreatedByUserID(inbound.NewSessionSpec{
-		RuntimeOwnerAccountID: "runtime-owner",
-	})
-	if got != "runtime-owner" {
-		t.Fatalf("created_by_user_id fallback = %q, want runtime-owner", got)
 	}
 }

@@ -6,37 +6,11 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
-	"github.com/memohai/memoh/internal/acl"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/bots"
+	appchannel "github.com/memohai/memoh/internal/app/channel"
+	appcore "github.com/memohai/memoh/internal/app/core"
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
-	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/channelaccess"
-	"github.com/memohai/memoh/internal/compaction"
-	"github.com/memohai/memoh/internal/conversation"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/mcp"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/message/event"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthclients"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/toolapproval"
-	"github.com/memohai/memoh/internal/userinput"
-	"github.com/memohai/memoh/internal/userruntime"
-	videopkg "github.com/memohai/memoh/internal/video"
-	"github.com/memohai/memoh/internal/webhooktunnel"
-	"github.com/memohai/memoh/internal/workspace"
 )
 
 func runServe() {
@@ -45,99 +19,10 @@ func runServe() {
 
 func options() fx.Option {
 	return fx.Options(
+		fx.Provide(provideConfig),
+		appcore.Module(),
+		appchannel.Module(),
 		fx.Provide(
-			provideConfig,
-			boot.ProvideRuntimeConfig,
-			provideLogger,
-			provideContainerService,
-			provideOverlayProviderRegistry,
-			provideNetworkService,
-			provideNetworkController,
-			provideDBConn,
-			providePGVectorStore,
-			providePostgresStore,
-			provideDBQueries,
-			provideAccountStore,
-			provideUserRuntimeStore,
-			provideBotRemoteRuntimeBindingStore,
-			provideUserRuntimeHub,
-			userruntime.NewService,
-			workspace.NewRemoteWorkspaceService,
-			provideUserRuntimePipe,
-			provideWikiStore,
-			provideWorkspaceManager,
-			provideBridgeProvider,
-			providePluginBridgeProvider,
-			provideMemoryLLM,
-			memprovider.NewService,
-			provideMemoryProviderRegistry,
-			models.NewService,
-			bots.NewService,
-			provideACPRunner,
-			provideACPSessionPool,
-			provideACPCodexOAuthHandler,
-			provideACPClaudeCodeOAuthHandler,
-			provideAccountService,
-			acl.NewService,
-			channelaccess.NewService,
-			settings.NewService,
-			toolapproval.NewService,
-			userinput.NewService,
-			provideHooksService,
-			provideProvidersService,
-			fetchproviders.NewService,
-			searchproviders.NewService,
-			policy.NewService,
-			mcp.NewConnectionService,
-			oauthclients.NewRegistry,
-			pluginspkg.NewService,
-			mcp.NewToolSessionContextStore,
-			conversation.NewService,
-			identities.NewService,
-			event.NewHub,
-			provideAudioRegistry,
-			audiopkg.NewService,
-			provideVideoRegistry,
-			videopkg.NewService,
-			provideAudioTempStore,
-			emailpkg.NewDBOAuthTokenStore,
-			provideEmailRegistry,
-			emailpkg.NewService,
-			emailpkg.NewOutboxService,
-			provideEmailChatGateway,
-			provideEmailTrigger,
-			emailpkg.NewManager,
-			provideRouteService,
-			provideSessionService,
-			provideMessageService,
-			provideMediaService,
-			providePipeline,
-			provideEventStore,
-			provideDiscussDriver,
-			local.NewRouteHub,
-			provideChannelRegistry,
-			channel.NewStore,
-			provideCommandHandler,
-			provideChannelRouter,
-			provideChannelManager,
-			provideChannelLifecycleService,
-			provideAgent,
-			provideChatResolver,
-			provideScheduleTriggerer,
-			provideHeartbeatSessionCreator,
-			provideScheduleSessionCreator,
-			schedule.NewService,
-			provideHeartbeatTriggerer,
-			heartbeat.NewService,
-			compaction.NewService,
-			provideContainerdHandler,
-			provideBotBackupService,
-			provideFederationGateway,
-			provideACPToolSource,
-			provideToolGatewayService,
-			provideBackgroundManager,
-			webhooktunnel.NewManager,
-			provideToolProviders,
 			provideServerHandler(handlers.NewPingHandler),
 			provideServerHandler(handlers.NewWebhookTunnelHandler),
 			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
@@ -185,7 +70,6 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideServerHandler(handlers.NewPluginsHandler),
 			provideServerHandler(handlers.NewBotBackupHandler),
-			provideOAuthService,
 			provideServerHandler(handlers.NewTokenUsageHandler),
 			provideServerHandler(handlers.NewSessionInfoHandler),
 			provideServerHandler(handlers.NewSupermarketHandler),
@@ -193,23 +77,6 @@ func options() fx.Option {
 			provideServer,
 		),
 		fx.Invoke(
-			injectToolProviders,
-			injectACPToolProviders,
-			startRegistrySync,
-			startAudioProviderBootstrap,
-			startVideoProviderBootstrap,
-			startMemoryProviderBootstrap,
-			startFetchProviderBootstrap,
-			startSearchProviderBootstrap,
-			startScheduleService,
-			startHeartbeatService,
-			startChannelManager,
-			startEmailManager,
-			startContainerReconciliation,
-			startBackgroundTaskCleanup,
-			startWebhookTunnelListener,
-			startWebhookTunnel,
-			startAudioTempStoreCleanup,
 			startServer,
 		),
 		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {
