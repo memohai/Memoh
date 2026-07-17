@@ -15,6 +15,7 @@ import (
 var nonTeamPublicTables = map[string]bool{
 	"schema_migrations": true,
 	"teams":             true,
+	"users":             true,
 }
 
 // TestTeamViewGuard verifies that views over team tables do not bypass RLS.
@@ -87,16 +88,27 @@ func TestTeamSchemaGuard(t *testing.T) {
 			t.Errorf("team table %s: team_id must be NOT NULL", tbl)
 		}
 
-		// (2) Existing PK remains stable and has a team-prefixed helper key.
+		// (2) The table has a team-prefixed identity key. Existing tables keep
+		// their global PK plus a helper unique; new tables may use a composite
+		// team-prefixed PK directly.
+		var teamPrimary bool
 		var helperKeys int
 		if err := pool.QueryRow(ctx, `
-			SELECT count(*) FROM pg_constraint
-			 WHERE conrelid=('public.'||quote_ident($1))::regclass
-			   AND contype='u' AND conname LIKE 'memoh_team_key_%'`, tbl).Scan(&helperKeys); err != nil {
+			SELECT
+			  EXISTS (
+			    SELECT 1 FROM pg_constraint con
+			     WHERE con.conrelid=('public.'||quote_ident($1))::regclass
+			       AND con.contype='p'
+			       AND (SELECT a.attname FROM pg_attribute a
+			             WHERE a.attrelid=con.conrelid AND a.attnum=con.conkey[1])='team_id'
+			  ),
+			  (SELECT count(*) FROM pg_constraint con
+			    WHERE con.conrelid=('public.'||quote_ident($1))::regclass
+			      AND con.contype='u' AND con.conname LIKE 'memoh_team_key_%')`, tbl).Scan(&teamPrimary, &helperKeys); err != nil {
 			t.Fatalf("team key check %s: %v", tbl, err)
 		}
-		if helperKeys != 1 {
-			t.Errorf("team table %s: expected one team-prefixed helper key, got %d", tbl, helperKeys)
+		if !teamPrimary && helperKeys != 1 {
+			t.Errorf("team table %s: expected a team-prefixed PK or one helper key, got pk=%v helpers=%d", tbl, teamPrimary, helperKeys)
 		}
 
 		// (3) has a root FK (team_id) -> teams(id).

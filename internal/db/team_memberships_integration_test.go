@@ -1,0 +1,346 @@
+//go:build integration
+
+package db_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/team"
+)
+
+func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
+	ctx := context.Background()
+	dsn := teamMigrationDSN(t)
+	pool := resetToEmpty(t)
+
+	stepUp(t, dsn, countAllMigrations(t)-1)
+
+	var userID, botID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (team_id, username, email, role, data_root)
+		VALUES ($1, 'legacy-member', 'legacy-member@example.com', 'admin', '/legacy')
+		RETURNING id`, team.DefaultTeamID).Scan(&userID); err != nil {
+		t.Fatalf("seed pre-membership user: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO bots (team_id, owner_user_id, name)
+		VALUES ($1, $2, 'legacy-member-bot') RETURNING id`, team.DefaultTeamID, userID).Scan(&botID); err != nil {
+		t.Fatalf("seed pre-membership bot: %v", err)
+	}
+
+	stepUp(t, dsn, 1)
+
+	var hasTeamID, hasRole bool
+	if err := pool.QueryRow(ctx, `
+		SELECT
+		  EXISTS (SELECT 1 FROM information_schema.columns
+		           WHERE table_schema='public' AND table_name='users' AND column_name='team_id'),
+		  EXISTS (SELECT 1 FROM information_schema.columns
+		           WHERE table_schema='public' AND table_name='users' AND column_name='role')`).Scan(&hasTeamID, &hasRole); err != nil {
+		t.Fatalf("inspect global users schema: %v", err)
+	}
+	if hasTeamID || hasRole {
+		t.Fatalf("users still has membership columns: team_id=%v role=%v", hasTeamID, hasRole)
+	}
+
+	var membershipTeam, role, dataRoot string
+	if err := pool.QueryRow(ctx, `
+		SELECT team_id::text, role::text, data_root
+		FROM team_members WHERE user_id=$1`, userID).Scan(&membershipTeam, &role, &dataRoot); err != nil {
+		t.Fatalf("read backfilled membership: %v", err)
+	}
+	if membershipTeam != team.DefaultTeamID || role != "admin" || dataRoot != "/legacy" {
+		t.Fatalf("backfilled membership = (%s, %s, %s)", membershipTeam, role, dataRoot)
+	}
+
+	var ownerParent string
+	if err := pool.QueryRow(ctx, `
+		SELECT parent.relname
+		FROM pg_constraint con
+		JOIN pg_class parent ON parent.oid=con.confrelid
+		WHERE con.conrelid='public.bots'::regclass
+		  AND con.conname='bots_owner_user_id_fkey'`).Scan(&ownerParent); err != nil {
+		t.Fatalf("read bot owner FK: %v", err)
+	}
+	if ownerParent != "team_members" {
+		t.Fatalf("bot owner FK parent = %q, want team_members", ownerParent)
+	}
+
+	stepDown(t, dsn, 1)
+
+	var restoredTeam, restoredRole, restoredRoot string
+	if err := pool.QueryRow(ctx, `
+		SELECT team_id::text, role::text, data_root FROM users WHERE id=$1`, userID,
+	).Scan(&restoredTeam, &restoredRole, &restoredRoot); err != nil {
+		t.Fatalf("read restored user: %v", err)
+	}
+	if restoredTeam != team.DefaultTeamID || restoredRole != "admin" || restoredRoot != "/legacy" {
+		t.Fatalf("restored user = (%s, %s, %s)", restoredTeam, restoredRole, restoredRoot)
+	}
+	var membershipTableExists bool
+	if err := pool.QueryRow(ctx,
+		`SELECT to_regclass('public.team_members') IS NOT NULL`,
+	).Scan(&membershipTableExists); err != nil {
+		t.Fatalf("inspect membership table after down: %v", err)
+	}
+	if membershipTableExists {
+		t.Fatal("team_members still exists after rolling back 0114")
+	}
+
+	stepUp(t, dsn, 1)
+	var preservedBot bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM bots WHERE id=$1)`, botID).Scan(&preservedBot); err != nil {
+		t.Fatalf("check bot after re-up: %v", err)
+	}
+	if !preservedBot {
+		t.Fatal("membership migration round trip lost the owned bot")
+	}
+}
+
+func TestGlobalUserCanBelongToMultipleTeams(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+	const teamTwo = "00000000-0000-0000-0000-0000000000f2"
+
+	if _, err := pool.Exec(ctx, `INSERT INTO teams (id, slug) VALUES ($1, 'team-two')`, teamTwo); err != nil {
+		t.Fatalf("seed second team: %v", err)
+	}
+	var userID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (username, email, password_hash, display_name)
+		VALUES ('shared-user', 'shared@example.com', 'hash', 'Shared User')
+		RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("seed global user: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO team_members (team_id, user_id, role, data_root)
+		VALUES ($1, $3, 'admin', '/team-one'), ($2, $3, 'member', '/team-two')`,
+		team.DefaultTeamID, teamTwo, userID); err != nil {
+		t.Fatalf("seed memberships: %v", err)
+	}
+
+	accountAs := func(teamID string) dbsqlc.TeamAccount {
+		t.Helper()
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin account read: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", teamID); err != nil {
+			t.Fatalf("bind account team: %v", err)
+		}
+		account, err := dbsqlc.New(tx).GetAccountByUserID(ctx, uuidValue(t, userID))
+		if err != nil {
+			t.Fatalf("get account for team %s: %v", teamID, err)
+		}
+		return account
+	}
+
+	teamOneAccount := accountAs(team.DefaultTeamID)
+	teamTwoAccount := accountAs(teamTwo)
+	if teamOneAccount.ID != teamTwoAccount.ID {
+		t.Fatalf("team accounts use different principals: %s vs %s", teamOneAccount.ID, teamTwoAccount.ID)
+	}
+	if teamOneAccount.Role != "admin" || teamOneAccount.DataRoot.String != "/team-one" {
+		t.Fatalf("team-one account role/root = %q/%q", teamOneAccount.Role, teamOneAccount.DataRoot.String)
+	}
+	if teamTwoAccount.Role != "member" || teamTwoAccount.DataRoot.String != "/team-two" {
+		t.Fatalf("team-two account role/root = %q/%q", teamTwoAccount.Role, teamTwoAccount.DataRoot.String)
+	}
+
+	if _, err := pool.Exec(ctx, `INSERT INTO users (username) VALUES ('shared-user')`); sqlState(err) != "23505" {
+		t.Fatalf("global username uniqueness SQLSTATE = %q, want 23505", sqlState(err))
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin remove member: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", teamTwo); err != nil {
+		t.Fatalf("bind remove-member team: %v", err)
+	}
+	if _, err := dbsqlc.New(tx).RemoveMember(ctx, uuidValue(t, userID)); err != nil {
+		t.Fatalf("remove team-two member: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit remove member: %v", err)
+	}
+
+	var username, passwordHash string
+	if err := pool.QueryRow(ctx, `SELECT username, password_hash FROM users WHERE id=$1`, userID).Scan(&username, &passwordHash); err != nil {
+		t.Fatalf("read global credentials: %v", err)
+	}
+	if username != "shared-user" || passwordHash != "hash" {
+		t.Fatalf("remove member changed credentials: %q/%q", username, passwordHash)
+	}
+	var teamOneActive, teamTwoActive bool
+	if err := pool.QueryRow(ctx, `
+		SELECT
+		  bool_or(is_active) FILTER (WHERE team_id=$1),
+		  bool_or(is_active) FILTER (WHERE team_id=$2)
+		FROM team_members WHERE user_id=$3`, team.DefaultTeamID, teamTwo, userID,
+	).Scan(&teamOneActive, &teamTwoActive); err != nil {
+		t.Fatalf("read membership states: %v", err)
+	}
+	if !teamOneActive || teamTwoActive {
+		t.Fatalf("membership active states = %v/%v", teamOneActive, teamTwoActive)
+	}
+}
+
+func TestAccountQueriesAttachExistingUserToAnotherTeam(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+	const teamTwo = "00000000-0000-0000-0000-0000000000f2"
+	const unusedUserID = "00000000-0000-0000-0000-0000000000a2"
+
+	if _, err := pool.Exec(ctx, `INSERT INTO teams (id, slug) VALUES ($1, 'account-team-two')`, teamTwo); err != nil {
+		t.Fatalf("seed second team: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin default-team account: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", team.DefaultTeamID); err != nil {
+		t.Fatalf("bind default team: %v", err)
+	}
+	queries := dbsqlc.New(tx)
+	created, err := queries.CreateUser(ctx, dbsqlc.CreateUserParams{
+		IsActive: true,
+		Metadata: []byte(`{"source":"test"}`),
+	})
+	if err != nil {
+		t.Fatalf("create global user and membership: %v", err)
+	}
+	account, err := queries.CreateAccount(ctx, dbsqlc.CreateAccountParams{
+		Username:     pgtype.Text{String: "query-shared", Valid: true},
+		Email:        pgtype.Text{String: "query-shared@example.com", Valid: true},
+		PasswordHash: pgtype.Text{String: "team-one-hash", Valid: true},
+		DisplayName:  pgtype.Text{String: "Query Shared", Valid: true},
+		AvatarUrl:    pgtype.Text{},
+		UserID:       created.ID,
+		Role:         "admin",
+		IsActive:     true,
+		DataRoot:     pgtype.Text{String: "/query-team-one", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create default-team account: %v", err)
+	}
+	if account.Role != "admin" || account.TeamID.String() != team.DefaultTeamID {
+		t.Fatalf("default-team account role/team = %q/%q", account.Role, account.TeamID.String())
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit default-team account: %v", err)
+	}
+
+	tx, err = pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin second-team account: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", teamTwo); err != nil {
+		t.Fatalf("bind second team: %v", err)
+	}
+	attached, err := dbsqlc.New(tx).UpsertAccountByUsername(ctx, dbsqlc.UpsertAccountByUsernameParams{
+		UserID:       uuidValue(t, unusedUserID),
+		Username:     pgtype.Text{String: "query-shared", Valid: true},
+		Email:        pgtype.Text{String: "query-shared@example.com", Valid: true},
+		PasswordHash: pgtype.Text{String: "team-two-hash", Valid: true},
+		DisplayName:  pgtype.Text{String: "Query Shared", Valid: true},
+		AvatarUrl:    pgtype.Text{},
+		IsActive:     true,
+		Role:         "member",
+		DataRoot:     pgtype.Text{String: "/query-team-two", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("attach existing account to second team: %v", err)
+	}
+	if attached.ID != created.ID {
+		t.Fatalf("attached principal = %s, want existing %s", attached.ID, created.ID)
+	}
+	if attached.Role != "member" || attached.TeamID.String() != teamTwo {
+		t.Fatalf("second-team account role/team = %q/%q", attached.Role, attached.TeamID.String())
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit second-team account: %v", err)
+	}
+
+	var userCount, membershipCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username='query-shared'`).Scan(&userCount); err != nil {
+		t.Fatalf("count global users: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM team_members WHERE user_id=$1`, created.ID).Scan(&membershipCount); err != nil {
+		t.Fatalf("count memberships: %v", err)
+	}
+	if userCount != 1 || membershipCount != 2 {
+		t.Fatalf("global users/memberships = %d/%d, want 1/2", userCount, membershipCount)
+	}
+	var passwordHash string
+	if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, created.ID).Scan(&passwordHash); err != nil {
+		t.Fatalf("read shared password hash: %v", err)
+	}
+	if passwordHash != "team-one-hash" {
+		t.Fatalf("second-team membership overwrote global password hash: %q", passwordHash)
+	}
+}
+
+func TestTeamMembershipRejectsCrossTeamOwnership(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+	const teamTwo = "00000000-0000-0000-0000-0000000000f2"
+
+	if _, err := pool.Exec(ctx, `INSERT INTO teams (id, slug) VALUES ($1, 'owner-team-two')`, teamTwo); err != nil {
+		t.Fatalf("seed second team: %v", err)
+	}
+	var userID string
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username) VALUES ('owner-one') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)`, team.DefaultTeamID, userID); err != nil {
+		t.Fatalf("seed team-one membership: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO bots (team_id, owner_user_id, name) VALUES ($1, $2, 'cross-owner')`, teamTwo, userID); sqlState(err) != "23503" {
+		t.Fatalf("cross-team owner SQLSTATE = %q, want 23503", sqlState(err))
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)`, teamTwo, userID); err != nil {
+		t.Fatalf("add team-two membership: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO bots (team_id, owner_user_id, name) VALUES ($1, $2, 'same-owner')`, teamTwo, userID); err != nil {
+		t.Fatalf("same-team owner insert: %v", err)
+	}
+}
+
+func TestTeamMembershipDownFailsWithMultipleMemberships(t *testing.T) {
+	ctx := context.Background()
+	dsn := teamMigrationDSN(t)
+	pool := freshMigratedDB(t)
+	const teamTwo = "00000000-0000-0000-0000-0000000000f2"
+
+	if _, err := pool.Exec(ctx, `INSERT INTO teams (id, slug) VALUES ($1, 'down-team-two')`, teamTwo); err != nil {
+		t.Fatalf("seed second team: %v", err)
+	}
+	var userID string
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username) VALUES ('multi-down') RETURNING id`).Scan(&userID); err != nil {
+		t.Fatalf("seed global user: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO team_members (team_id, user_id)
+		VALUES ($1, $3), ($2, $3)`, team.DefaultTeamID, teamTwo, userID); err != nil {
+		t.Fatalf("seed multiple memberships: %v", err)
+	}
+	if err := tryStepDown(t, dsn, 1); err == nil {
+		t.Fatal("0114 down must fail closed when a user has multiple memberships")
+	}
+}
+
+func uuidValue(t *testing.T, value string) (out pgtype.UUID) {
+	t.Helper()
+	if err := out.Scan(value); err != nil {
+		t.Fatalf("parse uuid %q: %v", value, err)
+	}
+	return out
+}

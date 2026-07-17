@@ -63,7 +63,7 @@ func (s *Store) CreateUser(ctx context.Context, input dbstore.CreateUserInput) (
 	if err != nil {
 		return dbstore.AccountRecord{}, err
 	}
-	return accountRecord(row), nil
+	return accountRecord(dbsqlc.TeamAccount(row)), nil
 }
 
 func (s *Store) CreateAccount(ctx context.Context, input dbstore.CreateAccountInput) (dbstore.AccountRecord, error) {
@@ -85,7 +85,7 @@ func (s *Store) CreateAccount(ctx context.Context, input dbstore.CreateAccountIn
 	if err != nil {
 		return dbstore.AccountRecord{}, err
 	}
-	return accountRecord(row), nil
+	return accountRecord(dbsqlc.TeamAccount(row)), nil
 }
 
 func (s *Store) UpdateLastLogin(ctx context.Context, accountID string) error {
@@ -112,7 +112,7 @@ func (s *Store) UpdateAdmin(ctx context.Context, input dbstore.UpdateAccountAdmi
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)
 	}
-	return accountRecord(row), nil
+	return accountRecord(dbsqlc.TeamAccount(row)), nil
 }
 
 func (s *Store) UpdateProfile(ctx context.Context, input dbstore.UpdateAccountProfileInput) (dbstore.AccountRecord, error) {
@@ -121,17 +121,16 @@ func (s *Store) UpdateProfile(ctx context.Context, input dbstore.UpdateAccountPr
 		return dbstore.AccountRecord{}, err
 	}
 	row, err := s.queries.UpdateAccountProfile(ctx, dbsqlc.UpdateAccountProfileParams{
-		ID:          userID,
+		UserID:      userID,
 		DisplayName: optionalText(input.DisplayName),
 		AvatarUrl:   optionalText(input.AvatarURL),
 		Timezone:    input.Timezone,
-		IsActive:    input.IsActive,
 		Metadata:    []byte(input.Metadata),
 	})
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)
 	}
-	return accountRecord(row), nil
+	return accountRecord(dbsqlc.TeamAccount(row)), nil
 }
 
 func (s *Store) UpdatePassword(ctx context.Context, input dbstore.UpdateAccountPasswordInput) error {
@@ -140,8 +139,8 @@ func (s *Store) UpdatePassword(ctx context.Context, input dbstore.UpdateAccountP
 		return err
 	}
 	_, err = s.queries.UpdateAccountPassword(ctx, dbsqlc.UpdateAccountPasswordParams{
-		ID:           userID,
 		PasswordHash: text(input.PasswordHash),
+		UserID:       userID,
 	})
 	return mapQueryErr(err)
 }
@@ -170,7 +169,7 @@ func optionalText(value string) pgtype.Text {
 	return pgtype.Text{String: value, Valid: value != ""}
 }
 
-func accountRecords(rows []dbsqlc.User) []dbstore.AccountRecord {
+func accountRecords(rows []dbsqlc.TeamAccount) []dbstore.AccountRecord {
 	items := make([]dbstore.AccountRecord, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, accountRecord(row))
@@ -178,7 +177,7 @@ func accountRecords(rows []dbsqlc.User) []dbstore.AccountRecord {
 	return items
 }
 
-func accountRecord(row dbsqlc.User) dbstore.AccountRecord {
+func accountRecord(row dbsqlc.TeamAccount) dbstore.AccountRecord {
 	rec := dbstore.AccountRecord{
 		ID:              row.ID.String(),
 		Username:        row.Username.String,
@@ -189,7 +188,7 @@ func accountRecord(row dbsqlc.User) dbstore.AccountRecord {
 		Timezone:        row.Timezone,
 		PasswordHash:    row.PasswordHash.String,
 		HasPasswordHash: row.PasswordHash.Valid,
-		IsActive:        row.IsActive,
+		IsActive:        row.IsActive.Bool,
 		Metadata:        string(row.Metadata),
 	}
 	if row.CreatedAt.Valid {

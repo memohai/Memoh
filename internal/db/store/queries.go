@@ -49,7 +49,7 @@ type Queries interface {
 	CountScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) (int64, error)
 	CountSessionEvents(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	CountTokenUsageRecords(ctx context.Context, arg dbsqlc.CountTokenUsageRecordsParams) (int64, error)
-	CreateAccount(ctx context.Context, arg dbsqlc.CreateAccountParams) (dbsqlc.User, error)
+	CreateAccount(ctx context.Context, arg dbsqlc.CreateAccountParams) (dbsqlc.CreateAccountRow, error)
 	CreateBot(ctx context.Context, arg dbsqlc.CreateBotParams) (dbsqlc.CreateBotRow, error)
 	CreateBotACLRule(ctx context.Context, arg dbsqlc.CreateBotACLRuleParams) (dbsqlc.BotAclRule, error)
 	CreateBotPluginInstallation(ctx context.Context, arg dbsqlc.CreateBotPluginInstallationParams) (dbsqlc.BotPluginInstallation, error)
@@ -101,7 +101,7 @@ type Queries interface {
 	CreateStorageProvider(ctx context.Context, arg dbsqlc.CreateStorageProviderParams) (dbsqlc.StorageProvider, error)
 	CreateToolApprovalRequest(ctx context.Context, arg dbsqlc.CreateToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
 	CreateUserInputRequest(ctx context.Context, arg dbsqlc.CreateUserInputRequestParams) (dbsqlc.UserInputRequest, error)
-	CreateUser(ctx context.Context, arg dbsqlc.CreateUserParams) (dbsqlc.User, error)
+	CreateUser(ctx context.Context, arg dbsqlc.CreateUserParams) (dbsqlc.CreateUserRow, error)
 	DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) error
 	DeleteBotByID(ctx context.Context, id pgtype.UUID) error
 	DeleteBotChannelConfig(ctx context.Context, arg dbsqlc.DeleteBotChannelConfigParams) error
@@ -142,8 +142,8 @@ type Queries interface {
 	EvaluateBotACLRule(ctx context.Context, arg dbsqlc.EvaluateBotACLRuleParams) (string, error)
 	FailUserInputRequest(ctx context.Context, arg dbsqlc.FailUserInputRequestParams) (dbsqlc.UserInputRequest, error)
 	FindChatRoute(ctx context.Context, arg dbsqlc.FindChatRouteParams) (dbsqlc.FindChatRouteRow, error)
-	GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (dbsqlc.User, error)
-	GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (dbsqlc.User, error)
+	GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (dbsqlc.TeamAccount, error)
+	GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (dbsqlc.TeamAccount, error)
 	GetActiveSessionForRoute(ctx context.Context, routeID pgtype.UUID) (dbsqlc.BotSession, error)
 	GetBotACLDefaultEffect(ctx context.Context, id pgtype.UUID) (string, error)
 	GetBotByID(ctx context.Context, id pgtype.UUID) (dbsqlc.GetBotByIDRow, error)
@@ -228,7 +228,7 @@ type Queries interface {
 	IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (dbsqlc.Schedule, error)
 	InsertLifecycleEvent(ctx context.Context, arg dbsqlc.InsertLifecycleEventParams) error
 	InsertVersion(ctx context.Context, arg dbsqlc.InsertVersionParams) (dbsqlc.ContainerVersion, error)
-	ListAccounts(ctx context.Context) ([]dbsqlc.User, error)
+	ListAccounts(ctx context.Context) ([]dbsqlc.TeamAccount, error)
 	ListCompactionArtifactLineageBySession(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.BotHistoryMessageCompact, error)
 	ListCompactionArtifactParentIDsBySuccessor(ctx context.Context, arg dbsqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error)
 	ListActiveMessagesSince(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceParams) ([]dbsqlc.ListActiveMessagesSinceRow, error)
@@ -348,7 +348,7 @@ type Queries interface {
 	RedeemChannelLinkCode(ctx context.Context, arg dbsqlc.RedeemChannelLinkCodeParams) (dbsqlc.UserChannelIdentityBinding, error)
 	RemoveChatParticipant(ctx context.Context, arg dbsqlc.RemoveChatParticipantParams) error
 	SaveMatrixSyncSinceToken(ctx context.Context, arg dbsqlc.SaveMatrixSyncSinceTokenParams) (int64, error)
-	SearchAccounts(ctx context.Context, arg dbsqlc.SearchAccountsParams) ([]dbsqlc.User, error)
+	SearchAccounts(ctx context.Context, arg dbsqlc.SearchAccountsParams) ([]dbsqlc.TeamAccount, error)
 	SearchChannelIdentities(ctx context.Context, arg dbsqlc.SearchChannelIdentitiesParams) ([]dbsqlc.ChannelIdentity, error)
 	SearchMessages(ctx context.Context, arg dbsqlc.SearchMessagesParams) ([]dbsqlc.SearchMessagesRow, error)
 	SetBotACLDefaultEffect(ctx context.Context, arg dbsqlc.SetBotACLDefaultEffectParams) error
@@ -359,10 +359,10 @@ type Queries interface {
 	SubmitUserInputRequest(ctx context.Context, arg dbsqlc.SubmitUserInputRequestParams) (dbsqlc.UserInputRequest, error)
 	TouchChat(ctx context.Context, chatID pgtype.UUID) error
 	TouchSession(ctx context.Context, id pgtype.UUID) error
-	UpdateAccountAdmin(ctx context.Context, arg dbsqlc.UpdateAccountAdminParams) (dbsqlc.User, error)
-	UpdateAccountLastLogin(ctx context.Context, id pgtype.UUID) (dbsqlc.User, error)
-	UpdateAccountPassword(ctx context.Context, arg dbsqlc.UpdateAccountPasswordParams) (dbsqlc.User, error)
-	UpdateAccountProfile(ctx context.Context, arg dbsqlc.UpdateAccountProfileParams) (dbsqlc.User, error)
+	UpdateAccountAdmin(ctx context.Context, arg dbsqlc.UpdateAccountAdminParams) (dbsqlc.UpdateAccountAdminRow, error)
+	UpdateAccountLastLogin(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
+	UpdateAccountPassword(ctx context.Context, arg dbsqlc.UpdateAccountPasswordParams) (pgtype.UUID, error)
+	UpdateAccountProfile(ctx context.Context, arg dbsqlc.UpdateAccountProfileParams) (dbsqlc.UpdateAccountProfileRow, error)
 	UpdateBotACLRule(ctx context.Context, arg dbsqlc.UpdateBotACLRuleParams) (dbsqlc.BotAclRule, error)
 	UpdateBotChannelConfigDisabled(ctx context.Context, arg dbsqlc.UpdateBotChannelConfigDisabledParams) (dbsqlc.BotChannelConfig, error)
 	UpdateBotEmailBinding(ctx context.Context, arg dbsqlc.UpdateBotEmailBindingParams) (dbsqlc.BotEmailBinding, error)
@@ -407,7 +407,7 @@ type Queries interface {
 	ReplaceHistoryTurn(ctx context.Context, arg dbsqlc.ReplaceHistoryTurnParams) (dbsqlc.ReplaceHistoryTurnRow, error)
 	SupersedeHistoryTurn(ctx context.Context, arg dbsqlc.SupersedeHistoryTurnParams) (HistoryTurn, error)
 	UpdateUserProviderOAuthState(ctx context.Context, arg dbsqlc.UpdateUserProviderOAuthStateParams) error
-	UpsertAccountByUsername(ctx context.Context, arg dbsqlc.UpsertAccountByUsernameParams) (dbsqlc.User, error)
+	UpsertAccountByUsername(ctx context.Context, arg dbsqlc.UpsertAccountByUsernameParams) (dbsqlc.UpsertAccountByUsernameRow, error)
 	UpsertBotChannelConfig(ctx context.Context, arg dbsqlc.UpsertBotChannelConfigParams) (dbsqlc.BotChannelConfig, error)
 	UpsertBotSettings(ctx context.Context, arg dbsqlc.UpsertBotSettingsParams) (dbsqlc.UpsertBotSettingsRow, error)
 	UpsertBotStorageBinding(ctx context.Context, arg dbsqlc.UpsertBotStorageBindingParams) (dbsqlc.BotStorageBinding, error)

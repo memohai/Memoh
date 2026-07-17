@@ -1,0 +1,257 @@
+-- 0114_team_memberships
+-- Split global user principals from team membership and preserve team-safe references.
+
+-- The migration owner may be a non-superuser. Disable the old FORCE RLS
+-- boundary before inspecting every team; this file runs transactionally, so a
+-- failed preflight restores the original policies and RLS state.
+DROP POLICY IF EXISTS users_team_delete ON public.users;
+DROP POLICY IF EXISTS users_team_update ON public.users;
+DROP POLICY IF EXISTS users_team_insert ON public.users;
+DROP POLICY IF EXISTS users_team_select ON public.users;
+ALTER TABLE public.users NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;
+
+-- A username or email could briefly have been created once per team after
+-- 0112. Such rows cannot be merged automatically without choosing credentials
+-- and ownership, so fail before changing constraints.
+DO $duplicate_global_identities$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM public.users
+         WHERE username IS NOT NULL
+         GROUP BY username HAVING count(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'cannot globalize users: duplicate usernames exist across teams';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.users
+         WHERE email IS NOT NULL
+         GROUP BY email HAVING count(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'cannot globalize users: duplicate emails exist across teams';
+    END IF;
+END
+$duplicate_global_identities$;
+
+CREATE TABLE public.team_members (
+    team_id    UUID        NOT NULL DEFAULT public.memoh_current_team_id(),
+    user_id    UUID        NOT NULL,
+    role       user_role   NOT NULL DEFAULT 'member',
+    is_active  BOOLEAN     NOT NULL DEFAULT true,
+    data_root  TEXT,
+    metadata   JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (team_id, user_id),
+    CONSTRAINT team_members_team_id_fkey
+        FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE RESTRICT,
+    CONSTRAINT team_members_user_id_fkey
+        FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX team_members_user_id_idx ON public.team_members (user_id);
+
+INSERT INTO public.team_members (
+    team_id, user_id, role, is_active, data_root, created_at, updated_at
+)
+SELECT team_id, id, role, is_active, data_root, created_at, updated_at
+FROM public.users;
+
+-- PostgreSQL validates replacement FKs by scanning their child tables. A
+-- non-superuser migration owner is subject to FORCE RLS during that internal
+-- scan, so temporarily suspend RLS while constraints are rebuilt.
+ALTER TABLE public.bot_acl_rules NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_acl_rules DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_channel_admins NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_channel_admins DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_history_messages NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_history_messages DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_user_grants NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_user_grants DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bots NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bots DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_link_codes NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_link_codes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.email_providers NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.email_providers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_bindings NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_bindings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_identity_bindings NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_identity_bindings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_provider_oauth_tokens NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_provider_oauth_tokens DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_runtimes NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_runtimes DISABLE ROW LEVEL SECURITY;
+
+-- Team-owned references now target membership rather than requiring the user
+-- principal itself to belong to exactly one team.
+ALTER TABLE public.bot_acl_rules
+    DROP CONSTRAINT bot_acl_rules_created_by_user_id_fkey;
+ALTER TABLE public.bot_channel_admins
+    DROP CONSTRAINT bot_channel_admins_created_by_user_id_fkey;
+ALTER TABLE public.bot_history_messages
+    DROP CONSTRAINT bot_history_messages_sender_account_user_id_fkey;
+ALTER TABLE public.bot_sessions
+    DROP CONSTRAINT bot_sessions_created_by_user_id_fkey;
+ALTER TABLE public.bot_user_grants
+    DROP CONSTRAINT bot_user_grants_created_by_user_id_fkey,
+    DROP CONSTRAINT bot_user_grants_user_id_fkey;
+ALTER TABLE public.bots
+    DROP CONSTRAINT bots_owner_user_id_fkey;
+ALTER TABLE public.channel_link_codes
+    DROP CONSTRAINT channel_link_codes_user_id_fkey;
+ALTER TABLE public.email_providers
+    DROP CONSTRAINT email_providers_user_id_fkey;
+ALTER TABLE public.user_channel_bindings
+    DROP CONSTRAINT user_channel_bindings_user_id_fkey;
+ALTER TABLE public.user_channel_identity_bindings
+    DROP CONSTRAINT user_channel_identity_bindings_user_id_fkey;
+ALTER TABLE public.user_provider_oauth_tokens
+    DROP CONSTRAINT user_provider_oauth_tokens_user_id_fkey;
+ALTER TABLE public.user_runtimes
+    DROP CONSTRAINT user_runtimes_user_id_fkey;
+
+ALTER TABLE public.bot_acl_rules
+    ADD CONSTRAINT bot_acl_rules_created_by_user_id_fkey
+    FOREIGN KEY (team_id, created_by_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE SET NULL (created_by_user_id);
+ALTER TABLE public.bot_channel_admins
+    ADD CONSTRAINT bot_channel_admins_created_by_user_id_fkey
+    FOREIGN KEY (team_id, created_by_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE SET NULL (created_by_user_id);
+ALTER TABLE public.bot_history_messages
+    ADD CONSTRAINT bot_history_messages_sender_account_user_id_fkey
+    FOREIGN KEY (team_id, sender_account_user_id)
+    REFERENCES public.team_members(team_id, user_id);
+ALTER TABLE public.bot_sessions
+    ADD CONSTRAINT bot_sessions_created_by_user_id_fkey
+    FOREIGN KEY (team_id, created_by_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE SET NULL (created_by_user_id);
+ALTER TABLE public.bot_user_grants
+    ADD CONSTRAINT bot_user_grants_created_by_user_id_fkey
+    FOREIGN KEY (team_id, created_by_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE SET NULL (created_by_user_id),
+    ADD CONSTRAINT bot_user_grants_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.bots
+    ADD CONSTRAINT bots_owner_user_id_fkey
+    FOREIGN KEY (team_id, owner_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.channel_link_codes
+    ADD CONSTRAINT channel_link_codes_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.email_providers
+    ADD CONSTRAINT email_providers_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.user_channel_bindings
+    ADD CONSTRAINT user_channel_bindings_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.user_channel_identity_bindings
+    ADD CONSTRAINT user_channel_identity_bindings_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.user_provider_oauth_tokens
+    ADD CONSTRAINT user_provider_oauth_tokens_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.user_runtimes
+    ADD CONSTRAINT user_runtimes_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+
+ALTER TABLE public.bot_acl_rules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_acl_rules FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_channel_admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_channel_admins FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_history_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_history_messages FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_user_grants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_user_grants FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bots FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_link_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_link_codes FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.email_providers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.email_providers FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_bindings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_bindings FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_identity_bindings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_identity_bindings FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_provider_oauth_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_provider_oauth_tokens FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_runtimes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_runtimes FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE public.users
+    DROP CONSTRAINT users_team_id_fkey,
+    DROP CONSTRAINT memoh_team_key_018c4edf45ca,
+    DROP CONSTRAINT users_email_unique,
+    DROP CONSTRAINT users_username_unique;
+
+ALTER TABLE public.users
+    DROP COLUMN team_id,
+    DROP COLUMN role,
+    DROP COLUMN data_root;
+
+ALTER TABLE public.users
+    ADD CONSTRAINT users_email_unique UNIQUE (email),
+    ADD CONSTRAINT users_username_unique UNIQUE (username);
+
+ALTER TABLE public.team_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.team_members FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY team_members_team_select ON public.team_members
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY team_members_team_insert ON public.team_members
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY team_members_team_update ON public.team_members
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY team_members_team_delete ON public.team_members
+    FOR DELETE USING (team_id = public.memoh_current_team_id());
+
+-- Preserve the account-shaped query contract while sourcing authorization
+-- fields from the current team's membership.
+CREATE VIEW public.team_accounts
+WITH (security_invoker = true)
+AS
+SELECT
+    u.id,
+    u.username,
+    u.email,
+    u.password_hash,
+    tm.role,
+    u.display_name,
+    u.avatar_url,
+    u.timezone,
+    tm.data_root,
+    u.last_login_at,
+    (u.is_active AND tm.is_active) AS is_active,
+    u.metadata,
+    u.created_at,
+    u.updated_at,
+    tm.team_id
+FROM public.team_members tm
+JOIN public.users u ON u.id = tm.user_id
+WHERE tm.team_id = public.memoh_current_team_id();
