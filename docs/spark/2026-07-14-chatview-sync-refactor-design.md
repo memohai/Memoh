@@ -470,7 +470,9 @@ apps/web/src/store/chat/
 >
 > **为什么作废**：它把**发号权威**放回了 Postgres——与 §0 愿景 3「消息在运行态诞生时就带着固定顺序号、一路不变流到 Postgres」相抵触：若号是落库前一刻才由 Postgres 预留，那"运行态诞生即带号"就不成立，运行中拿的是一张空头支票（要等 Postgres 分配才知道自己是几号）。这正是我们一路讨论要消灭的"运行中一套、落库另一套"。作废的具体表述包括下文的"先 admission 再调用 PostgreSQL reservation primitive 预留 turn_position"、"保留 `next_turn_position` 并提升为唯一裁决点"、以及"从已落库 max 推算下一值作废"那句。
 
-**新（现行）：发号在 runtime 侧完成，Postgres 只存落库结果、不参与号源裁决。**
+> ❌ **（2026-07-17 再修订作废，见 §10.9）**：以下 max+1 修订的论证基础经验收期代码取证不成立（实现是 admission 时预留、不是落库前一刻；两模型发号成本均为零），但其勘查结论（互斥前提、专用 MAX 查询、0112 的角色）有价值，已收进 §10.9「幸存的认知」。下文保留原文存档。
+>
+> **新（现行）：发号在 runtime 侧完成，Postgres 只存落库结果、不参与号源裁决。**
 
 一条序的完整流动：
 
@@ -492,6 +494,35 @@ apps/web/src/store/chat/
 1. **非 runtime 通道发号（Telegram 等 11 通道 + heartbeat/schedule）**：倾向**让 IM Channel 侧自己发号**——它本就承担"从平台拉消息 → 落库"，发号（`max(turn_position)+1`）在同一入口顺手做，与 runtime 路径共用**同一条发号规则**（读已落库 max +1），不分两套语义。用不用一个 runtime 抽象来统一，是形式问题；关键是**规则统一为一条序**，谁执行都读同一个 max。
    > ⚠️ 本条原写法"必须调用 PostgreSQL reservation primitive、谁都不许从本地历史推算下一值"已随 §10.7 修订作废：号源不在 Postgres，非 runtime 通道与 Web runtime 用**同一规则**（读已落库 max +1），但必须纳入**同一个 session 级发号互斥**（见 §10.7 末尾并发前提），否则并发重号。
 2. **二级 seq 是否保留**：`(turn_position, turn_message_seq)` 二级结构保留即可——retry/edit 的作废链（`turn_superseded_by_turn_id`）按 turn 粒度操作更自然。**在数据处理/排序上它天然可拍平成一级**（`ORDER BY turn_position, turn_message_seq` 就是一个全序），前端与对齐无需感知二级，读侧当一条连续序用；二级只在写侧/作废链保留其结构价值。两不冲突。
+
+## 10.9 发号模型的最终收敛：两级分权（2026-07-17，验收期代码取证后修订）
+
+> 本节作废：§10.7 的「新（现行）」max+1 修订及其随后内容、§10.8.1 的 ⚠️ 作废注、§10.2 缺口表 #2 的 ⚠️ 作废注、§11.1.1 / §11.1.4 的 ⚠️ 作废注、§11.3 末条的括号作废注。结论：**现行实现就是终态设计——两级分权的混合模型，不是过渡态。** Postgres 计数器恢复合法地位，但论证与最初的旧写法不同：旧写法说"必须有一个唯一裁决点"（断言），本节说"按协调范围分权 + 成本取证"（证据）。
+
+### 为什么 §10.7 的修订理由不成立（事实纠正）
+
+§10.7 作废旧方向的核心论据是"号是落库前一刻才由 Postgres 预留，运行中拿的是空头支票"。验收期对实现做代码取证（`internal/message/service.go`、`internal/handlers/local_channel.go`、全部 14 条写路径枚举）后确认三条事实：
+
+- **实现是 admission 时预留，不是落库前一刻。** `ReserveRuntimeTurn` 发生在 claim 窗口内、fence 激活后、run 开始流转前；`turn_position` 在第一条 row 诞生前已确定，并随 `turn_reservation` 公开发进快照与 wire。愿景 3「运行态诞生即带号」**在实现中已经成立**。§10.7 修订攻击的是一个从未被实现的方案。
+- **发号成本两个模型都是零。** runtime 路径的 admission 本来就要为 fence 碰 Postgres（`LockSessionRuntimeFence` 会话行锁）；计数器 UPDATE 搭这个已存在事务的车。max+1 的 MAX 读同样要搭车。"多占一次连接/事务"不成立。
+- **turn 的诞生时刻比设想更少。** 全路径枚举后确认：ask_user / 工具审批续跑**不产生新 turn**（`DeferredContinuation` 复用原 turn 坐标、续轮内 seq）。turn 诞生 = 用户发 prompt / retry-edit / IM 消息 / heartbeat-schedule（每次新 session）/ discuss / subagent——人或调度器说话的粒度，任何模型都没有压力问题。
+
+### 收敛后的模型：发号权威按协调范围分权
+
+| 级 | 协调范围 | 发号权威 | 现状 |
+|---|---|---|---|
+| turn 级（`turn_position`） | 跨 run、跨进程、跨全部写入通道 | **Postgres 计数器**（admission 时预留，搭 fence 事务） | 已实现 |
+| 轮内级（`turn_message_seq`） | 单 run、单进程 owner（claim 已互斥） | **runtime 进程内 `runtimeRowTracker`**，随 ledger 事件实时进 Redis 快照，终态逐字落库 | 已实现 |
+
+- §10.7 修订版自己设定的前置条件——"所有入口纳入同一个 session 级发号互斥（同一个并发控制点）"——**计数器天然就是**：它是全部写路径唯一现成的统一控制点。max+1 反而要为 IM（仅进程内锁，多副本即破）、被动消息（无锁）等路径新建分布式互斥。
+- 混合切换（部分路径 max+1、部分路径计数器）必然撞 `idx_bot_history_messages_session_position_seq_unique` 硬错误（`isTurnSequenceUniqueViolation` 只认旧索引名），**无中间态**。全切 max+1 则引入跨家族碰撞窗口：runtime 的在飞号（已公开未落库）对 legacy 路径的 MAX 读不可见，同一 session 双通道并发时失败会落在 run 的终态落库上。
+- 一句话：**§10.7 想要的"runtime 生成 → Redis → Postgres 只存"，对占 99% 的轮内发号动作已经成立；剩下每轮一次的 turn_position 由 Postgres 裁决，成本为零、免疫碰撞。** 这就是"一条序"的终态。
+
+### 从 max+1 讨论中幸存的认知（记账，不阻断收敛）
+
+- 计数器的真实代价：号是数据之外的一处状态，fork / botbackup import 已有三处维护手术（`SetSessionNextTurnPosition` 等）。记为已知熵债。
+- 若未来出现"Postgres 不可用也要开 run"或大规模跨 worker 换手的真实需求，max+1 是已勘查可行的备选路径，要点：用**专用 MAX 查询**（0112 索引即覆盖索引），**不可**挂在 context 加载上当副产物——实际 context 查询是 `ListActiveSinceBySession`（§10.7 误写为 `ListMessagesBySession`），它不 SELECT 坐标列、有 24h 窗口（闲置 session 得空集 → position 1 撞库）、统计域是可见视图（偏小）；legacy 路径可用 0112 唯一索引 + 重读重试做乐观并发（需扩展 `isTurnSequenceUniqueViolation` 认新索引名）；`AllocateSessionTurnPosition` 是基线死 SQL、计数器列无读路径依赖，真切换时均可直接删。
+- §11.1.1 / §11.1.4 的原写法恢复有效，口径以本节为准：计数器不是"落库前一刻才分配"，是 admission 时预留；"规则统一"已经成立——所有路径的 turn 级裁决本来就在同一计数器上，无需迁移。
 
 ## 11. 落地需求（说清要什么、为什么，不排工单）
 
