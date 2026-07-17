@@ -2,8 +2,8 @@
 import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { Button } from '@felinic/ui'
-import { getSpeechProviders, getTranscriptionProviders, postSpeechProvidersByIdImportModels, postTranscriptionProvidersByIdImportModels } from '@memohai/sdk'
-import type { AudioSpeechProviderResponse } from '@memohai/sdk'
+import { getProviderTemplates, getSpeechProviders, getTranscriptionProviders, postSpeechProvidersByIdImportModels, postTranscriptionProvidersByIdImportModels } from '@memohai/sdk'
+import type { AudioSpeechProviderResponse, ProvidertemplatesGetResponse } from '@memohai/sdk'
 import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
@@ -16,6 +16,7 @@ import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import SpeechSetting from '@/pages/speech/components/provider-setting.vue'
 import TranscriptionSetting from '@/pages/transcription/provider-setting.vue'
+import { isTemplateConfigured } from '@/utils/provider-template'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
@@ -35,6 +36,22 @@ const { data: transcriptionData, isLoading: transcriptionLoading } = useQuery({
   },
 })
 
+const { data: speechTemplateData } = useQuery({
+  key: () => ['provider-templates', 'speech'],
+  query: async () => {
+    const { data } = await getProviderTemplates({ query: { domain: 'speech' }, throwOnError: true })
+    return data
+  },
+})
+
+const { data: transcriptionTemplateData } = useQuery({
+  key: () => ['provider-templates', 'transcription'],
+  query: async () => {
+    const { data } = await getProviderTemplates({ query: { domain: 'transcription' }, throwOnError: true })
+    return data
+  },
+})
+
 const curTts = ref<AudioSpeechProviderResponse>()
 const curTranscription = ref<AudioSpeechProviderResponse>()
 provide('curTtsProvider', curTts)
@@ -44,6 +61,8 @@ type VoiceDetailKind = 'speech' | 'transcription'
 type VoiceDetail = { kind: VoiceDetailKind, provider: AudioSpeechProviderResponse }
 const detailKind = ref<VoiceDetailKind>('speech')
 const openStatus = reactive({ addSpeechOpen: false, addTranscriptionOpen: false })
+const initialSpeechTemplateId = ref('')
+const initialTranscriptionTemplateId = ref('')
 
 async function importSpeechModels(providerId: string) {
   const { data } = await postSpeechProvidersByIdImportModels({
@@ -77,6 +96,14 @@ const speechProviders = computed<AudioSpeechProviderResponse[]>(() =>
 const transcriptionProviders = computed<AudioSpeechProviderResponse[]>(() =>
   Array.isArray(transcriptionData.value) ? sortByEnabled(transcriptionData.value) : [],
 )
+const speechTemplates = computed<ProvidertemplatesGetResponse[]>(() =>
+  Array.isArray(speechTemplateData.value) ? speechTemplateData.value : [],
+)
+const transcriptionTemplates = computed<ProvidertemplatesGetResponse[]>(() =>
+  Array.isArray(transcriptionTemplateData.value) ? transcriptionTemplateData.value : [],
+)
+const availableSpeechTemplates = computed(() => speechTemplates.value.filter(template => !isTemplateConfigured(template)))
+const availableTranscriptionTemplates = computed(() => transcriptionTemplates.value.filter(template => !isTemplateConfigured(template)))
 
 // Page-owned query key, valued `kind:id` so refresh restores which pane.
 const {
@@ -132,6 +159,16 @@ function openTranscription(provider: AudioSpeechProviderResponse) {
   openDetail({ kind: 'transcription', provider })
 }
 
+function openAddSpeech(templateId?: string) {
+  initialSpeechTemplateId.value = templateId ?? ''
+  openStatus.addSpeechOpen = true
+}
+
+function openAddTranscription(templateId?: string) {
+  initialTranscriptionTemplateId.value = templateId ?? ''
+  openStatus.addTranscriptionOpen = true
+}
+
 // Each section adds its own kind of provider, so refresh just that list when
 // the matching add dialog closes.
 watch(() => openStatus.addSpeechOpen, (isOpen, wasOpen) => {
@@ -163,7 +200,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
             <Button
               variant="secondary"
               size="sm"
-              @click="openStatus.addSpeechOpen = true"
+              @click="openAddSpeech()"
             >
               <Plus class="size-4" />
               {{ t('common.add') }}
@@ -171,7 +208,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
           </template>
 
           <div
-            v-if="speechProviders.length > 0"
+            v-if="speechProviders.length + availableSpeechTemplates.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
@@ -197,6 +234,32 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
                 </span>
               </template>
             </BackendCard>
+            <BackendCard
+              v-for="template in availableSpeechTemplates"
+              :key="`template:${template.id}`"
+              :name="template.name ?? ''"
+              :subtitle="t('provider.templateNotConfigured')"
+              @click="openAddSpeech(template.id)"
+            >
+              <template #leading>
+                <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                  <ProviderIcon
+                    v-if="template.icon"
+                    :icon="template.icon"
+                    size="1.5em"
+                  />
+                  <span
+                    v-else
+                    class="text-xs font-medium text-muted-foreground"
+                  >
+                    {{ getInitials(template.name) }}
+                  </span>
+                </span>
+              </template>
+              <template #trailing>
+                <Plus class="size-4 shrink-0 text-muted-foreground" />
+              </template>
+            </BackendCard>
           </div>
           <p
             v-else
@@ -215,7 +278,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
             <Button
               variant="secondary"
               size="sm"
-              @click="openStatus.addTranscriptionOpen = true"
+              @click="openAddTranscription()"
             >
               <Plus class="size-4" />
               {{ t('common.add') }}
@@ -223,7 +286,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
           </template>
 
           <div
-            v-if="transcriptionProviders.length > 0"
+            v-if="transcriptionProviders.length + availableTranscriptionTemplates.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
@@ -249,6 +312,32 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
                 </span>
               </template>
             </BackendCard>
+            <BackendCard
+              v-for="template in availableTranscriptionTemplates"
+              :key="`template:${template.id}`"
+              :name="template.name ?? ''"
+              :subtitle="t('provider.templateNotConfigured')"
+              @click="openAddTranscription(template.id)"
+            >
+              <template #leading>
+                <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                  <ProviderIcon
+                    v-if="template.icon"
+                    :icon="template.icon"
+                    size="1.5em"
+                  />
+                  <span
+                    v-else
+                    class="text-xs font-medium text-muted-foreground"
+                  >
+                    {{ getInitials(template.name) }}
+                  </span>
+                </span>
+              </template>
+              <template #trailing>
+                <Plus class="size-4 shrink-0 text-muted-foreground" />
+              </template>
+            </BackendCard>
           </div>
           <p
             v-else
@@ -264,6 +353,8 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
         hide-trigger
         preset-domain="speech"
         :providers="addProviderNames"
+        :templates="speechTemplates"
+        :initial-template-id="initialSpeechTemplateId"
         :import-models="importSpeechModels"
       />
       <AddProvider
@@ -271,6 +362,8 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
         hide-trigger
         preset-domain="transcription"
         :providers="addProviderNames"
+        :templates="transcriptionTemplates"
+        :initial-template-id="initialTranscriptionTemplateId"
         :import-models="importTranscriptionModels"
       />
     </PageShell>

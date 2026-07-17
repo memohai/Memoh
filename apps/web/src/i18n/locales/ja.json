@@ -93,6 +93,19 @@
     "bot": {
       "name_taken": "この名前はすでに使用されています。"
     },
+    "provider": {
+      "name_taken": "同じ名前のプロバイダーがすでに存在します。"
+    },
+    "provider_template": {
+      "not_found": "このプロバイダーテンプレートは利用できなくなりました。",
+      "domain_invalid": "プロバイダーテンプレートの種類が無効です。",
+      "domain_mismatch": "このプロバイダーテンプレートはここでは使用できません。",
+      "operation_failed": "プロバイダーテンプレートの操作に失敗しました。",
+      "request_invalid": "プロバイダー設定が無効です。"
+    },
+    "search_provider": {
+      "type_conflict": "このWeb検索プロバイダーはすでに設定されています。"
+    },
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
       "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
@@ -1034,6 +1047,8 @@
     "customProvider": "カスタムプロバイダー",
     "apiKey": "APIキー",
     "apiKeyPlaceholder": "APIキーを入力",
+    "templateNotConfigured": "未設定",
+    "requiredField": "{field}は必須です",
     "nameRequired": "名前を入力してください",
     "clientTypeRequired": "クライアントの種類を選択してください",
     "apiKeyRequired": "APIキーを入力してください",
@@ -1153,6 +1168,8 @@
     "add": "メモリプロバイダーを追加",
     "empty": "メモリプロバイダーがありません",
     "provider": "プロバイダーの種類",
+    "providerRequired": "プロバイダーの種類を選択してください",
+    "nameRequired": "名前を入力してください",
     "searchPlaceholder": "プロバイダーを検索...",
     "emptyTitle": "メモリプロバイダーがありません",
     "emptyDescription": "メモリプロバイダーを追加して、Bot の長期メモリを有効にします",

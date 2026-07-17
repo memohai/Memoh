@@ -2,18 +2,12 @@
 import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
-  Button,
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
 } from '@felinic/ui'
-import { getEmailProviders } from '@memohai/sdk'
-import type { EmailProviderResponse } from '@memohai/sdk'
+import { getEmailProviders, getEmailProvidersMeta } from '@memohai/sdk'
+import type { EmailProviderMeta, EmailProviderResponse } from '@memohai/sdk'
 import { Plus, Search } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddEmailProvider from './components/add-email-provider.vue'
@@ -27,6 +21,7 @@ import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
+const EMAIL_PROVIDER_TYPES = ['generic', 'gmail', 'mailgun'] as const
 
 const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['email-providers'],
@@ -36,15 +31,33 @@ const { data: providerData, isLoading: providersLoading } = useQuery({
   },
 })
 
+const { data: providerMetaData } = useQuery({
+  key: () => ['email-providers-meta'],
+  query: async () => {
+    const { data } = await getEmailProvidersMeta({ throwOnError: true })
+    return data
+  },
+})
+
 const curProvider = ref<EmailProviderResponse>()
 provide('curEmailProvider', curProvider)
 
 const searchQuery = ref('')
 const openStatus = reactive({ addOpen: false })
+const initialProvider = ref('')
 
 const providers = computed<EmailProviderResponse[]>(() =>
   Array.isArray(providerData.value) ? providerData.value : [],
 )
+const providerMetas = computed<EmailProviderMeta[]>(() =>
+  Array.isArray(providerMetaData.value) ? providerMetaData.value : [],
+)
+const availableTemplates = computed(() => EMAIL_PROVIDER_TYPES
+  .filter(provider => !providers.value.some(instance => instance.provider === provider))
+  .map(provider => ({
+    provider,
+    meta: providerMetas.value.find(item => item.provider === provider),
+  })))
 
 // Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
 const {
@@ -63,7 +76,7 @@ const {
   isReady: () => providerData.value !== undefined,
 })
 
-const showSearch = computed(() => providers.value.length > 0)
+const showSearch = computed(() => providers.value.length + availableTemplates.value.length > 0)
 
 const filteredProviders = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
@@ -73,6 +86,20 @@ const filteredProviders = computed(() => {
     || (p.provider ?? '').toLowerCase().includes(keyword),
   )
 })
+
+const filteredTemplates = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase()
+  if (!keyword) return availableTemplates.value
+  return availableTemplates.value.filter(template =>
+    (template.meta?.display_name ?? '').toLowerCase().includes(keyword)
+    || template.provider.toLowerCase().includes(keyword),
+  )
+})
+
+function openAdd(provider: string) {
+  initialProvider.value = provider
+  openStatus.addOpen = true
+}
 
 // A provider may have been created in the add dialog — refresh on close.
 watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
@@ -104,14 +131,10 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
             />
           </InputGroup>
         </div>
-        <Button @click="openStatus.addOpen = true">
-          <Plus class="size-4" />
-          {{ t('email.add') }}
-        </Button>
       </template>
 
       <div
-        v-if="providers.length > 0"
+        v-if="providers.length + availableTemplates.length > 0"
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard
@@ -130,38 +153,31 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
           </template>
         </BackendCard>
 
-        <button
-          type="button"
-          class="group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          @click="openStatus.addOpen = true"
+        <BackendCard
+          v-for="template in filteredTemplates"
+          :key="`template:${template.provider}`"
+          :name="template.meta?.display_name ?? template.provider"
+          :subtitle="t('provider.templateNotConfigured')"
+          @click="openAdd(template.provider)"
         >
-          <Plus class="size-4" />
-          {{ t('email.add') }}
-        </button>
+          <template #leading>
+            <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+              <EmailProviderIcon
+                :provider="template.provider"
+                class="size-5 text-muted-foreground"
+              />
+            </span>
+          </template>
+          <template #trailing>
+            <Plus class="size-4 shrink-0 text-muted-foreground" />
+          </template>
+        </BackendCard>
       </div>
-
-      <Empty
-        v-else
-        class="rounded-[var(--radius-menu-shell)] border border-border py-16"
-      >
-        <EmptyHeader>
-          <EmptyTitle>{{ t('email.emptyTitle') }}</EmptyTitle>
-          <EmptyDescription>{{ t('email.emptyDescription') }}</EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button
-            variant="outline"
-            @click="openStatus.addOpen = true"
-          >
-            <Plus class="size-4" />
-            {{ t('email.add') }}
-          </Button>
-        </EmptyContent>
-      </Empty>
 
       <AddEmailProvider
         v-model:open="openStatus.addOpen"
         hide-trigger
+        :initial-provider="initialProvider"
       />
     </PageShell>
 

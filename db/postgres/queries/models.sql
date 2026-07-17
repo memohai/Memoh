@@ -10,6 +10,19 @@ VALUES (
 )
 RETURNING *;
 
+-- name: CreateProviderFromTemplate :one
+INSERT INTO providers (provider_template_id, name, client_type, icon, enable, config, metadata)
+VALUES (
+  sqlc.arg(provider_template_id),
+  sqlc.arg(name),
+  sqlc.arg(client_type),
+  sqlc.arg(icon),
+  sqlc.arg(enable),
+  sqlc.arg(config),
+  sqlc.arg(metadata)
+)
+RETURNING *;
+
 -- name: GetProviderByID :one
 SELECT * FROM providers WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id);
 

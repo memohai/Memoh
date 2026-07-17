@@ -2,8 +2,8 @@
 import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { Button } from '@felinic/ui'
-import { getVideoProviders, postVideoProvidersByIdImportModels } from '@memohai/sdk'
-import type { VideoProviderResponse } from '@memohai/sdk'
+import { getProviderTemplates, getVideoProviders, postVideoProvidersByIdImportModels } from '@memohai/sdk'
+import type { ProvidertemplatesGetResponse, VideoProviderResponse } from '@memohai/sdk'
 import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
@@ -14,6 +14,7 @@ import PageShell from '@/components/page-shell/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import VideoProviderSetting from './provider-setting.vue'
+import { isTemplateConfigured } from '@/utils/provider-template'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
@@ -26,15 +27,28 @@ const { data: providersData, isLoading: providersLoading } = useQuery({
   },
 })
 
+const { data: templateData } = useQuery({
+  key: () => ['provider-templates', 'video'],
+  query: async () => {
+    const { data } = await getProviderTemplates({ query: { domain: 'video' }, throwOnError: true })
+    return data
+  },
+})
+
 const curProvider = ref<VideoProviderResponse>()
 provide('curVideoProvider', curProvider)
 
 const openStatus = reactive({ addOpen: false })
+const initialTemplateId = ref('')
 
 const providers = computed<VideoProviderResponse[]>(() => {
   const list = Array.isArray(providersData.value) ? providersData.value : []
   return [...list].sort((a, b) => Number(b.enable !== false) - Number(a.enable !== false))
 })
+const templates = computed<ProvidertemplatesGetResponse[]>(() =>
+  Array.isArray(templateData.value) ? templateData.value : [],
+)
+const availableTemplates = computed(() => templates.value.filter(template => !isTemplateConfigured(template)))
 
 // Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
 const {
@@ -71,6 +85,11 @@ async function importVideoModels(providerId: string) {
   return data
 }
 
+function openAddProvider(templateId?: string) {
+  initialTemplateId.value = templateId ?? ''
+  openStatus.addOpen = true
+}
+
 watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
   if (wasOpen && !isOpen) {
     queryCache.invalidateQueries({ key: ['video-providers'] })
@@ -92,14 +111,14 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
       :description="t('video.providersHint')"
     >
       <template #actions>
-        <Button @click="openStatus.addOpen = true">
+        <Button @click="openAddProvider()">
           <Plus class="size-4" />
           {{ t('common.add') }}
         </Button>
       </template>
 
       <div
-        v-if="providers.length > 0"
+        v-if="providers.length + availableTemplates.length > 0"
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard
@@ -125,6 +144,32 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
             </span>
           </template>
         </BackendCard>
+        <BackendCard
+          v-for="template in availableTemplates"
+          :key="`template:${template.id}`"
+          :name="template.name ?? ''"
+          :subtitle="t('provider.templateNotConfigured')"
+          @click="openAddProvider(template.id)"
+        >
+          <template #leading>
+            <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+              <ProviderIcon
+                v-if="template.icon"
+                :icon="template.icon"
+                size="1.5em"
+              />
+              <span
+                v-else
+                class="text-xs font-medium text-muted-foreground"
+              >
+                {{ getInitials(template.name) }}
+              </span>
+            </span>
+          </template>
+          <template #trailing>
+            <Plus class="size-4 shrink-0 text-muted-foreground" />
+          </template>
+        </BackendCard>
       </div>
       <p
         v-else
@@ -138,6 +183,8 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
         hide-trigger
         preset-domain="video"
         :providers="addProviderNames"
+        :templates="templates"
+        :initial-template-id="initialTemplateId"
         :import-models="importVideoModels"
       />
     </PageShell>

@@ -2,8 +2,8 @@
 import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
 import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, Spinner } from '@felinic/ui'
-import { getMemoryProviders } from '@memohai/sdk'
-import type { AdaptersProviderGetResponse } from '@memohai/sdk'
+import { getMemoryProviders, getMemoryProvidersMeta } from '@memohai/sdk'
+import type { AdaptersProviderGetResponse, AdaptersProviderMeta } from '@memohai/sdk'
 import { Brain, ChevronRight, Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddMemoryProvider from './components/add-memory-provider.vue'
@@ -16,6 +16,7 @@ import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 
 const { t } = useI18n()
+const MEMORY_PROVIDER_TYPES = ['mem0', 'openviking'] as const
 
 const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['memory-providers'],
@@ -25,11 +26,28 @@ const { data: providerData, isLoading: providersLoading } = useQuery({
   },
 })
 
+const { data: providerMetaData } = useQuery({
+  key: () => ['memory-providers-meta'],
+  query: async () => {
+    const { data } = await getMemoryProvidersMeta({ throwOnError: true })
+    return data
+  },
+})
+
 const providers = computed<AdaptersProviderGetResponse[]>(() =>
   Array.isArray(providerData.value) ? providerData.value : [],
 )
 const builtinProvider = computed(() => providers.value.find((p) => p.provider === 'builtin') ?? null)
 const externalProviders = computed(() => providers.value.filter((p) => p.provider !== 'builtin'))
+const providerMetas = computed<AdaptersProviderMeta[]>(() =>
+  Array.isArray(providerMetaData.value) ? providerMetaData.value : [],
+)
+const availableTemplates = computed(() => MEMORY_PROVIDER_TYPES
+  .filter(provider => !externalProviders.value.some(instance => instance.provider === provider))
+  .map(provider => ({
+    provider,
+    meta: providerMetas.value.find(item => item.provider === provider),
+  })))
 
 // Only the external (advanced) backend opened in the detail pane uses this.
 const curProvider = ref<AdaptersProviderGetResponse | null>(null)
@@ -37,6 +55,7 @@ provide('curMemoryProvider', curProvider)
 
 const advancedOpen = ref(false)
 const openStatus = reactive({ addOpen: false })
+const initialProvider = ref('')
 
 // The built-in config owns the mode/model draft + save; the Save button lives in
 // this page's header (#actions), so read its state off the child instead of
@@ -66,12 +85,17 @@ const {
   isReady: () => providerData.value !== undefined,
 })
 
-watch(externalProviders, (list) => {
-  if (!didAutoOpen && list.length > 0) {
+watch([externalProviders, availableTemplates], ([providers, templateItems]) => {
+  if (!didAutoOpen && providers.length + templateItems.length > 0) {
     advancedOpen.value = true
     didAutoOpen = true
   }
 }, { immediate: true })
+
+function openAddProvider(provider: string) {
+  initialProvider.value = provider
+  openStatus.addOpen = true
+}
 </script>
 
 <template>
@@ -126,7 +150,7 @@ watch(externalProviders, (list) => {
             </p>
 
             <div
-              v-if="externalProviders.length > 0"
+              v-if="externalProviders.length + availableTemplates.length > 0"
               class="grid grid-cols-1 gap-3 sm:grid-cols-2"
             >
               <BackendCard
@@ -142,16 +166,23 @@ watch(externalProviders, (list) => {
                   </span>
                 </template>
               </BackendCard>
+              <BackendCard
+                v-for="template in availableTemplates"
+                :key="`template:${template.provider}`"
+                :name="template.meta?.display_name ?? t(`memory.providerNames.${template.provider}`, template.provider)"
+                :subtitle="t('provider.templateNotConfigured')"
+                @click="openAddProvider(template.provider)"
+              >
+                <template #leading>
+                  <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                    <Brain class="size-5 text-muted-foreground" />
+                  </span>
+                </template>
+                <template #trailing>
+                  <Plus class="size-4 shrink-0 text-muted-foreground" />
+                </template>
+              </BackendCard>
             </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              @click="openStatus.addOpen = true"
-            >
-              <Plus class="size-4" />
-              {{ t('memory.add') }}
-            </Button>
           </CollapsibleContent>
         </Collapsible>
       </div>
@@ -159,6 +190,7 @@ watch(externalProviders, (list) => {
       <AddMemoryProvider
         v-model:open="openStatus.addOpen"
         hide-trigger
+        :initial-provider="initialProvider"
       />
     </PageShell>
 

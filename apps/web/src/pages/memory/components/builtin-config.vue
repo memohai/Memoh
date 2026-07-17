@@ -124,7 +124,16 @@ const { data: statusData } = useQuery({
 
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
-const graphStatus = computed(() => statusData.value as AdaptersProviderStatusResponse | null)
+const graphStatus = computed(() => {
+  if (!props.provider?.id) {
+    return {
+      provider_type: 'builtin',
+      memory_mode: 'graph',
+      embedding_model_id: '',
+    } satisfies AdaptersProviderStatusResponse
+  }
+  return statusData.value as AdaptersProviderStatusResponse | null
+})
 // Mode tile: the configured memory mode, falling back to the built-in default
 // ('graph') when the provider config hasn't been saved yet.
 const modeLabel = computed(() => {

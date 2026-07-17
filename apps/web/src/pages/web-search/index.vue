@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { Button } from '@felinic/ui'
-import { getFetchProviders, getSearchProviders } from '@memohai/sdk'
-import type { FetchprovidersGetResponse, SearchprovidersGetResponse } from '@memohai/sdk'
+import { getFetchProviders, getFetchProvidersMeta, getSearchProviders } from '@memohai/sdk'
+import type { FetchprovidersGetResponse, FetchprovidersProviderMeta, SearchprovidersGetResponse } from '@memohai/sdk'
 import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddFetchProvider from './components/add-fetch-provider.vue'
@@ -21,6 +20,9 @@ import SwapTransition from '@/components/settings/swap-transition.vue'
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
+const SEARCH_PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
+const FETCH_PROVIDER_TYPES = ['jina', 'cloudflare_markdown'] as const
+
 const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['search-providers'],
   query: async () => {
@@ -33,6 +35,14 @@ const { data: fetchProviderData, isLoading: fetchProvidersLoading } = useQuery({
   key: () => ['fetch-providers'],
   query: async () => {
     const { data } = await getFetchProviders({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: fetchProviderMetaData } = useQuery({
+  key: () => ['fetch-providers-meta'],
+  query: async () => {
+    const { data } = await getFetchProvidersMeta({ throwOnError: true })
     return data
   },
 })
@@ -51,6 +61,8 @@ const openStatus = reactive({
   addSearchOpen: false,
   addFetchOpen: false,
 })
+const initialSearchProvider = ref('')
+const initialFetchProvider = ref('')
 
 function sortByEnabled<T extends { enable?: boolean }>(list: T[]) {
   return [...list].sort((a, b) => Number(b.enable !== false) - Number(a.enable !== false))
@@ -59,6 +71,10 @@ function sortByEnabled<T extends { enable?: boolean }>(list: T[]) {
 const providers = computed<SearchprovidersGetResponse[]>(() =>
   Array.isArray(providerData.value) ? sortByEnabled(providerData.value) : [],
 )
+const searchItems = computed(() => SEARCH_PROVIDER_TYPES.map(provider => ({
+  provider,
+  instance: providers.value.find(item => item.provider === provider),
+})))
 
 const fetchProviders = computed<FetchprovidersGetResponse[]>(() => {
   if (!Array.isArray(fetchProviderData.value)) return []
@@ -68,6 +84,15 @@ const fetchProviders = computed<FetchprovidersGetResponse[]>(() => {
     return Number(b.enable !== false) - Number(a.enable !== false)
   })
 })
+const fetchProviderMetas = computed<FetchprovidersProviderMeta[]>(() =>
+  Array.isArray(fetchProviderMetaData.value) ? fetchProviderMetaData.value : [],
+)
+const availableFetchTemplates = computed(() => FETCH_PROVIDER_TYPES
+  .filter(provider => !fetchProviders.value.some(instance => instance.provider === provider))
+  .map(provider => ({
+    provider,
+    meta: fetchProviderMetas.value.find(item => item.provider === provider),
+  })))
 
 // Page-owned query key, valued `kind:id` so refresh restores which pane.
 const {
@@ -113,8 +138,22 @@ function openProvider(provider: SearchprovidersGetResponse) {
   openDetail({ kind: 'search', provider })
 }
 
+function openSearchItem(item: { provider: string, instance?: SearchprovidersGetResponse }) {
+  if (item.instance) {
+    openProvider(item.instance)
+    return
+  }
+  initialSearchProvider.value = item.provider
+  openStatus.addSearchOpen = true
+}
+
 function openFetchProvider(provider: FetchprovidersGetResponse) {
   openDetail({ kind: 'fetch', provider })
+}
+
+function openAddFetch(provider: string) {
+  initialFetchProvider.value = provider
+  openStatus.addFetchOpen = true
 }
 
 watch(() => openStatus.addSearchOpen, (isOpen, wasOpen) => {
@@ -144,44 +183,31 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
           :title="t('webSearch.searchProviders')"
           :description="t('webSearch.searchHint')"
         >
-          <template #actions>
-            <Button
-              variant="secondary"
-              size="sm"
-              @click="openStatus.addSearchOpen = true"
-            >
-              <Plus class="size-4" />
-              {{ t('common.add') }}
-            </Button>
-          </template>
-
-          <div
-            v-if="providers.length > 0"
-            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
-          >
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <BackendCard
-              v-for="provider in providers"
-              :key="provider.id"
-              :name="provider.name ?? ''"
-              :enabled="provider.enable !== false"
-              @click="openProvider(provider)"
+              v-for="item in searchItems"
+              :key="item.provider"
+              :name="item.instance?.name ?? t(`webSearch.providerNames.${item.provider}`, item.provider)"
+              :subtitle="item.instance ? '' : t('provider.templateNotConfigured')"
+              :enabled="item.instance?.enable !== false && !!item.instance"
+              @click="openSearchItem(item)"
             >
               <template #leading>
                 <span class="flex size-10 items-center justify-center">
                   <SearchProviderLogo
-                    :provider="provider.provider || ''"
+                    :provider="item.provider"
                     size="md"
                   />
                 </span>
               </template>
+              <template
+                v-if="!item.instance"
+                #trailing
+              >
+                <Plus class="size-4 shrink-0 text-muted-foreground" />
+              </template>
             </BackendCard>
           </div>
-          <p
-            v-else
-            class="px-2 text-xs text-muted-foreground"
-          >
-            {{ t('webSearch.empty') }}
-          </p>
         </SectionGroup>
 
         <!-- Fetch providers -->
@@ -189,19 +215,8 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
           :title="t('webSearch.fetchProviders')"
           :description="t('webSearch.fetchHint')"
         >
-          <template #actions>
-            <Button
-              variant="secondary"
-              size="sm"
-              @click="openStatus.addFetchOpen = true"
-            >
-              <Plus class="size-4" />
-              {{ t('common.add') }}
-            </Button>
-          </template>
-
           <div
-            v-if="fetchProviders.length > 0"
+            v-if="fetchProviders.length + availableFetchTemplates.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
@@ -220,6 +235,25 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
                 </span>
               </template>
             </BackendCard>
+            <BackendCard
+              v-for="template in availableFetchTemplates"
+              :key="`template:${template.provider}`"
+              :name="template.meta?.display_name ?? t(`webSearch.fetchProviderNames.${template.provider}`, template.provider)"
+              :subtitle="t('provider.templateNotConfigured')"
+              @click="openAddFetch(template.provider)"
+            >
+              <template #leading>
+                <span class="flex size-10 items-center justify-center">
+                  <SearchProviderLogo
+                    :provider="template.provider"
+                    size="md"
+                  />
+                </span>
+              </template>
+              <template #trailing>
+                <Plus class="size-4 shrink-0 text-muted-foreground" />
+              </template>
+            </BackendCard>
           </div>
           <p
             v-else
@@ -233,10 +267,12 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
       <AddSearchProvider
         v-model:open="openStatus.addSearchOpen"
         hide-trigger
+        :initial-provider="initialSearchProvider"
       />
       <AddFetchProvider
         v-model:open="openStatus.addFetchOpen"
         hide-trigger
+        :initial-provider="initialFetchProvider"
       />
     </PageShell>
 

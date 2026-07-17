@@ -26,6 +26,7 @@ type HistoryTurn struct {
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
+	AcquireProviderTemplateSyncLock(ctx context.Context) error
 	ApproveToolApprovalRequest(ctx context.Context, arg dbsqlc.ApproveToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
 	CancelPendingToolApprovalsBySession(ctx context.Context, arg dbsqlc.CancelPendingToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
 	CancelPendingUserInputsBySession(ctx context.Context, arg dbsqlc.CancelPendingUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
@@ -92,6 +93,7 @@ type Queries interface {
 	CreateModel(ctx context.Context, arg dbsqlc.CreateModelParams) (dbsqlc.Model, error)
 	CreateModelVariant(ctx context.Context, arg dbsqlc.CreateModelVariantParams) (dbsqlc.ModelVariant, error)
 	CreateProvider(ctx context.Context, arg dbsqlc.CreateProviderParams) (dbsqlc.Provider, error)
+	CreateProviderFromTemplate(ctx context.Context, arg dbsqlc.CreateProviderFromTemplateParams) (dbsqlc.Provider, error)
 	CreateSchedule(ctx context.Context, arg dbsqlc.CreateScheduleParams) (dbsqlc.Schedule, error)
 	CreateScheduleLog(ctx context.Context, arg dbsqlc.CreateScheduleLogParams) (dbsqlc.CreateScheduleLogRow, error)
 	CreateSearchProvider(ctx context.Context, arg dbsqlc.CreateSearchProviderParams) (dbsqlc.SearchProvider, error)
@@ -197,6 +199,7 @@ type Queries interface {
 	GetPendingUserInputBySessionShortID(ctx context.Context, arg dbsqlc.GetPendingUserInputBySessionShortIDParams) (dbsqlc.UserInputRequest, error)
 	GetProviderByClientType(ctx context.Context, clientType string) (dbsqlc.Provider, error)
 	GetProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.Provider, error)
+	GetProviderTemplateByID(ctx context.Context, id pgtype.UUID) (dbsqlc.TemplateProviderTemplate, error)
 	GetProviderByName(ctx context.Context, name string) (dbsqlc.Provider, error)
 	GetProviderOAuthTokenByProvider(ctx context.Context, providerID pgtype.UUID) (dbsqlc.ProviderOauthToken, error)
 	GetProviderOAuthTokenByState(ctx context.Context, state string) (dbsqlc.ProviderOauthToken, error)
@@ -270,6 +273,8 @@ type Queries interface {
 	LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID pgtype.UUID) error
 	HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.UUID) error
 	ListAllMessagesForBackup(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListAllMessagesForBackupRow, error)
+	ListAllProviderTemplateModels(ctx context.Context, providerTemplateID pgtype.UUID) ([]dbsqlc.TemplateProviderTemplateModel, error)
+	ListAllProviderTemplates(ctx context.Context) ([]dbsqlc.TemplateProviderTemplate, error)
 	ListHistoryTurnsByBot(ctx context.Context, botID pgtype.UUID) ([]HistoryTurn, error)
 	ListMessages(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListMessagesRow, error)
 	GetMessageByExternalIDBySession(ctx context.Context, arg dbsqlc.GetMessageByExternalIDBySessionParams) (dbsqlc.GetMessageByExternalIDBySessionRow, error)
@@ -304,6 +309,8 @@ type Queries interface {
 	ListPendingToolApprovalsBySession(ctx context.Context, arg dbsqlc.ListPendingToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
 	ListPendingUserInputsBySession(ctx context.Context, arg dbsqlc.ListPendingUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
 	ListProviders(ctx context.Context) ([]dbsqlc.Provider, error)
+	ListProviderTemplateModels(ctx context.Context, providerTemplateID pgtype.UUID) ([]dbsqlc.TemplateProviderTemplateModel, error)
+	ListProviderTemplates(ctx context.Context, domain string) ([]dbsqlc.ListProviderTemplatesRow, error)
 	ListReadableBindingsByProvider(ctx context.Context, emailProviderID pgtype.UUID) ([]dbsqlc.BotEmailBinding, error)
 	ListScheduleLogsByBot(ctx context.Context, arg dbsqlc.ListScheduleLogsByBotParams) ([]dbsqlc.ListScheduleLogsByBotRow, error)
 	ListScheduleLogsBySchedule(ctx context.Context, arg dbsqlc.ListScheduleLogsByScheduleParams) ([]dbsqlc.ListScheduleLogsByScheduleRow, error)
@@ -393,6 +400,8 @@ type Queries interface {
 	UpdateMemoryProvider(ctx context.Context, arg dbsqlc.UpdateMemoryProviderParams) (dbsqlc.MemoryProvider, error)
 	UpdateModel(ctx context.Context, arg dbsqlc.UpdateModelParams) (dbsqlc.Model, error)
 	UpdateProvider(ctx context.Context, arg dbsqlc.UpdateProviderParams) (dbsqlc.Provider, error)
+	SetProviderTemplateActive(ctx context.Context, arg dbsqlc.SetProviderTemplateActiveParams) error
+	SetProviderTemplateModelActive(ctx context.Context, arg dbsqlc.SetProviderTemplateModelActiveParams) error
 	UpdateProviderOAuthState(ctx context.Context, arg dbsqlc.UpdateProviderOAuthStateParams) error
 	UpdateSchedule(ctx context.Context, arg dbsqlc.UpdateScheduleParams) (dbsqlc.Schedule, error)
 	UpdateSearchProvider(ctx context.Context, arg dbsqlc.UpdateSearchProviderParams) (dbsqlc.SearchProvider, error)
@@ -422,6 +431,8 @@ type Queries interface {
 	UpsertProviderOAuthToken(ctx context.Context, arg dbsqlc.UpsertProviderOAuthTokenParams) (dbsqlc.ProviderOauthToken, error)
 	UpsertRegistryModel(ctx context.Context, arg dbsqlc.UpsertRegistryModelParams) (dbsqlc.Model, error)
 	UpsertRegistryProvider(ctx context.Context, arg dbsqlc.UpsertRegistryProviderParams) (dbsqlc.Provider, error)
+	UpsertProviderTemplate(ctx context.Context, arg dbsqlc.UpsertProviderTemplateParams) (dbsqlc.TemplateProviderTemplate, error)
+	UpsertProviderTemplateModel(ctx context.Context, arg dbsqlc.UpsertProviderTemplateModelParams) (dbsqlc.TemplateProviderTemplateModel, error)
 	UpsertSessionDiscussCursor(ctx context.Context, arg dbsqlc.UpsertSessionDiscussCursorParams) (dbsqlc.BotSessionDiscussCursor, error)
 	UpsertSnapshot(ctx context.Context, arg dbsqlc.UpsertSnapshotParams) (dbsqlc.Snapshot, error)
 	UpsertUserChannelBinding(ctx context.Context, arg dbsqlc.UpsertUserChannelBindingParams) (dbsqlc.UserChannelBinding, error)

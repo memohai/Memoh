@@ -1263,6 +1263,8 @@ definitions:
         type: boolean
       native_commands:
         type: boolean
+      native_user_input:
+        type: boolean
       polls:
         type: boolean
       reactions:
@@ -4215,6 +4217,23 @@ definitions:
       count:
         type: integer
     type: object
+  providers.CreateFromTemplateRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      domain:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      template_id:
+        type: string
+    required:
+    - template_id
+    type: object
   providers.CreateRequest:
     properties:
       client_type:
@@ -4252,6 +4271,8 @@ definitions:
         additionalProperties: {}
         type: object
       name:
+        type: string
+      provider_template_id:
         type: string
       updated_at:
         type: string
@@ -4361,6 +4382,65 @@ definitions:
         additionalProperties: {}
         type: object
       name:
+        type: string
+    type: object
+  providertemplates.GetResponse:
+    properties:
+      config_schema:
+        additionalProperties: {}
+        type: object
+      configured:
+        type: boolean
+      created_at:
+        type: string
+      default_config:
+        additionalProperties: {}
+        type: object
+      description:
+        type: string
+      domain:
+        type: string
+      driver:
+        type: string
+      icon:
+        type: string
+      id:
+        type: string
+      key:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      models:
+        items:
+          $ref: '#/definitions/providertemplates.ModelResponse'
+        type: array
+      name:
+        type: string
+      sort_order:
+        type: integer
+      source:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  providertemplates.ModelResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      model_id:
+        type: string
+      name:
+        type: string
+      sort_order:
+        type: integer
+      type:
         type: string
     type: object
   schedule.CreateRequest:
@@ -12184,6 +12264,62 @@ paths:
       summary: Health check with server capabilities
       tags:
       - system
+  /provider-templates:
+    get:
+      description: List active global provider templates and whether the current tenant
+        has configured each template
+      parameters:
+      - description: Template domain (llm, speech, transcription, video)
+        in: query
+        name: domain
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/providertemplates.GetResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List provider templates
+      tags:
+      - provider-templates
+  /provider-templates/{id}:
+    get:
+      description: Get an active global provider template and its model catalog
+      parameters:
+      - description: Provider template ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/providertemplates.GetResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get a provider template
+      tags:
+      - provider-templates
   /providers:
     get:
       consumes:
@@ -12548,6 +12684,45 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Count providers
+      tags:
+      - providers
+  /providers/from-template:
+    post:
+      consumes:
+      - application/json
+      description: Materialize a tenant-owned provider only when the user saves a
+        template configuration
+      parameters:
+      - description: Provider template configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/providers.CreateFromTemplateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/providers.GetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Create a provider from a global template
       tags:
       - providers
   /providers/name/{name}:

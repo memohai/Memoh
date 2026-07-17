@@ -78,7 +78,7 @@
             </FieldStack>
           </FormField>
           <FormField
-            v-if="apiKeyRequired"
+            v-if="shouldShowApiKeyField()"
             v-slot="{ componentField }"
             name="api_key"
           >
@@ -104,7 +104,7 @@
             {{ $t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubCreateHint' : 'provider.oauth.openaiCreateHint') }}
           </div>
           <FormField
-            v-if="form.values.client_type !== 'github-copilot'"
+            v-if="shouldShowBaseUrlField()"
             v-slot="{ componentField }"
             name="base_url"
           >
@@ -185,8 +185,8 @@ import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import { useMutation, useQueryCache } from '@pinia/colada'
-import { postProviders, postProvidersByIdImportModels } from '@memohai/sdk'
-import type { ProvidersCreateRequest } from '@memohai/sdk'
+import { postProviders, postProvidersByIdImportModels, postProvidersFromTemplate } from '@memohai/sdk'
+import type { ProvidersCreateRequest, ProvidertemplatesGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
@@ -203,6 +203,7 @@ import { computed, ref, watch } from 'vue'
 import { providerPresets } from '@/constants/provider-presets'
 import type { ProviderPreset } from '@/constants/provider-presets'
 import ProviderIcon from '@/components/provider-icon/index.vue'
+import { templateConfigFields, templateDefaultConfig } from '@/utils/provider-template'
 import { suggestProviderName } from './provider-presets'
 
 const open = defineModel<boolean>('open')
@@ -210,21 +211,59 @@ const props = withDefaults(defineProps<{
   providers?: Array<{ name?: string }>
   hideTrigger?: boolean
   presetDomain?: 'llm' | 'video' | 'speech' | 'transcription'
+  templates?: ProvidertemplatesGetResponse[]
+  initialTemplateId?: string
   importModels?: (providerId: string) => Promise<{ created?: number, skipped?: number } | null | undefined>
 }>(), {
   providers: () => [],
   hideTrigger: false,
   presetDomain: 'llm',
-  importModels: undefined,
 })
 const { t } = useI18n()
 const { run } = useDialogMutation()
 
+type SelectablePreset = ProviderPreset & {
+  templateId?: string
+  templateFieldKeys?: string[]
+}
+
 const customPresetId = 'custom'
-const availablePresets = computed(() => providerPresets.filter(preset => (preset.domain ?? 'llm') === props.presetDomain))
+const availablePresets = computed<SelectablePreset[]>(() => {
+  if (props.templates) {
+    return props.templates
+      .filter(template => template.id && template.domain === props.presetDomain)
+      .map((template) => {
+        const uiPreset = providerPresets.find(preset => preset.source === template.source)
+        const fields = templateConfigFields(template)
+        const defaults = templateDefaultConfig(template)
+        const apiKeyField = fields.find(field => field.key === 'api_key')
+        const baseUrlField = fields.find(field => field.key === 'base_url')
+        return {
+          id: template.id!,
+          templateId: template.id!,
+          name: template.name ?? template.key ?? '',
+          registryName: uiPreset?.registryName,
+          clientType: template.driver ?? uiPreset?.clientType ?? '',
+          baseUrl: typeof defaults.base_url === 'string' ? defaults.base_url : (uiPreset?.baseUrl ?? ''),
+          icon: template.icon ?? uiPreset?.icon,
+          source: template.source ?? uiPreset?.source ?? '',
+          requiresApiKey: apiKeyField?.required ?? false,
+          requiresBaseUrl: baseUrlField?.required ?? false,
+          templateFieldKeys: fields.map(field => field.key),
+          domain: props.presetDomain,
+        }
+      })
+  }
+  return providerPresets.filter(preset => (preset.domain ?? 'llm') === props.presetDomain)
+})
 // Only the LLM domain offers a free-form "custom" entry; the others (video,
 // speech, transcription) always start on a concrete preset.
-const defaultPresetId = computed(() => props.presetDomain === 'llm' ? customPresetId : (availablePresets.value[0]?.id ?? customPresetId))
+const defaultPresetId = computed(() => {
+  if (props.initialTemplateId && availablePresets.value.some(preset => preset.templateId === props.initialTemplateId)) {
+    return props.initialTemplateId
+  }
+  return props.presetDomain === 'llm' ? customPresetId : (availablePresets.value[0]?.id ?? customPresetId)
+})
 const selectedPresetId = ref(defaultPresetId.value)
 
 const selectedPreset = computed(() => getPresetById(selectedPresetId.value))
@@ -247,15 +286,22 @@ const providerPresetOptions = computed(() => [
   })),
 ])
 
-function getPresetById(id: string | undefined): ProviderPreset | null {
+function getPresetById(id: string | undefined): SelectablePreset | null {
   if (!id || id === customPresetId) return null
-  return providerPresets.find(preset => preset.id === id) ?? null
+  return availablePresets.value.find(preset => preset.id === id) ?? null
 }
 
-const apiKeyRequired = computed(() => {
+function shouldShowApiKeyField() {
   if (isManagedOAuthClientType(form.values.client_type)) return false
-  return selectedPreset.value?.requiresApiKey !== false
-})
+  const preset = selectedPreset.value
+  return !preset?.templateId || preset.templateFieldKeys?.includes('api_key') === true
+}
+
+function shouldShowBaseUrlField() {
+  if (form.values.client_type === 'github-copilot') return false
+  const preset = selectedPreset.value
+  return !preset?.templateId || preset.templateFieldKeys?.includes('base_url') === true
+}
 
 const clientTypeOptions = computed(() =>
   MANUAL_LLM_CLIENT_TYPE_LIST.map((ct) => ({
@@ -274,24 +320,39 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
     if (typeof data.api_key === 'string' && data.api_key.trim() !== '' && data.client_type !== 'github-copilot') {
       config.api_key = data.api_key.trim()
     }
-    const payload: ProvidersCreateRequest = {
-      name: String(data.name ?? ''),
-      client_type: String(data.client_type ?? ''),
-      config,
-    }
     const preset = selectedPreset.value
-    if (preset) {
-      if (preset.icon) {
-        payload.icon = preset.icon
-      }
-      payload.metadata = {
-        preset: {
-          id: preset.id,
-          source: preset.source,
+    let result
+    if (preset?.templateId) {
+      const response = await postProvidersFromTemplate({
+        body: {
+          template_id: preset.templateId,
+          domain: props.presetDomain,
+          name: String(data.name ?? ''),
+          config,
         },
+        throwOnError: true,
+      })
+      result = response.data
+    } else {
+      const payload: ProvidersCreateRequest = {
+        name: String(data.name ?? ''),
+        client_type: String(data.client_type ?? ''),
+        config,
       }
+      if (preset) {
+        if (preset.icon) {
+          payload.icon = preset.icon
+        }
+        payload.metadata = {
+          preset: {
+            id: preset.id,
+            source: preset.source,
+          },
+        }
+      }
+      const response = await postProviders({ body: payload, throwOnError: true })
+      result = response.data
     }
-    const { data: result } = await postProviders({ body: payload, throwOnError: true })
     if (data.auto_import && result?.id) {
       try {
         const importResult = props.importModels
@@ -317,6 +378,7 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
   onSettled: () => {
     queryCache.invalidateQueries({ key: ['providers'] })
     queryCache.invalidateQueries({ key: ['models'] })
+    queryCache.invalidateQueries({ key: ['provider-templates', props.presetDomain] })
   },
 })
 
@@ -327,7 +389,7 @@ const providerSchema = toTypedSchema(z.object({
   client_type: z.string().min(1, t('provider.clientTypeRequired')),
   auto_import: z.boolean().optional(),
 }).superRefine((value, ctx) => {
-  const requiresApiKey = !isManagedOAuthClientType(value.client_type) && selectedPreset.value?.requiresApiKey !== false
+  const requiresApiKey = shouldShowApiKeyField() && selectedPreset.value?.requiresApiKey !== false
   if (requiresApiKey && !value.api_key?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -335,7 +397,7 @@ const providerSchema = toTypedSchema(z.object({
       message: t('provider.apiKeyRequired'),
     })
   }
-  const requiresBaseUrl = value.client_type !== 'github-copilot' && selectedPreset.value?.requiresBaseUrl !== false
+  const requiresBaseUrl = shouldShowBaseUrlField() && selectedPreset.value?.requiresBaseUrl !== false
   if (requiresBaseUrl && !value.base_url?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -362,6 +424,7 @@ function valuesForPreset(preset: ProviderPreset | null) {
     name: suggestProviderName(preset.name, props.providers),
     base_url: preset.baseUrl,
     client_type: preset.clientType,
+    auto_import: true,
   }
 }
 
@@ -390,7 +453,9 @@ watch(() => form.values.client_type, (clientType) => {
   }
 })
 
-watch(open, () => resetCreateForm())
+watch(open, (isOpen) => {
+  if (isOpen) resetCreateForm()
+})
 
 const createProvider = form.handleSubmit(async (value) => {
   await run(

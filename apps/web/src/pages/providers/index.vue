@@ -13,8 +13,8 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from '@felinic/ui'
-import { getModels, getProviders } from '@memohai/sdk'
-import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import { getModels, getProviders, getProviderTemplates } from '@memohai/sdk'
+import type { ModelsGetResponse, ProvidersGetResponse, ProvidertemplatesGetResponse } from '@memohai/sdk'
 import { Boxes, Box, ChevronRight, Plus, Search } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
@@ -25,6 +25,7 @@ import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import { avatarInitials } from '@/composables/useAvatarInitials'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import { isTemplateConfigured } from '@/utils/provider-template'
 import ModelSetting from './model-setting.vue'
 
 const { t } = useI18n()
@@ -45,9 +46,18 @@ const { data: modelData } = useQuery({
   },
 })
 
+const { data: templateData } = useQuery({
+  key: () => ['provider-templates', 'llm'],
+  query: async () => {
+    const { data } = await getProviderTemplates({ query: { domain: 'llm' }, throwOnError: true })
+    return data
+  },
+})
+
 const curProvider = ref<ProvidersGetResponse>()
 const searchQuery = ref('')
 const addOpen = ref(false)
+const initialTemplateId = ref('')
 
 const providers = computed<ProvidersGetResponse[]>(() => {
   if (!Array.isArray(providerData.value)) return []
@@ -57,6 +67,12 @@ const providers = computed<ProvidersGetResponse[]>(() => {
     return be - ae
   })
 })
+
+const templates = computed<ProvidertemplatesGetResponse[]>(() =>
+  Array.isArray(templateData.value) ? templateData.value : [],
+)
+
+const availableTemplates = computed(() => templates.value.filter(template => !isTemplateConfigured(template)))
 
 // Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
 const {
@@ -87,7 +103,7 @@ const modelCountByProvider = computed(() => {
 
 // Always offer search once there's anything to filter — a hidden-then-appearing
 // box read as inconsistent (some providers showed it, some didn't).
-const showSearch = computed(() => providers.value.length > 0)
+const showSearch = computed(() => providers.value.length + availableTemplates.value.length > 0)
 
 const filteredProviders = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
@@ -97,6 +113,16 @@ const filteredProviders = computed(() => {
     const url = providerSubtitle(p).toLowerCase()
     return name.includes(keyword) || url.includes(keyword)
   })
+})
+
+const filteredTemplates = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase()
+  if (!keyword) return availableTemplates.value
+  return availableTemplates.value.filter(template =>
+    (template.name ?? '').toLowerCase().includes(keyword)
+    || (template.driver ?? '').toLowerCase().includes(keyword)
+    || (template.description ?? '').toLowerCase().includes(keyword),
+  )
 })
 
 function providerSubtitle(provider: ProvidersGetResponse) {
@@ -109,6 +135,11 @@ function providerSubtitle(provider: ProvidersGetResponse) {
 
 function modelCount(id: string | undefined) {
   return id ? (modelCountByProvider.value[id] ?? 0) : 0
+}
+
+function openAddProvider(templateId?: string) {
+  initialTemplateId.value = templateId ?? ''
+  addOpen.value = true
 }
 </script>
 
@@ -134,14 +165,14 @@ function modelCount(id: string | undefined) {
             />
           </InputGroup>
         </div>
-        <Button @click="addOpen = true">
+        <Button @click="openAddProvider()">
           <Plus class="size-4" />
           {{ t('provider.addBtn') }}
         </Button>
       </template>
 
       <div
-        v-if="providers.length > 0"
+        v-if="providers.length + availableTemplates.length > 0"
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard
@@ -181,6 +212,33 @@ function modelCount(id: string | undefined) {
             />
           </template>
         </BackendCard>
+
+        <BackendCard
+          v-for="template in filteredTemplates"
+          :key="`template:${template.id}`"
+          :name="template.name ?? ''"
+          :subtitle="t('provider.templateNotConfigured')"
+          @click="openAddProvider(template.id)"
+        >
+          <template #leading>
+            <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+              <ProviderIcon
+                v-if="template.icon"
+                :icon="template.icon"
+                size="1.5em"
+              />
+              <span
+                v-else
+                class="text-xs font-medium text-muted-foreground"
+              >
+                {{ avatarInitials(template.name, '?') }}
+              </span>
+            </span>
+          </template>
+          <template #trailing>
+            <Plus class="size-4 shrink-0 text-muted-foreground" />
+          </template>
+        </BackendCard>
       </div>
 
       <Empty
@@ -197,7 +255,7 @@ function modelCount(id: string | undefined) {
         <EmptyContent>
           <Button
             variant="outline"
-            @click="addOpen = true"
+            @click="openAddProvider()"
           >
             <Plus class="size-4" />
             {{ t('provider.addBtn') }}
@@ -208,6 +266,8 @@ function modelCount(id: string | undefined) {
       <AddProvider
         v-model:open="addOpen"
         :providers="providers"
+        :templates="templates"
+        :initial-template-id="initialTemplateId"
         hide-trigger
       />
     </PageShell>

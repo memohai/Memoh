@@ -1,156 +1,233 @@
 <template>
-  <section>
-    <FormDialogShell
-      v-model:open="open"
-      :title="$t('webSearch.addSearch')"
-      :cancel-text="$t('common.cancel')"
-      :submit-text="$t('webSearch.addSearch')"
-      :submit-disabled="(form.meta.value.valid === false) || isLoading"
-      :loading="isLoading"
-      @submit="handleCreate"
-    >
-      <template #trigger>
-        <span
-          v-if="hideTrigger"
-          class="hidden"
-        />
-        <Button
-          v-else
-          class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
-          variant="outline"
+  <FormDialogShell
+    v-model:open="open"
+    :title="$t('webSearch.addSearch')"
+    :cancel-text="$t('common.cancel')"
+    :submit-text="$t('common.save')"
+    :submit-disabled="form.meta.value.valid === false || isLoading || !selectedMeta"
+    :loading="isLoading"
+    max-width-class="sm:max-w-xl"
+    @submit="handleCreate"
+  >
+    <template #trigger>
+      <span
+        v-if="hideTrigger"
+        class="hidden"
+      />
+      <Button
+        v-else
+        variant="outline"
+      >
+        <Plus class="size-4" />
+        {{ $t('webSearch.addSearch') }}
+      </Button>
+    </template>
+
+    <template #body>
+      <FormStack class="mt-4">
+        <FieldStack :label="$t('webSearch.provider')">
+          <div class="flex h-9 items-center gap-2 rounded-md border border-input bg-muted px-3 text-sm">
+            <SearchProviderLogo
+              :provider="initialProvider"
+              size="xs"
+            />
+            <span>{{ providerDisplayName }}</span>
+          </div>
+        </FieldStack>
+
+        <FormField
+          v-slot="{ componentField }"
+          name="name"
         >
-          <Plus class="mr-1 size-4" /> {{ $t('webSearch.addSearch') }}
-        </Button>
-      </template>
-      <template #body>
-        <div class="mt-4">
-          <FormStack>
-            <FormField
-              v-slot="{ componentField }"
-              name="name"
-            >
-              <FieldStack
-                :label="$t('common.name')"
-                for="search-provider-create-name"
+          <FieldStack :label="$t('common.name')">
+            <FormControl>
+              <Input
+                :placeholder="$t('common.namePlaceholder')"
+                v-bind="componentField"
+              />
+            </FormControl>
+          </FieldStack>
+        </FormField>
+
+        <FieldStack
+          v-for="field in configFields"
+          :key="field.key"
+          :help="field.description"
+        >
+          <template #label>
+            <Label>
+              {{ field.title }}
+              <span
+                v-if="field.required"
+                class="text-destructive"
+              >*</span>
+            </Label>
+          </template>
+
+          <Switch
+            v-if="field.type === 'bool' || field.type === 'boolean'"
+            :model-value="configData[field.key] === true"
+            @update:model-value="value => configData[field.key] = value"
+          />
+          <Select
+            v-else-if="field.enum.length > 0"
+            :model-value="String(configData[field.key] ?? '')"
+            @update:model-value="value => configData[field.key] = value"
+          >
+            <SelectTrigger class="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="option in field.enum"
+                :key="option"
+                :value="option"
               >
-                <FormControl>
-                  <Input
-                    id="search-provider-create-name"
-                    type="text"
-                    :placeholder="$t('common.namePlaceholder')"
-                    v-bind="componentField"
-                    :aria-label="$t('common.name')"
-                  />
-                </FormControl>
-              </FieldStack>
-            </FormField>
-            <FormField
-              v-slot="{ componentField }"
-              name="provider"
-            >
-              <FieldStack
-                :label="$t('webSearch.provider')"
-                for="search-provider-create-type"
-              >
-                <FormControl>
-                  <Select v-bind="componentField">
-                    <SelectTrigger
-                      id="search-provider-create-type"
-                      class="w-full"
-                      :aria-label="$t('webSearch.provider')"
-                    >
-                      <SelectValue :placeholder="$t('common.typePlaceholder')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem
-                          v-for="type in PROVIDER_TYPES"
-                          :key="type"
-                          :value="type"
-                        >
-                          <span class="flex items-center gap-2">
-                            <SearchProviderLogo
-                              :provider="type"
-                              size="xs"
-                            />
-                            <span>{{ $t(`webSearch.providerNames.${type}`, type) }}</span>
-                          </span>
-                        </SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </FormControl>
-              </FieldStack>
-            </FormField>
-          </FormStack>
-        </div>
-      </template>
-    </FormDialogShell>
-  </section>
+                {{ option }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            v-else
+            :model-value="String(configData[field.key] ?? '')"
+            :type="field.secret ? 'password' : field.type === 'number' || field.type === 'integer' ? 'number' : 'text'"
+            :placeholder="field.example === undefined ? '' : String(field.example)"
+            @update:model-value="value => updateConfig(field.key, field.type, value)"
+          />
+        </FieldStack>
+      </FormStack>
+    </template>
+  </FormDialogShell>
 </template>
 
 <script setup lang="ts">
+import { computed, reactive, watch } from 'vue'
 import {
   Button,
-  Input,
-  FormField,
   FormControl,
+  FormField,
+  Input,
+  Label,
   Select,
+  SelectContent,
+  SelectItem,
   SelectTrigger,
   SelectValue,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
+  Switch,
+  toast,
 } from '@felinic/ui'
-import { toTypedSchema } from '@vee-validate/zod'
-import z from 'zod'
-import { useForm } from 'vee-validate'
-import { useMutation, useQueryCache } from '@pinia/colada'
-import { postSearchProviders } from '@memohai/sdk'
-import type { SearchprovidersCreateRequest } from '@memohai/sdk'
-import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
+import { toTypedSchema } from '@vee-validate/zod'
+import { useForm } from 'vee-validate'
+import z from 'zod'
+import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
+import { getSearchProvidersMeta, postSearchProviders } from '@memohai/sdk'
+import type { SearchprovidersCreateRequest, SearchprovidersProviderMeta, SearchprovidersProviderName } from '@memohai/sdk'
+import { useI18n } from 'vue-i18n'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
-import { useDialogMutation } from '@/composables/useDialogMutation'
-import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
-
-const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
+import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
+import { useDialogMutation } from '@/composables/useDialogMutation'
+import { normalizeProviderConfigFields } from '@/utils/provider-template'
 
 const open = defineModel<boolean>('open')
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   hideTrigger?: boolean
+  initialProvider?: string
 }>(), {
   hideTrigger: false,
+  initialProvider: '',
 })
+
 const { t } = useI18n()
 const { run } = useDialogMutation()
-
 const queryCache = useQueryCache()
-const { mutateAsync: createProviderMutation, isLoading } = useMutation({
-  mutation: async (data: Record<string, unknown>) => {
-    const { data: result } = await postSearchProviders({ body: data as SearchprovidersCreateRequest, throwOnError: true })
-    return result
+const configData = reactive<Record<string, unknown>>({})
+
+const { data: providerMetaData } = useQuery({
+  key: () => ['search-providers-meta'],
+  query: async () => {
+    const { data } = await getSearchProvidersMeta({ throwOnError: true })
+    return data
+  },
+})
+
+const providerMetas = computed<SearchprovidersProviderMeta[]>(() =>
+  Array.isArray(providerMetaData.value) ? providerMetaData.value : [],
+)
+const selectedMeta = computed(() => providerMetas.value.find(meta => meta.provider === props.initialProvider))
+const providerDisplayName = computed(() =>
+  selectedMeta.value?.display_name ?? t(`webSearch.providerNames.${props.initialProvider}`, props.initialProvider),
+)
+const configFields = computed(() => normalizeProviderConfigFields(selectedMeta.value?.config_schema))
+
+const schema = toTypedSchema(z.object({
+  name: z.string().min(1, t('webSearch.nameRequired')),
+}))
+const form = useForm({ validationSchema: schema })
+
+function replaceConfig(config: Record<string, unknown>) {
+  Object.keys(configData).forEach(key => delete configData[key])
+  Object.assign(configData, config)
+}
+
+function defaultConfig() {
+  return Object.fromEntries(configFields.value
+    .filter(field => !field.secret && field.example !== undefined)
+    .map(field => [field.key, field.example]))
+}
+
+function resetForm() {
+  form.resetForm({ values: { name: providerDisplayName.value } })
+  replaceConfig(defaultConfig())
+}
+
+function updateConfig(key: string, type: string, value: string | number) {
+  if ((type === 'number' || type === 'integer') && value !== '') {
+    configData[key] = Number(value)
+    return
+  }
+  configData[key] = value
+}
+
+watch(open, (isOpen) => {
+  if (isOpen) resetForm()
+})
+watch(selectedMeta, (meta, previous) => {
+  if (open.value && meta && meta !== previous) resetForm()
+})
+
+const { mutateAsync: createProvider, isLoading } = useMutation({
+  mutation: async (value: { name: string }) => {
+    const body: SearchprovidersCreateRequest = {
+      name: value.name.trim(),
+      provider: props.initialProvider as SearchprovidersProviderName,
+      config: { ...configData },
+    }
+    const { data } = await postSearchProviders({ body, throwOnError: true })
+    return data
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['search-providers'] }),
 })
 
-const providerSchema = toTypedSchema(z.object({
-  name: z.string().min(1, t('webSearch.nameRequired')),
-  provider: z.string().min(1, t('webSearch.providerRequired')),
-}))
-
-const form = useForm({
-  validationSchema: providerSchema,
-})
-
 const handleCreate = form.handleSubmit(async (value) => {
+  const missing = configFields.value.find((field) => {
+    if (!field.required) return false
+    const fieldValue = configData[field.key]
+    if (field.type === 'bool' || field.type === 'boolean') return fieldValue === undefined || fieldValue === null
+    return !String(fieldValue ?? '').trim()
+  })
+  if (missing) {
+    toast.error(t('provider.requiredField', { field: missing.title }))
+    return
+  }
   await run(
-    () => createProviderMutation({ ...value, config: {} }),
+    () => createProvider(value),
     {
       fallbackMessage: t('common.saveFailed'),
       onSuccess: () => {
+        toast.success(t('webSearch.saveSuccess'))
         open.value = false
       },
     },
