@@ -847,6 +847,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 		sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
 		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, pipelinepkg.DiscussSessionConfig{
+			TeamID:            cfg.TeamID,
 			BotID:             identity.BotID,
 			SessionID:         sessionID,
 			RouteID:           resolved.RouteID,

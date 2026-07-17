@@ -1157,9 +1157,9 @@ func buildModelSelectionRequest(p baseRunConfigParams, chatID string) conversati
 // identity) for a bot+session without loading messages or requiring a query.
 // The caller is responsible for filling RunConfig.Messages.
 // Used by the discuss driver to reuse the resolver's model/tools/prompt pipeline.
-func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (pipelinepkg.ResolveRunConfigResult, error) {
+func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (agentpkg.ResolveRunConfigResult, error) {
 	if strings.TrimSpace(botID) == "" {
-		return pipelinepkg.ResolveRunConfigResult{}, errors.New("bot id is required")
+		return agentpkg.ResolveRunConfigResult{}, errors.New("bot id is required")
 	}
 
 	sessionType, runtimeType := r.resolveRunConfigSessionDescriptor(ctx, sessionID)
@@ -1177,7 +1177,7 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 				SessionToken:      chatToken,
 			},
 		}
-		return pipelinepkg.ResolveRunConfigResult{
+		return agentpkg.ResolveRunConfigResult{
 			RunConfig:   cfg,
 			RuntimeType: runtimeType,
 		}, nil
@@ -1193,11 +1193,11 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 		SessionType:       sessionType,
 	})
 	if err != nil {
-		return pipelinepkg.ResolveRunConfigResult{}, err
+		return agentpkg.ResolveRunConfigResult{}, err
 	}
 
 	cfg = r.prepareRunConfig(ctx, cfg)
-	return pipelinepkg.ResolveRunConfigResult{
+	return agentpkg.ResolveRunConfigResult{
 		RunConfig:   cfg,
 		ModelID:     chatModel.ID,
 		RuntimeType: runtimeType,

@@ -1,0 +1,309 @@
+package inprocess
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"time"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
+
+	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/pipeline"
+	sessionpkg "github.com/memohai/memoh/internal/session"
+)
+
+// DiscussResolver is the slice of flow.Resolver the discuss path needs:
+// run-config resolution, image inlining, and round persistence.
+type DiscussResolver interface {
+	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (agentpkg.ResolveRunConfigResult, error)
+	InlineImageAttachments(ctx context.Context, botID string, refs []pipeline.ImageAttachmentRef) []sdk.ImagePart
+	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
+}
+
+// AgentStreamer is the native agent streaming surface the discuss path
+// drives. Satisfied by *agent.Agent.
+type AgentStreamer interface {
+	Stream(ctx context.Context, cfg agentpkg.RunConfig) <-chan agentpkg.StreamEvent
+}
+
+// discussDeps holds the discuss-mode dependencies, set via WithDiscuss.
+type discussDeps struct {
+	agent    AgentStreamer
+	resolver DiscussResolver
+}
+
+// startDiscussTurn orchestrates one discuss turn: resolve the run config,
+// emit a synthetic run-resolved event, then either stream the native agent
+// (persisting the round) or the external ACP runtime. The participation
+// gate for ACP runtimes lives here because it is a property of runtime
+// cost, not of channel policy: the caller supplies DiscussAddressed and
+// the runtime decides whether starting is worth it.
+func (a *Adapter) startDiscussTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
+	if a.discuss == nil || a.discuss.agent == nil || a.discuss.resolver == nil {
+		return nil, errors.New("turn: discuss runtime not configured")
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	h := newDiscussHandle(runCtx, cmd, cancel)
+	go a.pumpDiscuss(runCtx, cmd, h)
+	return h, nil
+}
+
+func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc) *discussHandle {
+	return &discussHandle{
+		runHandle: runHandle{
+			id:        newRunID(),
+			events:    make(chan turn.Event, 16),
+			errs:      make(chan error, 1),
+			ctx:       ctx,
+			cancel:    cancel,
+			inject:    make(chan conversation.InjectMessage), // unused in discuss mode
+			addAssets: func([]turn.OutboundAssetRef) {},
+		},
+		teamID:    cmd.TeamID,
+		sessionID: cmd.SessionID,
+	}
+}
+
+// discussHandle reuses runHandle's channel pair with manual event emission.
+type discussHandle struct {
+	runHandle
+	teamID    string
+	sessionID string
+	seq       int64
+}
+
+func (h *discussHandle) emit(kind string, payload []byte) {
+	h.seq++
+	h.events <- turn.Event{
+		RunID:     h.id,
+		TeamID:    h.teamID,
+		SessionID: h.sessionID,
+		Seq:       h.seq,
+		Kind:      kind,
+		Payload:   payload,
+	}
+}
+
+func (a *Adapter) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
+	defer close(h.events)
+	defer close(h.errs)
+	defer h.cancel()
+
+	resolved, err := a.discuss.resolver.ResolveRunConfig(ctx,
+		cmd.BotID, cmd.SessionID, cmd.SourceChannelIdentityID,
+		cmd.CurrentChannel, cmd.ReplyTarget, cmd.ConversationType, cmd.SessionToken)
+	if err != nil {
+		h.errs <- err
+		return
+	}
+	resolvedPayload, _ := json.Marshal(turn.DiscussRunResolvedPayload{RuntimeType: resolved.RuntimeType})
+	h.emit(turn.DiscussEventRunResolved, resolvedPayload)
+
+	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
+		if !cmd.DiscussAddressed {
+			h.emit(turn.DiscussEventSkipped, nil)
+			return
+		}
+		a.pumpDiscussACP(ctx, cmd, h)
+		return
+	}
+	a.pumpDiscussNative(ctx, cmd, h, resolved)
+}
+
+func (a *Adapter) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved agentpkg.ResolveRunConfigResult) {
+	runConfig := resolved.RunConfig
+	runConfig.Messages = discussMessagesToSDK(cmd.DiscussMessages)
+	runConfig.SessionType = sessionpkg.TypeDiscuss
+	runConfig.Query = ""
+
+	// Inline image attachments from new RC segments so the model receives
+	// them as native vision input (ImagePart) on the first encounter.
+	if runConfig.SupportsImageInput && len(cmd.DiscussImageRefs) > 0 {
+		refs := make([]pipeline.ImageAttachmentRef, len(cmd.DiscussImageRefs))
+		for i, r := range cmd.DiscussImageRefs {
+			refs[i] = pipeline.ImageAttachmentRef{ContentHash: r.ContentHash, Mime: r.Mime}
+		}
+		imageParts := a.discuss.resolver.InlineImageAttachments(ctx, cmd.BotID, refs)
+		injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
+	}
+	runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(buildLateBindingPrompt(cmd.DiscussMentioned)))
+	runConfig = runConfig.RefreshContextFrag()
+
+	eventCh := a.discuss.agent.Stream(ctx, runConfig)
+
+	var finalMessages json.RawMessage
+	for event := range eventCh {
+		if event.Type == agentpkg.EventAgentEnd || event.Type == agentpkg.EventAgentAbort {
+			finalMessages = event.Messages
+		}
+		payload, marshalErr := json.Marshal(event)
+		if marshalErr != nil {
+			continue
+		}
+		h.emit(string(event.Type), payload)
+	}
+
+	if len(finalMessages) > 0 {
+		var sdkMsgs []sdk.Message
+		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
+			if storeErr := a.discuss.resolver.StoreRound(ctx,
+				cmd.BotID, cmd.SessionID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
+				sdkMsgs, resolved.ModelID,
+			); storeErr != nil {
+				h.errs <- storeErr
+			}
+		}
+	}
+}
+
+func (a *Adapter) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
+	prompt := discussACPFullContextPrompt(cmd.DiscussMessages, buildLateBindingPrompt(cmd.DiscussAddressed))
+	if strings.TrimSpace(prompt) == "" {
+		// No composable context: end without a skip marker so the caller
+		// does not advance its consumed cursor (pre-port semantics).
+		return
+	}
+	chunks, errs := a.runner.StreamChat(ctx, conversation.ChatRequest{
+		BotID:                   cmd.BotID,
+		ChatID:                  cmd.BotID,
+		SessionID:               cmd.SessionID,
+		RouteID:                 cmd.RouteID,
+		SourceChannelIdentityID: cmd.SourceChannelIdentityID,
+		CurrentChannel:          cmd.CurrentChannel,
+		ReplyTarget:             cmd.ReplyTarget,
+		ConversationType:        cmd.ConversationType,
+		Token:                   cmd.SessionToken,
+		ChatToken:               cmd.ChatToken,
+		ToolHTTPURL:             cmd.ToolHTTPURL,
+		Query:                   prompt,
+		RawQuery:                prompt,
+		UserMessagePersisted:    true,
+		SkipMemoryExtraction:    true,
+		ForceFreshRuntime:       true,
+	})
+	for chunks != nil || errs != nil {
+		select {
+		case chunk, ok := <-chunks:
+			if !ok {
+				chunks = nil
+				continue
+			}
+			h.emit(parseKind(chunk), chunk)
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			if err != nil {
+				h.errs <- err
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// buildLateBindingPrompt renders the per-turn runtime instructions. The
+// native runtime nudges on explicit mentions; the ACP runtime nudges on
+// the broader addressed condition (mention or direct conversation).
+func buildLateBindingPrompt(nudge bool) string {
+	now := time.Now().Format(time.RFC3339)
+	var sb strings.Builder
+	sb.WriteString("Current time: ")
+	sb.WriteString(now)
+	sb.WriteString("\n\n")
+	sb.WriteString("IMPORTANT: You MUST use the `send` tool to speak. Your text output is invisible to everyone — it is only internal monologue. ")
+	sb.WriteString("If you want to say something, you MUST call the `send` tool. Writing text without a tool call means absolute silence — no one will see it.")
+
+	if nudge {
+		sb.WriteString("\n\nYou are being addressed directly. You should respond by calling the `send` tool now.")
+	}
+
+	return sb.String()
+}
+
+// discussMessagesToSDK converts composed context messages into SDK
+// messages, preserving structured raw content when present.
+func discussMessagesToSDK(messages []turn.DiscussMessage) []sdk.Message {
+	result := make([]sdk.Message, 0, len(messages))
+	for _, m := range messages {
+		if len(m.RawContent) > 0 {
+			raw, err := json.Marshal(struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			}{
+				Role:    m.Role,
+				Content: m.RawContent,
+			})
+			if err == nil {
+				var msg sdk.Message
+				if json.Unmarshal(raw, &msg) == nil {
+					result = append(result, msg)
+					continue
+				}
+			}
+		}
+		switch m.Role {
+		case "assistant":
+			result = append(result, sdk.AssistantMessage(m.Content))
+		default:
+			result = append(result, sdk.UserMessage(m.Content))
+		}
+	}
+	return result
+}
+
+// injectImagePartsIntoLastUserMessage appends ImageParts to the last user
+// message in msgs so the model receives inline vision input.
+func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePart) {
+	if len(parts) == 0 {
+		return
+	}
+	extra := make([]sdk.MessagePart, 0, len(parts))
+	for _, p := range parts {
+		if strings.TrimSpace(p.Image) != "" {
+			extra = append(extra, p)
+		}
+	}
+	if len(extra) == 0 {
+		return
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == sdk.MessageRoleUser {
+			msgs[i].Content = append(msgs[i].Content, extra...)
+			return
+		}
+	}
+}
+
+// discussACPFullContextPrompt renders the composed context into the single
+// reset-each-turn prompt used by external ACP runtimes.
+func discussACPFullContextPrompt(messages []turn.DiscussMessage, lateBinding string) string {
+	var b strings.Builder
+	b.WriteString("You are replying in a discuss-mode conversation. The runtime is reset each turn, so use the complete context below as the source of truth.\n\n")
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		if role == "" {
+			role = "user"
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		b.WriteString("[")
+		b.WriteString(role)
+		b.WriteString("]\n")
+		b.WriteString(content)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Reply to the latest user-visible message when a response is appropriate.")
+	if strings.TrimSpace(lateBinding) != "" {
+		b.WriteString("\n\n")
+		b.WriteString(lateBinding)
+	}
+	return b.String()
+}

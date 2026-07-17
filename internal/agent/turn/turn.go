@@ -126,6 +126,49 @@ type StartTurnCommand struct {
 	// Discuss-mode extras.
 	SessionToken string //nolint:gosec // session credential material, in-process only
 	ToolHTTPURL  string
+
+	// DiscussMessages is the composed conversation context for a discuss
+	// turn (Mode == ModeDiscuss), already rendered by the caller's
+	// projection. The runtime appends its own late-binding prompt after
+	// image inlining so vision parts land on the last real user message.
+	DiscussMessages  []DiscussMessage
+	DiscussImageRefs []DiscussImageRef
+	// DiscussMentioned reports an explicit @-mention or reply-to in the
+	// new context window; DiscussAddressed additionally covers direct
+	// (1:1) conversations. Expensive external runtimes (ACP) use
+	// DiscussAddressed as a participation gate and skip the run when
+	// false.
+	DiscussMentioned bool
+	DiscussAddressed bool
+}
+
+// DiscussMessage is one composed context message for a discuss turn.
+type DiscussMessage struct {
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	RawContent json.RawMessage `json:"raw_content,omitempty"`
+}
+
+// DiscussImageRef references an image attachment to inline as vision input.
+type DiscussImageRef struct {
+	ContentHash string `json:"content_hash"`
+	Mime        string `json:"mime,omitempty"`
+}
+
+// Synthetic discuss event kinds emitted by the runtime before (or instead
+// of) the model event stream.
+const (
+	// DiscussEventRunResolved is always the first event of a discuss run;
+	// its payload is DiscussRunResolvedPayload.
+	DiscussEventRunResolved = "discuss_run_resolved"
+	// DiscussEventSkipped signals the runtime declined to start (e.g. ACP
+	// participation gate); the run ends after this event.
+	DiscussEventSkipped = "discuss_skipped"
+)
+
+// DiscussRunResolvedPayload is the payload of DiscussEventRunResolved.
+type DiscussRunResolvedPayload struct {
+	RuntimeType string `json:"runtime_type"`
 }
 
 // ToolApprovalResponse resumes a turn deferred on tool approval

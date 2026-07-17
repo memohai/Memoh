@@ -382,11 +382,10 @@ func provideEventStore(log *slog.Logger, queries dbstore.Queries) *pipelinepkg.E
 	return pipelinepkg.NewEventStore(log, queries)
 }
 
-func provideDiscussDriver(log *slog.Logger, pipeline *pipelinepkg.Pipeline, eventStore *pipelinepkg.EventStore, agent *agentpkg.Agent, msgService *message.DBService) *pipelinepkg.DiscussDriver {
+func provideDiscussDriver(log *slog.Logger, pipeline *pipelinepkg.Pipeline, eventStore *pipelinepkg.EventStore, msgService *message.DBService) *pipelinepkg.DiscussDriver {
 	return pipelinepkg.NewDiscussDriver(pipelinepkg.DiscussDriverDeps{
 		Pipeline:       pipeline,
 		EventStore:     eventStore,
-		Agent:          agent,
 		MessageService: msgService,
 		CursorStore:    eventStore,
 		Logger:         log,
@@ -630,6 +629,7 @@ func provideChannelRouter(
 	sessionService *sessionpkg.Service,
 	msgService *message.DBService,
 	resolver *flow.Resolver,
+	agent *agentpkg.Agent,
 	identityService *identities.Service,
 	botService *bots.Service,
 	accountService *accounts.Service,
@@ -656,12 +656,11 @@ func provideChannelRouter(
 	qqAdapter.SetChannelIdentityResolver(identityService)
 	qqAdapter.SetRouteResolver(routeService)
 
-	turnService := turninprocess.New(resolver)
+	turnService := turninprocess.New(resolver, turninprocess.WithDiscuss(agent, resolver))
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, turnService, identityService, policyService, rc.JwtSecret, 5*time.Minute)
 	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
 	processor.SetPipeline(pipeline, eventStore, discussDriver)
-	discussDriver.SetResolver(resolver)
-	discussDriver.SetRuntimeStreamer(resolver)
+	discussDriver.SetTurnService(turnService)
 	discussDriver.SetBroadcaster(hub)
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)

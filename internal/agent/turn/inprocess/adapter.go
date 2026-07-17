@@ -36,19 +36,41 @@ type userInputResponder interface {
 // Adapter implements turn.Service by translating commands into
 // conversation.ChatRequest and driving the resolver's stream.
 type Adapter struct {
-	runner ChatStreamer
+	runner  ChatStreamer
+	discuss *discussDeps
+}
+
+// Option configures optional adapter capabilities.
+type Option func(*Adapter)
+
+// WithDiscuss enables discuss-mode turns backed by the native agent and
+// the resolver's run-config/persistence surface.
+func WithDiscuss(agent AgentStreamer, resolver DiscussResolver) Option {
+	return func(a *Adapter) {
+		a.discuss = &discussDeps{agent: agent, resolver: resolver}
+	}
 }
 
 // New creates an in-process turn service over the given runner.
-func New(runner ChatStreamer) *Adapter {
-	return &Adapter{runner: runner}
+func New(runner ChatStreamer, opts ...Option) *Adapter {
+	a := &Adapter{runner: runner}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
+
+// newRunID mints a run identifier.
+func newRunID() string { return uuid.NewString() }
 
 // StartTurn validates the command, starts the underlying stream, and
 // returns a handle whose Events/Errs mirror the runner's channel pair.
 func (a *Adapter) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
 	if cmd.TeamID == "" {
 		return nil, errors.New("turn: TeamID is required")
+	}
+	if cmd.Mode == turn.ModeDiscuss {
+		return a.startDiscussTurn(ctx, cmd)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 
@@ -71,7 +93,7 @@ func (a *Adapter) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 	chunkCh, errCh := a.runner.StreamChat(runCtx, req)
 
 	h := &runHandle{
-		id:     uuid.NewString(),
+		id:     newRunID(),
 		events: make(chan turn.Event, 16),
 		errs:   make(chan error, 1),
 		ctx:    runCtx,
