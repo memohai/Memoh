@@ -166,6 +166,27 @@ func TestProviderInstancesLinkToGlobalTemplates(t *testing.T) {
 			if count != 1 {
 				t.Errorf("public.%s must have exactly one single-column link to template.provider_templates, got %d", table, count)
 			}
+
+			var setNullColumns []string
+			if err := pool.QueryRow(ctx, `
+				SELECT ARRAY(
+				  SELECT attr.attname
+				    FROM unnest(con.confdelsetcols) WITH ORDINALITY key(attnum, ord)
+				    JOIN pg_attribute attr
+				      ON attr.attrelid = con.conrelid
+				     AND attr.attnum = key.attnum
+				   ORDER BY key.ord
+				)
+				  FROM pg_constraint con
+				 WHERE con.conrelid = 'public.providers'::regclass
+				   AND con.conname = 'providers_provider_template_id_fkey'
+				   AND con.confdeltype = 'n'
+			`).Scan(&setNullColumns); err != nil {
+				t.Fatalf("inspect provider template delete action: %v", err)
+			}
+			if len(setNullColumns) != 1 || setNullColumns[0] != "provider_template_id" {
+				t.Fatalf("provider template SET NULL columns = %v, want [provider_template_id]", setNullColumns)
+			}
 		})
 	}
 

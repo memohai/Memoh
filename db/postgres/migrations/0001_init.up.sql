@@ -116,7 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_user_channel_bindings_user_id ON user_channel_bin
 
 CREATE TABLE IF NOT EXISTS providers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  provider_template_id UUID REFERENCES template.provider_templates(id) ON DELETE SET NULL,
+  provider_template_id UUID,
   name TEXT NOT NULL,
   client_type TEXT NOT NULL DEFAULT 'openai-completions',
   icon TEXT,
@@ -125,6 +125,10 @@ CREATE TABLE IF NOT EXISTS providers (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT providers_provider_template_id_fkey
+    FOREIGN KEY (provider_template_id)
+    REFERENCES template.provider_templates(id)
+    ON DELETE SET NULL (provider_template_id),
   CONSTRAINT providers_name_unique UNIQUE (name),
   CONSTRAINT providers_client_type_check CHECK (client_type IN (
     'openai-responses',

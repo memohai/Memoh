@@ -65,7 +65,7 @@ BEGIN
       ADD CONSTRAINT providers_provider_template_id_fkey
       FOREIGN KEY (provider_template_id)
       REFERENCES template.provider_templates(id)
-      ON DELETE SET NULL;
+      ON DELETE SET NULL (provider_template_id);
   END IF;
 END
 $$;
