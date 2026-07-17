@@ -79,6 +79,7 @@ import (
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/storage/providers/fallback"
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
+	"github.com/memohai/memoh/internal/team"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/userruntime"
@@ -1017,7 +1018,12 @@ func (a *gatewayAssetLoaderAdapter) AccessPathForGateway(ctx context.Context, bo
 // and native agent. Both chat and discuss turns flow through it; Channel
 // consumes it as the only agent surface.
 func provideTurnService(resolver *flow.Resolver, agent *agentpkg.Agent) turn.Service {
-	return turninprocess.New(resolver, turninprocess.WithDiscuss(agent, resolver))
+	// The self-hosted runtime binds its DB pool to the singleton team, so
+	// the adapter fails closed on any other TeamID (turn.ErrTeamNotServed).
+	return turninprocess.New(resolver,
+		turninprocess.WithDiscuss(agent, resolver),
+		turninprocess.WithAllowedTeam(team.DefaultTeamID),
+	)
 }
 
 // resolverBotPermissionChecker duplicates appchannel's inbound permission

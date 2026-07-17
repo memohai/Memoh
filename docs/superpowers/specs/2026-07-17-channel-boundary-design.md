@@ -112,7 +112,8 @@ Memoh/
 
 - 契约不携带函数、Go channel或进程内状态引用（区别于现有`conversation.ChatRequest`）。
 - 所有命令与事件必填`team_id`。OSS单团队下由Channel边缘从`ChannelConfig.TeamID`填入（PR #791后config行已携带team_id）；禁止在契约层回退到`team.DefaultTeamID`。
-- 幂等键从平台`external_message_id`派生，由Channel生成、Agent去重。
+- 幂等键从平台`external_message_id`派生，由Channel生成、Agent去重。进程内适配器按`(team_id, idempotency_key)`做进程生命周期的认领（有界注册表），重复投递返回`ErrDuplicateTurn`、Channel静默丢弃；跨进程的持久化认领随Run Journal（RFC第6节）落地。
+- 进程内适配器只服务组合根注入的单一team（自托管为`DefaultTeamID`）：DB连接池按会话绑定单team GUC，非本team命令返回`ErrTeamNotServed`fail-closed，防止静默读写默认team数据；hosted多team运行时以请求级team绑定替换该守卫。
 - 事件流的消费语义与RFC 6.3对齐：每个Run内顺序号单调递增；本spec阶段事件仅进程内传递，不落Run Journal。
 
 ### 5.2 契约形状（示意，字段以实现PR为准）

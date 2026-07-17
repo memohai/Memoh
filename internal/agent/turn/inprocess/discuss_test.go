@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -342,4 +343,52 @@ func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) boo
 		return false
 	}
 	return false
+}
+
+// TestDiscussCancelUnblocksFullEventBuffer mirrors the chat-mode burst
+// repro for the discuss pump's emit path.
+func TestDiscussCancelUnblocksFullEventBuffer(t *testing.T) {
+	agent := &burstAgentStreamer{count: 40}
+	resolver := &fakeDiscussResolver{
+		resolveResult: agentpkg.ResolveRunConfigResult{ModelID: "model-1"},
+	}
+	a := New(&fakeRunner{}, WithDiscuss(agent, resolver))
+	h, err := a.StartTurn(context.Background(), discussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	h.Cancel()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-h.Events():
+			if !ok {
+				for range h.Errs() {
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("discuss events channel not closed after cancel with full buffer")
+		}
+	}
+}
+
+type burstAgentStreamer struct {
+	count int
+}
+
+func (f *burstAgentStreamer) Stream(ctx context.Context, _ agentpkg.RunConfig) <-chan agentpkg.StreamEvent {
+	ch := make(chan agentpkg.StreamEvent)
+	go func() {
+		defer close(ch)
+		for range f.count {
+			select {
+			case ch <- agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "x"}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch
 }

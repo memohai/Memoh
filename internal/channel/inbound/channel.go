@@ -1186,6 +1186,18 @@ startStream:
 
 	handle, startErr := p.turnSvc.StartTurn(streamCtx, cmd)
 	if startErr != nil {
+		if errors.Is(startErr, turn.ErrDuplicateTurn) {
+			// Platform webhook redelivery of an already-claimed message:
+			// treat as delivered, no user-visible error.
+			if p.logger != nil {
+				p.logger.Info(
+					"duplicate inbound turn dropped",
+					slog.String("channel", msg.Channel.String()),
+					slog.String("external_message_id", sourceMessageID),
+				)
+			}
+			return nil
+		}
 		if p.logger != nil {
 			p.logger.Error(
 				"start turn failed",

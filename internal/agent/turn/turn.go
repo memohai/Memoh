@@ -12,11 +12,24 @@ package turn
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/userinput"
 )
+
+// ErrDuplicateTurn reports that a StartTurnCommand's (TeamID,
+// IdempotencyKey) pair was already claimed by an earlier run. Callers
+// handling platform webhook retries should treat it as successful
+// delivery and drop the duplicate silently.
+var ErrDuplicateTurn = errors.New("turn: duplicate idempotency key")
+
+// ErrTeamNotServed reports that the service instance does not serve the
+// command's team. The in-process runtime binds its database pool to the
+// single self-hosted team, so commands for any other team must fail
+// closed instead of silently reading and writing the default team's data.
+var ErrTeamNotServed = errors.New("turn: team not served by this instance")
 
 // Mode selects the turn orchestration path.
 type Mode string

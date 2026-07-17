@@ -76,15 +76,32 @@ type discussHandle struct {
 	seq       int64
 }
 
-func (h *discussHandle) emit(kind string, payload []byte) {
+// emit delivers one event, giving up when the run context is canceled so
+// a stalled consumer can never wedge the pump (Cancel must always unblock).
+func (h *discussHandle) emit(kind string, payload []byte) bool {
 	h.seq++
-	h.events <- turn.Event{
+	select {
+	case h.events <- turn.Event{
 		RunID:     h.id,
 		TeamID:    h.teamID,
 		SessionID: h.sessionID,
 		Seq:       h.seq,
 		Kind:      kind,
 		Payload:   payload,
+	}:
+		return true
+	case <-h.ctx.Done():
+		return false
+	}
+}
+
+// emitErr mirrors emit for the error channel.
+func (h *discussHandle) emitErr(err error) bool {
+	select {
+	case h.errs <- err:
+		return true
+	case <-h.ctx.Done():
+		return false
 	}
 }
 
@@ -97,11 +114,13 @@ func (a *Adapter) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		cmd.BotID, cmd.SessionID, cmd.SourceChannelIdentityID,
 		cmd.CurrentChannel, cmd.ReplyTarget, cmd.ConversationType, cmd.SessionToken)
 	if err != nil {
-		h.errs <- err
+		h.emitErr(err)
 		return
 	}
 	resolvedPayload, _ := json.Marshal(turn.DiscussRunResolvedPayload{RuntimeType: resolved.RuntimeType})
-	h.emit(turn.DiscussEventRunResolved, resolvedPayload)
+	if !h.emit(turn.DiscussEventRunResolved, resolvedPayload) {
+		return
+	}
 
 	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
 		if !cmd.DiscussAddressed {
@@ -144,7 +163,9 @@ func (a *Adapter) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		if marshalErr != nil {
 			continue
 		}
-		h.emit(string(event.Type), payload)
+		if !h.emit(string(event.Type), payload) {
+			return
+		}
 	}
 
 	if len(finalMessages) > 0 {
@@ -154,7 +175,7 @@ func (a *Adapter) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 				cmd.BotID, cmd.SessionID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
 				sdkMsgs, resolved.ModelID,
 			); storeErr != nil {
-				h.errs <- storeErr
+				h.emitErr(storeErr)
 			}
 		}
 	}
@@ -192,14 +213,18 @@ func (a *Adapter) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 				chunks = nil
 				continue
 			}
-			h.emit(parseKind(chunk), chunk)
+			if !h.emit(parseKind(chunk), chunk) {
+				return
+			}
 		case err, ok := <-errs:
 			if !ok {
 				errs = nil
 				continue
 			}
 			if err != nil {
-				h.errs <- err
+				if !h.emitErr(err) {
+					return
+				}
 			}
 		case <-ctx.Done():
 			return

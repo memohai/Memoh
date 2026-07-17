@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/google/uuid"
@@ -36,12 +37,26 @@ type userInputResponder interface {
 // Adapter implements turn.Service by translating commands into
 // conversation.ChatRequest and driving the resolver's stream.
 type Adapter struct {
-	runner  ChatStreamer
-	discuss *discussDeps
+	runner      ChatStreamer
+	discuss     *discussDeps
+	allowedTeam string
+	idem        *idempotencyRegistry
 }
 
 // Option configures optional adapter capabilities.
 type Option func(*Adapter)
+
+// WithAllowedTeam restricts the adapter to a single team. The in-process
+// runtime's database pool is session-bound to one team GUC, so commands
+// for any other team must fail closed (turn.ErrTeamNotServed) instead of
+// silently operating on the bound team's data. The composition root
+// injects the self-hosted singleton team; a hosted multi-team runtime
+// replaces this with request-scoped team binding.
+func WithAllowedTeam(teamID string) Option {
+	return func(a *Adapter) {
+		a.allowedTeam = teamID
+	}
+}
 
 // WithDiscuss enables discuss-mode turns backed by the native agent and
 // the resolver's run-config/persistence surface.
@@ -53,7 +68,7 @@ func WithDiscuss(agent AgentStreamer, resolver DiscussResolver) Option {
 
 // New creates an in-process turn service over the given runner.
 func New(runner ChatStreamer, opts ...Option) *Adapter {
-	a := &Adapter{runner: runner}
+	a := &Adapter{runner: runner, idem: newIdempotencyRegistry(idempotencyCapacity)}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -68,6 +83,12 @@ func newRunID() string { return uuid.NewString() }
 func (a *Adapter) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
 	if cmd.TeamID == "" {
 		return nil, errors.New("turn: TeamID is required")
+	}
+	if a.allowedTeam != "" && cmd.TeamID != a.allowedTeam {
+		return nil, fmt.Errorf("%w: %s", turn.ErrTeamNotServed, cmd.TeamID)
+	}
+	if cmd.IdempotencyKey != "" && !a.idem.claim(cmd.TeamID, cmd.IdempotencyKey) {
+		return nil, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, cmd.IdempotencyKey)
 	}
 	if cmd.Mode == turn.ModeDiscuss {
 		return a.startDiscussTurn(ctx, cmd)
@@ -190,13 +211,17 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan conversation.
 				continue
 			}
 			seq++
-			h.events <- turn.Event{
+			select {
+			case h.events <- turn.Event{
 				RunID:     h.id,
 				TeamID:    cmd.TeamID,
 				SessionID: cmd.SessionID,
 				Seq:       seq,
 				Kind:      parseKind(chunk),
 				Payload:   chunk,
+			}:
+			case <-h.ctx.Done():
+				return
 			}
 		case err, ok := <-errCh:
 			if !ok {
@@ -204,7 +229,11 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan conversation.
 				continue
 			}
 			if err != nil {
-				h.errs <- err
+				select {
+				case h.errs <- err:
+				case <-h.ctx.Done():
+					return
+				}
 			}
 		}
 	}

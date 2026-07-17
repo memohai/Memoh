@@ -2,6 +2,7 @@ package inprocess
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -222,5 +223,78 @@ func TestCommandFieldTranslation(t *testing.T) {
 	}
 	if len(got.Channels) != 1 || got.Channels[0] != "telegram" {
 		t.Errorf("Channels = %+v", got.Channels)
+	}
+}
+
+func TestStartTurnRejectsForeignTeam(t *testing.T) {
+	a := New(&fakeRunner{}, WithAllowedTeam("team-home"))
+	_, err := a.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-other", Mode: turn.ModeChat})
+	if !errors.Is(err, turn.ErrTeamNotServed) {
+		t.Fatalf("err = %v, want ErrTeamNotServed", err)
+	}
+	if _, err := a.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-home", Mode: turn.ModeChat}); err != nil {
+		t.Fatalf("home team rejected: %v", err)
+	}
+}
+
+func TestStartTurnClaimsIdempotencyKey(t *testing.T) {
+	a := New(&fakeRunner{})
+	first, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
+		TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range first.Events() {
+	}
+	// Redelivery of the same platform message must be rejected even after
+	// the first run completed.
+	if _, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
+		TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-1",
+	}); !errors.Is(err, turn.ErrDuplicateTurn) {
+		t.Fatalf("err = %v, want ErrDuplicateTurn", err)
+	}
+	// Same key under another team is a distinct claim.
+	if _, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
+		TeamID: "t2", Mode: turn.ModeChat, IdempotencyKey: "msg-1",
+	}); err != nil {
+		t.Fatalf("cross-team claim rejected: %v", err)
+	}
+	// Empty keys are never deduplicated.
+	for range 2 {
+		if _, err := a.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat}); err != nil {
+			t.Fatalf("empty key rejected: %v", err)
+		}
+	}
+}
+
+// TestCancelUnblocksFullEventBuffer reproduces the reviewer's 32-event
+// burst: with no consumer and a full buffer, Cancel must still unblock
+// the pump and close both channels.
+func TestCancelUnblocksFullEventBuffer(t *testing.T) {
+	chunks := make([]string, 40)
+	for i := range chunks {
+		chunks[i] = `{"type":"text_delta","delta":"x"}`
+	}
+	r := &fakeRunner{chunks: chunks}
+	a := New(r)
+	h, err := a.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond) // let the pump fill the buffer
+	h.Cancel()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-h.Events():
+			if !ok {
+				for range h.Errs() {
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("events channel not closed after cancel with full buffer")
+		}
 	}
 }
