@@ -53,6 +53,7 @@ const completeSessionEventDelivery = `-- name: CompleteSessionEventDelivery :exe
 WITH locked AS MATERIALIZED (
   SELECT event.id,
          event.session_id,
+         event.event_kind,
          event.delivery_claim_token,
          event.delivery_claimed_until,
          event.delivery_completed_at
@@ -70,25 +71,28 @@ WHERE event.id = locked.id
   AND locked.delivery_claim_token = $1::uuid
   AND locked.delivery_claimed_until > clock_timestamp()
   AND locked.delivery_completed_at IS NULL
-  AND EXISTS (
-    SELECT 1
-    FROM bot_history_messages history
-    WHERE history.team_id = public.memoh_current_team_id()
-      AND history.event_id = locked.id
-      AND history.session_id = locked.session_id
-      AND history.role = 'user'
-      AND (
-        COALESCE(history.metadata->>'pipeline_delivery_state', '') <> 'pending'
-        OR EXISTS (
-          SELECT 1
-          FROM bot_history_messages response
-          WHERE response.team_id = public.memoh_current_team_id()
-            AND response.session_id = locked.session_id
-            AND response.turn_id = history.turn_id
-            AND response.role IN ('assistant', 'tool')
-            AND response.turn_message_seq > history.turn_message_seq
+  AND (
+    locked.event_kind IN ('edit', 'delete', 'service')
+    OR EXISTS (
+      SELECT 1
+      FROM bot_history_messages history
+      WHERE history.team_id = public.memoh_current_team_id()
+        AND history.event_id = locked.id
+        AND history.session_id = locked.session_id
+        AND history.role = 'user'
+        AND (
+          COALESCE(history.metadata->>'pipeline_delivery_state', '') <> 'pending'
+          OR EXISTS (
+            SELECT 1
+            FROM bot_history_messages response
+            WHERE response.team_id = public.memoh_current_team_id()
+              AND response.session_id = locked.session_id
+              AND response.turn_id = history.turn_id
+              AND response.role IN ('assistant', 'tool')
+              AND response.turn_message_seq > history.turn_message_seq
+          )
         )
-      )
+    )
   )
 `
 

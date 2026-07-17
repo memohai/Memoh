@@ -135,6 +135,7 @@ func TestSessionEventIngestMigrationPostgresPath(t *testing.T) {
 CREATE TABLE bot_session_events (
   id UUID PRIMARY KEY,
   session_id UUID NOT NULL,
+  event_kind TEXT NOT NULL,
   event_data JSONB NOT NULL,
   received_at_ms BIGINT NOT NULL
 );
@@ -156,8 +157,8 @@ CREATE TABLE bot_history_messages (
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_session_events (id, session_id, event_data, received_at_ms)
-VALUES ($1, $2, jsonb_build_object('event_cursor', $3::bigint), $3)
+INSERT INTO bot_session_events (id, session_id, event_kind, event_data, received_at_ms)
+VALUES ($1, $2, 'message', jsonb_build_object('event_cursor', $3::bigint), $3)
 `, eventID, sessionID, legacyCursor); err != nil {
 		t.Fatalf("insert legacy event: %v", err)
 	}
@@ -250,6 +251,31 @@ UPDATE bot_session_events SET delivery_claimed_until = now() - INTERVAL '1 secon
 	}
 	if err := claim(firstToken); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("claim completed delivery error = %v, want no rows", err)
+	}
+
+	for index, eventKind := range []string{"edit", "delete", "service"} {
+		passiveEventID := uuid.NewString()
+		if _, err := tx.Exec(ctx, `
+INSERT INTO bot_session_events (id, session_id, event_kind, event_data, received_at_ms)
+VALUES ($1, $2, $3, '{}'::jsonb, $4)
+`, passiveEventID, sessionID, eventKind, legacyCursor+int64(index)+1); err != nil {
+			t.Fatalf("insert %s event: %v", eventKind, err)
+		}
+		pgPassiveEventID, err := ParseUUID(passiveEventID)
+		if err != nil {
+			t.Fatalf("parse %s event id: %v", eventKind, err)
+		}
+		if _, err := queries.ClaimSessionEventDelivery(ctx, sqlc.ClaimSessionEventDeliveryParams{
+			EventID: pgPassiveEventID, ClaimToken: firstToken, LeaseMs: time.Minute.Milliseconds(),
+		}); err != nil {
+			t.Fatalf("claim %s event delivery: %v", eventKind, err)
+		}
+		rows, err = queries.CompleteSessionEventDelivery(ctx, sqlc.CompleteSessionEventDeliveryParams{
+			EventID: pgPassiveEventID, ClaimToken: firstToken,
+		})
+		if err != nil || rows != 1 {
+			t.Fatalf("complete %s event without history = %d, %v, want 1/nil", eventKind, rows, err)
+		}
 	}
 }
 
