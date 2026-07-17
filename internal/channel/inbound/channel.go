@@ -1310,6 +1310,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if persistedUserMessageID == "" {
 					return errors.New("persist queued message returned empty id")
 				}
+				userMessagePersisted = true
 				queuedTask := QueuedTask{
 					Ctx:                    ctx,
 					Cfg:                    cfg,

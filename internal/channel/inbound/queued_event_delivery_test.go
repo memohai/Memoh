@@ -22,6 +22,19 @@ type transientQueuedGateway struct {
 	calls atomic.Int32
 }
 
+type routeReleaseHistoryWriter struct {
+	*durableHistoryWriter
+	dispatcher *RouteDispatcher
+}
+
+func (w *routeReleaseHistoryWriter) Persist(ctx context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	message, err := w.durableHistoryWriter.Persist(ctx, input)
+	if err == nil {
+		w.dispatcher.MarkDone("route")
+	}
+	return message, err
+}
+
 type deletedQueuedSessionEnsurer struct {
 	*fakeSessionEnsurer
 	deleted bool
@@ -100,6 +113,29 @@ func TestQueuedEventReplayUsesPersistedUserMessageWithoutReingestion(t *testing.
 		t.Fatalf("history writes after drain = %d, want 1", writer.calls)
 	}
 	assertDeliveryNodeCount(t, pipeline, 1)
+}
+
+func TestQueuedEventRouteReleaseAfterHistoryPersistStartsWithPersistedUserMessage(t *testing.T) {
+	queries := &durableEventQueries{}
+	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	writer := &routeReleaseHistoryWriter{durableHistoryWriter: &durableHistoryWriter{queries: queries, pipeline: pipeline}}
+	processor, dispatcher, gateway := newQueuedEventDeliveryProcessor(t, queries, writer, pipeline)
+	writer.dispatcher = dispatcher
+	dispatcher.MarkActive("route")
+
+	if err := processor.HandleInbound(deliveryContext(), deliveryConfig(), queuedDeliveryMessage(), &fakeReplySender{}); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+
+	if writer.calls != 1 {
+		t.Fatalf("history writes = %d, want 1", writer.calls)
+	}
+	if !gateway.gotReq.UserMessagePersisted || gateway.gotReq.PersistedUserMessageID != "44444444-4444-4444-4444-444444444444" {
+		t.Fatalf("direct ChatRequest persistence = %t/%q, want true/persisted message id",
+			gateway.gotReq.UserMessagePersisted,
+			gateway.gotReq.PersistedUserMessageID,
+		)
+	}
 }
 
 func TestQueuedEventReplayUsesSessionCapturedAtEnqueue(t *testing.T) {
