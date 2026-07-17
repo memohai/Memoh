@@ -193,9 +193,11 @@ func TestPostgresClaimFencedRoundRejectsLeaseThatExpiresWhileWaitingToPersist(t 
 		t.Fatalf("lock session row: %v", err)
 	}
 
+	persistPool := openNamedTurnResponseCursorTestPool(t, ctx, "claim-session-"+uuid.NewString())
+	persistService := NewService(nil, postgresstore.NewQueriesWithPool(persistPool, dbsqlc.New(persistPool)))
 	resultCh := make(chan claimPersistResult, 1)
 	go func() {
-		_, handled, persistErr := seedService.PersistRound(ctx, []PersistInput{{
+		_, handled, persistErr := persistService.PersistRound(ctx, []PersistInput{{
 			BotID:                botID.String(),
 			SessionID:            sessionID.String(),
 			Role:                 "assistant",
@@ -204,12 +206,21 @@ func TestPostgresClaimFencedRoundRejectsLeaseThatExpiresWhileWaitingToPersist(t 
 		}}, RoundPersistenceOptions{DeliveryClaims: []DeliveryClaim{{EventID: eventID, ClaimToken: claimToken}}})
 		resultCh <- claimPersistResult{handled: handled, err: persistErr}
 	}()
-	select {
-	case result := <-resultCh:
-		t.Fatalf("claim-fenced persistence did not wait for the session lock: %#v", result)
-	case <-time.After(100 * time.Millisecond):
+	waitForPostgresLockWait(t, ctx, pool, persistPool.Config().ConnConfig.RuntimeParams["application_name"], resultCh)
+	for {
+		var expired bool
+		if err := pool.QueryRow(ctx, `
+			SELECT delivery_claimed_until <= clock_timestamp()
+			FROM bot_session_events
+			WHERE id = $1
+		`, eventID).Scan(&expired); err != nil {
+			t.Fatalf("read session-lock claim expiry: %v", err)
+		}
+		if expired {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	time.Sleep(500 * time.Millisecond)
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatalf("release session blocker: %v", err)
 	}
