@@ -1,4 +1,4 @@
--- 0111_team_core
+-- 0112_team_core
 -- Add the singleton team root, team-scoped schema, query context, RLS,
 -- team-safe view, and team-prefixed indexes.
 

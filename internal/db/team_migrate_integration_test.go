@@ -414,7 +414,7 @@ func countTeamMigrations(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("read migrations dir: %v", err)
 	}
-	const teamMigration = "0111_team_core.up.sql"
+	const teamMigration = "0112_team_core.up.sql"
 	found := false
 	for _, e := range entries {
 		if e.Name() == teamMigration {
