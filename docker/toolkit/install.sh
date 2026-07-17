@@ -46,7 +46,11 @@ PYTHON_VERSION="${PYTHON_VERSION:-3.14.6}"
 PYTHON_STANDALONE_TAG="${PYTHON_STANDALONE_TAG:-20260623}"
 CODEX_VERSION="${CODEX_VERSION:-0.144.5}"
 CODEX_ACP_VERSION="${CODEX_ACP_VERSION:-1.1.4}"
-CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.59.0}"
+# 0.59.0 synchronously probes context usage during session startup and model
+# switches, which can stall both operations for tens of seconds. Keep the last
+# known-good release until upstream issue #880 is fixed:
+# https://github.com/agentclientprotocol/claude-agent-acp/issues/880
+CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.58.1}"
 HERMES_AGENT_VERSION="${HERMES_AGENT_VERSION:-0.18.2}"
 HERMES_AGENT_PACKAGE="${HERMES_AGENT_PACKAGE:-hermes-agent[acp,mcp]==$HERMES_AGENT_VERSION}"
 

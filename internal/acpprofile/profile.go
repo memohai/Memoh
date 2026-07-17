@@ -244,7 +244,9 @@ func claudeCodeProfile() Profile {
 		LocalCommand:           "npx",
 		LocalArgs: []string{
 			"-y",
-			"@agentclientprotocol/claude-agent-acp@0.59.0",
+			// Keep this aligned with docker/toolkit/install.sh. Version 0.59.0
+			// regresses session startup and model switching (upstream #880).
+			"@agentclientprotocol/claude-agent-acp@0.58.1",
 		},
 		ManagedFields: []ManagedField{
 			{
