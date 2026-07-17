@@ -492,12 +492,16 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 	})
 
 	var completedStepMessages []sdk.Message
+	var syntheticRoles []string
 	var terminal StreamEvent
 	for event := range a.Stream(context.Background(), RunConfig{
 		Model:              &sdk.Model{ID: "mock-model", Provider: modelProvider},
 		Messages:           []sdk.Message{sdk.UserMessage("look at the image")},
 		SupportsImageInput: true,
 		SupportsToolCall:   true,
+		SyntheticRowRecorder: func(role string) {
+			syntheticRoles = append(syntheticRoles, role)
+		},
 		Identity: SessionContext{
 			BotID: "bot-1",
 		},
@@ -536,6 +540,9 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 	}
 	if injectedAtStepBoundary != 1 {
 		t.Fatalf("read_media messages at completed-step boundaries = %d, want 1", injectedAtStepBoundary)
+	}
+	if len(syntheticRoles) != 1 || syntheticRoles[0] != string(sdk.MessageRoleUser) {
+		t.Fatalf("synthetic row recorder roles = %#v, want one user row", syntheticRoles)
 	}
 }
 

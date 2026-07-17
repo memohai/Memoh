@@ -69,6 +69,8 @@ type readMediaDecorationState struct {
 	prepareCalls  int
 	injections    []readMediaInjection
 	readyMessages []sdk.Message
+
+	syntheticRowRecorder func(role string)
 }
 
 type readMediaInjection struct {
@@ -144,6 +146,9 @@ func (s *readMediaDecorationState) takePendingMessageLocked() (sdk.Message, bool
 	message := sdk.Message{
 		Role:    sdk.MessageRoleUser,
 		Content: parts,
+	}
+	if s.syntheticRowRecorder != nil {
+		s.syntheticRowRecorder(string(message.Role))
 	}
 	return message, true
 }

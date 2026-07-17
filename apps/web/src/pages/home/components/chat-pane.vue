@@ -935,6 +935,10 @@ const startupSendFailure = computed(() => chatStore.startupSendFailureFor(
   paneTarget.value,
   paneComposerScope.value,
 ))
+const composerDraftRestore = computed(() => chatStore.composerDraftRestoreFor(
+  paneTarget.value,
+  paneComposerScope.value,
+))
 const hasRenderedSession = computed(() =>
   !!(paneTarget.value.sessionId || activeChatTarget.value.sessionId || '').trim(),
 )
@@ -2178,6 +2182,30 @@ watch([
     : []
   composerError.value = failure.error || t('chat.sendFailed')
   chatStore.clearStartupSendFailure(failure.id)
+}, { immediate: true })
+
+watch([
+  composerDraftRestore,
+  paneTarget,
+  isVisible,
+], ([restore]) => {
+  if (!restore || !isVisible.value) return
+  const target = paneTarget.value
+  if (restore.botId !== target.botId || restore.viewId !== target.viewId) return
+  if (restore.sessionId && restore.sessionId !== (target.sessionId ?? '')) return
+  const paneScope = inputDraftKey.value || 'chat'
+  if (restore.composerScope && restore.composerScope !== paneScope) return
+
+  inputText.value = restore.text
+  saveInputDraft(inputDraftKey.value, restore.text)
+  pendingFiles.value = restore.attachments
+    .map(attachmentToFile)
+    .filter((file): file is File => file !== null)
+  requestedSkills.value = skillSlashEnabled.value
+    ? restore.requestedSkills.map(skill => ({ ...skill }))
+    : []
+  composerError.value = ''
+  chatStore.clearComposerDraftRestore(restore.seq)
 }, { immediate: true })
 
 const elNode = useTemplateRef('scrollContainer')

@@ -1,6 +1,7 @@
 package sessionruntime
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -603,6 +604,7 @@ func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessi
 			StartedAt:           now,
 			UpdatedAt:           now,
 			Messages:            []conversation.UIMessage{},
+			RowLedger:           []conversation.UIRowIdentity{},
 		}
 		return snapshot, true, nil
 	}
@@ -719,6 +721,8 @@ func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessi
 		run.Status = RunStatusRunning
 		run.RequestUserTurn = admission.RequestUserTurn
 		run.Operation = admission.Operation
+		run.TurnReservation = admission.TurnReservation
+		run.RowLedger = runtimeLedgerForAdmission(admission)
 		run.UpdatedAt = now
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
@@ -1084,13 +1088,40 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	}
 
 	var messages []conversation.UIMessage
+	persistedProjection, hasPersistedProjection := conversation.RuntimePersistedProjectionFromMetadata(event.Metadata)
+	terminalHasCanonicalMessages := (event.Type == agentpkg.EventAgentEnd || event.Type == agentpkg.EventAgentAbort) && hasCanonicalTerminalMessages(event.Messages)
+	replaceTerminalMessages := hasPersistedProjection || terminalHasCanonicalMessages
 	switch event.Type {
 	case agentpkg.EventAgentStart, agentpkg.EventHistoryCommit:
+	case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
+		if hasPersistedProjection {
+			messages = append([]conversation.UIMessage(nil), persistedProjection.AssistantMessages...)
+		} else {
+			messages = ctrl.converter.ConvertTerminalMessages(event.Messages)
+		}
 	case agentpkg.EventError:
 	default:
 		messages = ctrl.converter.HandleEvent(conversation.UIStreamEventFromAgentEvent(event))
 	}
 	delta, visibleChange := runtimeDeltaForAgentEvent(event, messages)
+	if (event.Type == agentpkg.EventAgentEnd || event.Type == agentpkg.EventAgentAbort) && !replaceTerminalMessages {
+		delta.ResetMessages = false
+		delta.MessageUpserts = nil
+	}
+	eventLedgerRows := uiRowIdentitiesFromAgent(event.LedgerRows)
+	switch {
+	case hasPersistedProjection:
+		delta.ResetRowLedger = true
+		delta.RowLedgerUpserts = append([]conversation.UIRowIdentity(nil), persistedProjection.RowLedger...)
+		visibleChange = true
+	case event.ResetLedger:
+		delta.ResetRowLedger = true
+		delta.RowLedgerUpserts = append([]conversation.UIRowIdentity(nil), eventLedgerRows...)
+		visibleChange = true
+	case len(eventLedgerRows) > 0:
+		delta.RowLedgerUpserts = append([]conversation.UIRowIdentity(nil), eventLedgerRows...)
+		visibleChange = true
+	}
 	if !visibleChange {
 		return messages, nil
 	}
@@ -1116,7 +1147,19 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 		snapshot.Queue = nonNilQueue(snapshot.Queue)
 		snapshot.UpdatedAt = now
 		run.UpdatedAt = now
-		if event.Type == agentpkg.EventRetry {
+		if hasPersistedProjection && persistedProjection.RequestUserTurn != nil {
+			requestUserTurn := *persistedProjection.RequestUserTurn
+			run.RequestUserTurn = &requestUserTurn
+		}
+		switch {
+		case hasPersistedProjection:
+			run.RowLedger = append([]conversation.UIRowIdentity(nil), persistedProjection.RowLedger...)
+		case event.ResetLedger:
+			run.RowLedger = append([]conversation.UIRowIdentity(nil), eventLedgerRows...)
+		default:
+			run.RowLedger = mergeRowLedger(run.RowLedger, eventLedgerRows...)
+		}
+		if event.Type == agentpkg.EventRetry || replaceTerminalMessages {
 			run.Messages = []conversation.UIMessage{}
 		}
 		for _, msg := range messages {
@@ -1173,6 +1216,11 @@ func (m *Manager) appendActiveMessageAndPublish(ctx context.Context, handle RunH
 		m.logger.Warn("publish runtime message append failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("stream_id", handle.StreamID))
 	}
 	return true, nil
+}
+
+func hasCanonicalTerminalMessages(messages []byte) bool {
+	trimmed := bytes.TrimSpace(messages)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
 }
 
 func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {

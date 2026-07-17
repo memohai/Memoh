@@ -403,7 +403,7 @@ func TestLocalChannelRuntimeManagedStreamDoesNotWriteLegacyFrames(t *testing.T) 
 		}
 		close(eventCh)
 		handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: manager}
-		_ = handler.forwardRuntimeWSStreamEvents(r.Context(), r.Context(), handle, eventCh, nil, nil)
+		_ = handler.forwardRuntimeWSStreamEvents(r.Context(), r.Context(), handle, eventCh, nil)
 		close(processed)
 		<-closeWriter
 		writer.Close()
@@ -471,7 +471,7 @@ func TestLocalChannelRuntimeContractAggregatesActiveRunSnapshot(t *testing.T) {
 		eventCh <- rawRuntimeContractEvent(t, event)
 	}
 	close(eventCh)
-	if err := handler.forwardRuntimeWSStreamEvents(context.Background(), context.Background(), handle, eventCh, nil, nil); err != nil {
+	if err := handler.forwardRuntimeWSStreamEvents(context.Background(), context.Background(), handle, eventCh, nil); err != nil {
 		t.Fatalf("forward runtime events: %v", err)
 	}
 
@@ -1028,7 +1028,7 @@ func TestLocalChannelRuntimeForwarderBatchesAdjacentTextDeltas(t *testing.T) {
 	}
 	close(eventCh)
 	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: manager, resolver: &flow.Resolver{}}
-	if err := handler.forwardRuntimeWSStreamEvents(context.Background(), context.Background(), requireHandlerRunHandle(t, manager, runtimeContractBotID, runtimeContractSessionID, runtimeContractStreamID), eventCh, nil, nil); err != nil {
+	if err := handler.forwardRuntimeWSStreamEvents(context.Background(), context.Background(), requireHandlerRunHandle(t, manager, runtimeContractBotID, runtimeContractSessionID, runtimeContractStreamID), eventCh, nil); err != nil {
 		t.Fatalf("forward batched runtime deltas: %v", err)
 	}
 	if updates := backend.UpdateCount() - baselineUpdates; updates <= 0 || updates >= 100 {
@@ -1437,6 +1437,7 @@ func TestLocalChannelHandleWebSocketReplacementCommandsUseRuntimeProtocolAfterSu
 		wantKind        string
 		wantReplaceFrom string
 		wantReplacement string
+		oldRequestID    string
 	}{
 		{
 			name: "retry",
@@ -1445,6 +1446,7 @@ func TestLocalChannelHandleWebSocketReplacementCommandsUseRuntimeProtocolAfterSu
 			},
 			wantKind:        sessionruntime.RunOperationRetry,
 			wantReplaceFrom: "assistant-old",
+			oldRequestID:    "user-request",
 		},
 		{
 			name: "edit",
@@ -1454,6 +1456,7 @@ func TestLocalChannelHandleWebSocketReplacementCommandsUseRuntimeProtocolAfterSu
 			wantKind:        sessionruntime.RunOperationEdit,
 			wantReplaceFrom: "user-old",
 			wantReplacement: "edited prompt",
+			oldRequestID:    "user-old",
 		},
 	}
 
@@ -1479,6 +1482,7 @@ func TestLocalChannelHandleWebSocketReplacementCommandsUseRuntimeProtocolAfterSu
 			}
 
 			var operation *sessionruntime.RunOperationView
+			var reservation *messagepkg.RuntimeTurnReservation
 			deadline := time.Now().Add(2 * time.Second)
 			for {
 				if err := client.SetReadDeadline(deadline); err != nil {
@@ -1502,6 +1506,7 @@ func TestLocalChannelHandleWebSocketReplacementCommandsUseRuntimeProtocolAfterSu
 				}
 				if run := runtimeDeltaCurrentRun(event); run != nil && run.Operation != nil {
 					operation = run.Operation
+					reservation = run.TurnReservation
 				}
 				if runtimeDeltaRunStatus(event) == sessionruntime.RunStatusCompleted {
 					break
@@ -1512,6 +1517,9 @@ func TestLocalChannelHandleWebSocketReplacementCommandsUseRuntimeProtocolAfterSu
 			}
 			if tt.wantReplacement != "" && (operation.ReplacementUserTurn == nil || operation.ReplacementUserTurn.Text != tt.wantReplacement) {
 				t.Fatalf("replacement user turn = %#v", operation.ReplacementUserTurn)
+			}
+			if reservation == nil || reservation.Request.MessageID == "" || reservation.Request.MessageID == tt.oldRequestID {
+				t.Fatalf("replacement reservation reused old request identity: %#v", reservation)
 			}
 		})
 	}
@@ -1533,28 +1541,26 @@ func TestLocalChannelHandleWebSocketLegacyClientReceivesFramesWithoutRuntimeSubs
 		t.Fatalf("write retry command: %v", err)
 	}
 
-	legacyFrames := map[string]bool{}
-	deadline := time.Now().Add(2 * time.Second)
-	for !legacyFrames["end"] {
-		if err := client.SetReadDeadline(deadline); err != nil {
-			t.Fatalf("set read deadline: %v", err)
-		}
-		var raw map[string]any
-		if err := client.ReadJSON(&raw); err != nil {
-			t.Fatalf("read legacy frame: %v", err)
-		}
-		if eventType, _ := raw["type"].(string); eventType == "start" || eventType == "message" || eventType == "end" {
-			legacyFrames[eventType] = true
-		}
-	}
-	for _, eventType := range []string{"start", "message", "end"} {
-		if !legacyFrames[eventType] {
-			t.Fatalf("legacy client did not receive %s: %#v", eventType, legacyFrames)
-		}
-	}
 	waitHandlerRuntimeSnapshot(t, manager, func(snapshot sessionruntime.Snapshot) bool {
 		return snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status == sessionruntime.RunStatusCompleted
 	})
+	if err := client.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	for {
+		var raw map[string]any
+		if err := client.ReadJSON(&raw); err != nil {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				break
+			}
+			t.Fatalf("read websocket frame: %v", err)
+		}
+		eventType, _ := raw["type"].(string)
+		if eventType == "start" || eventType == "message" || eventType == "end" {
+			t.Fatalf("runtime-backed stream emitted legacy %s frame: %#v", eventType, raw)
+		}
+	}
 }
 
 func TestLocalChannelHandleWebSocketCanAbortBlockedReplacementAdmission(t *testing.T) {
@@ -1988,7 +1994,7 @@ func TestLocalChannelDistributedInactiveDurableResponseAdmission(t *testing.T) {
 				Resolver:  &flow.Resolver{},
 				fence:     wantFence,
 				preserved: tt.preserved,
-				stages:    make(chan deferredResponseStage, 3),
+				stages:    make(chan deferredResponseStage, 4),
 			}
 			handler := runtimeContractLocalChannelHandler(manager)
 			handler.SetResolver(resolver)
@@ -1997,7 +2003,7 @@ func TestLocalChannelDistributedInactiveDurableResponseAdmission(t *testing.T) {
 				t.Fatalf("write deferred response: %v", err)
 			}
 
-			wantStages := []string{"prepare", "activate", "respond"}
+			wantStages := []string{"prepare", "activate", "prepare_continuation", "respond"}
 			for _, wantStage := range wantStages {
 				select {
 				case stage := <-resolver.stages:
@@ -2012,6 +2018,11 @@ func TestLocalChannelDistributedInactiveDurableResponseAdmission(t *testing.T) {
 					if stage.name == "respond" && (stage.fence != wantFence || stage.resolveOnly) {
 						t.Fatalf("response ran with fence:%#v resolveOnly:%v", stage.fence, stage.resolveOnly)
 					}
+					if stage.name == "prepare_continuation" || stage.name == "respond" {
+						if stage.fence != wantFence || stage.reservation.Request.MessageID != "11111111-1111-4111-8111-111111111111" || stage.reservation.Request.TurnMessageSeq != 1 {
+							t.Fatalf("continuation stage = %#v", stage)
+						}
+					}
 				case <-time.After(2 * time.Second):
 					t.Fatalf("timed out waiting for %s stage", wantStage)
 				}
@@ -2021,6 +2032,80 @@ func TestLocalChannelDistributedInactiveDurableResponseAdmission(t *testing.T) {
 			})
 			if snapshot.CurrentRunView.StreamID != streamID {
 				t.Fatalf("continuation stream = %#v", snapshot.CurrentRunView)
+			}
+			if len(snapshot.CurrentRunView.RowLedger) != 3 || snapshot.CurrentRunView.RowLedger[0].StableID != "11111111-1111-4111-8111-111111111111" || snapshot.CurrentRunView.RowLedger[2].Role != "tool" || snapshot.CurrentRunView.RowLedger[2].TurnMessageSeq != 3 {
+				t.Fatalf("continuation admission ledger = %#v", snapshot.CurrentRunView.RowLedger)
+			}
+		})
+	}
+}
+
+func TestLocalChannelInactiveDeferredResponseAdmissionCarriesTurnReservation(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   map[string]any
+		preserved runtimefence.PreservedDecision
+	}{
+		{
+			name: "tool approval",
+			command: map[string]any{
+				"type": "tool_approval_response", "stream_id": "approval-deferred-memory", "session_id": runtimeContractSessionID,
+				"approval_id": "33333333-3333-3333-3333-333333333333", "decision": "approve",
+			},
+			preserved: runtimefence.PreservedDecision{Kind: runtimefence.DecisionToolApproval, ID: "33333333-3333-3333-3333-333333333333"},
+		},
+		{
+			name: "user input",
+			command: map[string]any{
+				"type": "user_input_response", "stream_id": "input-deferred-memory", "session_id": runtimeContractSessionID,
+				"user_input_id": "44444444-4444-4444-4444-444444444444",
+				"answers":       []map[string]any{{"question_id": "q1", "option_ids": []string{"q1.o1"}}},
+			},
+			preserved: runtimefence.PreservedDecision{Kind: runtimefence.DecisionUserInput, ID: "44444444-4444-4444-4444-444444444444"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+				OwnerID: "handler-deferred-" + strings.ReplaceAll(tt.name, " ", "-"), StateTTL: time.Hour, OwnerLeaseTTL: time.Minute,
+			})
+			if err := manager.Start(context.Background()); err != nil {
+				t.Fatalf("start runtime manager: %v", err)
+			}
+			t.Cleanup(func() { _ = manager.Close() })
+			wantFence := runtimefence.Fence{BotID: runtimeContractBotID, SessionID: runtimeContractSessionID, Token: 81}
+			resolver := &deferredResponseResolver{
+				Resolver: &flow.Resolver{}, fence: wantFence, preserved: tt.preserved,
+				stages: make(chan deferredResponseStage, 4),
+			}
+			handler := runtimeContractLocalChannelHandler(manager)
+			handler.SetResolver(resolver)
+			client := openLocalChannelTestWS(t, handler, runtimeContractBotID, runtimeContractUserID)
+			if err := client.WriteJSON(tt.command); err != nil {
+				t.Fatalf("write deferred response: %v", err)
+			}
+
+			for _, want := range []string{"prepare", "prepare_continuation", "respond"} {
+				select {
+				case stage := <-resolver.stages:
+					if stage.name != want {
+						t.Fatalf("stage = %q, want %q", stage.name, want)
+					}
+					if want == "prepare_continuation" || want == "respond" {
+						if stage.reservation.Request.MessageID != "11111111-1111-4111-8111-111111111111" || stage.reservation.Request.TurnMessageSeq != 1 {
+							t.Fatalf("continuation reservation = %#v", stage.reservation)
+						}
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatalf("timed out waiting for %s", want)
+				}
+			}
+			snapshot := waitHandlerRuntimeSnapshot(t, manager, func(snapshot sessionruntime.Snapshot) bool {
+				return snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status == sessionruntime.RunStatusCompleted
+			})
+			if len(snapshot.CurrentRunView.RowLedger) != 3 || snapshot.CurrentRunView.RowLedger[0].StableID != "11111111-1111-4111-8111-111111111111" || snapshot.CurrentRunView.RowLedger[2].Role != "tool" || snapshot.CurrentRunView.RowLedger[2].TurnMessageSeq != 3 {
+				t.Fatalf("admission row ledger = %#v", snapshot.CurrentRunView.RowLedger)
 			}
 		})
 	}
@@ -2079,7 +2164,7 @@ func TestLocalChannelDistributedInactiveDurableResponseDoesNotReplaceActiveRun(t
 				Resolver:  &flow.Resolver{},
 				fence:     runtimefence.Fence{BotID: runtimeContractBotID, SessionID: runtimeContractSessionID, Token: 74},
 				preserved: tt.preserved,
-				stages:    make(chan deferredResponseStage, 3),
+				stages:    make(chan deferredResponseStage, 4),
 			}
 			handler := runtimeContractLocalChannelHandler(manager)
 			handler.SetResolver(resolver)
@@ -2124,7 +2209,7 @@ func TestLocalChannelInvalidUserInputResponseFailsBeforeRunAdmission(t *testing.
 	resolver := &deferredResponseResolver{
 		Resolver:   &flow.Resolver{},
 		prepareErr: errors.New("question q1 has no option unknown"),
-		stages:     make(chan deferredResponseStage, 3),
+		stages:     make(chan deferredResponseStage, 4),
 	}
 	handler := runtimeContractLocalChannelHandler(manager)
 	handler.SetResolver(resolver)
@@ -2868,6 +2953,33 @@ type scriptedOrdinaryResolver struct {
 	authority    chan agentpkg.TerminalHookAuthority
 }
 
+func testRuntimeTurnReservation(req conversation.ChatRequest, requestMessageID string) (conversation.ChatRequest, messagepkg.RuntimeTurnReservation) {
+	sequence := handlerRuntimePrefixSequence.Add(1)
+	turnID := fmt.Sprintf("00000000-0000-4000-8000-%012d", sequence)
+	messageID := strings.TrimSpace(requestMessageID)
+	if messageID == "" {
+		messageID = fmt.Sprintf("10000000-0000-4000-8000-%012d", sequence)
+	}
+	reservation := messagepkg.RuntimeTurnReservation{
+		TurnID:       turnID,
+		TurnPosition: sequence,
+		Request: messagepkg.RuntimeRowReservation{
+			MessageID:      messageID,
+			Role:           "user",
+			TurnID:         turnID,
+			TurnPosition:   sequence,
+			TurnMessageSeq: 1,
+		},
+	}
+	req.RuntimeTurn = &reservation
+	return req, reservation
+}
+
+func (*scriptedOrdinaryResolver) ReserveRuntimeTurn(_ context.Context, req conversation.ChatRequest, requestMessageID string) (conversation.ChatRequest, messagepkg.RuntimeTurnReservation, error) {
+	prepared, reservation := testRuntimeTurnReservation(req, requestMessageID)
+	return prepared, reservation, nil
+}
+
 type blockingAssetResolver struct {
 	*scriptedOrdinaryResolver
 	linkStarted  chan struct{}
@@ -2944,6 +3056,7 @@ type deferredResponseStage struct {
 	fence       runtimefence.Fence
 	options     runtimefence.ActivationOptions
 	resolveOnly bool
+	reservation messagepkg.RuntimeTurnReservation
 }
 
 type deferredResponseResolver struct {
@@ -2973,6 +3086,50 @@ func (r *deferredResponseResolver) PrepareUserInputResponse(context.Context, flo
 	return r.preserved, r.prepareErr
 }
 
+func deferredResponseContinuation() flow.DeferredContinuation {
+	turn := messagepkg.RuntimeTurnReservation{
+		TurnID:       "88888888-8888-4888-8888-888888888888",
+		TurnPosition: 8,
+		Request: messagepkg.RuntimeRowReservation{
+			MessageID:      "11111111-1111-4111-8111-111111111111",
+			Role:           "user",
+			TurnID:         "88888888-8888-4888-8888-888888888888",
+			TurnPosition:   8,
+			TurnMessageSeq: 1,
+		},
+	}
+	continuation, err := flow.NewDeferredContinuation(turn, messagepkg.RuntimeRowReservation{
+		MessageID:      "33333333-3333-4333-8333-333333333333",
+		Role:           "tool",
+		TurnID:         turn.TurnID,
+		TurnPosition:   turn.TurnPosition,
+		TurnMessageSeq: 3,
+	}, []messagepkg.Message{
+		{ID: turn.Request.MessageID, Role: "user", TurnID: turn.TurnID, TurnPosition: turn.TurnPosition, TurnMessageSeq: 1},
+		{ID: "22222222-2222-4222-8222-222222222222", Role: "assistant", TurnID: turn.TurnID, TurnPosition: turn.TurnPosition, TurnMessageSeq: 2},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return continuation
+}
+
+func (r *deferredResponseResolver) PrepareDeferredToolApprovalContinuation(ctx context.Context, _ flow.ToolApprovalResponseInput) (flow.DeferredContinuation, error) {
+	fence, _ := runtimefence.FromContext(ctx)
+	continuation := deferredResponseContinuation()
+	reservation := continuation.TurnReservation()
+	r.stages <- deferredResponseStage{name: "prepare_continuation", fence: fence, reservation: reservation}
+	return continuation, nil
+}
+
+func (r *deferredResponseResolver) PrepareDeferredUserInputContinuation(ctx context.Context, _ flow.UserInputResponseInput) (flow.DeferredContinuation, error) {
+	fence, _ := runtimefence.FromContext(ctx)
+	continuation := deferredResponseContinuation()
+	reservation := continuation.TurnReservation()
+	r.stages <- deferredResponseStage{name: "prepare_continuation", fence: fence, reservation: reservation}
+	return continuation, nil
+}
+
 func (r *deferredResponseResolver) RespondToolApproval(ctx context.Context, input flow.ToolApprovalResponseInput, _ chan<- flow.WSStreamEvent) error {
 	fence, _ := runtimefence.FromContext(ctx)
 	r.stages <- deferredResponseStage{name: "respond", fence: fence, resolveOnly: input.ResolveOnly}
@@ -2982,6 +3139,18 @@ func (r *deferredResponseResolver) RespondToolApproval(ctx context.Context, inpu
 func (r *deferredResponseResolver) RespondUserInput(ctx context.Context, input flow.UserInputResponseInput, _ chan<- flow.WSStreamEvent) error {
 	fence, _ := runtimefence.FromContext(ctx)
 	r.stages <- deferredResponseStage{name: "respond", fence: fence, resolveOnly: input.ResolveOnly}
+	return nil
+}
+
+func (r *deferredResponseResolver) RespondToolApprovalContinuation(ctx context.Context, input flow.ToolApprovalResponseInput, continuation flow.DeferredContinuation, _ chan<- flow.WSStreamEvent) error {
+	fence, _ := runtimefence.FromContext(ctx)
+	r.stages <- deferredResponseStage{name: "respond", fence: fence, resolveOnly: input.ResolveOnly, reservation: continuation.TurnReservation()}
+	return nil
+}
+
+func (r *deferredResponseResolver) RespondUserInputContinuation(ctx context.Context, input flow.UserInputResponseInput, continuation flow.DeferredContinuation, _ chan<- flow.WSStreamEvent) error {
+	fence, _ := runtimefence.FromContext(ctx)
+	r.stages <- deferredResponseStage{name: "respond", fence: fence, resolveOnly: input.ResolveOnly, reservation: continuation.TurnReservation()}
 	return nil
 }
 
@@ -3096,6 +3265,11 @@ type replacementContractMessageService struct {
 	messagepkg.Service
 	messages map[string]messagepkg.Message
 	turn     messagepkg.HistoryTurn
+}
+
+func (*replacementContractMessageService) ReserveRuntimeTurn(_ context.Context, botID, sessionID, requestMessageID string) (messagepkg.RuntimeTurnReservation, error) {
+	_, reservation := testRuntimeTurnReservation(conversation.ChatRequest{BotID: botID, SessionID: sessionID}, requestMessageID)
+	return reservation, nil
 }
 
 func (s *replacementContractMessageService) GetByIDBySession(_ context.Context, _ string, messageID string) (messagepkg.Message, error) {

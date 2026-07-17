@@ -46,7 +46,7 @@ func (r *Resolver) PrepareUserMessageWS(ctx context.Context, req conversation.Ch
 // RuntimeRequestUserTurn returns the canonical, non-durable user turn shown
 // while an ordinary WebSocket run is active.
 func RuntimeRequestUserTurn(req conversation.ChatRequest, timestamp time.Time) *conversation.UITurn {
-	return &conversation.UITurn{
+	turn := &conversation.UITurn{
 		Role:              "user",
 		Text:              userTurnDisplayText(req),
 		UserMessageKind:   strings.TrimSpace(req.UserMessageKind),
@@ -57,6 +57,27 @@ func RuntimeRequestUserTurn(req conversation.ChatRequest, timestamp time.Time) *
 		SenderUserID:      strings.TrimSpace(req.UserID),
 		ExternalMessageID: strings.TrimSpace(req.ExternalMessageID),
 	}
+	if req.RuntimeTurn != nil {
+		turn.ID = strings.TrimSpace(req.RuntimeTurn.Request.MessageID)
+		turn.TurnPosition = req.RuntimeTurn.Request.TurnPosition
+		turn.TurnMessageSeq = req.RuntimeTurn.Request.TurnMessageSeq
+	}
+	return turn
+}
+
+// ReserveRuntimeTurn assigns the request row and turn coordinates after
+// runtime ownership has been durably fenced but before admission is published.
+func (r *Resolver) ReserveRuntimeTurn(ctx context.Context, req conversation.ChatRequest, requestMessageID string) (conversation.ChatRequest, messagepkg.RuntimeTurnReservation, error) {
+	reserver, ok := r.messageService.(messagepkg.RuntimeTurnReserver)
+	if !ok {
+		return req, messagepkg.RuntimeTurnReservation{}, errors.New("message service does not support runtime turn reservations")
+	}
+	reservation, err := reserver.ReserveRuntimeTurn(ctx, req.BotID, req.SessionID, requestMessageID)
+	if err != nil {
+		return req, messagepkg.RuntimeTurnReservation{}, err
+	}
+	req.RuntimeTurn = &reservation
+	return req, reservation, nil
 }
 
 // persistUserTurn writes a user turn before agent execution. It is used after

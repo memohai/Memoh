@@ -133,6 +133,22 @@ func assertDynamicJSONFidelity(t *testing.T, message conversation.UIMessage) {
 	}
 	if empty, ok := message.Progress[0].([]any); !ok || len(empty) != 0 {
 		t.Fatalf("dynamic nested progress array = %#v", message.Progress[0])
+
+func TestCloneUIMessagesCopiesRowIdentityLedger(t *testing.T) {
+	messages := []conversation.UIMessage{{
+		ID:   1,
+		Type: conversation.UIMessageTool,
+		RowIdentities: []conversation.UIRowIdentity{{
+			StableID: "assistant-row", TurnID: "turn-1", TurnPosition: 4, TurnMessageSeq: 2,
+		}},
+	}}
+	cloned, err := cloneUIMessages(messages)
+	if err != nil {
+		t.Fatalf("cloneUIMessages() error = %v", err)
+	}
+	messages[0].RowIdentities[0].StableID = "mutated"
+	if cloned[0].RowIdentities[0].StableID != "assistant-row" {
+		t.Fatalf("cloned row identities alias source: %#v", cloned[0].RowIdentities)
 	}
 }
 

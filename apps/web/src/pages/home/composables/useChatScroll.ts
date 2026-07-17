@@ -140,7 +140,7 @@ export interface UseChatScrollOptions {
  *   ResizeObserver(content element) ─ image/font/layout-only reflow ─▶ run the
  *       same gated heartbeat. It never writes scrollTop merely because height
  *       changed: parked views stay parked, while an explicitly-following view
- *       is healed to the new bottom.
+ *       follows the new bottom.
  *   wheel  ─▶ physical intent; deltaY<0 (up) parks the view immediately.
  *   scroll ─▶ refresh isAtBottom; if it is not our own scroll, run the latch.
  *
@@ -194,7 +194,7 @@ export interface UseChatScrollOptions {
  * call collapseReserveKeepingView from there and do NOT add a second
  * settle-time / delayed "restore" layer. Either the product geometry
  * changed (rethink reserve structure) or the bug is elsewhere (follow
- * arming, remount, id identity). Three rewrite rounds died on "mechanism
+ * arming or message identity). Three rewrite rounds died on "mechanism
  * got clever"; the surviving rule is: one named handover, one formula,
  * everything else stays dumb and browser-owned.
  *
@@ -292,19 +292,13 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // This map is the source of truth; chat-pane projects it per turn via
   // turnReserveStyle(turn.id) as a :style min-height binding. Two design
   // points, both learned the hard way:
-  //   • Declarative, not an imperative inline style: the style is part of
-  //     the render, so a container remount (stream completion re-keys the
-  //     turn) re-renders WITH the reserve — a reserve-less frame (and the
-  //     scrollTop clamp it caused: view silently shoved up, fake jump
-  //     arrow) cannot be produced. The imperative design needed a restore
-  //     helper plus a remount watcher to approximate this, and still lost
-  //     the race whenever anything forced layout mid-remount.
+  //   • Declarative, not an imperative inline style: the style remains part
+  //     of the render across ordinary Vue patches, with no restore callback.
   //   • Keyed by the turn's opening message id, NOT by position: positional
   //     bindings re-map onto different containers the instant the turn
   //     count changes mid-send (optimistic append lands several microtasks
   //     after pinAfterSend). Id keying is inert to turn-count changes; it
-  //     relies on render ids being stable across the optimistic → server
-  //     consolidation, which the store guarantees (adoptRenderIdentity).
+  //     relies on render ids remaining stable across runtime settlement.
   //
   // BUSINESS INVARIANT unchanged: the reserve must NOT change when the
   // stream finishes — it is legal layout until the next send's handover,
@@ -315,8 +309,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
     return px === undefined ? undefined : { minHeight: `${px}px` }
   }
   // Turn id holding the CURRENT pin's reserve (the entry the next send's
-  // handover collapses). An id, not an element pointer — element pointers
-  // die on remount, which was the imperative design's disease.
+  // handover collapses). An id, not an element pointer, so DOM ownership stays
+  // with Vue rather than leaking into the scroll state machine.
   let pinnedTurnId: string | null = null
 
   // ── collapseReserveKeepingView ─────────────────────────────────────────
@@ -324,7 +318,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // height drop. Call site is intentionally singular: tryApplyPin, when the
   // previous pin container is not the container about to receive the new
   // reserve. Do not reuse for Thought/tool expands, stream completion,
-  // remounts, or prepend — those stay browser-owned (overflow-anchor) or
+  // identity changes, or prepend — those stay browser-owned (overflow-anchor) or
   // follow/escape owned.
   //
   // Why we write scrollTop at all (vs "let the browser handle shrink"):
@@ -686,7 +680,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // Immediate projection of the same value: the reactive binding lands on
     // Vue's next flush, but the tween below needs this frame's geometry.
     // The binding renders the identical value and owns it from the next
-    // patch on — including across every future remount.
+    // patch on.
     container.style.minHeight = `${reservePx}px`
     lastScrollTop = el.scrollTop
 
@@ -695,7 +689,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // jumping back to a message cannot drift apart. Anchored on the PROMPT,
     // never on scrollHeight (a bottom-anchored target moves mid-flight when
     // the reply outgrows the reserve). Re-resolved every tween frame because
-    // optimistic → server id swap can remount the prompt row mid-flight.
+    // streamed content can change prompt geometry during the entrance.
     // Measured only after step 1 so distance and peek are real previous-turn
     // content.
     const pinTarget = () => {
@@ -1017,11 +1011,6 @@ export function useChatScroll(options: UseChatScrollOptions) {
       handleUserScroll(isScrollingUp)
       return
     }
-    // Layout displacement while following: heal it. Completion re-renders can
-    // shove the viewport with no further DOM mutation ever coming to pull it
-    // back — the follow heartbeat may see neither a mutation nor a resize, so
-    // this scroll event is the only wake-up we get.
-    if (followEnabled && !isNearBottom(el)) stickToBottomNow()
   }
 
   function handleUserScroll(isScrollingUp: boolean) {
@@ -1042,34 +1031,6 @@ export function useChatScroll(options: UseChatScrollOptions) {
       followEnabled = true
     }
   }
-
-  // ── Pinned-turn identity migration ─────────────────────────────────────
-  // Stream completion swaps the opening user message's render id (temp →
-  // server) when the store cannot adopt the on-screen id; the v-for key
-  // changes and the turn container REMOUNTS under a NEW id. The reserve map
-  // is keyed by the OLD id — without migration the fresh container's :style
-  // lookup misses and Vue strips the min-height (spacing vanished exactly at
-  // completion; the imperative design survived this because its restore
-  // helper stamped px onto whatever container was last, id-blind).
-  // flush: 'pre' is load-bearing: the migration must land BEFORE the render
-  // that re-keys, so the remounted container binds the reserve in the very
-  // same patch — a reserve-less frame never exists.
-  watch(() => messages.value.map(message => message.id), () => {
-    if (!pinnedTurnId) return
-    const px = turnReserves.value.get(pinnedTurnId)
-    if (px === undefined) return
-    const list = messages.value
-    if (list.some(m => m.id === pinnedTurnId)) return
-    // The pinned turn's opening prompt is still the newest user message —
-    // only its id changed. No user message at all means the turn was
-    // removed (retry/fork surgery): drop the reserve with it.
-    const successor = lastUserMessage()?.id ?? null
-    const next = new Map(turnReserves.value)
-    next.delete(pinnedTurnId)
-    if (successor) next.set(successor, px)
-    turnReserves.value = next
-    pinnedTurnId = successor
-  }, { flush: 'pre' })
 
   // Follow / pin heartbeat. Streaming (and any other subtree mutation) lands
   // here. Order matters:

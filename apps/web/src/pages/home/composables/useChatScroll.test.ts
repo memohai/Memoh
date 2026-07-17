@@ -63,16 +63,6 @@ function userMessage(id: string, text = id): ChatMessage {
   }
 }
 
-function assistantMessage(id: string): ChatMessage {
-  return {
-    id,
-    role: 'assistant',
-    messages: [],
-    timestamp: '2026-07-10T00:00:01.000Z',
-    streaming: false,
-  }
-}
-
 function rect(top: number, height: number): DOMRect {
   return {
     x: 0,
@@ -331,54 +321,4 @@ describe('useChatScroll gesture and layout handling', () => {
     expect(harness.scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: 'auto' })
   })
 
-  it('migrates a pinned reserve when messages are replaced in place', async () => {
-    const harness = mountHarness([
-      userMessage('user-1'),
-      assistantMessage('assistant-1'),
-    ])
-    harness.geometry.scrollHeight = 800
-    harness.geometry.clientHeight = 300
-    harness.viewport.scrollTop = 500
-
-    const firstTurn = document.createElement('div')
-    const firstPrompt = document.createElement('div')
-    firstPrompt.dataset.messageId = 'user-1'
-    firstTurn.append(firstPrompt)
-    harness.content.append(firstTurn)
-    harness.lastTurnEl.value = firstTurn
-    await flushDom()
-
-    harness.scroll.pinAfterSend()
-    const secondTurn = document.createElement('div')
-    const secondPrompt = document.createElement('div')
-    secondPrompt.dataset.messageId = 'optimistic-user-2'
-    secondTurn.append(secondPrompt)
-    secondTurn.getBoundingClientRect = () => rect(120, 60)
-    secondPrompt.getBoundingClientRect = () => rect(120, 40)
-    Object.defineProperty(secondTurn, 'offsetHeight', {
-      configurable: true,
-      get: () => Math.max(60, Number.parseFloat(secondTurn.style.minHeight) || 0),
-    })
-    Object.defineProperty(secondPrompt, 'offsetHeight', {
-      configurable: true,
-      get: () => 40,
-    })
-
-    harness.messages.value.push(
-      userMessage('optimistic-user-2'),
-      assistantMessage('optimistic-assistant-2'),
-    )
-    harness.lastTurnEl.value = secondTurn
-    harness.content.append(secondTurn)
-    await flushDom()
-
-    const reserve = harness.scroll.turnReserveStyle('optimistic-user-2')
-    expect(reserve?.minHeight).toMatch(/^\d+px$/)
-
-    harness.messages.value.splice(2, 1, userMessage('server-user-2'))
-    await nextTick()
-
-    expect(harness.scroll.turnReserveStyle('optimistic-user-2')).toBeUndefined()
-    expect(harness.scroll.turnReserveStyle('server-user-2')).toEqual(reserve)
-  })
 })

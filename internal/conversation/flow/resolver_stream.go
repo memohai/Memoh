@@ -31,6 +31,7 @@ type terminalSnapshot struct {
 	deferredToolID string
 	aborted        bool
 	visibleOutput  bool
+	runtimeRows    []messagepkg.RuntimeRowReservation
 }
 
 func hasVisibleAgentStreamOutput(event agentpkg.StreamEvent) bool {
@@ -508,6 +509,9 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
 	cfg = r.prepareRunConfig(streamCtx, cfg)
+	rowTracker := newRuntimeRowTracker(req.RuntimeTurn)
+	bindRuntimeInjectedRecorder(&cfg, rc, rowTracker)
+	bindRuntimeSyntheticRowRecorder(&cfg, rowTracker)
 	canonicalSteps, err := r.beginCanonicalStepPersistence(streamCtx, req, rc)
 	if err != nil {
 		return nil, err
@@ -542,6 +546,7 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 	canonicalFinalized := false
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
+		rowTracker.annotate(&event)
 
 		// Track tool calls for adaptive idle timeout
 		if event.Type == agentpkg.EventToolCallStart {
@@ -588,6 +593,7 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 		} else if event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.visibleOutput = hasVisibleOutput
+				snap.runtimeRows = rowTracker.bindTerminalRows(snap.sdkMessages)
 				lastSnapshot = snap
 				hasSnapshot = true
 				if !stored {
@@ -596,6 +602,15 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 						return persistedMessages, fmt.Errorf("persist terminal agent result: %w", storeErr)
 					}
 					persistedMessages = persisted
+					if len(persisted) > 0 {
+						if event.Metadata == nil {
+							event.Metadata = make(map[string]any, 1)
+						}
+						event.Metadata[conversation.RuntimePersistedProjectionMetadataKey] = conversation.NewRuntimePersistedProjection(persisted)
+						if remarshal, marshalErr := json.Marshal(event); marshalErr == nil {
+							data = remarshal
+						}
+					}
 					stored = true
 				}
 				if len(persistedMessages) > 0 {
@@ -729,6 +744,13 @@ func (r *Resolver) persistTerminalSnapshotResult(ctx context.Context, req conver
 		return nil, fmt.Errorf("runtime ownership check before persistence: %w", err)
 	}
 	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
+	for i := range outputMessages {
+		if i >= len(snap.runtimeRows) || strings.TrimSpace(snap.runtimeRows[i].MessageID) == "" {
+			continue
+		}
+		row := snap.runtimeRows[i]
+		outputMessages[i].RuntimeRow = &row
+	}
 	if snap.aborted && !snap.visibleOutput {
 		r.logger.Info("skip persisting aborted terminal snapshot before visible output",
 			slog.String("bot_id", req.BotID),
@@ -782,6 +804,26 @@ func hasPersistableAssistantOutput(messages []conversation.ModelMessage) bool {
 		}
 	}
 	return false
+}
+
+func bindRuntimeInjectedRecorder(cfg *agentpkg.RunConfig, rc resolvedContext, rowTracker *runtimeRowTracker) {
+	if cfg == nil || rowTracker == nil || rc.recordInjectedMessage == nil {
+		return
+	}
+	cfg.InjectedRecorder = func(headerifiedText string, insertAfter int) {
+		rc.recordInjectedMessage(conversation.InjectedMessageRecord{
+			HeaderifiedText: headerifiedText,
+			InsertAfter:     insertAfter,
+			RuntimeRow:      rowTracker.reserveInjectedRow(),
+		})
+	}
+}
+
+func bindRuntimeSyntheticRowRecorder(cfg *agentpkg.RunConfig, rowTracker *runtimeRowTracker) {
+	if cfg == nil || rowTracker == nil {
+		return
+	}
+	cfg.SyntheticRowRecorder = rowTracker.reserveTerminalSyntheticRow
 }
 
 // persistPartialResult is the interrupt-path fallback. When the agent stream
@@ -865,16 +907,18 @@ func interleaveInjectedMessages(round []conversation.ModelMessage, injections []
 		result = append(result, msg)
 		for injIdx < len(injections) && injections[injIdx].InsertAfter == i {
 			result = append(result, conversation.ModelMessage{
-				Role:    "user",
-				Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+				Role:       "user",
+				Content:    conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+				RuntimeRow: injections[injIdx].RuntimeRow,
 			})
 			injIdx++
 		}
 	}
 	for ; injIdx < len(injections); injIdx++ {
 		result = append(result, conversation.ModelMessage{
-			Role:    "user",
-			Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+			Role:       "user",
+			Content:    conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+			RuntimeRow: injections[injIdx].RuntimeRow,
 		})
 	}
 	return result

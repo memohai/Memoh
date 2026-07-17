@@ -128,6 +128,7 @@ func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 // @Param limit query int false "Limit"
 // @Param before query string false "Before"
 // @Param before_message_id query string false "Message ID cursor before which to page"
+// @Param turn_id query string false "Turn ID whose complete visible rows should be returned"
 // @Param format query string false "Response format: ui returns normalized chat UI turns"
 // @Success 200 {object} map[string][]messagepkg.Message
 // @Success 200 {object} map[string][]conversation.UITurn "when format=ui"
@@ -166,7 +167,17 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid before_message_id")
 		}
 	}
-	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
+	turnID := strings.TrimSpace(c.QueryParam("turn_id"))
+	if turnID != "" {
+		if _, err := uuid.Parse(turnID); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid turn_id")
+		}
+	}
+	beforeParam := strings.TrimSpace(c.QueryParam("before"))
+	before, hasBefore := parseBeforeParam(beforeParam)
+	if turnID != "" && (beforeMessageID != "" || beforeParam != "") {
+		return echo.NewHTTPError(http.StatusBadRequest, "turn_id cannot be combined with before or before_message_id")
+	}
 	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
 
 	bot, _, sess, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
@@ -177,6 +188,8 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 
 	var messages []messagepkg.Message
 	switch {
+	case turnID != "":
+		messages, err = h.messageService.ListVisibleMessagesByTurnIDBySession(c.Request().Context(), sessionID, turnID)
 	case beforeMessageID != "":
 		messages, err = h.messageService.ListBeforeMessageBySession(c.Request().Context(), sessionID, beforeMessageID, limit)
 	case hasBefore:
@@ -199,7 +212,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	// assistant turn (its earlier rows on the previous page) would render one
 	// reply as several turns/action bars. Extend the head back to a real turn
 	// boundary so a turn is never split across pages.
-	if format == "ui" && sessionID != "" && len(messages) > 0 {
+	if format == "ui" && turnID == "" && sessionID != "" && len(messages) > 0 {
 		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages, limit)
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)

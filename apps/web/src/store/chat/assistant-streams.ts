@@ -1,4 +1,4 @@
-import { computed, reactive, toRaw, type Ref } from 'vue'
+import { computed, reactive, type Ref } from 'vue'
 import type { ChatAssistantTurn, ChatMessage, ChatUserTurn } from './types'
 
 export interface RuntimeReplacementState {
@@ -28,21 +28,8 @@ export interface AssistantStream {
 
 interface PendingAssistantStream extends AssistantStream {
   sessionId: string
-  appendMessages: boolean
-  messageIds: Map<number, number>
   resolve: () => void
   reject: (error: Error) => void
-}
-
-interface AssistantStreamMessage {
-  id: number
-  type: string
-  tool_call_id?: string
-}
-
-export interface StreamIdentity {
-  stream_id?: string
-  session_id?: string
 }
 
 export interface TrackAssistantStreamInput {
@@ -129,7 +116,8 @@ export function createAssistantStreamRegistry({
     botId: string | null | undefined,
     targetSessionId: string | null | undefined,
   ): boolean {
-    return assistantStreamsForSession(botId, targetSessionId).length > 0
+    return assistantStreamsForSession(botId, targetSessionId)
+      .some(stream => stream.assistantTurn.streaming)
   }
 
   function isUnboundComposerStreaming(botId: string | null | undefined, composerScope?: string): boolean {
@@ -154,20 +142,6 @@ export function createAssistantStreamRegistry({
       ? isSessionStreaming(bid, activeSid)
       : isUnboundComposerStreaming(bid)
   })
-
-  function fallbackStreamId(botId: string, targetSessionId?: string | null): string {
-    const bid = botId.trim() || 'unbound'
-    const sid = (targetSessionId ?? '').trim()
-    return sid ? `session:${bid}:${sid}:agent-stream` : `bot:${bid}:legacy-stream`
-  }
-
-  function streamIdForEvent(botId: string, event: StreamIdentity, targetSessionId?: string): string {
-    const explicit = (event.stream_id ?? '').trim()
-    if (explicit) return explicit
-    const sid = (event.session_id ?? targetSessionId ?? '').trim()
-    const activeIds = assistantStreamsForSession(botId, sid).map(stream => stream.streamId)
-    return activeIds.length === 1 ? activeIds[0]! : fallbackStreamId(botId, sid)
-  }
 
   // Promise construction registers synchronously. Callers rely on the stream
   // being discoverable before ws.send() can synchronously replay an event.
@@ -196,8 +170,6 @@ export function createAssistantStreamRegistry({
         sessionId: targetSessionId,
         composerScope: input.composerScope?.trim() || 'chat',
         viewId: input.viewId?.trim() || 'chat',
-        appendMessages: input.assistantTurn.messages.length > 0,
-        messageIds: new Map(),
         runtimeObserved: false,
         runtimeGeneration: input.runtimeGeneration?.trim() ?? '',
         runtimeMessageIds: new Set<number>(),
@@ -214,47 +186,6 @@ export function createAssistantStreamRegistry({
 
   function getAssistantStream(streamId: string, botId?: string, targetSessionId?: string): AssistantStream | undefined {
     return findAssistantStream(streamId, botId, targetSessionId)
-  }
-
-  // Each server-side continuation owns a fresh UI-message converter whose ids
-  // start at zero. A response to ask_user / tool approval resumes inside the
-  // existing assistant turn, so those stream-local ids must be translated into
-  // the turn's id namespace instead of overwriting its earlier blocks.
-  function mapAssistantStreamMessage<T extends AssistantStreamMessage>(
-    streamId: string,
-    message: T,
-    botId?: string,
-    targetSessionId?: string,
-  ): T {
-    const stream = findAssistantStream(streamId, botId, targetSessionId)
-    if (!stream) return message
-
-    const mappedId = stream.messageIds.get(message.id)
-    if (mappedId !== undefined) {
-      return mappedId === message.id ? message : { ...message, id: mappedId }
-    }
-
-    const toolCallId = message.type === 'tool' ? message.tool_call_id?.trim() : ''
-    const existingTool = toolCallId
-      ? stream.assistantTurn.messages.find(block =>
-          block.type === 'tool'
-          && (block.toolCallId === toolCallId || block.tool_call_id === toolCallId),
-        )
-      : undefined
-
-    let targetId = existingTool?.id
-    if (targetId === undefined) {
-      const turn = toRaw(stream.assistantTurn)
-      const reservedIds = activeStreams()
-        .filter(active => toRaw(active.assistantTurn) === turn)
-        .flatMap(active => [...active.messageIds.values()])
-      const occupiedIds = [...stream.assistantTurn.messages.map(block => block.id), ...reservedIds]
-      targetId = stream.appendMessages || occupiedIds.includes(message.id)
-        ? occupiedIds.reduce((maxId, id) => Math.max(maxId, id), -1) + 1
-        : message.id
-    }
-    stream.messageIds.set(message.id, targetId)
-    return targetId === message.id ? message : { ...message, id: targetId }
   }
 
   function finishAssistantStream(streamId: string, botId?: string, targetSessionId?: string): PendingAssistantStream | undefined {
@@ -392,10 +323,8 @@ export function createAssistantStreamRegistry({
     assistantStreamsForSession,
     isSessionStreaming,
     isUnboundComposerStreaming,
-    streamIdForEvent,
     trackAssistantStream,
     getAssistantStream,
-    mapAssistantStreamMessage,
     resolveAssistantStream,
     rejectAssistantStream,
     discardAssistantStream,

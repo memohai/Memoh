@@ -243,6 +243,54 @@ func TestStoreMessagesUsesAtomicRoundForRuntimeFence(t *testing.T) {
 	}
 }
 
+func TestStoreMessagesUsesAtomicRoundForLocalRuntimeReservation(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "33333333-3333-3333-3333-333333333333"
+	turn := &messagepkg.RuntimeTurnReservation{
+		TurnID:       "44444444-4444-4444-4444-444444444444",
+		TurnPosition: 9,
+		Request: messagepkg.RuntimeRowReservation{
+			MessageID:      "55555555-5555-5555-5555-555555555555",
+			Role:           "user",
+			TurnID:         "44444444-4444-4444-4444-444444444444",
+			TurnPosition:   9,
+			TurnMessageSeq: 1,
+		},
+	}
+	assistantRow := messagepkg.RuntimeRowReservation{
+		MessageID:      "66666666-6666-6666-6666-666666666666",
+		Role:           "assistant",
+		TurnID:         turn.TurnID,
+		TurnPosition:   turn.TurnPosition,
+		TurnMessageSeq: 2,
+	}
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+
+	persisted, err := resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: sessionID, Query: "hello", RuntimeTurn: turn,
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("hello"), RuntimeRow: &turn.Request},
+		{Role: "assistant", Content: conversation.NewTextContent("done"), RuntimeRow: &assistantRow},
+	}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("storeMessages() error = %v", err)
+	}
+	if len(messages.roundInputs) != 2 || len(persisted) != 2 {
+		t.Fatalf("atomic round inputs/persisted = %d/%d, want 2/2", len(messages.roundInputs), len(persisted))
+	}
+	if len(messages.batchInputs) != 0 || len(messages.persisted) != 0 {
+		t.Fatalf("local runtime used non-atomic fallback: batch=%d persist=%d", len(messages.batchInputs), len(messages.persisted))
+	}
+	if got := messages.roundInputs[0]; got.MessageID != turn.Request.MessageID || got.TurnID != turn.TurnID || got.TurnPosition != 9 || got.TurnMessageSeq != 1 {
+		t.Fatalf("request reservation = %#v", got)
+	}
+	if got := messages.roundInputs[1]; got.MessageID != assistantRow.MessageID || got.TurnMessageSeq != 2 {
+		t.Fatalf("assistant reservation = %#v", got)
+	}
+}
+
 func TestStoreMessagesCommitsReplacementWithFencedRound(t *testing.T) {
 	t.Parallel()
 

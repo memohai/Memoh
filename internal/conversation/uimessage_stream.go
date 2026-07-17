@@ -71,11 +71,9 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			c.text = &uiTextStreamState{ID: c.allocBlockID(UIMessageText, "")}
 		}
 		c.text.Content += event.Delta
-		return []UIMessage{{
-			ID:      c.text.ID,
-			Type:    UIMessageText,
-			Content: c.text.Content,
-		}}
+		message := UIMessage{ID: c.text.ID, Type: UIMessageText, Content: c.text.Content}
+		applyUIStreamRowIdentity(&message, event)
+		return []UIMessage{message}
 
 	case "text_end":
 		c.finalizeTextBlock()
@@ -90,11 +88,9 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			c.reasoning = &uiTextStreamState{ID: c.allocBlockID(UIMessageReasoning, "")}
 		}
 		c.reasoning.Content += event.Delta
-		return []UIMessage{{
-			ID:      c.reasoning.ID,
-			Type:    UIMessageReasoning,
-			Content: c.reasoning.Content,
-		}}
+		message := UIMessage{ID: c.reasoning.ID, Type: UIMessageReasoning, Content: c.reasoning.Content}
+		applyUIStreamRowIdentity(&message, event)
+		return []UIMessage{message}
 
 	case "reasoning_end":
 		c.reasoning = nil
@@ -126,6 +122,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			c.tools[trimmed] = state
 		}
 		state.Message.Running = uiBoolPtr(true)
+		applyUIStreamRowIdentity(&state.Message, event)
 		c.finalizeTextBlock()
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
@@ -151,6 +148,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			state.Message.Input = event.Input
 		}
 		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyUIStreamRowIdentity(&state.Message, event)
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "tool_approval_request":
@@ -191,6 +189,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			Status:     status,
 			CanApprove: strings.EqualFold(status, "pending"),
 		}
+		applyUIStreamRowIdentity(&state.Message, event)
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "user_input_request":
@@ -236,6 +235,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			event.Metadata["ui_payload"],
 			status == "pending",
 		)
+		applyUIStreamRowIdentity(&state.Message, event)
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "tool_call_end":
@@ -256,6 +256,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		}
 		applyExecutionLocationMetadata(&state.Message, event.Metadata)
 		applyToolResultToUIMessage(&state.Message, event.Output)
+		applyUIStreamRowIdentity(&state.Message, event)
 		if state.Message.ToolCallID != "" && !isBackgroundToolStillRunning(state.Message) {
 			delete(c.tools, state.Message.ToolCallID)
 		}
@@ -265,14 +266,41 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if len(event.Attachments) == 0 {
 			return nil
 		}
-		return []UIMessage{{
+		message := UIMessage{
 			ID:          c.allocBlockID(UIMessageAttachments, ""),
 			Type:        UIMessageAttachments,
 			Attachments: append([]UIAttachment(nil), event.Attachments...),
-		}}
+		}
+		applyUIStreamRowIdentity(&message, event)
+		return []UIMessage{message}
 
 	default:
 		return nil
+	}
+}
+
+func applyUIStreamRowIdentity(message *UIMessage, event UIMessageStreamEvent) {
+	if message == nil {
+		return
+	}
+	if stableID := strings.TrimSpace(event.StableID); stableID != "" {
+		message.StableID = stableID
+		message.TurnPosition = event.TurnPosition
+		message.TurnMessageSeq = event.TurnMessageSeq
+	} else if message.StableID == "" && len(event.RowIdentities) > 0 {
+		primary := event.RowIdentities[0]
+		message.StableID = strings.TrimSpace(primary.StableID)
+		message.TurnPosition = primary.TurnPosition
+		message.TurnMessageSeq = primary.TurnMessageSeq
+	}
+	appendUIRowIdentities(message, event.RowIdentities...)
+	if len(event.RowIdentities) == 0 && strings.TrimSpace(event.StableID) != "" {
+		appendUIRowIdentities(message, UIRowIdentity{
+			StableID:       event.StableID,
+			TurnID:         event.TurnID,
+			TurnPosition:   event.TurnPosition,
+			TurnMessageSeq: event.TurnMessageSeq,
+		})
 	}
 }
 
@@ -389,6 +417,9 @@ func cloneToolStreamMessage(message UIMessage) UIMessage {
 	}
 	if len(message.Progress) > 0 {
 		clone.Progress = append([]any(nil), message.Progress...)
+	}
+	if len(message.RowIdentities) > 0 {
+		clone.RowIdentities = append([]UIRowIdentity(nil), message.RowIdentities...)
 	}
 	return clone
 }

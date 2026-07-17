@@ -1089,8 +1089,12 @@ export type ConversationUiMessage = {
     name?: string;
     output?: unknown;
     progress?: Array<unknown>;
+    row_identities?: Array<ConversationUiRowIdentity>;
     running?: boolean;
+    stable_id?: string;
     tool_call_id?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
     type?: ConversationUiMessageType;
     user_input?: ConversationUiUserInput;
 };
@@ -1102,6 +1106,14 @@ export type ConversationUiReplyRef = {
     message_id?: string;
     preview?: string;
     sender?: string;
+};
+
+export type ConversationUiRowIdentity = {
+    role?: string;
+    stable_id?: string;
+    turn_id?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
 };
 
 export type ConversationUiToolApproval = {
@@ -1129,6 +1141,8 @@ export type ConversationUiTurn = {
     skill_activation?: ConversationSkillActivation;
     text?: string;
     timestamp?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
     user_message_kind?: string;
 };
 
@@ -2312,6 +2326,9 @@ export type MessageMessage = {
     session_id?: string;
     session_mode?: string;
     source_reply_to_message_id?: string;
+    turn_id?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
     usage?: Array<number>;
 };
 
@@ -2326,6 +2343,20 @@ export type MessageMessageAsset = {
     role?: string;
     size_bytes?: number;
     storage_key?: string;
+};
+
+export type MessageRuntimeRowReservation = {
+    message_id?: string;
+    role?: string;
+    turn_id?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
+};
+
+export type MessageRuntimeTurnReservation = {
+    request?: MessageRuntimeRowReservation;
+    turn_id?: string;
+    turn_position?: number;
 };
 
 export type ModelsAddRequest = {
@@ -2800,10 +2831,12 @@ export type SessionruntimeCurrentRunView = {
     owner_id?: string;
     owner_lease_expires_at?: string;
     request_user_turn?: ConversationUiTurn;
+    row_ledger?: Array<ConversationUiRowIdentity>;
     started_at?: string;
     status?: string;
     steer?: SessionruntimeSteerState;
     stream_id?: string;
+    turn_reservation?: MessageRuntimeTurnReservation;
     updated_at?: string;
 };
 
@@ -7600,6 +7633,10 @@ export type GetBotsByBotIdMessagesData = {
          * Message ID cursor before which to page
          */
         before_message_id?: string;
+        /**
+         * Turn ID whose complete visible rows should be returned
+         */
+        turn_id?: string;
         /**
          * Response format: ui returns normalized chat UI turns
          */

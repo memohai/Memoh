@@ -5530,6 +5530,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Turn ID whose complete visible rows should be returned",
+                        "name": "turn_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Response format: ui returns normalized chat UI turns",
                         "name": "format",
                         "in": "query"
@@ -16577,11 +16583,26 @@ const docTemplate = `{
                     "type": "array",
                     "items": {}
                 },
+                "row_identities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIRowIdentity"
+                    }
+                },
                 "running": {
                     "type": "boolean"
                 },
+                "stable_id": {
+                    "type": "string"
+                },
                 "tool_call_id": {
                     "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
                 },
                 "type": {
                     "$ref": "#/definitions/conversation.UIMessageType"
@@ -16623,6 +16644,26 @@ const docTemplate = `{
                 },
                 "sender": {
                     "type": "string"
+                }
+            }
+        },
+        "conversation.UIRowIdentity": {
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string"
+                },
+                "stable_id": {
+                    "type": "string"
+                },
+                "turn_id": {
+                    "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
                 }
             }
         },
@@ -16702,6 +16743,12 @@ const docTemplate = `{
                 },
                 "timestamp": {
                     "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
                 },
                 "user_message_kind": {
                     "type": "string"
@@ -19617,6 +19664,15 @@ const docTemplate = `{
                 "source_reply_to_message_id": {
                     "type": "string"
                 },
+                "turn_id": {
+                    "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
+                },
                 "usage": {
                     "type": "array",
                     "items": {
@@ -19652,6 +19708,40 @@ const docTemplate = `{
                 },
                 "storage_key": {
                     "type": "string"
+                }
+            }
+        },
+        "message.RuntimeRowReservation": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "turn_id": {
+                    "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
+                }
+            }
+        },
+        "message.RuntimeTurnReservation": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "$ref": "#/definitions/message.RuntimeRowReservation"
+                },
+                "turn_id": {
+                    "type": "string"
+                },
+                "turn_position": {
+                    "type": "integer"
                 }
             }
         },
@@ -20902,6 +20992,12 @@ const docTemplate = `{
                 "request_user_turn": {
                     "$ref": "#/definitions/conversation.UITurn"
                 },
+                "row_ledger": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIRowIdentity"
+                    }
+                },
                 "started_at": {
                     "type": "string"
                 },
@@ -20913,6 +21009,9 @@ const docTemplate = `{
                 },
                 "stream_id": {
                     "type": "string"
+                },
+                "turn_reservation": {
+                    "$ref": "#/definitions/message.RuntimeTurnReservation"
                 },
                 "updated_at": {
                     "type": "string"

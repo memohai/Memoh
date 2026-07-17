@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
@@ -66,6 +67,7 @@ func (r *Resolver) prepareRoundMessagesForPersistence(req conversation.ChatReque
 	if !opts.AllowPendingToolCalls {
 		fullRound = repairToolCallClosures(fullRound, syntheticToolClosureError)
 	}
+	assignMissingRuntimeRows(fullRound, req.RuntimeTurn)
 
 	// Filter out empty assistant messages (content: []) that result from LLM
 	// returning no useful output (e.g., context window overflow). These provide
@@ -86,6 +88,32 @@ func (r *Resolver) prepareRoundMessagesForPersistence(req conversation.ChatReque
 		return nil
 	}
 	return filtered
+}
+
+func assignMissingRuntimeRows(messages []conversation.ModelMessage, turn *messagepkg.RuntimeTurnReservation) {
+	if turn == nil {
+		return
+	}
+	for i := range messages {
+		if messages[i].RuntimeRow != nil || !strings.EqualFold(strings.TrimSpace(messages[i].Role), "tool") {
+			continue
+		}
+		for j := i - 1; j >= 0; j-- {
+			if !strings.EqualFold(strings.TrimSpace(messages[j].Role), "assistant") || messages[j].RuntimeRow == nil {
+				continue
+			}
+			assistant := messages[j].RuntimeRow
+			row := messagepkg.RuntimeRowReservation{
+				MessageID:      uuid.NewString(),
+				Role:           "tool",
+				TurnID:         assistant.TurnID,
+				TurnPosition:   assistant.TurnPosition,
+				TurnMessageSeq: assistant.TurnMessageSeq + 1,
+			}
+			messages[i].RuntimeRow = &row
+			break
+		}
+	}
 }
 
 // isEmptyAssistantMessage returns true if an assistant message has no
@@ -283,6 +311,7 @@ func (r *Resolver) buildPersistInputs(ctx context.Context, req conversation.Chat
 			persistMeta = mergeMetadata(persistMeta, extraMeta)
 		}
 		persistInputs = append(persistInputs, messagepkg.PersistInput{
+			MessageID:               runtimeRowMessageID(msg.RuntimeRow),
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
 			SenderChannelIdentityID: messageSenderChannelIdentityID,
@@ -300,6 +329,9 @@ func (r *Resolver) buildPersistInputs(ctx context.Context, req conversation.Chat
 			SessionMode:             sessionMode,
 			RuntimeType:             runtimeType,
 			TurnRequestMessageID:    turnRequestMessageID,
+			TurnID:                  runtimeRowTurnID(msg.RuntimeRow),
+			TurnPosition:            runtimeRowTurnPosition(msg.RuntimeRow),
+			TurnMessageSeq:          runtimeRowTurnMessageSeq(msg.RuntimeRow),
 			SkipHistoryTurn:         req.SkipHistoryTurn,
 		})
 	}
@@ -322,12 +354,70 @@ func (r *Resolver) buildRoundPersistenceOptions(ctx context.Context, req convers
 	options.Replacement = &messagepkg.TurnReplacement{
 		OldTurnID:        replacement.oldTurnID,
 		RequestMessageID: replacement.requestMessageID,
+		TurnID:           runtimeTurnID(req.RuntimeTurn),
+		TurnPosition:     runtimeTurnPosition(req.RuntimeTurn),
 		Reason:           replacement.reason,
 	}
 	if replacement.forkAnchor != nil {
 		options.Replacement.SessionMetadata = replacement.forkAnchor.metadata
 	}
 	return options, nil
+}
+
+func runtimeRowMessageID(row *messagepkg.RuntimeRowReservation) string {
+	if row == nil {
+		return ""
+	}
+	return strings.TrimSpace(row.MessageID)
+}
+
+func runtimeRowTurnID(row *messagepkg.RuntimeRowReservation) string {
+	if row == nil {
+		return ""
+	}
+	return strings.TrimSpace(row.TurnID)
+}
+
+func runtimeRowTurnPosition(row *messagepkg.RuntimeRowReservation) int64 {
+	if row == nil {
+		return 0
+	}
+	return row.TurnPosition
+}
+
+func runtimeRowTurnMessageSeq(row *messagepkg.RuntimeRowReservation) int64 {
+	if row == nil {
+		return 0
+	}
+	return row.TurnMessageSeq
+}
+
+func runtimeTurnID(turn *messagepkg.RuntimeTurnReservation) string {
+	if turn == nil {
+		return ""
+	}
+	return strings.TrimSpace(turn.TurnID)
+}
+
+func runtimeTurnPosition(turn *messagepkg.RuntimeTurnReservation) int64 {
+	if turn == nil {
+		return 0
+	}
+	return turn.TurnPosition
+}
+
+func runtimeTurnRequestMessageID(turn *messagepkg.RuntimeTurnReservation) string {
+	if turn == nil {
+		return ""
+	}
+	return strings.TrimSpace(turn.Request.MessageID)
+}
+
+func runtimeTurnRequestMessageSeq(turn *messagepkg.RuntimeTurnReservation) int64 {
+	if turn == nil {
+		return 0
+	}
+	return turn.Request.TurnMessageSeq
 }
 
 func workspaceTargetMetadata(target *conversation.WorkspaceTarget) map[string]any {

@@ -15,6 +15,7 @@
           "kind": "retry",
           "replace_from_message_id": "assistant-old"
         },
+        "row_ledger": [],
         "started_at": "2026-07-10T00:00:00Z",
         "status": "running",
         "stream_id": "stream-retry-operation",
@@ -49,6 +50,7 @@
             "timestamp": "2026-07-10T00:00:00Z"
           }
         },
+        "row_ledger": [],
         "started_at": "2026-07-10T00:00:00Z",
         "status": "running",
         "stream_id": "stream-edit-operation",

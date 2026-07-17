@@ -42,7 +42,30 @@ type Message struct {
 	CompactID               string          `json:"compact_id,omitempty"`
 	EventID                 string          `json:"event_id,omitempty"`
 	DisplayContent          string          `json:"display_content,omitempty"`
+	TurnID                  string          `json:"turn_id,omitempty"`
+	TurnPosition            int64           `json:"turn_position,omitempty"`
+	TurnMessageSeq          int64           `json:"turn_message_seq,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
+}
+
+// RuntimeRowReservation is the durable identity assigned to one history row
+// before that row is persisted. PersistRound must write these coordinates
+// verbatim so runtime and history describe the same object.
+type RuntimeRowReservation struct {
+	MessageID      string `json:"message_id"`
+	Role           string `json:"role"`
+	TurnID         string `json:"turn_id"`
+	TurnPosition   int64  `json:"turn_position"`
+	TurnMessageSeq int64  `json:"turn_message_seq"`
+}
+
+// RuntimeTurnReservation reserves one globally ordered history turn. Gaps are
+// intentional: an aborted run may consume a position without ever creating a
+// history row, and that position must never be recycled.
+type RuntimeTurnReservation struct {
+	TurnID       string                `json:"turn_id"`
+	TurnPosition int64                 `json:"turn_position"`
+	Request      RuntimeRowReservation `json:"request"`
 }
 
 type HistoryTurn struct {
@@ -74,6 +97,7 @@ type AssetRef struct {
 
 // PersistInput is the input for persisting a message.
 type PersistInput struct {
+	MessageID               string
 	BotID                   string
 	SessionID               string
 	SenderChannelIdentityID string
@@ -91,6 +115,9 @@ type PersistInput struct {
 	EventID                 string
 	DisplayText             string
 	TurnRequestMessageID    string
+	TurnID                  string
+	TurnPosition            int64
+	TurnMessageSeq          int64
 	SkipHistoryTurn         bool
 }
 
@@ -113,6 +140,8 @@ type ToolTailRoundPersister interface {
 type TurnReplacement struct {
 	OldTurnID        string
 	RequestMessageID string
+	TurnID           string
+	TurnPosition     int64
 	Reason           string
 	SessionMetadata  map[string]any
 }
@@ -147,6 +176,12 @@ type AtomicRoundPersister interface {
 	PersistRound(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions) ([]Message, bool, error)
 }
 
+// RuntimeTurnReserver allocates the turn order before an admitted run starts
+// producing rows. Distributed callers carry a runtime fence in ctx.
+type RuntimeTurnReserver interface {
+	ReserveRuntimeTurn(ctx context.Context, botID, sessionID, requestMessageID string) (RuntimeTurnReservation, error)
+}
+
 // Service defines message read/write behavior.
 type Service interface {
 	Writer
@@ -163,7 +198,8 @@ type Service interface {
 	ListBeforeMessageBySession(ctx context.Context, sessionID string, beforeMessageID string, limit int32) ([]Message, error)
 	LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error)
 	GetByIDBySession(ctx context.Context, sessionID string, messageID string) (Message, error)
-	ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string) ([]Message, error)
+	ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string, maxCount int32) ([]Message, error)
+	ListVisibleMessagesByTurnIDBySession(ctx context.Context, sessionID string, turnID string) ([]Message, error)
 	GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error)
 	GetLatestVisibleTurnBySession(ctx context.Context, sessionID string) (HistoryTurn, error)
 	ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error)

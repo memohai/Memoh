@@ -651,6 +651,9 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_turn_seq_unique
   ON bot_history_messages(turn_id, turn_message_seq)
   WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_session_position_seq_unique
+  ON bot_history_messages(session_id, turn_position, turn_message_seq)
+  WHERE session_id IS NOT NULL AND turn_position IS NOT NULL AND turn_message_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_order
   ON bot_history_messages(session_id, turn_position DESC, turn_message_seq DESC, created_at DESC, id DESC)
   WHERE turn_visible = true

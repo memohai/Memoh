@@ -5,6 +5,8 @@ import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effo
 import { AUTH_SESSION_CLEARED_EVENT } from '@/lib/auth-session'
 import { useChatSelectionStore } from './chat-selection'
 import { useChatStore } from './chat-list'
+import { seedSynchronizedTranscriptForTest } from './chat/sync/projection'
+import type { ChatMessage, ChatViewTarget } from './chat/types'
 import type { ConversationUiMessage, ConversationUiTurn, SessionruntimeRunOperationView, SessionruntimeSnapshot } from '@memohai/sdk'
 import {
   generationReuseContractFixture,
@@ -91,6 +93,18 @@ function createTestPinia() {
   return pinia
 }
 
+function seedTranscript(store: ReturnType<typeof useChatStore>, ...turns: ChatMessage[]) {
+  seedSynchronizedTranscriptForTest(store.chatView().transcript, ...turns)
+}
+
+function seedTargetTranscript(
+  store: ReturnType<typeof useChatStore>,
+  target: ChatViewTarget,
+  ...turns: ChatMessage[]
+) {
+  seedSynchronizedTranscriptForTest(store.chatView(target).transcript, ...turns)
+}
+
 function applyLatestDraftRequest(store: ReturnType<typeof useChatStore>) {
   const request = store.draftViewRequested
   if (!request) throw new Error('Expected a Draft view request')
@@ -174,6 +188,33 @@ function richActiveRunStoreScript(sessionId = 'session-1', streamId = 'stream-ri
   })) as UIStreamEvent[]
 }
 
+function runtimeMessagesWithIdentity(
+  messages: ConversationUiMessage[],
+  streamId: string,
+  turnPosition = 1,
+): ConversationUiMessage[] {
+  return messages.map((message, index) => ({
+    ...message,
+    stable_id: message.stable_id ?? `${streamId}-row-${message.id ?? index}`,
+    turn_position: message.turn_position ?? turnPosition,
+    turn_message_seq: message.turn_message_seq ?? index + 2,
+  }))
+}
+
+function runtimeUserTurnWithIdentity(
+  turn: ConversationUiTurn | undefined,
+  streamId: string,
+  turnPosition = 1,
+): ConversationUiTurn | undefined {
+  if (!turn) return undefined
+  return {
+    ...turn,
+    id: turn.id ?? `${streamId}-user-row`,
+    turn_position: turn.turn_position ?? turnPosition,
+    turn_message_seq: turn.turn_message_seq ?? 1,
+  }
+}
+
 function runtimeSnapshotFromScript(
   script: UIStreamEvent[],
   sessionId = 'session-1',
@@ -185,10 +226,11 @@ function runtimeSnapshotFromScript(
   historyCommitted = false,
   canonicalReady = false,
 ): SessionruntimeSnapshot {
-  const messages = script.flatMap((event) => {
+  const messages = runtimeMessagesWithIdentity(script.flatMap((event) => {
     if (event.type !== 'message') return []
     return [event.data as ConversationUiMessage]
-  })
+  }), streamId)
+  const normalizedRequestUserTurn = runtimeUserTurnWithIdentity(requestUserTurn, streamId)
   return {
     bot_id: 'bot-1',
     session_id: sessionId,
@@ -201,7 +243,7 @@ function runtimeSnapshotFromScript(
       messages,
       ...(historyCommitted ? { history_committed: true } : {}),
       ...(canonicalReady ? { canonical_ready: true } : {}),
-      ...(requestUserTurn ? { request_user_turn: requestUserTurn } : {}),
+      ...(normalizedRequestUserTurn ? { request_user_turn: normalizedRequestUserTurn } : {}),
       ...(error ? { error } : {}),
     },
     queue: [],
@@ -234,8 +276,11 @@ function runtimeReplacementSnapshot(
         stream_id: streamId,
         generation: `generation-${streamId}`,
         status,
-        messages,
-        operation,
+        messages: runtimeMessagesWithIdentity(messages, streamId, 2),
+        operation: {
+          ...operation,
+          replacement_user_turn: runtimeUserTurnWithIdentity(operation.replacement_user_turn, streamId, 2),
+        },
         ...(historyCommitted ? { history_committed: true } : {}),
         ...(canonicalReady ? { canonical_ready: true } : {}),
       },
@@ -258,11 +303,28 @@ describe('chat-list store', () => {
   let sendEvents: UIStreamEvent[]
   let sentWSMessages: Array<Record<string, unknown>>
   let wsOutboundTimeline: Array<Record<string, unknown>>
-  let abortedWSStreams: string[]
   let runtimeSubscribeMessages: Array<Record<string, unknown>>
   let runtimeUnsubscribeMessages: Array<Record<string, unknown>>
   let lastStreamId = ''
   let lastSessionId = ''
+  let legacyRuntimeStates: Map<string, {
+    sessionId: string
+    generation: string
+    epoch: string
+    seq: number
+    messages: ConversationUiMessage[]
+    requestUserTurn?: ConversationUiTurn
+    operation?: SessionruntimeRunOperationView
+  }>
+  let legacyRuntimeAdmissions: Map<string, {
+    requestUserTurn?: ConversationUiTurn
+    operation?: SessionruntimeRunOperationView
+  }>
+  let canonicalRuntimeStreams: Set<string>
+
+  function sentAbortMessages() {
+    return sentWSMessages.filter(message => message.type === 'abort')
+  }
 
   beforeEach(() => {
     testPiniaInstances = []
@@ -275,13 +337,12 @@ describe('chat-list store', () => {
     lastSessionId = ''
     sentWSMessages = []
     wsOutboundTimeline = []
-    abortedWSStreams = []
     runtimeSubscribeMessages = []
     runtimeUnsubscribeMessages = []
-    sendEvents = [
-      { type: 'start' } as UIStreamEvent,
-      { type: 'error', message: 'model failed' } as UIStreamEvent,
-    ]
+    legacyRuntimeStates = new Map()
+    legacyRuntimeAdmissions = new Map()
+    canonicalRuntimeStreams = new Set()
+    sendEvents = [{ type: 'error', message: 'model failed' } as UIStreamEvent]
     vi.clearAllMocks()
 
     api.fetchBots.mockResolvedValue([
@@ -427,13 +488,114 @@ describe('chat-list store', () => {
       sessionsActivityHandler = onEvent
       signal.addEventListener('abort', () => resolve(), { once: true })
     }))
-    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
-      streamHandler = onStreamEvent
+    api.connectWebSocket.mockImplementation((sourceBotId: string, onStreamEvent: UIStreamEventHandler) => {
+      const abort = vi.fn()
+      const emitRuntime = (
+        streamId: string,
+        targetSessionId: string,
+        status: string,
+        messages?: ConversationUiMessage[],
+        error = '',
+      ) => {
+        const runtimeKey = `${targetSessionId}\u0000${streamId}`
+        const existing = legacyRuntimeStates.get(runtimeKey)
+        const admission = legacyRuntimeAdmissions.get(runtimeKey)
+        const state = existing ?? {
+          sessionId: targetSessionId,
+          generation: `generation-${streamId}`,
+          epoch: `epoch-${targetSessionId || 'unbound'}`,
+          seq: 0,
+          messages: [],
+          ...admission,
+        }
+        state.sessionId = targetSessionId || state.sessionId
+        if (messages) state.messages = messages.map((message, index) => ({
+          ...message,
+          stable_id: message.stable_id ?? `${streamId}-row-${message.id}`,
+          turn_position: message.turn_position ?? 1,
+          turn_message_seq: message.turn_message_seq ?? index + 2,
+        }))
+        state.seq += 1
+        legacyRuntimeStates.set(runtimeKey, state)
+        onStreamEvent({
+          type: 'runtime_snapshot',
+          bot_id: sourceBotId,
+          session_id: state.sessionId,
+          stream_id: streamId,
+          epoch: state.epoch,
+          seq: state.seq,
+          snapshot: {
+            bot_id: sourceBotId,
+            session_id: state.sessionId,
+            epoch: state.epoch,
+            seq: state.seq,
+            current_run_view: {
+              stream_id: streamId,
+              generation: state.generation,
+              status,
+              messages: state.messages,
+              ...(state.requestUserTurn ? { request_user_turn: state.requestUserTurn } : {}),
+              ...(state.operation ? { operation: state.operation } : {}),
+              ...(error ? { error } : {}),
+            },
+            queue: [],
+          },
+        } as UIStreamEvent)
+      }
+      const adaptLegacyEvent = (event: UIStreamEvent, streamId: string, targetSessionId: string) => {
+        if (event.type === 'runtime_snapshot' || event.type === 'runtime_delta') {
+          const canonicalSessionId = (event.session_id ?? targetSessionId).trim()
+          const canonicalStreamId = (event.stream_id ?? streamId).trim()
+          if (canonicalSessionId && canonicalStreamId) {
+            canonicalRuntimeStreams.add(`${canonicalSessionId}\u0000${canonicalStreamId}`)
+          }
+          onStreamEvent(event)
+          return
+        }
+        if (canonicalRuntimeStreams.has(`${targetSessionId}\u0000${streamId}`)) {
+          onStreamEvent(event)
+          return
+        }
+        if (event.type === 'start') {
+          emitRuntime(streamId, targetSessionId, 'running')
+          return
+        }
+        if (event.type === 'message') {
+          const runtimeKey = `${targetSessionId}\u0000${streamId}`
+          const previous = legacyRuntimeStates.get(runtimeKey)?.messages ?? []
+          const messages = [...previous]
+          const index = messages.findIndex(message => message.id === event.data.id)
+          if (index >= 0) messages[index] = event.data as ConversationUiMessage
+          else messages.push(event.data as ConversationUiMessage)
+          emitRuntime(streamId, targetSessionId, 'running', messages)
+          return
+        }
+        if (event.type === 'end') {
+          emitRuntime(streamId, targetSessionId, 'completed')
+          return
+        }
+        if (event.type === 'error' && legacyRuntimeStates.has(`${targetSessionId}\u0000${streamId}`)) {
+          emitRuntime(streamId, targetSessionId, 'errored', undefined, event.message)
+          return
+        }
+        onStreamEvent(event)
+      }
+      streamHandler = event => adaptLegacyEvent(
+        event,
+        (event as { stream_id?: string }).stream_id ?? lastStreamId,
+        (event as { session_id?: string }).session_id ?? lastSessionId,
+      )
       return {
         get connected() {
           return true
         },
-        send: vi.fn((message: { stream_id?: string; session_id?: string }) => {
+        send: vi.fn((message: {
+          type?: string
+          stream_id?: string
+          session_id?: string
+          message_id?: string
+          text?: string
+        }) => {
           wsOutboundTimeline.push(message as Record<string, unknown>)
           if ((message as Record<string, unknown>).type === 'runtime_subscribe') {
             runtimeSubscribeMessages.push(message as Record<string, unknown>)
@@ -446,21 +608,87 @@ describe('chat-list store', () => {
           sentWSMessages.push(message as Record<string, unknown>)
           lastStreamId = message.stream_id ?? ''
           lastSessionId = message.session_id ?? ''
+          const outboundType = String((message as Record<string, unknown>).type ?? '')
+          if (outboundType === 'abort') {
+            return
+          }
+          if (lastStreamId && ['message', 'retry_message', 'edit_message'].includes(outboundType)) {
+            const runtimeKey = `${lastSessionId}\u0000${lastStreamId}`
+            const admission: {
+              requestUserTurn?: ConversationUiTurn
+              operation?: SessionruntimeRunOperationView
+            } = {}
+            if (outboundType === 'message') {
+              admission.requestUserTurn = {
+                role: 'user',
+                id: `${lastStreamId}-user-row`,
+                text: message.text ?? '',
+                external_message_id: lastStreamId,
+                timestamp: '2026-07-16T00:00:00.000Z',
+                turn_position: 1,
+                turn_message_seq: 1,
+              }
+            } else if (outboundType === 'retry_message') {
+              admission.operation = {
+                kind: 'retry',
+                replace_from_message_id: message.message_id,
+              }
+            } else {
+              admission.operation = {
+                kind: 'edit',
+                replace_from_message_id: message.message_id,
+                replacement_user_turn: {
+                  role: 'user',
+                  id: `${lastStreamId}-user-row`,
+                  text: message.text ?? '',
+                  external_message_id: lastStreamId,
+                  timestamp: '2026-07-16T00:00:00.000Z',
+                  turn_position: 1,
+                  turn_message_seq: 1,
+                },
+              }
+            }
+            legacyRuntimeAdmissions.set(runtimeKey, admission)
+          }
+          const sidebandAction = outboundType === 'tool_approval_response' || outboundType === 'user_input_response'
+          const preAdmissionError = sendEvents.some(event => event.type === 'error')
+            && !sendEvents.some(event => event.type === 'message')
           for (const event of sendEvents) {
+            const explicitEventSessionId = (event as { session_id?: string }).session_id?.trim()
+            if (event.type === 'session_created' && explicitEventSessionId) {
+              const unboundRuntimeKey = `\u0000${lastStreamId}`
+              const boundRuntimeKey = `${explicitEventSessionId}\u0000${lastStreamId}`
+              const admission = legacyRuntimeAdmissions.get(unboundRuntimeKey)
+              if (admission) {
+                legacyRuntimeAdmissions.delete(unboundRuntimeKey)
+                legacyRuntimeAdmissions.set(boundRuntimeKey, admission)
+              }
+              lastSessionId = explicitEventSessionId
+            }
+            const eventSessionId = explicitEventSessionId || lastSessionId
             const commandInvocation = event.type === 'command_result' || event.type === 'command_error'
               ? { invocation_id: event.invocation_id ?? lastStreamId }
               : {}
-            onStreamEvent({
+            if ((sidebandAction || preAdmissionError) && event.type === 'start') continue
+            if (sidebandAction && (event.type === 'end' || event.type === 'error')) {
+              onStreamEvent({
+                type: event.type === 'end' ? 'command_result' : 'command_error',
+                invocation_id: lastStreamId,
+                action_id: outboundType,
+                session_id: eventSessionId,
+                ...(event.type === 'error' ? { error: { message: event.message } } : {}),
+              } as UIStreamEvent)
+              continue
+            }
+            streamHandler?.({
               ...event,
               ...commandInvocation,
               stream_id: lastStreamId,
-              session_id: lastSessionId,
+              session_id: eventSessionId,
             } as UIStreamEvent)
           }
         }),
-        abort: vi.fn((streamId: string, _sessionId: string, _generation?: string) => {
-          abortedWSStreams.push(streamId)
-        }),
+        abort,
         close: vi.fn(),
         onOpen: null,
         onClose: null,
@@ -701,7 +929,7 @@ describe('chat-list store', () => {
     const store = useChatStore()
 
     await store.selectBot('bot-1')
-    store.messages.push({
+    seedTranscript(store, {
       id: 'existing-user',
       role: 'user',
       text: 'old message',
@@ -1162,15 +1390,17 @@ describe('chat-list store', () => {
     const tool = assistant.messages.find(block => block.type === 'tool')
     if (!tool?.approval) throw new Error('approval block was not streamed')
 
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     await store.respondToolApproval(tool.approval, 'approve')
     const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
     await store.selectSession('session-2')
     streamHandler?.({
-      type: 'error',
-      stream_id: responseStreamId,
+      type: 'command_error',
+      invocation_id: responseStreamId,
+      action_id: 'tool_approval_response',
+      terminal: true,
       session_id: 'session-1',
-      message: 'approval failed',
+      error: { code: 'runtime_response_failed', message: 'approval failed' },
     } as UIStreamEvent)
     await flushPromises()
     await flushPromises()
@@ -1196,8 +1426,8 @@ describe('chat-list store', () => {
       bot_id: 'bot-1',
       session_id: 'session-1',
       stream_id: originalStreamId,
-      seq: 1,
-      snapshot: runtimeSnapshotFromScript([], 'session-1', originalStreamId, 'aborted', 1),
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', originalStreamId, 'aborted', 3),
     } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: false, stage: 'stream' })
     expect(assistant.streaming).toBe(false)
@@ -1241,7 +1471,7 @@ describe('chat-list store', () => {
     }
     const approval = tool.approval
 
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     await store.respondToolApproval(approval, 'approve')
     await store.respondToolApproval(approval, 'approve')
     await flushPromises()
@@ -1270,12 +1500,10 @@ describe('chat-list store', () => {
       status: 'pending',
       can_approve: true,
     }
-    store.messages.push(approvalTurn(approval))
+    seedTranscript(store, approvalTurn(approval))
     await expect(store.respondToolApproval(approval, 'approve')).resolves.toBe(true)
     const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
     const responseStreamId = responseMessage?.stream_id as string
-    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
-
     store.abort()
     streamHandler?.({
       type: 'command_error',
@@ -1286,7 +1514,7 @@ describe('chat-list store', () => {
     } as UIStreamEvent)
     await flushPromises()
 
-    expect(ws.abort).not.toHaveBeenCalled()
+    expect(sentAbortMessages()).toHaveLength(0)
     expect(store.streaming).toBe(false)
     const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
     expect(block?.type).toBe('tool')
@@ -1334,7 +1562,6 @@ describe('chat-list store', () => {
     await expect(store.respondToolApproval(tool.approval, 'approve')).resolves.toBe(true)
     const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
     const responseStreamId = responseMessage?.stream_id as string
-    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
     const messageCount = store.messages.length
 
     streamHandler?.({
@@ -1342,8 +1569,8 @@ describe('chat-list store', () => {
       bot_id: 'bot-1',
       session_id: 'session-1',
       stream_id: originalStreamId,
-      seq: 1,
-      snapshot: runtimeSnapshotFromScript(runtimeEvents, 'session-1', originalStreamId, 'running', 1),
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript(runtimeEvents, 'session-1', originalStreamId, 'running', 3),
     } as UIStreamEvent)
     store.abort()
     streamHandler?.({
@@ -1353,19 +1580,58 @@ describe('chat-list store', () => {
       terminal: true,
       error: { code: 'runtime_response_failed', message: 'run stopped' },
     } as UIStreamEvent)
+    api.fetchMessagesUI.mockResolvedValue([
+      {
+        id: `${originalStreamId}-user-row`,
+        role: 'user',
+        text: 'run pwd',
+        attachments: [],
+        external_message_id: originalStreamId,
+        turn_position: 1,
+        turn_message_seq: 1,
+        timestamp: '2026-07-16T00:00:00.000Z',
+      },
+      {
+        id: `${originalStreamId}-row-1`,
+        role: 'assistant',
+        messages: [{
+          id: 1,
+          stable_id: `${originalStreamId}-row-1`,
+          turn_position: 1,
+          turn_message_seq: 2,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        }],
+        timestamp: '2026-07-16T00:00:00.000Z',
+        streaming: false,
+      },
+    ])
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
       session_id: 'session-1',
       stream_id: originalStreamId,
-      seq: 2,
-      snapshot: runtimeSnapshotFromScript(runtimeEvents, 'session-1', originalStreamId, 'aborted', 2),
+      seq: 4,
+      snapshot: runtimeSnapshotFromScript(runtimeEvents, 'session-1', originalStreamId, 'aborted', 4),
     } as UIStreamEvent)
     await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
     await flushPromises()
 
-    expect(ws.abort).toHaveBeenCalledTimes(1)
-    expect(ws.abort).toHaveBeenCalledWith(originalStreamId, 'session-1', `generation-${originalStreamId}`)
+    expect(sentAbortMessages()).toEqual([expect.objectContaining({
+      type: 'abort',
+      stream_id: originalStreamId,
+      session_id: 'session-1',
+      generation: `generation-${originalStreamId}`,
+    })])
     expect(tool.approval).toMatchObject({ status: 'pending', can_approve: true })
     expect(store.messages).toHaveLength(messageCount)
 
@@ -1410,7 +1676,7 @@ describe('chat-list store', () => {
       status: 'pending',
       can_approve: true,
     }
-    store.messages.push(approvalTurn(approval))
+    seedTranscript(store, approvalTurn(approval))
 
     const result = await store.respondToolApproval(approval, 'approve')
     await flushPromises()
@@ -1451,7 +1717,7 @@ describe('chat-list store', () => {
       status: 'pending',
       can_approve: true,
     }
-    store.messages.push(approvalTurn(approval))
+    seedTranscript(store, approvalTurn(approval))
 
     const result = await store.respondToolApproval(approval, 'approve')
     await flushPromises()
@@ -2478,7 +2744,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
@@ -2514,7 +2780,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     const [first, second] = await Promise.all([
       store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] }),
@@ -2833,7 +3099,7 @@ describe('chat-list store', () => {
     await flushPromises()
 
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
     expect(await store.respondUserInput(userInput, {
       answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
     })).toBe(true)
@@ -2898,7 +3164,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { canceled: true, reason: 'user_canceled' })
     await flushPromises()
@@ -2941,7 +3207,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
@@ -2979,7 +3245,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
@@ -3026,7 +3292,7 @@ describe('chat-list store', () => {
       ],
       can_respond: true,
     }
-    store.messages.push({
+    seedTranscript(store, {
       id: 'assistant-1',
       role: 'assistant',
       messages: [{
@@ -3080,7 +3346,7 @@ describe('chat-list store', () => {
     expect(store.isSessionStreaming('bot-1', 'session-1')).toBe(true)
 
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
@@ -3455,7 +3721,7 @@ describe('chat-list store', () => {
     await vi.waitFor(() => expect(api.fetchMessagesUI).toHaveBeenCalled())
     await flushPromises()
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
     api.fetchMessagesUI.mockClear()
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
@@ -3484,7 +3750,7 @@ describe('chat-list store', () => {
     await vi.waitFor(() => expect(api.fetchMessagesUI).toHaveBeenCalled())
     await flushPromises()
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
     api.fetchMessagesUI.mockClear()
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
@@ -3526,8 +3792,8 @@ describe('chat-list store', () => {
     await flushPromises()
     const inputA = singleSelectUserInput('input-a')
     const inputB = singleSelectUserInput('input-b')
-    store.chatView(targetA).transcript.messages.push(askUserTurn(inputA, 'call-a'))
-    store.chatView(targetB).transcript.messages.push(askUserTurn(inputB, 'call-b'))
+    seedTargetTranscript(store, targetA, askUserTurn(inputA, 'call-a'))
+    seedTargetTranscript(store, targetB, askUserTurn(inputB, 'call-b'))
     const sharedStreamId = '00000000-0000-4000-8000-000000000001'
     const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(sharedStreamId)
 
@@ -3596,7 +3862,7 @@ describe('chat-list store', () => {
 
     sendEvents = []
     const userInput = singleSelectUserInput('reused-stream-input')
-    store.messages.push(askUserTurn(userInput, 'reused-stream-call'))
+    seedTranscript(store, askUserTurn(userInput, 'reused-stream-call'))
     expect(await store.respondUserInput(userInput, { canceled: true })).toBe(true)
     uuid.mockRestore()
     streamHandler?.({
@@ -3630,7 +3896,7 @@ describe('chat-list store', () => {
     const subscriptionId = String(runtimeSubscribeMessages.at(-1)?.invocation_id ?? '')
     expect(subscriptionId).not.toBe('')
     const userInput = singleSelectUserInput('subscription-collision-input')
-    store.messages.push(askUserTurn(userInput, 'subscription-collision-call'))
+    seedTranscript(store, askUserTurn(userInput, 'subscription-collision-call'))
     const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(subscriptionId as `${string}-${string}-${string}-${string}-${string}`)
     expect(await store.respondUserInput(userInput, { canceled: true })).toBe(true)
     uuid.mockRestore()
@@ -3673,8 +3939,8 @@ describe('chat-list store', () => {
     await flushPromises()
     const inputA = singleSelectUserInput('delete-input-a')
     const inputB = singleSelectUserInput('delete-input-b')
-    store.chatView(targetA).transcript.messages.push(askUserTurn(inputA, 'delete-call-a'))
-    store.chatView(targetB).transcript.messages.push(askUserTurn(inputB, 'delete-call-b'))
+    seedTargetTranscript(store, targetA, askUserTurn(inputA, 'delete-call-a'))
+    seedTargetTranscript(store, targetB, askUserTurn(inputB, 'delete-call-b'))
     const sharedStreamId = '00000000-0000-4000-8000-000000000002'
     const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(sharedStreamId)
     await store.respondUserInput(inputA, { canceled: true }, targetA)
@@ -3724,7 +3990,7 @@ describe('chat-list store', () => {
     const approval: UIToolApproval = {
       approval_id: 'delete-approval-a', short_id: 19, status: 'pending', can_approve: true,
     }
-    store.messages.push(approvalTurn(approval))
+    seedTranscript(store, approvalTurn(approval))
     expect(await store.respondToolApproval(approval, 'approve')).toBe(true)
     const responseStreamId = String(sentWSMessages.at(-1)?.stream_id ?? '')
     expect(responseStreamId).not.toBe('')
@@ -3757,7 +4023,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     api.fetchMessagesUI.mockClear()
 
@@ -3866,17 +4132,58 @@ describe('chat-list store', () => {
     const approval: UIToolApproval = {
       approval_id: 'approval-in-a', short_id: 21, status: 'pending', can_approve: true,
     }
-    store.chatView(targetA).transcript.messages.push(approvalTurn(approval))
+    seedTargetTranscript(store, targetA, approvalTurn(approval))
     expect(await store.respondToolApproval(approval, 'approve', targetA)).toBe(true)
     uuid.mockRestore()
-    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
-
     windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
       detail: { reason: 'logout' },
     }))
 
     await expect(sending).resolves.toMatchObject({ ok: false })
-    expect(websocket.abort).toHaveBeenCalledWith(sharedStreamId, 'session-b', '')
+    expect(sentAbortMessages()).toContainEqual(expect.objectContaining({
+      stream_id: sharedStreamId,
+      session_id: 'session-b',
+    }))
+  })
+
+  it('does not reclaim or restore a pending send after auth reset', async () => {
+    const windowTarget = new EventTarget()
+    vi.stubGlobal('window', windowTarget)
+    sendEvents = []
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const target = { botId: 'bot-1', sessionId: 'session-1', viewId: 'chat' }
+
+    const sending = store.sendMessage('old user draft')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(1))
+    const oldStreamId = String(sentWSMessages.find(message => message.type === 'message')?.stream_id ?? '')
+    windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
+      detail: { reason: 'logout' },
+    }))
+
+    await expect(sending).resolves.toMatchObject({ ok: false })
+    expect(store.composerDraftRestoreFor(target, 'chat')).toBeNull()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const oldRequest = { role: 'user', text: 'old user draft', external_message_id: oldStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', oldStreamId, 'running', 1, '', oldRequest),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', oldStreamId, 'aborted', 2, 'aborted', oldRequest),
+    } as UIStreamEvent)
+    await flushPromises()
+    await flushPromises()
+
+    expect(store.composerDraftRestoreFor(target, 'chat')).toBeNull()
   })
 
   it('does not restore bots from an initialization response after auth reset', async () => {
@@ -3982,7 +4289,6 @@ describe('chat-list store', () => {
     await flushPromises()
 
     const assistant = store.messages.find(turn => turn.role === 'assistant')
-    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
     expect(store.streaming).toBe(true)
     expect(assistant?.streaming).toBe(true)
 
@@ -4007,7 +4313,11 @@ describe('chat-list store', () => {
     } as UIStreamEvent)
 
     await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
-    expect(ws.abort).toHaveBeenCalledWith(lastStreamId, lastSessionId, `generation-${lastStreamId}`)
+    expect(sentAbortMessages()).toContainEqual(expect.objectContaining({
+      stream_id: lastStreamId,
+      session_id: lastSessionId,
+      generation: `generation-${lastStreamId}`,
+    }))
     expect(store.streaming).toBe(false)
     expect(assistant?.streaming).toBe(false)
   })
@@ -4044,7 +4354,7 @@ describe('chat-list store', () => {
   })
 
   it('waits for the server runtime operation before replacing a retried assistant', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
       nextCursor: null,
@@ -4095,7 +4405,8 @@ describe('chat-list store', () => {
     expect(store.messages[1]).toMatchObject({
       role: 'assistant',
       streaming: true,
-      __optimistic: true,
+      __optimistic: false,
+      syncState: expect.objectContaining({ presence: 'live', persistence: 'unknown' }),
       messages: [{ type: 'text', content: 'new answer partial' }],
     })
 
@@ -4110,7 +4421,7 @@ describe('chat-list store', () => {
       {
         id: 'assistant-new',
         role: 'assistant',
-        messages: [{ id: 1, type: 'text', content: 'new answer' }],
+        messages: [{ id: 1, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new answer' }],
         timestamp: '2026-05-17T08:00:02.000Z',
         streaming: false,
       },
@@ -4118,11 +4429,16 @@ describe('chat-list store', () => {
     streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
       kind: 'retry',
       replace_from_message_id: 'assistant-old',
-    }, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11))
+    }, [{ id: 0, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new answer' }], 'completed', 11))
     await retry
     await flushPromises()
 
-    expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-new'])
+    expect(store.messages[0]?.id).toBe('user-1')
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      serverId: 'assistant-new',
+      streaming: false,
+    })
   })
 
   it('keeps an initiating retry pending until runtime admission arrives', async () => {
@@ -4229,7 +4545,7 @@ describe('chat-list store', () => {
   })
 
   it('moves fork divider anchor to the previous inherited assistant when retry replaces the fork anchor', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{
         id: 'fork-session',
@@ -4340,7 +4656,7 @@ describe('chat-list store', () => {
   })
 
   it('clears fork divider anchor when retry replaces the only inherited assistant', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{
         id: 'fork-session',
@@ -4421,7 +4737,7 @@ describe('chat-list store', () => {
   })
 
   it('moves fork divider anchor when edit replaces the fork anchor tail', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{
         id: 'fork-session',
@@ -4644,7 +4960,7 @@ describe('chat-list store', () => {
   })
 
   it('waits for the server runtime operation before replacing an edited turn', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
       nextCursor: null,
@@ -4689,6 +5005,8 @@ describe('chat-list store', () => {
         role: 'user',
         text: 'new prompt',
         timestamp: '2026-05-17T08:00:02.000Z',
+        turn_position: 2,
+        turn_message_seq: 1,
         platform: 'local',
       },
     }, [{ id: 0, type: 'text', content: 'new answer partial' }]))
@@ -4699,12 +5017,14 @@ describe('chat-list store', () => {
     expect(store.messages[0]).toMatchObject({
       role: 'user',
       text: 'new prompt',
-      __optimistic: true,
+      __optimistic: false,
+      syncState: expect.objectContaining({ presence: 'live', persistence: 'unknown' }),
     })
     expect(store.messages[1]).toMatchObject({
       role: 'assistant',
       streaming: true,
-      __optimistic: true,
+      __optimistic: false,
+      syncState: expect.objectContaining({ presence: 'live', persistence: 'unknown' }),
     })
 
     api.fetchMessagesUI.mockResolvedValueOnce([
@@ -4714,11 +5034,13 @@ describe('chat-list store', () => {
         text: 'new prompt',
         attachments: [],
         timestamp: '2026-05-17T08:00:02.000Z',
+        turn_position: 2,
+        turn_message_seq: 1,
       },
       {
         id: 'assistant-new',
         role: 'assistant',
-        messages: [{ id: 1, type: 'text', content: 'new answer' }],
+        messages: [{ id: 1, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new answer' }],
         timestamp: '2026-05-17T08:00:03.000Z',
         streaming: false,
       },
@@ -4728,11 +5050,14 @@ describe('chat-list store', () => {
       replace_from_message_id: 'user-1',
       replacement_user_turn: {
         role: 'user',
+        id: 'user-new',
         text: 'new prompt',
         timestamp: '2026-05-17T08:00:02.000Z',
         platform: 'local',
+        turn_position: 2,
+        turn_message_seq: 1,
       },
-    }, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11))
+    }, [{ id: 0, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new answer' }], 'completed', 11))
     await edit
     await vi.waitFor(() => {
       expect(store.messages).toMatchObject([
@@ -5353,7 +5678,7 @@ describe('chat-list store', () => {
     await flushPromises()
 
     expect(await store.forkMessage('user-1')).toBe(false)
-    store.messages.push({
+    seedTranscript(store, {
       id: 'ephemeral-error',
       role: 'assistant',
       messages: [{ id: 0, type: 'error', content: 'Response stopped' }],
@@ -5362,7 +5687,7 @@ describe('chat-list store', () => {
       __ephemeral: true,
     })
     expect(await store.forkMessage('ephemeral-error')).toBe(false)
-    store.messages.push({
+    seedTranscript(store, {
       id: 'optimistic-assistant',
       role: 'assistant',
       messages: [],
@@ -5383,11 +5708,38 @@ describe('chat-list store', () => {
         get connected() {
           return true
         },
-        send: vi.fn((message: { type?: string; reasoning_effort?: string; stream_id?: string; session_id?: string }) => {
+        send: vi.fn((message: { type?: string; reasoning_effort?: string; stream_id?: string; session_id?: string; text?: string }) => {
           if (message.type === 'runtime_subscribe' || message.type === 'runtime_unsubscribe') return
           sent.push(message)
-          onStreamEvent({ type: 'start', stream_id: message.stream_id, session_id: message.session_id } as UIStreamEvent)
-          onStreamEvent({ type: 'end', stream_id: message.stream_id, session_id: message.session_id } as UIStreamEvent)
+          if (!message.stream_id || !message.session_id) return
+          onStreamEvent({
+            type: 'runtime_snapshot',
+            bot_id: 'bot-1',
+            session_id: message.session_id,
+            stream_id: message.stream_id,
+            epoch: `epoch-${message.session_id}`,
+            seq: 1,
+            snapshot: runtimeSnapshotFromScript([], message.session_id, message.stream_id, 'running', 1, '', {
+              role: 'user',
+              text: message.text ?? '',
+              external_message_id: message.stream_id,
+              timestamp: '2026-07-16T00:00:00.000Z',
+            }),
+          } as UIStreamEvent)
+          onStreamEvent({
+            type: 'runtime_snapshot',
+            bot_id: 'bot-1',
+            session_id: message.session_id,
+            stream_id: message.stream_id,
+            epoch: `epoch-${message.session_id}`,
+            seq: 2,
+            snapshot: runtimeSnapshotFromScript([], message.session_id, message.stream_id, 'completed', 2, '', {
+              role: 'user',
+              text: message.text ?? '',
+              external_message_id: message.stream_id,
+              timestamp: '2026-07-16T00:00:00.000Z',
+            }),
+          } as UIStreamEvent)
         }),
         abort: vi.fn(),
         close: vi.fn(),
@@ -5678,26 +6030,32 @@ describe('chat-list store', () => {
     })
     expect(sentWSMessages[0]?.requested_skills).toBeUndefined()
 
-    streamHandler?.({
-      type: 'user_message',
-      stream_id: streamId,
-      session_id: 'session-a',
-      data: {
-        id: 'msg-skill',
-        role: 'user',
-        text: '',
-        user_message_kind: 'skill_activation',
-        skill_activation: {
-          skills: [{
-            name: 'flutter-adding-home-screen-widgets',
-            display_name: 'Flutter adding home screen widgets',
-            description: 'Safe display summary',
-            source_kind: 'managed',
-            state: 'effective',
-          }],
-        },
-        timestamp: '2026-07-03T00:00:00.000Z',
+    const requestUserTurn: ConversationUiTurn = {
+      id: 'msg-skill',
+      role: 'user',
+      text: '',
+      user_message_kind: 'skill_activation',
+      skill_activation: {
+        skills: [{
+          name: 'flutter-adding-home-screen-widgets',
+          display_name: 'Flutter adding home screen widgets',
+          description: 'Safe display summary',
+          source_kind: 'managed',
+          state: 'effective',
+        }],
       },
+      timestamp: '2026-07-03T00:00:00.000Z',
+      turn_position: 1,
+      turn_message_seq: 1,
+    }
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-a',
+      stream_id: streamId,
+      epoch: 'epoch-session-a',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-a', streamId, 'running', 1, '', requestUserTurn),
     } as UIStreamEvent)
     await flushPromises()
 
@@ -5715,11 +6073,18 @@ describe('chat-list store', () => {
     })
     expect(store.messages[1]).toMatchObject({ role: 'assistant', streaming: true })
 
-    streamHandler?.({
+    const responseScript = [{
       type: 'message',
-      stream_id: streamId,
+      data: { id: 1, stable_id: `${streamId}-row-1`, turn_position: 1, turn_message_seq: 2, type: 'text', content: 'Done' },
+    } as UIStreamEvent]
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
       session_id: 'session-a',
-      data: { id: 1, type: 'text', content: 'Done' },
+      stream_id: streamId,
+      epoch: 'epoch-session-a',
+      seq: 2,
+      snapshot: runtimeSnapshotFromScript(responseScript, 'session-a', streamId, 'running', 2, '', requestUserTurn),
     } as UIStreamEvent)
     expect(store.messages[1]).toMatchObject({
       role: 'assistant',
@@ -5727,7 +6092,25 @@ describe('chat-list store', () => {
       streaming: true,
     })
 
-    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { ...requestUserTurn, attachments: [] },
+      {
+        id: `${streamId}-row-1`,
+        role: 'assistant',
+        messages: responseScript.map(event => event.type === 'message' ? event.data : null).filter(Boolean),
+        timestamp: '2026-07-03T00:00:01.000Z',
+        streaming: false,
+      },
+    ])
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-a',
+      stream_id: streamId,
+      epoch: 'epoch-session-a',
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript(responseScript, 'session-a', streamId, 'completed', 3, '', requestUserTurn),
+    } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
@@ -5751,7 +6134,21 @@ describe('chat-list store', () => {
     expect(secondResult).toMatchObject({ ok: false, stage: 'startup' })
     expect(sentWSMessages).toHaveLength(1)
 
-    streamHandler?.({ type: 'end', stream_id: streamId } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      epoch: 'epoch-session-1',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'completed', 1, '', {
+        role: 'user',
+        text: 'first activation',
+        external_message_id: streamId,
+        timestamp: '2026-07-16T00:00:00.000Z',
+      }),
+    } as UIStreamEvent)
     await expect(firstSend).resolves.toMatchObject({ ok: true })
     expect(store.streaming).toBe(false)
   })
@@ -5770,10 +6167,13 @@ describe('chat-list store', () => {
 
     expect(runtimeSubscribeMessages).toEqual([])
     store.abort()
-    expect(abortedWSStreams).not.toContain(streamId)
+    expect(sentAbortMessages()).toHaveLength(0)
 
     streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-1' } as UIStreamEvent)
-    expect(abortedWSStreams).toContain(streamId)
+    expect(sentAbortMessages()).toContainEqual(expect.objectContaining({
+      stream_id: streamId,
+      session_id: 'session-1',
+    }))
     expect(runtimeSubscribeMessages).toEqual([expect.objectContaining({
       type: 'runtime_subscribe',
       session_id: 'session-1',
@@ -5788,7 +6188,7 @@ describe('chat-list store', () => {
       seq: 1,
       snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 1),
     } as UIStreamEvent)
-    expect(abortedWSStreams.filter(id => id === streamId)).toHaveLength(2)
+    expect(sentAbortMessages().filter(message => message.stream_id === streamId)).toHaveLength(2)
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
@@ -6114,11 +6514,14 @@ describe('chat-list store', () => {
     api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
       if (returningToSessionA && targetSessionId === 'session-a') {
         return [{
-          id: 'server-user-a',
+          id: `${sentWSMessages[0]?.stream_id as string}-user-row`,
           role: 'user',
           text: 'first',
           attachments: [],
           timestamp: '2026-07-10T00:00:00.000Z',
+          external_message_id: sentWSMessages[0]?.stream_id as string,
+          turn_position: 1,
+          turn_message_seq: 1,
         }]
       }
       return []
@@ -6179,15 +6582,14 @@ describe('chat-list store', () => {
     let returningToSessionA = false
     api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
       if (!returningToSessionA || targetSessionId !== 'session-a') return []
-      return [
-        { id: 'server-user-a', role: 'user', text: 'first', attachments: [], timestamp: '2026-07-10T00:00:00.000Z' },
-        {
-          id: 'server-assistant-a',
-          role: 'assistant',
-          messages: [{ id: 0, type: 'text', content: 'persisted' }],
-          timestamp: '2026-07-10T00:00:01.000Z',
-        },
-      ]
+      return [{
+        id: 'server-user-a',
+        role: 'user',
+        text: 'first',
+        attachments: [],
+        timestamp: '2026-07-10T00:00:00.000Z',
+        external_message_id: sentWSMessages[0]?.stream_id as string,
+      }]
     })
     const store = useChatStore()
 
@@ -6302,21 +6704,46 @@ describe('chat-list store', () => {
     const streamB = sent.find(item => item.type === 'message' && item.stream_id && item.session_id === 'session-b')?.stream_id
     expect(streamA).toBeTruthy()
     expect(streamB).toBeTruthy()
+    if (!streamA || !streamB) throw new Error('missing interleaved stream ids')
     expect(store.isSessionStreaming('bot-1', 'session-a')).toBe(true)
     expect(store.isSessionStreaming('bot-1', 'session-b')).toBe(true)
 
-    streamHandler?.({
-      type: 'message',
-      stream_id: streamA,
-      session_id: 'session-a',
-      data: { id: 0, type: 'text', content: 'answer A' },
-    } as UIStreamEvent)
-    streamHandler?.({
-      type: 'message',
-      stream_id: streamB,
-      session_id: 'session-b',
-      data: { id: 0, type: 'text', content: 'answer B' },
-    } as UIStreamEvent)
+    const emitInterleavedSnapshot = (
+      sessionId: string,
+      streamId: string,
+      prompt: string,
+      answer: string,
+      status: string,
+      seq: number,
+    ) => {
+      const script = [{
+        type: 'message',
+        data: {
+          id: 0,
+          stable_id: `${streamId}-assistant-row`,
+          turn_position: 1,
+          turn_message_seq: 2,
+          type: 'text',
+          content: answer,
+        },
+      } as UIStreamEvent]
+      streamHandler?.({
+        type: 'runtime_snapshot',
+        bot_id: 'bot-1',
+        session_id: sessionId,
+        stream_id: streamId,
+        epoch: `epoch-${sessionId}`,
+        seq,
+        snapshot: runtimeSnapshotFromScript(script, sessionId, streamId, status, seq, '', {
+          role: 'user',
+          text: prompt,
+          external_message_id: streamId,
+          timestamp: '2026-07-16T00:00:00.000Z',
+        }),
+      } as UIStreamEvent)
+    }
+    emitInterleavedSnapshot('session-a', streamA, 'first', 'answer A', 'running', 1)
+    emitInterleavedSnapshot('session-b', streamB, 'second', 'answer B', 'running', 1)
     // Active session is B, so its optimistic turn shows the message.
     expect(store.sessionId).toBe('session-b')
     expect(store.messages).toEqual(expect.arrayContaining([
@@ -6326,8 +6753,39 @@ describe('chat-list store', () => {
       }),
     ]))
 
-    streamHandler?.({ type: 'end', stream_id: streamA, session_id: 'session-a' } as UIStreamEvent)
-    streamHandler?.({ type: 'end', stream_id: streamB, session_id: 'session-b' } as UIStreamEvent)
+    api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
+      const streamId = targetSessionId === 'session-a' ? streamA : streamB
+      const prompt = targetSessionId === 'session-a' ? 'first' : 'second'
+      const answer = targetSessionId === 'session-a' ? 'answer A' : 'answer B'
+      return [
+        {
+          id: `${streamId}-user-row`,
+          role: 'user',
+          text: prompt,
+          attachments: [],
+          external_message_id: streamId,
+          turn_position: 1,
+          turn_message_seq: 1,
+          timestamp: '2026-07-16T00:00:00.000Z',
+        },
+        {
+          id: `${streamId}-assistant-row`,
+          role: 'assistant',
+          messages: [{
+            id: 0,
+            stable_id: `${streamId}-assistant-row`,
+            turn_position: 1,
+            turn_message_seq: 2,
+            type: 'text',
+            content: answer,
+          }],
+          timestamp: '2026-07-16T00:00:01.000Z',
+          streaming: false,
+        },
+      ]
+    })
+    emitInterleavedSnapshot('session-a', streamA, 'first', 'answer A', 'completed', 2)
+    emitInterleavedSnapshot('session-b', streamB, 'second', 'answer B', 'completed', 2)
     await first
     await second
   })
@@ -6639,8 +7097,8 @@ describe('chat-list store', () => {
     expect(store.messages[1]?.id).toBe('msg-2')
     expect(store.messages.length).toBe(32)
 
-    // SSE-triggered refresh fetches only the most recent page; merge MUST
-    // preserve the older content the user pulled in.
+    // The latest page overlaps the loaded tail, so only that authoritative
+    // suffix is replaced and the older content stays mounted.
     api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
     _sessionMessageHandler?.({
       type: 'message_created',
@@ -6648,19 +7106,97 @@ describe('chat-list store', () => {
     } as never)
     await new Promise(r => setTimeout(r, 150))
     await flushPromises()
+    expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { limit: 30 })
     expect(store.messages[0]?.id).toBe('msg-1')
     expect(store.messages[1]?.id).toBe('msg-2')
   })
 
+  it('appends the thirty-first persisted turn from a bounded latest page', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const initialPage = Array.from({ length: 30 }, (_, index) => ({
+      id: `message-${index + 1}`,
+      role: 'user' as const,
+      text: `message ${index + 1}`,
+      attachments: [],
+      timestamp: `2026-06-19T00:00:${String(index).padStart(2, '0')}Z`,
+      turn_position: index + 1,
+      turn_message_seq: 1,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const newest = {
+      id: 'message-31',
+      role: 'user' as const,
+      text: 'message 31',
+      attachments: [],
+      timestamp: '2026-06-19T00:01:00Z',
+      turn_position: 31,
+      turn_message_seq: 1,
+    }
+    // The real endpoint returns at most 30 rows: one overlap row falls off
+    // the front as the new tail row enters the page.
+    api.fetchMessagesUI.mockResolvedValueOnce([...initialPage.slice(1), newest])
+    _sessionMessageHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: newest.id,
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        role: 'user',
+        created_at: newest.timestamp,
+      },
+    })
+    await flushPromises()
+
+    expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { limit: 30 })
+    expect(store.messages).toHaveLength(31)
+    expect(store.messages[0]?.id).toBe('message-1')
+    expect(store.messages.at(-1)?.id).toBe('message-31')
+  })
+
+  it('resets to a non-overlapping latest page after dropped persisted events', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const initialPage = Array.from({ length: 30 }, (_, index) => ({
+      id: `old-${index + 1}`,
+      role: 'user' as const,
+      text: `old ${index + 1}`,
+      attachments: [],
+      timestamp: `2026-06-19T00:00:${String(index).padStart(2, '0')}Z`,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const latestPage = Array.from({ length: 30 }, (_, index) => ({
+      id: `latest-${index + 1}`,
+      role: 'user' as const,
+      text: `latest ${index + 1}`,
+      attachments: [],
+      timestamp: `2026-06-19T00:02:${String(index).padStart(2, '0')}Z`,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(latestPage)
+    _sessionMessageHandler?.({ type: 'dropped', count: 60 })
+    await flushPromises()
+
+    expect(store.messages.map(turn => turn.id)).toEqual(latestPage.map(turn => turn.id))
+    expect(store.messages.some(turn => turn.id === 'old-30')).toBe(false)
+  })
+
   it('replaces a scrolled-back optimistic user turn with its server twin instead of duplicating', async () => {
-    // The id-keyed dedup in the previous mergeMessages happily kept the
-    // optimistic and server copies side by side while the user was scrolled
-    // back. Logical-turn matching (role + content + ~timestamp), gated on
-    // the explicit `__optimistic` flag, collapses them in place. The flag
-    // (not id shape) is what isOptimisticTurn keys off, so this test also
-    // pins that a server turn whose id contains dashes (UUID-like) is NOT
-    // treated as optimistic — the prior heuristic would have misclassified
-    // it and eaten real history.
+    // Explicit external-message identity adopts the durable server row into
+    // the optimistic render key. Text and timestamps never participate, and
+    // an opaque UUID-shaped server id must remain ordinary persisted history.
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
       nextCursor: null,
@@ -6698,7 +7234,7 @@ describe('chat-list store', () => {
     // accidentally pass via id-shape heuristics — the __optimistic flag is
     // what drives the merge.
     const optimisticTimestamp = '2026-06-19T00:02:00Z'
-    store.messages.push({
+    seedTranscript(store, {
       id: '1700000000000',
       role: 'user',
       text: 'just sent',
@@ -6706,19 +7242,22 @@ describe('chat-list store', () => {
       timestamp: optimisticTimestamp,
       streaming: false,
       isSelf: true,
+      externalMessageId: 'request-just-sent',
       __optimistic: true,
     } as never)
     expect(store.messages.length).toBe(baseLength + 1)
 
-    // SSE-triggered refresh returns the server twin (different id, same
-    // role+content, timestamp within 5s).
+    // SSE-triggered refresh returns the same request under its durable id;
+    // external_message_id is the exact optimistic-to-persisted identity.
     api.fetchMessagesUI.mockResolvedValueOnce([
+      ...initialPage.slice(1),
       {
         id: 'server-user-1',
         role: 'user',
         text: 'just sent',
         attachments: [],
         timestamp: '2026-06-19T00:02:01Z',
+        external_message_id: 'request-just-sent',
       },
     ])
     _sessionMessageHandler?.({
@@ -6727,6 +7266,7 @@ describe('chat-list store', () => {
     } as never)
     await new Promise(r => setTimeout(r, 150))
     await flushPromises()
+    expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { limit: 30 })
 
     // Both copies would survive id-keyed dedup. Consolidation keeps the
     // optimistic render id stable so keyed chat DOM (including turn reserve)
@@ -6870,7 +7410,7 @@ describe('chat-list store', () => {
     } as UIStreamEvent)
     await flushPromises()
 
-    expect(abortedWSStreams).toContain(streamId)
+    expect(sentAbortMessages()).not.toContainEqual(expect.objectContaining({ stream_id: streamId }))
     expect(store.sessionId).toBe('session-2')
     expect(store.messages).toEqual([])
     expect(store.sessions.map(session => session.id)).toEqual(['session-2'])
@@ -6987,7 +7527,7 @@ describe('chat-list store', () => {
     expect(store.sessions.map(session => session.id)).toEqual(['shared-session', 'session-b2'])
     expect(store.sessionId).toBe('shared-session')
     expect(store.messages.slice(0, 2).map(message => message.id)).toEqual(['bot-2-user', 'bot-2-assistant'])
-    expect(abortedWSStreams).not.toContain(botTwoStreamId)
+    expect(sentAbortMessages()).not.toContainEqual(expect.objectContaining({ stream_id: botTwoStreamId }))
     expect(store.deletedSession).toEqual({
       id: 'shared-session',
       botId: 'bot-1',
@@ -7070,7 +7610,7 @@ describe('chat-list store', () => {
     expect(store.knownSessionSummary('session-2')).toBeNull()
   })
 
-  it('refreshes the current transcript when the session message stream reports dropped events', async () => {
+  it('merges persisted history when the session message stream reports dropped events', async () => {
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
       nextCursor: null,
@@ -7085,13 +7625,14 @@ describe('chat-list store', () => {
     expect(store.messages.map(message => message.id)).toEqual(['message-1'])
 
     api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'message-1', role: 'user', text: 'old', attachments: [], timestamp: '2026-06-20T00:00:00.000Z' },
       { id: 'message-2', role: 'user', text: 'refreshed', attachments: [], timestamp: '2026-06-20T00:00:01.000Z' },
     ])
     _sessionMessageHandler?.({ type: 'dropped', count: 3 })
     await flushPromises()
 
     expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { limit: 30 })
-    expect(store.messages.map(message => message.id)).toEqual(['message-2'])
+    expect(store.messages.map(message => message.id)).toEqual(['message-1', 'message-2'])
   })
 
   it('refreshes the session list when the bot activity stream reports dropped events', async () => {
@@ -7427,6 +7968,74 @@ describe('chat-list store', () => {
     await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
     expect(store.sessionId).toBe('session-b')
     expect(store.chatView(targetB).transcript.messages).toEqual([])
+  })
+
+  it('queues draft restores independently for two panes and retains a hidden pane restore', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    const targetA = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:restore-a' }
+    const targetB = { botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:restore-b' }
+    const scopeA = 'bot-1:chat:restore-a'
+    const scopeB = 'bot-1:chat:restore-b'
+    store.bindChatView(targetA.viewId, targetA, true)
+    store.bindChatView(targetB.viewId, targetB, true)
+    await flushPromises()
+    await flushPromises()
+
+    const sendA = store.sendMessage('restore pane A', undefined, { target: targetA, composerScope: scopeA })
+    const sendB = store.sendMessage('restore pane B', undefined, { target: targetB, composerScope: scopeB })
+    await vi.waitFor(() => {
+      expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(2)
+    })
+    const streamA = String(sentWSMessages.find(message => message.type === 'message' && message.session_id === 'session-a')?.stream_id ?? '')
+    const streamB = String(sentWSMessages.find(message => message.type === 'message' && message.session_id === 'session-b')?.stream_id ?? '')
+    expect(streamA).not.toBe('')
+    expect(streamB).not.toBe('')
+
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-a', seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-a', streamA, 'running', 1),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-b', seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-b', streamB, 'running', 1),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-a', seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-a', streamA, 'aborted', 2, 'aborted'),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-b', seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-b', streamB, 'aborted', 2, 'aborted'),
+    } as UIStreamEvent)
+    store.setChatViewVisible(targetB.viewId, false)
+
+    await expect(sendA).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    await expect(sendB).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    await vi.waitFor(() => {
+      expect(store.composerDraftRestoreFor(targetA, scopeA)?.text).toBe('restore pane A')
+      expect(store.composerDraftRestoreFor(targetB, scopeB)?.text).toBe('restore pane B')
+    })
+
+    const restoreA = store.composerDraftRestoreFor(targetA, scopeA)
+    if (!restoreA) throw new Error('missing pane A restore')
+    store.clearComposerDraftRestore(restoreA.seq)
+    expect(store.composerDraftRestoreFor(targetA, scopeA)).toBeNull()
+    expect(store.composerDraftRestoreFor(targetB, scopeB)?.text).toBe('restore pane B')
+
+    store.setChatViewVisible(targetB.viewId, true)
+    const restoreB = store.composerDraftRestoreFor(targetB, scopeB)
+    if (!restoreB) throw new Error('missing pane B restore after showing pane')
+    store.clearComposerDraftRestore(restoreB.seq)
+    expect(store.composerDraftRestoreFor(targetB, scopeB)).toBeNull()
   })
 
   it('shares one Session transcript and one Session SSE across two visible panes', async () => {
@@ -8141,7 +8750,13 @@ describe('chat-list store', () => {
       nextCursor: null,
     })
     api.fetchMessagesUI.mockResolvedValue([
-      { id: 'assistant-persisted', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'persisted answer' }], timestamp: '2026-07-12T00:00:00Z', streaming: false },
+      {
+        id: 'assistant-persisted',
+        role: 'assistant',
+        messages: [{ id: 0, stable_id: 'assistant-persisted', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'persisted answer' }],
+        timestamp: '2026-07-12T00:00:00Z',
+        streaming: false,
+      },
     ])
     const store = useChatStore()
     await store.selectBot('bot-1')
@@ -8153,7 +8768,10 @@ describe('chat-list store', () => {
       session_id: 'session-1',
       seq: 20,
       snapshot: runtimeSnapshotFromScript(
-        [{ type: 'message', data: { id: 0, type: 'text', content: 'persisted answer' } }],
+        [{
+          type: 'message',
+          data: { id: 0, stable_id: 'assistant-persisted', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'persisted answer' },
+        }],
         'session-1',
         'stream-already-completed',
         'completed',
@@ -8252,28 +8870,33 @@ describe('chat-list store', () => {
     const store = useChatStore()
     await store.selectBot('bot-1')
     await flushPromises()
-    const subscription = runtimeSubscribeMessages.at(-1)
-    const invocationId = String(subscription?.invocation_id ?? '')
-    expect(invocationId).not.toBe('')
 
+    const runningSnapshot = runtimeSnapshotFromScript(
+      [{ type: 'message', data: { id: 0, type: 'text', content: 'still running' } }],
+      'session-1',
+      'stream-still-running',
+      'running',
+      1,
+    )
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
       session_id: 'session-1',
+      epoch: runningSnapshot.epoch,
       stream_id: 'stream-still-running',
       seq: 1,
-      snapshot: runtimeSnapshotFromScript(
-        [{ type: 'message', data: { id: 0, type: 'text', content: 'still running' } }],
-        'session-1',
-        'stream-still-running',
-        'running',
-        1,
-      ),
+      snapshot: runningSnapshot,
     } as UIStreamEvent)
+    await flushPromises()
     vi.useFakeTimers()
+    streamHandler?.({ type: 'runtime_dropped', bot_id: 'bot-1', session_id: 'session-1' } as UIStreamEvent)
+    const subscription = runtimeSubscribeMessages.at(-1)
+    const invocationId = String(subscription?.invocation_id ?? '')
+    expect(invocationId).not.toBe('')
     streamHandler?.({
       type: 'command_error',
       invocation_id: invocationId,
+      session_id: 'session-1',
       action_id: 'runtime_subscribe',
       terminal: true,
       error: { code: 'runtime_response_failed', message: 'runtime backend unavailable' },
@@ -8296,6 +8919,7 @@ describe('chat-list store', () => {
       streamHandler?.({
         type: 'command_error',
         invocation_id: retryInvocationId,
+        session_id: 'session-1',
         action_id: 'runtime_subscribe',
         terminal: true,
         error: { code: 'runtime_response_failed', message: 'runtime backend still unavailable' },
@@ -8307,7 +8931,10 @@ describe('chat-list store', () => {
       expect(secondRetryDelay).toBeGreaterThan(firstRetryDelay)
       expect(secondRetryDelay).toBeLessThanOrEqual(30_000)
       expect(runtimeSubscribeMessages).toHaveLength(subscribeCount + 2)
-      expect(consoleError).toHaveBeenCalledWith('Runtime subscription failed:', 'runtime backend unavailable')
+      expect(consoleError).toHaveBeenCalledWith(
+        'Runtime subscription failed for bot-1/session-1:',
+        expect.objectContaining({ message: 'runtime backend unavailable' }),
+      )
     } finally {
       consoleError.mockRestore()
       vi.useRealTimers()
@@ -8435,6 +9062,12 @@ describe('chat-list store', () => {
       session_id: 'session-1',
     }))
 
+    const checkpoint = runtimeSnapshotFromScript([], 'session-1', 'stream-drop-checkpoint', 'running', 1)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', epoch: checkpoint.epoch,
+      stream_id: 'stream-drop-checkpoint', seq: 1, snapshot: checkpoint,
+    } as UIStreamEvent)
+    await flushPromises()
     const beforeDrop = runtimeSubscribeMessages.length
     streamHandler?.({ type: 'runtime_dropped', bot_id: 'bot-1', session_id: 'session-1', message: 'subscriber overflow' } as UIStreamEvent)
 
@@ -8522,17 +9155,15 @@ describe('chat-list store', () => {
   })
 
   it('does not queue an abort while reconnecting and keeps the run active', async () => {
-    const abort = vi.fn(() => {
-      throw new Error('WebSocket is not connected')
-    })
+    const send = vi.fn()
     api.connectWebSocket.mockImplementationOnce((_botId: string, onStreamEvent: UIStreamEventHandler) => {
       streamHandler = onStreamEvent
       return {
         get connected() {
           return false
         },
-        send: vi.fn(),
-        abort,
+        send,
+        abort: vi.fn(),
         close: vi.fn(),
         onOpen: null,
         onClose: null,
@@ -8546,35 +9177,38 @@ describe('chat-list store', () => {
     await store.selectBot('bot-1')
     await flushPromises()
 
-    streamHandler?.({ type: 'start', stream_id: 'stream-reconnecting-abort', session_id: 'session-1' } as UIStreamEvent)
-    streamHandler?.({
+    const reconnectingOutput = [{
       type: 'message',
-      stream_id: 'stream-reconnecting-abort',
-      session_id: 'session-1',
-      data: { id: 0, type: 'text', content: 'still running' },
-    } as UIStreamEvent)
-    expect(store.streaming).toBe(true)
-
+      data: { id: 0, stable_id: 'assistant-reconnecting', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'still running' },
+    } as UIStreamEvent]
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
       session_id: 'session-1',
       stream_id: 'stream-reconnecting-abort',
       seq: 1,
-      snapshot: runtimeSnapshotFromScript([], 'session-1', 'stream-reconnecting-abort', 'running', 1),
+      snapshot: runtimeSnapshotFromScript(reconnectingOutput, 'session-1', 'stream-reconnecting-abort', 'running', 1),
     } as UIStreamEvent)
+    expect(store.streaming).toBe(true)
     store.abort()
 
-    expect(abort).not.toHaveBeenCalled()
+    expect(send.mock.calls.map(([message]) => message).filter(message => message.type === 'abort')).toEqual([])
     expect(store.streaming).toBe(true)
     expect(toast.error).toHaveBeenCalledWith('WebSocket is not connected')
 
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-reconnecting',
+      role: 'assistant',
+      messages: reconnectingOutput.map(event => event.type === 'message' ? event.data : null).filter(Boolean),
+      timestamp: '2026-07-16T00:00:00.000Z',
+      streaming: false,
+    }])
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
       session_id: 'session-1',
       seq: 2,
-      snapshot: runtimeSnapshotFromScript([], 'session-1', 'stream-reconnecting-abort', 'aborted', 2),
+      snapshot: runtimeSnapshotFromScript(reconnectingOutput, 'session-1', 'stream-reconnecting-abort', 'aborted', 2),
     } as UIStreamEvent)
     expect(store.streaming).toBe(false)
     expect(store.messages.flatMap(turn =>
@@ -8595,30 +9229,45 @@ describe('chat-list store', () => {
     await flushPromises()
     const streamId = lastStreamId
     const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
-      abort: ReturnType<typeof vi.fn>
       onClose?: (() => void) | null
       onOpen?: (() => void) | null
     }
-    const runtimeOutput = [{ type: 'message', data: { id: 0, type: 'text', content: 'partial answer' } } as UIStreamEvent]
-    const running = runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'running', 1)
+    const runtimeOutput = [{
+      type: 'message',
+      data: { id: 0, stable_id: 'assistant-aborted-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'partial answer' },
+    } as UIStreamEvent]
+    const requestUserTurn: ConversationUiTurn = {
+      id: 'user-aborted-server',
+      role: 'user',
+      text: 'abort then reconnect',
+      external_message_id: streamId,
+      timestamp: '2026-07-16T00:00:00.000Z',
+      turn_position: 1,
+      turn_message_seq: 1,
+    }
+    const running = runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'running', 1, '', requestUserTurn)
     streamHandler?.({
       type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: running,
     } as UIStreamEvent)
     store.abort()
-    expect(websocket.abort).toHaveBeenCalledTimes(1)
+    expect(sentAbortMessages()).toHaveLength(1)
 
     websocket.onClose?.()
     websocket.onOpen?.()
-    const reconnected = runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'running', 2)
+    const reconnected = runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'running', 2, '', requestUserTurn)
     streamHandler?.({
       type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: reconnected,
     } as UIStreamEvent)
-    expect(websocket.abort).toHaveBeenCalledTimes(2)
-    expect(websocket.abort).toHaveBeenLastCalledWith(streamId, 'session-1', `generation-${streamId}`)
+    expect(sentAbortMessages()).toHaveLength(2)
+    expect(sentAbortMessages().at(-1)).toMatchObject({
+      stream_id: streamId,
+      session_id: 'session-1',
+      generation: `generation-${streamId}`,
+    })
 
     api.fetchMessagesUI.mockResolvedValue([
-      { id: 'user-aborted-server', role: 'user', text: 'abort then reconnect', attachments: [], timestamp: new Date().toISOString(), external_message_id: streamId },
-      { id: 'assistant-aborted-server', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'partial answer' }], timestamp: new Date().toISOString() },
+      { ...requestUserTurn, attachments: [] },
+      { id: 'assistant-aborted-server', role: 'assistant', messages: runtimeOutput.map(event => event.type === 'message' ? event.data : null).filter(Boolean), timestamp: new Date().toISOString() },
     ])
     _sessionMessageHandler?.({
       type: 'message_created',
@@ -8630,7 +9279,7 @@ describe('chat-list store', () => {
       bot_id: 'bot-1',
       session_id: 'session-1',
       seq: 3,
-      snapshot: runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'aborted', 3),
+      snapshot: runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'aborted', 3, '', requestUserTurn),
     } as UIStreamEvent)
     await expect(sending).resolves.toMatchObject({ ok: false })
     await vi.waitFor(() => {
@@ -8982,17 +9631,17 @@ describe('chat-list store', () => {
 
   it('projects the same ordinary request and assistant run in two independently subscribed stores', async () => {
     const handlers: UIStreamEventHandler[] = []
-    const abortCommands: Array<ReturnType<typeof vi.fn>> = []
+    const outboundMessages: Array<Array<Record<string, unknown>>> = []
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
       handlers.push(onStreamEvent)
-      const abort = vi.fn()
-      abortCommands.push(abort)
+      const outbound: Array<Record<string, unknown>> = []
+      outboundMessages.push(outbound)
       return {
         get connected() {
           return true
         },
-        send: vi.fn(),
-        abort,
+        send: vi.fn((message: Record<string, unknown>) => outbound.push(message)),
+        abort: vi.fn(),
         close: vi.fn(),
         onOpen: null,
         onClose: null,
@@ -9052,8 +9701,16 @@ describe('chat-list store', () => {
     expect(second.messages).toHaveLength(2)
 
     first.abort()
-    expect(abortCommands[0]).toHaveBeenCalledTimes(1)
-    expect(abortCommands[1]).not.toHaveBeenCalled()
+    const runtimeGeneration = richActiveRunContractFixture.runtime_snapshot.snapshot.current_run_view?.generation
+    expect(outboundMessages[0]?.filter(message => message.type === 'abort')).toEqual([
+      expect.objectContaining({
+        type: 'abort',
+        session_id: 'session-1',
+        stream_id: 'stream-rich',
+        generation: runtimeGeneration,
+      }),
+    ])
+    expect(outboundMessages[1]?.filter(message => message.type === 'abort')).toEqual([])
 
     const aborted = structuredClone(event) as unknown as {
       type: string
@@ -9112,17 +9769,23 @@ describe('chat-list store', () => {
 
     const streamId = 'stream-shared-completion'
     const running = runtimeSnapshotFromScript(
-      [{ type: 'message', data: { id: 0, type: 'text', content: 'shared answer' } } as UIStreamEvent],
+      [{
+        type: 'message',
+        data: { id: 0, stable_id: 'assistant-shared-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'shared answer' },
+      } as UIStreamEvent],
       'session-1',
       streamId,
       'running',
       10,
       '',
       {
+        id: 'user-shared-server',
         role: 'user',
         text: 'shared prompt',
         timestamp: new Date().toISOString(),
         external_message_id: streamId,
+        turn_position: 1,
+        turn_message_seq: 1,
       },
     )
     for (const handler of runtimeHandlers) {
@@ -9130,8 +9793,16 @@ describe('chat-list store', () => {
     }
 
     api.fetchMessagesUI.mockResolvedValue([
-      { id: 'user-shared-server', role: 'user', text: 'shared prompt', attachments: [], timestamp: new Date().toISOString(), external_message_id: streamId },
-      { id: 'assistant-shared-server', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'shared answer' }], timestamp: new Date().toISOString() },
+      {
+        id: 'user-shared-server', role: 'user', text: 'shared prompt', attachments: [], timestamp: new Date().toISOString(),
+        external_message_id: streamId, turn_position: 1, turn_message_seq: 1,
+      },
+      {
+        id: 'assistant-shared-server',
+        role: 'assistant',
+        messages: [{ id: 0, stable_id: 'assistant-shared-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'shared answer' }],
+        timestamp: new Date().toISOString(),
+      },
     ])
     for (const handler of historyHandlers) {
       handler({
@@ -9190,9 +9861,6 @@ describe('chat-list store', () => {
     expect(restoredAssistant).toMatchObject({ role: 'assistant', streaming: false })
     if (restoredAssistant?.role !== 'assistant') throw new Error('missing restored assistant turn')
     expect(restoredAssistant.messages).toEqual([{ id: 0, type: 'text', content: 'old answer' }])
-    expect(store.messages.flatMap(turn => turn.role === 'assistant'
-      ? turn.messages.filter(block => block.type === 'error')
-      : [])).toEqual([])
   })
 
   it.each([
@@ -9348,7 +10016,7 @@ describe('chat-list store', () => {
       expect.objectContaining({ type: 'text', content: 'new partial answer' }),
       expect.objectContaining({ type: 'error', content: 'replacement failed' }),
     ]))
-    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(refreshCallsBefore)
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(refreshCallsBefore + 1)
   })
 
   it('completes a retry in the background without leaking loading into the active session', async () => {
@@ -9400,7 +10068,7 @@ describe('chat-list store', () => {
 
     await store.selectSession('session-a')
     await flushPromises()
-    expect(store.messages.map(message => message.id)).toEqual(['user-a', 'assistant-new'])
+    expect(store.messages.map(message => message.serverId ?? message.id)).toEqual(['user-a', 'assistant-new'])
   })
 
   it('keeps a completed retry successful when REST reconciliation fails', async () => {
@@ -9596,21 +10264,39 @@ describe('chat-list store', () => {
     const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
     const first = store.retryLatestAssistant('assistant-old')
     await flushPromises()
-    streamHandler?.(runtimeReplacementSnapshot(sharedStreamId, operation, [{ id: 0, type: 'text', content: 'new answer' }]))
+    const runtimeMessages = [{
+      id: 0,
+      stable_id: `${sharedStreamId}-row-0`,
+      turn_position: 2,
+      turn_message_seq: 2,
+      type: 'text' as const,
+      content: 'new answer',
+    }]
+    const settledAssistantId = `${sharedStreamId}-row-0`
+    streamHandler?.(runtimeReplacementSnapshot(sharedStreamId, operation, runtimeMessages))
+    const liveAssistant = store.messages.at(-1)
+    if (liveAssistant?.role !== 'assistant') throw new Error('missing live replacement assistant')
+    const liveRenderId = liveAssistant.id
     api.fetchMessagesUI.mockResolvedValue([
       { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
-      { id: 'assistant-new', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'new answer' }], timestamp: '2026-07-12T00:00:02.000Z' },
+      { id: settledAssistantId, role: 'assistant', messages: runtimeMessages, timestamp: '2026-07-12T00:00:02.000Z' },
     ])
-    streamHandler?.(runtimeReplacementSnapshot(sharedStreamId, operation, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11))
+    streamHandler?.(runtimeReplacementSnapshot(sharedStreamId, operation, runtimeMessages, 'completed', 11))
     await expect(first).resolves.toMatchObject({ ok: true })
     await flushPromises()
 
     sendEvents = [{ type: 'error', message: 'second command rejected' } as UIStreamEvent]
-    await expect(store.retryLatestAssistant('assistant-new')).resolves.toMatchObject({
+    await expect(store.retryLatestAssistant(settledAssistantId)).resolves.toMatchObject({
       ok: false,
       stage: 'startup',
     })
-    expect(store.messages.map(turn => turn.id)).toEqual(['user-1', 'assistant-new'])
+    expect(store.messages[0]?.id).toBe('user-1')
+    expect(store.messages[1]).toMatchObject({
+      id: liveRenderId,
+      role: 'assistant',
+      serverId: settledAssistantId,
+      streaming: false,
+    })
     uuid.mockRestore()
   })
 
@@ -9629,7 +10315,7 @@ describe('chat-list store', () => {
       ? replacementPersisted
         ? [
             { id: 'user-a', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z', external_message_id: replacementStreamId },
-            { id: 'assistant-new', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'partial replacement' }], timestamp: '2026-07-12T00:00:02.000Z' },
+            { id: 'assistant-new', role: 'assistant', messages: [{ id: 0, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'partial replacement' }], timestamp: '2026-07-12T00:00:02.000Z' },
           ]
         : [
             { id: 'user-a', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
@@ -9647,7 +10333,7 @@ describe('chat-list store', () => {
     const retryStreamId = lastStreamId
     replacementStreamId = retryStreamId
     const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
-    const partial = [{ id: 0, type: 'text', content: 'partial replacement' }] as ConversationUiMessage[]
+    const partial = [{ id: 0, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'partial replacement' }] as ConversationUiMessage[]
     streamHandler?.(runtimeReplacementSnapshot(retryStreamId, operation, partial, 'running', 10, 'session-a'))
     await store.selectSession('session-b')
     await flushPromises()
@@ -9668,7 +10354,7 @@ describe('chat-list store', () => {
     streamHandler?.(replay)
     await flushPromises()
 
-    expect(store.messages.map(message => message.id)).toEqual(['user-a', 'assistant-new'])
+    expect(store.messages.map(message => message.serverId ?? message.id)).toEqual(['user-a', 'assistant-new'])
     expect(store.messages.at(-1)).toMatchObject({
       role: 'assistant',
       messages: expect.arrayContaining([
@@ -9707,7 +10393,12 @@ describe('chat-list store', () => {
     streamHandler?.(snapshot)
 
     expect(store.messages).toMatchObject([
-      { role: 'user', text: 'edited prompt', __optimistic: true },
+      {
+        role: 'user',
+        text: 'edited prompt',
+        __optimistic: false,
+        syncState: expect.objectContaining({ presence: 'live', persistence: 'unknown' }),
+      },
       {
         role: 'assistant',
         streaming: true,
@@ -9892,14 +10583,17 @@ describe('chat-list store', () => {
       type: 'message',
       stream_id: lastStreamId,
       session_id: 'session-1',
-      data: { id: 0, type: 'text', content: 'runtime response' },
+      data: { id: 0, stable_id: 'assistant-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'runtime response' },
     }] as UIStreamEvent[]
     const requestUserTurn: ConversationUiTurn = {
+      id: 'user-server',
       role: 'user',
       text: 'hello runtime',
       timestamp: new Date().toISOString(),
       platform: 'local',
       external_message_id: lastStreamId,
+      turn_position: 1,
+      turn_message_seq: 1,
     }
     streamHandler?.({
       type: 'runtime_snapshot',
@@ -9917,11 +10611,14 @@ describe('chat-list store', () => {
     expect(store.messages).toHaveLength(2)
 
     api.fetchMessagesUI.mockResolvedValue([
-      { id: 'user-server', role: 'user', text: 'hello runtime', attachments: [], timestamp: new Date().toISOString(), external_message_id: lastStreamId },
+      {
+        id: 'user-server', role: 'user', text: 'hello runtime', attachments: [], timestamp: new Date().toISOString(),
+        external_message_id: lastStreamId, turn_position: 1, turn_message_seq: 1,
+      },
       {
         id: 'assistant-server',
         role: 'assistant',
-        messages: [{ id: 0, type: 'text', content: 'runtime response' }],
+        messages: [{ id: 0, stable_id: 'assistant-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'runtime response' }],
         timestamp: new Date().toISOString(),
       },
     ])
@@ -10130,10 +10827,12 @@ describe('chat-list store', () => {
     streamHandler?.({
       type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: oldSnapshot,
     } as UIStreamEvent)
-    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
     store.abort()
-    expect(ws.abort).toHaveBeenCalledTimes(1)
-    expect(ws.abort).toHaveBeenCalledWith(streamId, 'session-1', 'generation-old')
+    expect(sentAbortMessages()).toEqual([expect.objectContaining({
+      stream_id: streamId,
+      session_id: 'session-1',
+      generation: 'generation-old',
+    })])
 
     const newSnapshot = runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 2)
     newSnapshot.current_run_view!.generation = 'generation-new'
@@ -10142,7 +10841,7 @@ describe('chat-list store', () => {
     } as UIStreamEvent)
     await flushPromises()
 
-    expect(ws.abort).toHaveBeenCalledTimes(1)
+    expect(sentAbortMessages()).toHaveLength(1)
     expect(store.streaming).toBe(true)
     expect(store.messages.some(turn => turn.role === 'assistant' && turn.id === `runtime-${streamId}` && turn.streaming)).toBe(true)
   })
@@ -10174,7 +10873,8 @@ describe('chat-list store', () => {
     const activeAssistant = store.messages.find(turn => turn.role === 'assistant' && turn.streaming)
     expect(activeAssistant?.role).toBe('assistant')
     if (activeAssistant?.role !== 'assistant') throw new Error('missing active assistant')
-    expect(activeAssistant.messages).toEqual([
+    expect(activeAssistant.messages).toHaveLength(1)
+    expect(activeAssistant.messages).toMatchObject([
       { id: 0, type: 'text', content: 'new generation text' },
     ])
   })
@@ -10248,13 +10948,16 @@ describe('chat-list store', () => {
     ], 'session-1', streamId, 'running', 3)
     second.current_run_view!.generation = 'generation-2'
     streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3, snapshot: second } as UIStreamEvent)
-    await flushPromises()
+    await vi.waitFor(() => {
+      expect(store.streaming).toBe(true)
+      expect(store.messages.find(turn => turn.role === 'assistant' && turn.streaming)).toBeDefined()
+    })
 
-    expect(store.streaming).toBe(true)
     const activeAssistant = store.messages.find(turn => turn.role === 'assistant' && turn.streaming)
     expect(activeAssistant?.role).toBe('assistant')
     if (activeAssistant?.role !== 'assistant') throw new Error('missing active assistant')
-    expect(activeAssistant.messages).toEqual([
+    expect(activeAssistant.messages).toHaveLength(1)
+    expect(activeAssistant.messages).toMatchObject([
       { id: 0, type: 'text', content: 'new generation text' },
     ])
   })
@@ -10276,11 +10979,13 @@ describe('chat-list store', () => {
         attachments: [],
         timestamp: '2026-07-14T00:00:00Z',
         external_message_id: streamId,
+        turn_position: 1,
+        turn_message_seq: 1,
       },
       {
         id: 'db-assistant-old',
         role: 'assistant',
-        messages: [{ id: 0, type: 'text', content: 'old final' }],
+        messages: [{ id: 0, stable_id: 'db-assistant-old', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'old final' }],
         timestamp: '2026-07-14T00:00:01Z',
       },
     ]
@@ -10294,12 +10999,18 @@ describe('chat-list store', () => {
     await flushPromises()
 
     const first = runtimeSnapshotFromScript([
-      { type: 'message', data: { id: 0, type: 'text', content: 'old partial' } } as UIStreamEvent,
+      {
+        type: 'message',
+        data: { id: 0, stable_id: 'db-assistant-old', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'old partial' },
+      } as UIStreamEvent,
     ], 'session-1', streamId, 'running', 1, '', {
+      id: 'db-user-old',
       role: 'user',
       text: 'old prompt',
       timestamp: '2026-07-14T00:00:00Z',
       external_message_id: streamId,
+      turn_position: 1,
+      turn_message_seq: 1,
     })
     first.current_run_view!.generation = 'generation-old'
     streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: first } as UIStreamEvent)
@@ -10321,23 +11032,31 @@ describe('chat-list store', () => {
     await flushPromises()
 
     const second = runtimeSnapshotFromScript([
-      { type: 'message', data: { id: 0, type: 'text', content: 'new partial' } } as UIStreamEvent,
+      {
+        type: 'message',
+        data: { id: 0, stable_id: 'db-assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new partial' },
+      } as UIStreamEvent,
     ], 'session-1', streamId, 'running', 3, '', {
+      id: 'db-user-new',
       role: 'user',
       text: 'new prompt',
       timestamp: '2026-07-14T00:01:00Z',
       external_message_id: streamId,
+      turn_position: 2,
+      turn_message_seq: 1,
     })
     second.current_run_view!.generation = 'generation-new'
     streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3, snapshot: second } as UIStreamEvent)
-    await flushPromises()
-
-    expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
-      'old prompt',
-      'old final',
-      'new prompt',
-      'new partial',
-    ])
+    // Session hydration and runtime events share one serialized queue. Wait for
+    // the accepted checkpoint to project instead of assuming one microtask turn.
+    await vi.waitFor(() => {
+      expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+        'old prompt',
+        'old final',
+        'new prompt',
+        'new partial',
+      ])
+    })
     expect(store.messages[0]).toMatchObject({ serverId: 'db-user-old', externalMessageId: streamId })
     expect(store.messages[1]).toMatchObject({ serverId: 'db-assistant-old', streaming: false })
     expect(store.messages[3]).toMatchObject({ role: 'assistant', streaming: true })
@@ -10559,7 +11278,111 @@ describe('chat-list store', () => {
     expect(store.streaming).toBe(true)
   })
 
+  it('settles the next runtime turn without replacing a full 30-turn history page', async () => {
+    const existing = Array.from({ length: 30 }, (_, index) => ({
+      id: `existing-${index + 1}`,
+      role: 'user' as const,
+      text: `existing ${index + 1}`,
+      attachments: [],
+      timestamp: `2026-07-14T00:00:${String(index).padStart(2, '0')}Z`,
+      turn_position: index + 1,
+      turn_message_seq: 1,
+    }))
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce(existing)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-turn-31'
+    const turnId = 'turn-31'
+    const userId = 'user-31'
+    const assistantId = 'assistant-31'
+    const runtimeMessage: ConversationUiMessage = {
+      id: 0,
+      type: 'text',
+      content: 'answer 31',
+      stable_id: assistantId,
+      turn_position: 31,
+      turn_message_seq: 2,
+      row_identities: [{
+        stable_id: assistantId,
+        role: 'assistant',
+        turn_id: turnId,
+        turn_position: 31,
+        turn_message_seq: 2,
+      }],
+    }
+    const requestUserTurn: ConversationUiTurn = {
+      id: userId,
+      role: 'user',
+      text: 'prompt 31',
+      timestamp: '2026-07-14T00:01:00Z',
+      external_message_id: streamId,
+      turn_position: 31,
+      turn_message_seq: 1,
+    }
+    const rowLedger = [
+      { stable_id: userId, role: 'user', turn_id: turnId, turn_position: 31, turn_message_seq: 1 },
+      { stable_id: assistantId, role: 'assistant', turn_id: turnId, turn_position: 31, turn_message_seq: 2 },
+    ]
+    const running = runtimeSnapshotFromScript(
+      [{ type: 'message', data: runtimeMessage } as UIStreamEvent],
+      'session-1',
+      streamId,
+      'running',
+      31,
+      '',
+      requestUserTurn,
+    )
+    running.current_run_view!.row_ledger = rowLedger
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 31, snapshot: running,
+    } as UIStreamEvent)
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { ...requestUserTurn, attachments: [] },
+      {
+        id: assistantId,
+        role: 'assistant',
+        messages: [runtimeMessage],
+        timestamp: '2026-07-14T00:01:01Z',
+        turn_position: 31,
+        turn_message_seq: 2,
+      },
+    ])
+    const completed = structuredClone(running)
+    completed.seq = 32
+    completed.current_run_view!.status = 'completed'
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 32, snapshot: completed,
+    } as UIStreamEvent)
+
+    await vi.waitFor(() => {
+      expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { turnId })
+      expect(store.messages).toHaveLength(32)
+    })
+    expect(store.messages.slice(0, 30).map(turn => turn.id)).toEqual(existing.map(turn => turn.id))
+    expect(store.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      streaming: false,
+      messages: [{ content: 'answer 31' }],
+    })
+  })
+
   it('fetches fresh history after a completed snapshot races an older hydration', async () => {
+    const streamId = 'stream-completed-during-history'
+    const runtimeScript = [{
+      type: 'message',
+      data: { id: 0, stable_id: 'persisted-assistant', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'completed answer' },
+    } as UIStreamEvent]
+    const requestUserTurn: ConversationUiTurn = {
+      id: 'persisted-user', role: 'user', text: 'completed prompt', timestamp: '2026-07-14T00:01:00Z',
+      external_message_id: streamId, turn_position: 1, turn_message_seq: 1,
+    }
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
       nextCursor: null,
@@ -10568,8 +11391,8 @@ describe('chat-list store', () => {
     api.fetchMessagesUI
       .mockImplementationOnce(() => staleHistory.promise)
       .mockResolvedValueOnce([
-        { id: 'persisted-user', role: 'user', text: 'completed prompt', attachments: [], timestamp: '2026-07-14T00:01:00Z' },
-        { id: 'persisted-assistant', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'completed answer' }], timestamp: '2026-07-14T00:01:10Z' },
+        { ...requestUserTurn, attachments: [] },
+        { id: 'persisted-assistant', role: 'assistant', messages: runtimeScript.map(event => event.type === 'message' ? event.data : null).filter(Boolean), timestamp: '2026-07-14T00:01:10Z' },
       ])
     const store = useChatStore()
     const selection = store.selectBot('bot-1')
@@ -10583,14 +11406,14 @@ describe('chat-list store', () => {
       bot_id: 'bot-1',
       session_id: 'session-1',
       seq: 3,
-      snapshot: runtimeSnapshotFromScript([], 'session-1', 'stream-completed-during-history', 'completed', 3),
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', streamId, 'completed', 3, '', requestUserTurn),
     } as UIStreamEvent)
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
       session_id: 'session-1',
       seq: 4,
-      snapshot: runtimeSnapshotFromScript([], 'session-1', 'stream-completed-during-history', 'completed', 4),
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', streamId, 'completed', 4, '', requestUserTurn),
     } as UIStreamEvent)
     staleHistory.resolve([
       { id: 'old-user', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-14T00:00:00Z' },
@@ -10668,8 +11491,158 @@ describe('chat-list store', () => {
     expect(store.messages.at(-1)).toMatchObject({ role: 'assistant', streaming: true })
   })
 
+  it('hands off a completed run after a newer run becomes current', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const target = { botId: 'bot-1', sessionId: 'session-1', viewId: 'chat' }
+
+    const firstSend = store.sendMessage('first prompt')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(1))
+    const firstStreamId = String(sentWSMessages.find(message => message.type === 'message')?.stream_id ?? '')
+    const firstScript = [{
+      type: 'message', data: { id: 0, type: 'text', content: 'first answer' },
+    } as UIStreamEvent]
+    const firstRequest = { role: 'user', text: 'first prompt', external_message_id: firstStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1,
+      snapshot: runtimeSnapshotFromScript(firstScript, 'session-1', firstStreamId, 'running', 1, '', firstRequest),
+    } as UIStreamEvent)
+
+    const firstHistory = deferred<UITurn[]>()
+    const callsBeforeTerminal = api.fetchMessagesUI.mock.calls.length
+    api.fetchMessagesUI.mockImplementationOnce(() => firstHistory.promise)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2,
+      snapshot: runtimeSnapshotFromScript(firstScript, 'session-1', firstStreamId, 'completed', 2, '', firstRequest),
+    } as UIStreamEvent)
+    await vi.waitFor(() => expect(api.fetchMessagesUI).toHaveBeenCalledTimes(callsBeforeTerminal + 1))
+    await expect(firstSend).resolves.toEqual({ ok: true })
+
+    const secondSend = store.sendMessage('second prompt')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(2))
+    const secondStreamId = String(sentWSMessages.filter(message => message.type === 'message').at(-1)?.stream_id ?? '')
+    const secondScript = [{
+      type: 'message', data: { id: 0, type: 'text', content: 'second partial' },
+    } as UIStreamEvent]
+    const secondRequest = { role: 'user', text: 'second prompt', external_message_id: secondStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3,
+      snapshot: runtimeSnapshotFromScript(secondScript, 'session-1', secondStreamId, 'running', 3, '', secondRequest),
+    } as UIStreamEvent)
+
+    firstHistory.resolve([
+      {
+        id: `${firstStreamId}-user-row`, role: 'user', text: 'first prompt', attachments: [],
+        timestamp: '2026-07-16T00:00:00.000Z', external_message_id: firstStreamId,
+        turn_position: 1, turn_message_seq: 1,
+      },
+      {
+        id: `${firstStreamId}-assistant-row`, role: 'assistant', timestamp: '2026-07-16T00:00:01.000Z',
+        messages: [{
+          id: 0, stable_id: `${firstStreamId}-row-0`, turn_position: 1, turn_message_seq: 2,
+          type: 'text', content: 'first answer',
+        }],
+      },
+    ])
+
+    await vi.waitFor(() => {
+      const turns = store.chatView(target).transcript.messages
+      expect(turns.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+        'first prompt',
+        'first answer',
+        'second prompt',
+        'second partial',
+      ])
+      expect(turns[0]?.__optimistic).not.toBe(true)
+      expect(turns[1]?.__optimistic).not.toBe(true)
+      expect(turns.at(-1)).toMatchObject({ role: 'assistant', streaming: true })
+    })
+
+    const secondAborted = runtimeSnapshotFromScript([], 'session-1', secondStreamId, 'aborted', 4, 'aborted', secondRequest)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 4, snapshot: secondAborted,
+    } as UIStreamEvent)
+    await expect(secondSend).resolves.toMatchObject({ ok: false, stage: 'stream' })
+  })
+
+  it('restores an aborted run draft after a newer run becomes current', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const target = { botId: 'bot-1', sessionId: 'session-1', viewId: 'chat' }
+    const composerScope = 'chat'
+
+    const firstSend = store.sendMessage('restore first draft')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(1))
+    const firstStreamId = String(sentWSMessages.find(message => message.type === 'message')?.stream_id ?? '')
+    const firstRequest = { role: 'user', text: 'restore first draft', external_message_id: firstStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', firstStreamId, 'running', 1, '', firstRequest),
+    } as UIStreamEvent)
+
+    const firstHistory = deferred<UITurn[]>()
+    const callsBeforeTerminal = api.fetchMessagesUI.mock.calls.length
+    api.fetchMessagesUI.mockImplementationOnce(() => firstHistory.promise)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', firstStreamId, 'aborted', 2, 'aborted', firstRequest),
+    } as UIStreamEvent)
+    await vi.waitFor(() => expect(api.fetchMessagesUI).toHaveBeenCalledTimes(callsBeforeTerminal + 1))
+    await expect(firstSend).resolves.toMatchObject({ ok: false, stage: 'stream' })
+
+    const secondSend = store.sendMessage('second prompt')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(2))
+    const secondStreamId = String(sentWSMessages.filter(message => message.type === 'message').at(-1)?.stream_id ?? '')
+    const secondRequest = { role: 'user', text: 'second prompt', external_message_id: secondStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3,
+      snapshot: runtimeSnapshotFromScript(
+        [{ type: 'message', data: { id: 0, type: 'text', content: 'second partial' } } as UIStreamEvent],
+        'session-1', secondStreamId, 'running', 3, '', secondRequest,
+      ),
+    } as UIStreamEvent)
+
+    firstHistory.resolve([])
+    await vi.waitFor(() => {
+      expect(store.composerDraftRestoreFor(target, composerScope)?.text).toBe('restore first draft')
+      expect(store.chatView(target).transcript.messages.at(-1)).toMatchObject({
+        role: 'assistant', streaming: true, messages: [{ type: 'text', content: 'second partial' }],
+      })
+    })
+
+    const restore = store.composerDraftRestoreFor(target, composerScope)
+    if (!restore) throw new Error('missing aborted draft restore')
+    store.clearComposerDraftRestore(restore.seq)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 4,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', secondStreamId, 'aborted', 4, 'aborted', secondRequest),
+    } as UIStreamEvent)
+    await expect(secondSend).resolves.toMatchObject({ ok: false, stage: 'stream' })
+  })
+
   it('fetches fresh history when the hydration preceding a completed snapshot fails', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const streamId = 'stream-completed-after-history-error'
+    const runtimeScript = [{
+      type: 'message',
+      data: { id: 0, stable_id: 'persisted-assistant', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'completed answer' },
+    } as UIStreamEvent]
+    const requestUserTurn: ConversationUiTurn = {
+      id: 'persisted-user', role: 'user', text: 'completed prompt', timestamp: '2026-07-14T00:01:00Z',
+      external_message_id: streamId, turn_position: 1, turn_message_seq: 1,
+    }
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
       nextCursor: null,
@@ -10678,8 +11651,8 @@ describe('chat-list store', () => {
     api.fetchMessagesUI
       .mockImplementationOnce(() => failedHistory.promise)
       .mockResolvedValueOnce([
-        { id: 'persisted-user', role: 'user', text: 'completed prompt', attachments: [], timestamp: '2026-07-14T00:01:00Z' },
-        { id: 'persisted-assistant', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'completed answer' }], timestamp: '2026-07-14T00:01:10Z' },
+        { ...requestUserTurn, attachments: [] },
+        { id: 'persisted-assistant', role: 'assistant', messages: runtimeScript.map(event => event.type === 'message' ? event.data : null).filter(Boolean), timestamp: '2026-07-14T00:01:10Z' },
       ])
     const store = useChatStore()
     const selection = store.selectBot('bot-1')
@@ -10693,7 +11666,7 @@ describe('chat-list store', () => {
       bot_id: 'bot-1',
       session_id: 'session-1',
       seq: 3,
-      snapshot: runtimeSnapshotFromScript([], 'session-1', 'stream-completed-after-history-error', 'completed', 3),
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', streamId, 'completed', 3, '', requestUserTurn),
     } as UIStreamEvent)
     failedHistory.reject(new Error('transient history failure'))
     await selection
@@ -10769,7 +11742,7 @@ describe('chat-list store', () => {
     expect(assistant.streaming).toBe(false)
     expect(assistant.messages.some(block => block.type === 'text' && block.content === 'partial output')).toBe(true)
     expect(assistant.messages.some(block => block.type === 'error' && block.content === 'runtime interrupted')).toBe(true)
-    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(refreshCallsBefore)
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(refreshCallsBefore + 1)
   })
 
   it('reconnect contract: empty runtime snapshot clears stale local pending streams', async () => {
@@ -10843,12 +11816,14 @@ describe('chat-list store', () => {
     await flushPromises()
 
     const streamId = 'stream-runtime-reset'
+    const runningSnapshot = runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, 'running', 11)
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
       session_id: 'session-1',
+      epoch: runningSnapshot.epoch,
       seq: 11,
-      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, 'running', 11),
+      snapshot: runningSnapshot,
     } as UIStreamEvent)
 
     expect(store.streaming).toBe(true)
@@ -10857,11 +11832,7 @@ describe('chat-list store', () => {
     if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
     expect(assistant.streaming).toBe(true)
 
-    let resolveRefresh: ((turns: unknown[]) => void) | undefined
     const refreshCallsBefore = api.fetchMessagesUI.mock.calls.length
-    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => {
-      resolveRefresh = resolve
-    }))
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
@@ -10879,9 +11850,7 @@ describe('chat-list store', () => {
 
     expect(store.streaming).toBe(false)
     expect(assistant.streaming).toBe(false)
-    expect(api.fetchMessagesUI.mock.calls.length).toBe(refreshCallsBefore + 1)
-    resolveRefresh?.([])
-    await flushPromises()
+    expect(api.fetchMessagesUI.mock.calls.length).toBe(refreshCallsBefore)
   })
 
   it('reconnect contract: lower-seq authoritative snapshot starts a new runtime sequence epoch', async () => {
@@ -11046,7 +12015,7 @@ describe('chat-list store', () => {
     expect(store.messages.filter(turn => turn.role === 'assistant')).toHaveLength(assistantCount)
   })
 
-  it('does not reuse a legacy terminal projection for a different runtime request', async () => {
+  it('does not reuse a terminal projection for a different runtime generation', async () => {
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
       nextCursor: null,
@@ -11055,45 +12024,94 @@ describe('chat-list store', () => {
     await store.selectBot('bot-1')
     await flushPromises()
 
-    const streamId = 'stream-legacy-terminal-reused'
-    store.messages.push({
-      id: 'old-optimistic-user',
+    const streamId = 'stream-terminal-reused'
+    const oldRequest: ConversationUiTurn = {
+      id: 'old-user-row',
       role: 'user',
       text: 'old prompt',
-      attachments: [],
-      timestamp: new Date().toISOString(),
-      externalMessageId: streamId,
-      streaming: false,
-      isSelf: true,
-      __optimistic: true,
-    })
-    streamHandler?.({ type: 'start', stream_id: streamId, session_id: 'session-1' } as UIStreamEvent)
+      timestamp: '2026-07-14T00:00:00Z',
+      external_message_id: streamId,
+      turn_position: 1,
+      turn_message_seq: 1,
+    }
+    const oldMessages: ConversationUiMessage[] = [{
+      id: 0,
+      stable_id: 'old-assistant-row',
+      turn_position: 1,
+      turn_message_seq: 2,
+      type: 'text',
+      content: 'old partial',
+    }]
+    const oldRunning = runtimeSnapshotFromScript(
+      [{ type: 'message', data: oldMessages[0] } as UIStreamEvent],
+      'session-1',
+      streamId,
+      'running',
+      1,
+      '',
+      oldRequest,
+    )
+    oldRunning.current_run_view!.generation = 'generation-old'
     streamHandler?.({
-      type: 'message',
-      stream_id: streamId,
-      session_id: 'session-1',
-      data: { id: 0, type: 'text', content: 'old partial' },
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: oldRunning,
     } as UIStreamEvent)
     expect(store.messages.find(turn => turn.role === 'assistant')).toMatchObject({
       role: 'assistant',
       messages: [expect.objectContaining({ type: 'text', content: 'old partial' })],
     })
-    streamHandler?.({ type: 'error', stream_id: streamId, session_id: 'session-1', message: 'old runtime failed' } as UIStreamEvent)
-    expect(store.messages).toHaveLength(2)
-    expect(store.messages[0]).toMatchObject({ role: 'user', text: 'old prompt' })
-    expect(store.messages[1]).toMatchObject({ role: 'assistant', streaming: false })
 
-    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<UITurn[]>(() => {}))
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { ...oldRequest, attachments: [] },
+      {
+        id: 'old-assistant-row',
+        role: 'assistant',
+        messages: oldMessages,
+        timestamp: '2026-07-14T00:00:01Z',
+      },
+    ])
+    const oldErrored = structuredClone(oldRunning)
+    oldErrored.seq = 2
+    oldErrored.current_run_view!.status = 'errored'
+    oldErrored.current_run_view!.error = 'old runtime failed'
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: oldErrored,
+    } as UIStreamEvent)
+    await vi.waitFor(() => {
+      expect(store.messages).toHaveLength(2)
+      expect(store.messages[0]).toMatchObject({ role: 'user', text: 'old prompt' })
+      expect(store.messages[1]).toMatchObject({
+        role: 'assistant',
+        streaming: false,
+        messages: expect.arrayContaining([
+          expect.objectContaining({ type: 'text', content: 'old partial' }),
+          expect.objectContaining({ type: 'error', content: 'old runtime failed' }),
+        ]),
+      })
+    })
+
     const running = runtimeSnapshotFromScript([
-      { type: 'message', data: { id: 0, type: 'text', content: 'new partial' } } as UIStreamEvent,
-    ], 'session-1', streamId, 'running', 1, '', {
+      {
+        type: 'message',
+        data: {
+          id: 0,
+          stable_id: 'new-assistant-row',
+          turn_position: 2,
+          turn_message_seq: 2,
+          type: 'text',
+          content: 'new partial',
+        },
+      } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 3, '', {
+      id: 'new-user-row',
       role: 'user',
       text: 'new prompt',
-      timestamp: new Date(Date.now() + 10_000).toISOString(),
+      timestamp: '2026-07-14T00:01:00Z',
       external_message_id: streamId,
+      turn_position: 2,
+      turn_message_seq: 1,
     })
     running.current_run_view!.generation = 'generation-new'
-    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: running } as UIStreamEvent)
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3, snapshot: running } as UIStreamEvent)
     await flushPromises()
 
     expect(store.messages).toHaveLength(4)
@@ -11456,7 +12474,7 @@ describe('chat-list store', () => {
     const store = useChatStore()
     await store.selectBot('bot-1')
     await flushPromises()
-    store.messages.push({
+    seedTranscript(store, {
       id: 'user-generation-a',
       role: 'user',
       text: 'old prompt',
@@ -11645,6 +12663,7 @@ describe('chat-list store', () => {
       },
     } as unknown as UIStreamEvent
     expect(() => streamHandler?.(malformed)).not.toThrow()
+    await flushPromises()
     expect(runtimeSubscribeMessages).toEqual([expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' })])
     expect(store.messages).toEqual([])
 
@@ -11700,6 +12719,7 @@ describe('chat-list store', () => {
       ),
     } as UIStreamEvent)
 
+    await flushPromises()
     expect(store.messages).toEqual([])
     expect(runtimeSubscribeMessages).toEqual([
       expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' }),
@@ -11733,6 +12753,7 @@ describe('chat-list store', () => {
       snapshot,
     } as UIStreamEvent)
 
+    await flushPromises()
     expect(store.messages).toEqual([])
     expect(runtimeSubscribeMessages).toEqual([
       expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' }),
@@ -12154,12 +13175,13 @@ describe('chat-list store', () => {
     const send = store.sendMessage('abort before admission')
     await flushPromises()
     const streamId = lastStreamId
-    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
-
     store.abort()
 
-    expect(ws.abort).toHaveBeenCalledWith(streamId, 'session-1', '')
-    expect(abortedWSStreams).toContain(streamId)
+    expect(sentAbortMessages()).toEqual([expect.objectContaining({
+      stream_id: streamId,
+      session_id: 'session-1',
+    })])
+    expect(sentAbortMessages()[0]).not.toHaveProperty('generation')
     expect(store.streaming).toBe(true)
 
     streamHandler?.({

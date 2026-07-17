@@ -1867,10 +1867,20 @@ definitions:
       progress:
         items: {}
         type: array
+      row_identities:
+        items:
+          $ref: '#/definitions/conversation.UIRowIdentity'
+        type: array
       running:
         type: boolean
+      stable_id:
+        type: string
       tool_call_id:
         type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
       type:
         $ref: '#/definitions/conversation.UIMessageType'
       user_input:
@@ -1900,6 +1910,19 @@ definitions:
         type: string
       sender:
         type: string
+    type: object
+  conversation.UIRowIdentity:
+    properties:
+      role:
+        type: string
+      stable_id:
+        type: string
+      turn_id:
+        type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
     type: object
   conversation.UIToolApproval:
     properties:
@@ -1952,6 +1975,10 @@ definitions:
         type: string
       timestamp:
         type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
       user_message_kind:
         type: string
     type: object
@@ -3861,6 +3888,12 @@ definitions:
         type: string
       source_reply_to_message_id:
         type: string
+      turn_id:
+        type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
       usage:
         items:
           type: integer
@@ -3885,6 +3918,28 @@ definitions:
         type: integer
       storage_key:
         type: string
+    type: object
+  message.RuntimeRowReservation:
+    properties:
+      message_id:
+        type: string
+      role:
+        type: string
+      turn_id:
+        type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
+    type: object
+  message.RuntimeTurnReservation:
+    properties:
+      request:
+        $ref: '#/definitions/message.RuntimeRowReservation'
+      turn_id:
+        type: string
+      turn_position:
+        type: integer
     type: object
   models.AddRequest:
     properties:
@@ -4722,6 +4777,10 @@ definitions:
         type: string
       request_user_turn:
         $ref: '#/definitions/conversation.UITurn'
+      row_ledger:
+        items:
+          $ref: '#/definitions/conversation.UIRowIdentity'
+        type: array
       started_at:
         type: string
       status:
@@ -4730,6 +4789,8 @@ definitions:
         $ref: '#/definitions/sessionruntime.SteerState'
       stream_id:
         type: string
+      turn_reservation:
+        $ref: '#/definitions/message.RuntimeTurnReservation'
       updated_at:
         type: string
     required:
@@ -8819,6 +8880,10 @@ paths:
       - description: Message ID cursor before which to page
         in: query
         name: before_message_id
+        type: string
+      - description: Turn ID whose complete visible rows should be returned
+        in: query
+        name: turn_id
         type: string
       - description: 'Response format: ui returns normalized chat UI turns'
         in: query

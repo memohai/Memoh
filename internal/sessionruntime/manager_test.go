@@ -13,6 +13,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 const (
@@ -1359,6 +1360,10 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 		t.Parallel()
 		runRuntimeManagerSharesRequestUserTurnContract(t, suite)
 	})
+	t.Run("shares canonical turn reservations", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerSharesTurnReservationContract(t, suite)
+	})
 	t.Run("keeps queued steer valid past command acknowledgement timeout", func(t *testing.T) {
 		t.Parallel()
 		runRuntimeManagerKeepsQueuedSteerPastAckTimeoutContract(t, suite)
@@ -1374,6 +1379,14 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 	t.Run("publishes history commit before terminal finalization", func(t *testing.T) {
 		t.Parallel()
 		runRuntimeManagerPublishesHistoryCommitContract(t, suite)
+	})
+	t.Run("replaces live messages with the terminal projection", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerReplacesLiveMessagesAtTerminalContract(t, suite)
+	})
+	t.Run("preserves live messages when terminal has no canonical projection", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerPreservesLiveMessagesAtEmptyTerminalContract(t, suite)
 	})
 	t.Run("recovers subscriber buffer overflow", func(t *testing.T) {
 		t.Parallel()
@@ -1435,6 +1448,125 @@ func runRuntimeManagerPublishesHistoryCommitContract(t *testing.T, suite runtime
 	})
 	if event.Delta.Run.CanonicalReady == nil || *event.Delta.Run.CanonicalReady {
 		t.Fatalf("history commit delta = %#v, want canonical_ready=false", event.Delta)
+
+func runRuntimeManagerReplacesLiveMessagesAtTerminalContract(t *testing.T, suite runtimeBackendContractSuite) {
+	t.Helper()
+
+	const sessionID = "session-terminal-projection"
+	const streamID = "stream-terminal-projection"
+	manager := testRuntimeManager(t, suite.newBackend(t), "owner-terminal-projection")
+	if err := manager.StartRun(context.Background(), testBotID, sessionID, streamID, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, sessionID, streamID)
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "transient tag-only output"}); err != nil {
+		t.Fatalf("handle live output: %v", err)
+	}
+
+	terminalMessage := conversation.UIMessage{
+		ID:             9,
+		StableID:       "33333333-3333-3333-3333-333333333333",
+		TurnPosition:   7,
+		TurnMessageSeq: 2,
+		Type:           conversation.UIMessageText,
+		Content:        "canonical persisted output",
+	}
+	terminal := agentpkg.StreamEvent{
+		Type: agentpkg.EventAgentEnd,
+		Metadata: map[string]any{
+			conversation.RuntimePersistedProjectionMetadataKey: conversation.RuntimePersistedProjection{
+				AssistantMessages: []conversation.UIMessage{terminalMessage},
+			},
+		},
+	}
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, terminal); err != nil {
+		t.Fatalf("handle terminal projection: %v", err)
+	}
+
+	snapshot, err := manager.Snapshot(context.Background(), testBotID, sessionID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snapshot.CurrentRunView == nil || len(snapshot.CurrentRunView.Messages) != 1 || snapshot.CurrentRunView.Messages[0].StableID != terminalMessage.StableID || snapshot.CurrentRunView.Messages[0].Content != terminalMessage.Content {
+		t.Fatalf("terminal messages = %#v, want only canonical projection", snapshot.CurrentRunView)
+	}
+	delta, visible := runtimeDeltaForAgentEvent(terminal, []conversation.UIMessage{terminalMessage})
+	if !visible || !delta.ResetMessages || len(delta.MessageUpserts) != 1 {
+		t.Fatalf("terminal delta = %#v visible:%v, want reset plus canonical upsert", delta, visible)
+	}
+}
+
+func runRuntimeManagerPreservesLiveMessagesAtEmptyTerminalContract(t *testing.T, suite runtimeBackendContractSuite) {
+	t.Helper()
+
+	const sessionID = "session-empty-terminal"
+	const streamID = "stream-empty-terminal"
+	manager := testRuntimeManager(t, suite.newBackend(t), "owner-empty-terminal")
+	if err := manager.StartRun(context.Background(), testBotID, sessionID, streamID, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, sessionID, streamID)
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "partial output"}); err != nil {
+		t.Fatalf("handle live output: %v", err)
+	}
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{Type: agentpkg.EventAgentAbort}); err != nil {
+		t.Fatalf("handle empty abort: %v", err)
+	}
+
+	snapshot, err := manager.Snapshot(context.Background(), testBotID, sessionID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusAborted {
+		t.Fatalf("terminal run = %#v, want aborted", snapshot.CurrentRunView)
+	}
+	assertRuntimeBlock(t, snapshot.CurrentRunView.Messages, conversation.UIMessageText, "", "partial output")
+}
+
+func TestRuntimeManagerResetLedgerReplacesDiscardedRows(t *testing.T) {
+	t.Parallel()
+
+	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-ledger-reset")
+	const sessionID = "session-ledger-reset"
+	const streamID = "stream-ledger-reset"
+	reservation := messagepkg.RuntimeTurnReservation{
+		TurnID:       "11111111-1111-1111-1111-111111111111",
+		TurnPosition: 7,
+		Request: messagepkg.RuntimeRowReservation{
+			MessageID: "22222222-2222-2222-2222-222222222222", Role: "user",
+			TurnID: "11111111-1111-1111-1111-111111111111", TurnPosition: 7, TurnMessageSeq: 1,
+		},
+	}
+	if err := manager.StartRunWithAdmission(context.Background(), testBotID, sessionID, streamID, RunAdmissionView{
+		TurnReservation: &reservation,
+	}, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start run with reservation: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, sessionID, streamID)
+	discarded := agentpkg.RowIdentity{
+		StableID: "33333333-3333-3333-3333-333333333333", Role: "assistant",
+		TurnID: reservation.TurnID, TurnPosition: 7, TurnMessageSeq: 2,
+	}
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{
+		Type: agentpkg.EventModelStepStart, LedgerRows: []agentpkg.RowIdentity{discarded},
+	}); err != nil {
+		t.Fatalf("publish discarded ledger row: %v", err)
+	}
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{
+		Type: agentpkg.EventRetry, ResetLedger: true, LedgerRows: []agentpkg.RowIdentity{{
+			StableID: reservation.Request.MessageID, Role: "user", TurnID: reservation.TurnID,
+			TurnPosition: reservation.TurnPosition, TurnMessageSeq: 1,
+		}},
+	}); err != nil {
+		t.Fatalf("reset retry ledger: %v", err)
+	}
+
+	snapshot, err := manager.Snapshot(context.Background(), testBotID, sessionID)
+	if err != nil {
+		t.Fatalf("snapshot reset ledger: %v", err)
+	}
+	if snapshot.CurrentRunView == nil || len(snapshot.CurrentRunView.RowLedger) != 1 || snapshot.CurrentRunView.RowLedger[0].StableID != reservation.Request.MessageID {
+		t.Fatalf("row ledger after retry reset = %#v", snapshot.CurrentRunView)
 	}
 }
 
@@ -2898,6 +3030,84 @@ func runRuntimeManagerSharesRequestUserTurnContract(t *testing.T, suite runtimeB
 	requestTurn.Attachments[0].Name = "mutated.txt"
 	if got.RequestUserTurn.Text != "inspect the workspace" || got.RequestUserTurn.Attachments[0].Name != "notes.txt" {
 		t.Fatalf("runtime request user turn aliases caller state: %#v", got.RequestUserTurn)
+	}
+}
+
+func runRuntimeManagerSharesTurnReservationContract(t *testing.T, suite runtimeBackendContractSuite) {
+	t.Helper()
+
+	backends := suite.newSharedBackends(t, 2)
+	owner := testRuntimeManager(t, backends[0], "owner-turn-reservation")
+	observer := testRuntimeManager(t, backends[1], "observer-turn-reservation")
+	reservation := &messagepkg.RuntimeTurnReservation{
+		TurnID:       "turn-17",
+		TurnPosition: 17,
+		Request: messagepkg.RuntimeRowReservation{
+			MessageID:      "request-17",
+			Role:           "user",
+			TurnID:         "turn-17",
+			TurnPosition:   17,
+			TurnMessageSeq: 1,
+		},
+	}
+	if err := owner.StartRunWithAdmission(
+		context.Background(),
+		testBotID,
+		testSessionID,
+		testStreamID,
+		RunAdmissionView{TurnReservation: reservation},
+		make(chan struct{}, 1),
+		func() {},
+		make(chan conversation.InjectMessage, 1),
+	); err != nil {
+		t.Fatalf("start run with turn reservation: %v", err)
+	}
+
+	snapshot, err := observer.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("observer snapshot: %v", err)
+	}
+	got := snapshot.CurrentRunView
+	if got == nil || got.TurnReservation == nil {
+		t.Fatalf("current run turn reservation = %#v", got)
+	}
+	if got.TurnReservation.TurnID != "turn-17" || got.TurnReservation.TurnPosition != 17 || got.TurnReservation.Request.MessageID != "request-17" || got.TurnReservation.Request.TurnMessageSeq != 1 {
+		t.Fatalf("turn reservation = %#v", got.TurnReservation)
+	}
+
+	reservation.TurnID = "mutated"
+	reservation.Request.MessageID = "mutated"
+	if got.TurnReservation.TurnID != "turn-17" || got.TurnReservation.Request.MessageID != "request-17" {
+		t.Fatalf("runtime turn reservation aliases caller state: %#v", got.TurnReservation)
+	}
+}
+
+func TestRuntimeManagerRejectsMismatchedTurnReservation(t *testing.T) {
+	t.Parallel()
+
+	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-invalid-turn-reservation")
+	err := manager.StartRunWithAdmission(
+		context.Background(),
+		testBotID,
+		testSessionID,
+		"stream-invalid-turn-reservation",
+		RunAdmissionView{TurnReservation: &messagepkg.RuntimeTurnReservation{
+			TurnID:       "turn-18",
+			TurnPosition: 18,
+			Request: messagepkg.RuntimeRowReservation{
+				MessageID:      "request-18",
+				Role:           "user",
+				TurnID:         "different-turn",
+				TurnPosition:   18,
+				TurnMessageSeq: 1,
+			},
+		}},
+		make(chan struct{}, 1),
+		func() {},
+		make(chan conversation.InjectMessage, 1),
+	)
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("start run error = %v, want mismatched turn reservation", err)
 	}
 }
 

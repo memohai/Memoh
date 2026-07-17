@@ -286,6 +286,9 @@ func cloneUIMessages(messages []conversation.UIMessage) ([]conversation.UIMessag
 				}
 			}
 		}
+		if len(message.RowIdentities) > 0 {
+			message.RowIdentities = append([]conversation.UIRowIdentity(nil), message.RowIdentities...)
+		}
 		if err := cloneJSON(messages[i].Attachments, &message.Attachments); err != nil {
 			return nil, err
 		}

@@ -34,6 +34,8 @@ export interface SessionRuntimeDelta {
   progress_appends?: SessionRuntimeProgressAppend[]
   message_upserts?: ConversationUiMessage[]
   reset_messages?: boolean
+  row_ledger_upserts?: SessionRuntimeRowIdentity[]
+  reset_row_ledger?: boolean
 }
 
 export interface SessionRuntimeRunPatch {
@@ -51,6 +53,18 @@ export interface SessionRuntimeMessageAppend {
   id: number
   type: ConversationUiMessageType
   content: string
+  stable_id?: string
+  turn_position?: number
+  turn_message_seq?: number
+  row_identities?: SessionRuntimeRowIdentity[]
+}
+
+export interface SessionRuntimeRowIdentity {
+  stable_id: string
+  role?: string
+  turn_id?: string
+  turn_position: number
+  turn_message_seq: number
 }
 
 export interface SessionRuntimeProgressAppend {
@@ -239,6 +253,7 @@ function isCurrentRunView(value: unknown): boolean {
     && (value.history_committed === undefined || typeof value.history_committed === 'boolean')
     && (value.canonical_ready === undefined || typeof value.canonical_ready === 'boolean')
     && (value.messages === undefined || (Array.isArray(value.messages) && value.messages.every(isRuntimeMessage)))
+    && (value.row_ledger === undefined || (Array.isArray(value.row_ledger) && value.row_ledger.every(isRowIdentity)))
     && (value.operation === undefined || isRuntimeOperation(value.operation))
     && (value.request_user_turn === undefined || isRuntimeTurn(value.request_user_turn))
     && isRuntimeSteer(value.steer)
@@ -273,6 +288,21 @@ function isMessageAppend(value: unknown): boolean {
     && Number.isFinite(value.id)
     && (value.type === 'text' || value.type === 'reasoning' || value.type === 'tool' || value.type === 'attachments')
     && typeof value.content === 'string'
+    && (value.stable_id === undefined || isNonEmptyString(value.stable_id))
+    && (value.turn_position === undefined || Number.isSafeInteger(value.turn_position))
+    && (value.turn_message_seq === undefined || Number.isSafeInteger(value.turn_message_seq))
+    && (value.row_identities === undefined || (
+      Array.isArray(value.row_identities) && value.row_identities.every(isRowIdentity)
+    ))
+}
+
+function isRowIdentity(value: unknown): value is SessionRuntimeRowIdentity {
+  return isRecord(value)
+    && isNonEmptyString(value.stable_id)
+    && isOptionalString(value.role)
+    && isOptionalString(value.turn_id)
+    && Number.isSafeInteger(value.turn_position)
+    && Number.isSafeInteger(value.turn_message_seq)
 }
 
 function isProgressAppend(value: unknown): boolean {
@@ -290,6 +320,8 @@ function isRuntimeDeltaPayload(value: unknown): value is SessionRuntimeDelta {
     && (value.progress_appends === undefined || (Array.isArray(value.progress_appends) && value.progress_appends.every(isProgressAppend)))
     && (value.message_upserts === undefined || (Array.isArray(value.message_upserts) && value.message_upserts.every(isRuntimeMessage)))
     && (value.reset_messages === undefined || typeof value.reset_messages === 'boolean')
+    && (value.row_ledger_upserts === undefined || (Array.isArray(value.row_ledger_upserts) && value.row_ledger_upserts.every(isRowIdentity)))
+    && (value.reset_row_ledger === undefined || typeof value.reset_row_ledger === 'boolean')
 }
 
 function runtimeSequence(value: unknown): number | undefined {
@@ -331,6 +363,7 @@ function cloneSnapshotForDelta(snapshot: SessionruntimeSnapshot): Sessionruntime
       ? {
           ...currentRun,
           messages: [...(currentRun.messages ?? [])],
+          row_ledger: [...(currentRun.row_ledger ?? [])],
         }
       : undefined,
   }
@@ -450,6 +483,12 @@ export function reduceSessionRuntimeDelta(
       targetMessages.push(message)
     }
     message.content = `${message.content ?? ''}${append.content}`
+    if (append.stable_id) message.stable_id = append.stable_id
+    if (append.turn_position !== undefined) message.turn_position = append.turn_position
+    if (append.turn_message_seq !== undefined) message.turn_message_seq = append.turn_message_seq
+    if (append.row_identities) {
+      Object.assign(message, { row_identities: structuredClone(append.row_identities) })
+    }
   }
   for (const append of delta.progress_appends ?? []) {
     const targetMessages: ConversationUiMessage[] = run.messages ?? messages
@@ -470,6 +509,14 @@ export function reduceSessionRuntimeDelta(
     )
     if (index >= 0) targetMessages[index] = structuredClone(incoming)
     else targetMessages.push(structuredClone(incoming))
+  }
+
+  if (delta.reset_row_ledger) run.row_ledger = []
+  for (const incoming of delta.row_ledger_upserts ?? []) {
+    const ledger = run.row_ledger ?? (run.row_ledger = [])
+    const index = ledger.findIndex(row => row.stable_id === incoming.stable_id)
+    if (index >= 0) ledger[index] = structuredClone(incoming)
+    else ledger.push(structuredClone(incoming))
   }
 
   const patch = delta.run

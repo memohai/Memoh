@@ -158,7 +158,11 @@ func (*recordingMessageService) GetByIDBySession(context.Context, string, string
 	return messagepkg.Message{}, nil
 }
 
-func (*recordingMessageService) ListVisibleFromBySession(context.Context, string, string) ([]messagepkg.Message, error) {
+func (*recordingMessageService) ListVisibleFromBySession(context.Context, string, string, int32) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*recordingMessageService) ListVisibleMessagesByTurnIDBySession(context.Context, string, string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
@@ -336,6 +340,158 @@ func TestPersistTerminalSnapshotStoresAssistantOutput(t *testing.T) {
 	}
 	if messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" {
 		t.Fatalf("unexpected persisted roles: %q, %q", messages.persisted[0].Role, messages.persisted[1].Role)
+	}
+}
+
+func TestRuntimeInjectedMessagePersistsInReservedTurnOrder(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	tracker := newRuntimeRowTracker(turn)
+	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventToolCallEnd})
+
+	records := make([]conversation.InjectedMessageRecord, 0, 1)
+	rc := resolvedContext{
+		injectedRecords: &records,
+		recordInjectedMessage: func(record conversation.InjectedMessageRecord) {
+			records = append(records, record)
+		},
+	}
+	cfg := agentpkg.RunConfig{
+		InjectedRecorder: func(string, int) {
+			t.Fatal("runtime recorder did not replace the unreserved recorder")
+		},
+	}
+	bindRuntimeInjectedRecorder(&cfg, rc, tracker)
+	cfg.InjectedRecorder("---\nsource: web\n---\nchange direction", 2)
+
+	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	sdkMessages := []sdk.Message{
+		{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ToolCallPart{
+				ToolCallID: "read-1",
+				ToolName:   "read",
+				Input:      map[string]any{"path": "README.md"},
+			}},
+		},
+		sdk.ToolMessage(sdk.ToolResultPart{
+			ToolCallID: "read-1",
+			ToolName:   "read",
+			Result:     "contents",
+		}),
+		sdk.AssistantMessage("updated answer"),
+	}
+	runtimeRows := tracker.bindTerminalRows(sdkMessages)
+
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	_, err := resolver.persistTerminalSnapshotResult(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:                storeRoundBotID,
+			SessionID:            "33333333-3333-3333-3333-333333333333",
+			Query:                "initial request",
+			RuntimeTurn:          turn,
+			SkipMemoryExtraction: true,
+		},
+		rc,
+		terminalSnapshot{
+			sdkMessages:   sdkMessages,
+			runtimeRows:   runtimeRows,
+			visibleOutput: true,
+		},
+	)
+	if err != nil {
+		t.Fatalf("persistTerminalSnapshotResult() error = %v", err)
+	}
+
+	if len(messages.roundInputs) != 5 {
+		t.Fatalf("persisted rows = %d, want 5", len(messages.roundInputs))
+	}
+	wantRoles := []string{"user", "assistant", "tool", "user", "assistant"}
+	for i, input := range messages.roundInputs {
+		if input.Role != wantRoles[i] {
+			t.Fatalf("row %d role = %q, want %q", i, input.Role, wantRoles[i])
+		}
+		if input.MessageID == "" || input.TurnID != turn.TurnID || input.TurnPosition != turn.TurnPosition || input.TurnMessageSeq != int64(i+1) {
+			t.Fatalf("row %d reservation = %#v, want complete sequence %d", i, input, i+1)
+		}
+	}
+}
+
+func TestRuntimeReadMediaSyntheticUserPersistsInReservedTurnOrder(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	tracker := newRuntimeRowTracker(turn)
+	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventToolCallEnd})
+	cfg := agentpkg.RunConfig{}
+	bindRuntimeSyntheticRowRecorder(&cfg, tracker)
+	cfg.SyntheticRowRecorder("user")
+	tracker.annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+
+	sdkMessages := []sdk.Message{
+		{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ToolCallPart{
+				ToolCallID: "read-1",
+				ToolName:   "read",
+				Input:      map[string]any{"path": "diagram.png"},
+			}},
+		},
+		sdk.ToolMessage(sdk.ToolResultPart{
+			ToolCallID: "read-1",
+			ToolName:   "read",
+			Result:     map[string]any{"ok": true},
+		}),
+		{
+			Role: sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{sdk.ImagePart{
+				Image:     "data:image/png;base64,cGl4ZWxz",
+				MediaType: "image/png",
+			}},
+		},
+		sdk.AssistantMessage("the diagram is valid"),
+	}
+	runtimeRows := tracker.bindTerminalRows(sdkMessages)
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	_, err := resolver.persistTerminalSnapshotResult(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID: storeRoundBotID, SessionID: "33333333-3333-3333-3333-333333333333",
+			Query: "inspect the diagram", RuntimeTurn: turn, SkipMemoryExtraction: true,
+		},
+		resolvedContext{},
+		terminalSnapshot{sdkMessages: sdkMessages, runtimeRows: runtimeRows, visibleOutput: true},
+	)
+	if err != nil {
+		t.Fatalf("persistTerminalSnapshotResult() error = %v", err)
+	}
+
+	if len(messages.roundInputs) != 5 {
+		t.Fatalf("persisted rows = %d, want 5", len(messages.roundInputs))
+	}
+	wantRoles := []string{"user", "assistant", "tool", "user", "assistant"}
+	for i, input := range messages.roundInputs {
+		if input.Role != wantRoles[i] || input.MessageID == "" || input.TurnMessageSeq != int64(i+1) {
+			t.Fatalf("persisted row %d = %#v, want %s sequence %d", i, input, wantRoles[i], i+1)
+		}
+	}
+}
+
+func TestBindRuntimeInjectedRecorderLeavesNonRuntimeRecorderUntouched(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	cfg := agentpkg.RunConfig{InjectedRecorder: func(string, int) { called = true }}
+	bindRuntimeInjectedRecorder(&cfg, resolvedContext{}, nil)
+	cfg.InjectedRecorder("ordinary injection", 0)
+	if !called {
+		t.Fatal("non-runtime injection recorder was replaced")
 	}
 }
 

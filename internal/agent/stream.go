@@ -11,6 +11,9 @@ type StreamEventType = event.StreamEventType
 // StreamEvent is emitted by the agent during streaming.
 type StreamEvent = event.StreamEvent
 
+// RowIdentity identifies one durable source row behind a projected block.
+type RowIdentity = event.RowIdentity
+
 const (
 	EventAgentStart          = event.AgentStart
 	EventStart               = event.AgentStart
@@ -38,4 +41,5 @@ const (
 	EventRetry               = event.Retry
 	EventProgress            = event.Progress
 	EventError               = event.Error
+	EventModelStepStart      = event.ModelStepStart
 )

@@ -104,21 +104,21 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 		switch strings.ToLower(strings.TrimSpace(decoded.Role)) {
 		case "assistant":
 			for _, reasoning := range extractPersistedReasoning(&decoded) {
-				appendPendingAssistantMessage(pending, UIMessage{
+				appendPendingModelMessage(pending, UIMessage{
 					Type:    UIMessageReasoning,
 					Content: reasoning,
-				})
+				}, decoded.RuntimeRow)
 			}
 
 			if text := extractAssistantStreamMessageText(&decoded); text != "" {
-				appendPendingAssistantMessage(pending, UIMessage{
+				appendPendingModelMessage(pending, UIMessage{
 					Type:    UIMessageText,
 					Content: text,
-				})
+				}, decoded.RuntimeRow)
 			}
 
 			for _, call := range extractPersistedToolCalls(&decoded) {
-				appendPendingAssistantMessage(pending, UIMessage{
+				appendPendingModelMessage(pending, UIMessage{
 					Type:              UIMessageTool,
 					Name:              call.Name,
 					Input:             call.Input,
@@ -127,7 +127,7 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 					Approval:          call.Approval,
 					ExecutionLocation: call.ExecutionLocation,
 					UserInput:         call.UserInput,
-				})
+				}, decoded.RuntimeRow)
 				if call.ID != "" {
 					pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
 				}
@@ -141,6 +141,7 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 				}
 
 				applyToolResultToUIMessage(&pending.Turn.Messages[idx], toolResult.Output)
+				appendUIRuntimeRowIdentity(&pending.Turn.Messages[idx], decoded.RuntimeRow)
 			}
 		}
 	}
@@ -318,6 +319,8 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				Platform:          resolveUIPersistencePlatform(raw),
 				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
 				ID:                strings.TrimSpace(raw.ID),
+				TurnPosition:      raw.TurnPosition,
+				TurnMessageSeq:    raw.TurnMessageSeq,
 			}
 			if turn.Platform != "" {
 				turn.SenderDisplayName = strings.TrimSpace(raw.SenderDisplayName)
@@ -355,26 +358,35 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 
 			for _, reasoning := range reasonings {
 				appendPendingAssistantMessage(pending, UIMessage{
-					ID:      pending.NextID,
-					Type:    UIMessageReasoning,
-					Content: reasoning,
+					StableID:       strings.TrimSpace(raw.ID),
+					TurnPosition:   raw.TurnPosition,
+					TurnMessageSeq: raw.TurnMessageSeq,
+					RowIdentities:  uiRowIdentitiesFromPersistedMessage(raw),
+					Type:           UIMessageReasoning,
+					Content:        reasoning,
 				})
 			}
 			if text != "" {
 				appendPendingAssistantMessage(pending, UIMessage{
-					ID:      pending.NextID,
-					Type:    UIMessageText,
-					Content: text,
+					StableID:       strings.TrimSpace(raw.ID),
+					TurnPosition:   raw.TurnPosition,
+					TurnMessageSeq: raw.TurnMessageSeq,
+					RowIdentities:  uiRowIdentitiesFromPersistedMessage(raw),
+					Type:           UIMessageText,
+					Content:        text,
 				})
 			}
 			for _, call := range toolCalls {
-				upsertPendingToolCall(pending, call)
+				upsertPendingToolCall(pending, call, raw)
 			}
 			if len(attachments) > 0 {
 				appendPendingAssistantMessage(pending, UIMessage{
-					ID:          pending.NextID,
-					Type:        UIMessageAttachments,
-					Attachments: attachments,
+					StableID:       strings.TrimSpace(raw.ID),
+					TurnPosition:   raw.TurnPosition,
+					TurnMessageSeq: raw.TurnMessageSeq,
+					RowIdentities:  uiRowIdentitiesFromPersistedMessage(raw),
+					Type:           UIMessageAttachments,
+					Attachments:    attachments,
 				})
 			}
 
@@ -391,6 +403,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				}
 
 				applyToolResultToUIMessage(&pending.Turn.Messages[idx], toolResult.Output)
+				appendUIRowIdentities(&pending.Turn.Messages[idx], uiRowIdentityFromPersistedMessage(raw))
 			}
 		}
 	}
@@ -407,6 +420,8 @@ func newPendingAssistantTurn(raw messagepkg.Message) *uiPendingAssistantTurn {
 			Platform:          resolveUIPersistencePlatform(raw),
 			ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
 			ID:                strings.TrimSpace(raw.ID),
+			TurnPosition:      raw.TurnPosition,
+			TurnMessageSeq:    raw.TurnMessageSeq,
 		},
 	}
 }
@@ -420,7 +435,73 @@ func appendPendingAssistantMessage(pending *uiPendingAssistantTurn, message UIMe
 	pending.Turn.Messages = append(pending.Turn.Messages, message)
 }
 
-func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedToolCall) {
+func appendPendingModelMessage(pending *uiPendingAssistantTurn, message UIMessage, row *messagepkg.RuntimeRowReservation) {
+	appendUIRuntimeRowIdentity(&message, row)
+	appendPendingAssistantMessage(pending, message)
+}
+
+func appendUIRuntimeRowIdentity(message *UIMessage, row *messagepkg.RuntimeRowReservation) {
+	if message == nil || row == nil || strings.TrimSpace(row.MessageID) == "" {
+		return
+	}
+	if message.StableID == "" {
+		message.StableID = strings.TrimSpace(row.MessageID)
+		message.TurnPosition = row.TurnPosition
+		message.TurnMessageSeq = row.TurnMessageSeq
+	}
+	appendUIRowIdentities(message, UIRowIdentity{
+		StableID:       row.MessageID,
+		Role:           row.Role,
+		TurnID:         row.TurnID,
+		TurnPosition:   row.TurnPosition,
+		TurnMessageSeq: row.TurnMessageSeq,
+	})
+}
+
+func uiRowIdentitiesFromPersistedMessage(raw messagepkg.Message) []UIRowIdentity {
+	identity := uiRowIdentityFromPersistedMessage(raw)
+	if strings.TrimSpace(identity.StableID) == "" {
+		return nil
+	}
+	return []UIRowIdentity{identity}
+}
+
+func uiRowIdentityFromPersistedMessage(raw messagepkg.Message) UIRowIdentity {
+	return UIRowIdentity{
+		StableID:       strings.TrimSpace(raw.ID),
+		Role:           strings.ToLower(strings.TrimSpace(raw.Role)),
+		TurnID:         strings.TrimSpace(raw.TurnID),
+		TurnPosition:   raw.TurnPosition,
+		TurnMessageSeq: raw.TurnMessageSeq,
+	}
+}
+
+func appendUIRowIdentities(message *UIMessage, rows ...UIRowIdentity) {
+	if message == nil {
+		return
+	}
+	for _, raw := range rows {
+		row := raw
+		row.StableID = strings.TrimSpace(row.StableID)
+		if row.StableID == "" {
+			continue
+		}
+		row.Role = strings.ToLower(strings.TrimSpace(row.Role))
+		row.TurnID = strings.TrimSpace(row.TurnID)
+		duplicate := false
+		for _, existing := range message.RowIdentities {
+			if strings.TrimSpace(existing.StableID) == row.StableID {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			message.RowIdentities = append(message.RowIdentities, row)
+		}
+	}
+}
+
+func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedToolCall, raw messagepkg.Message) {
 	if pending == nil {
 		return
 	}
@@ -443,10 +524,15 @@ func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedTool
 				msg.UserInput = call.UserInput
 			}
 			msg.Running = uiBoolPtr(true)
+			appendUIRowIdentities(msg, uiRowIdentityFromPersistedMessage(raw))
 			return
 		}
 	}
 	block := UIMessage{
+		StableID:          strings.TrimSpace(raw.ID),
+		TurnPosition:      raw.TurnPosition,
+		TurnMessageSeq:    raw.TurnMessageSeq,
+		RowIdentities:     uiRowIdentitiesFromPersistedMessage(raw),
 		Type:              UIMessageTool,
 		Name:              call.Name,
 		Input:             call.Input,

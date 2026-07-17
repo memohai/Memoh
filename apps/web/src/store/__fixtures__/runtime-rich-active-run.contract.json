@@ -113,6 +113,7 @@
           "text": "Inspect the workspace",
           "timestamp": "2026-07-10T00:00:00Z"
         },
+        "row_ledger": [],
         "started_at": "2026-07-10T00:00:00Z",
         "status": "running",
         "stream_id": "stream-rich",
@@ -153,6 +154,7 @@
             "text": "Inspect the workspace",
             "timestamp": "2026-07-10T00:00:00Z"
           },
+          "row_ledger": [],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-rich",
@@ -420,6 +422,7 @@
           "canonical_ready": false,
           "generation": "generation-stream-admission",
           "messages": [],
+          "row_ledger": [],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "admitting",
           "stream_id": "stream-admission",
@@ -455,6 +458,7 @@
             "text": "Inspect the workspace",
             "timestamp": "2026-07-10T00:00:00Z"
           },
+          "row_ledger": [],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-admission",
@@ -481,6 +485,7 @@
           "canonical_ready": false,
           "generation": "generation-stream-reset",
           "messages": [],
+          "row_ledger": [],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-reset",
@@ -555,6 +560,7 @@
           "canonical_ready": false,
           "generation": "generation-stream-steer",
           "messages": [],
+          "row_ledger": [],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-steer",

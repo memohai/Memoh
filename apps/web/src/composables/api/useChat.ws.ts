@@ -10,7 +10,7 @@ export interface WSUserInputAnswer {
 }
 
 export interface WSClientMessage {
-  type: 'message' | 'abort' | 'tool_approval_response' | 'user_input_response' | 'retry_message' | 'edit_message' | 'runtime_subscribe' | 'runtime_unsubscribe'
+  type: 'message' | 'abort' | 'steer_current_run' | 'tool_approval_response' | 'user_input_response' | 'retry_message' | 'edit_message' | 'runtime_subscribe' | 'runtime_unsubscribe'
   stream_id?: string
   generation?: string
   invocation_id?: string
@@ -138,10 +138,7 @@ export function connectWebSocket(
       if (!parsed || typeof parsed !== 'object') return
       const eventType = String((parsed as { type?: unknown }).type ?? '').trim()
       if (
-        eventType !== 'start'
-        && eventType !== 'message'
-        && eventType !== 'end'
-        && eventType !== 'error'
+        eventType !== 'error'
         && eventType !== 'session_created'
         && eventType !== 'user_message'
         && eventType !== 'command_result'

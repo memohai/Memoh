@@ -52,4 +52,25 @@ export default [
       }],
     },
   },
+  {
+    files: ['apps/web/src/**/*.{ts,tsx,vue}'],
+    ignores: [
+      'apps/web/src/store/chat/sync/**',
+      'apps/web/src/store/chat/transcript.ts',
+      'apps/web/src/store/chat/transcript.test.ts',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: [
+            '**/store/chat/transcript',
+            './chat/transcript',
+            './transcript',
+            '../transcript',
+          ],
+          message: 'Transcript mutation is owned by store/chat/sync; consume a sync facade or a read-only view.',
+        }],
+      }],
+    },
+  },
 ]

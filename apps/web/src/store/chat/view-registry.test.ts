@@ -1,21 +1,16 @@
+import { computed } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
-import { createChatViewRegistry } from './view-registry'
-import type { ChatAssistantTurn, ChatUserTurn } from './types'
+import {
+  createChatViewRegistry,
+  type ChatTranscriptHooks,
+  type ChatTranscriptReader,
+} from './view-registry'
+import type { ChatAssistantTurn, ChatMessage } from './types'
 
-vi.mock('@/store/user', () => ({
-  useUserStore: () => ({ userInfo: { id: 'user-1' } }),
-}))
-
-function userTurn(id: string, text = id): ChatUserTurn {
-  return {
-    id,
-    role: 'user',
-    text,
-    attachments: [],
-    timestamp: '2026-01-01T00:00:00.000Z',
-    streaming: false,
-    isSelf: true,
-  }
+interface FakeTranscript extends ChatTranscriptReader {
+  id: string
+  messages: ChatMessage[]
+  hooks: ChatTranscriptHooks
 }
 
 function pendingApprovalTurn(id: string): ChatAssistantTurn {
@@ -72,87 +67,100 @@ function pendingUserInputTurn(id: string): ChatAssistantTurn {
 }
 
 function makeRegistry(options: { cacheLimit?: number, streaming?: Set<string> } = {}) {
+  const createTranscript = vi.fn((target, hooks: ChatTranscriptHooks): FakeTranscript => ({
+    id: target.sessionId ? `session:${target.sessionId}` : `draft:${target.viewId}`,
+    messages: [],
+    hooks,
+  }))
+  const onPromoteTranscript = vi.fn()
+  const onDisposeTranscript = vi.fn()
   const onEvict = vi.fn()
+  const onSnapshot = vi.fn()
+  const onRefreshApplied = vi.fn()
   const registry = createChatViewRegistry({
     cacheLimit: options.cacheLimit,
-    rememberBackgroundTask: task => task,
-    applyPendingBackgroundEventsToTool: () => {},
-    bumpFsChangedAtIfFsMutation: () => {},
-    fetchMessages: vi.fn().mockResolvedValue([]),
-    locateMessage: vi.fn().mockResolvedValue({ items: [] }),
     isSessionStreaming: (botId, sessionId) => options.streaming?.has(`${botId}:${sessionId}`) === true,
+    createTranscript,
+    onPromoteTranscript,
+    onDisposeTranscript,
     onEvict,
+    onSnapshot,
+    onRefreshApplied,
   })
-  return { registry, onEvict }
+  return {
+    registry,
+    createTranscript,
+    onPromoteTranscript,
+    onDisposeTranscript,
+    onEvict,
+    onSnapshot,
+    onRefreshApplied,
+  }
 }
 
 describe('chat view registry', () => {
-  it('shares real sessions while isolating different sessions', () => {
-    const { registry } = makeRegistry()
+  it('shares one transcript reader for a session and isolates different sessions', () => {
+    const { registry, createTranscript } = makeRegistry()
     const first = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:1' })
     const duplicate = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:2' })
     const second = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:3' })
 
-    first.transcript.appendToView(userTurn('a'))
-    second.transcript.appendToView(userTurn('b'))
-
     expect(duplicate).toBe(first)
-    expect(first.transcript.messages.map(message => message.id)).toEqual(['a'])
-    expect(second.transcript.messages.map(message => message.id)).toEqual(['b'])
+    expect(second.transcript).not.toBe(first.transcript)
+    expect(createTranscript).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps loading and pagination state independent between Sessions', () => {
-    const { registry } = makeRegistry()
-    const first = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:1' })
-    const second = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:2' })
+  it('passes normalized targets and forwards transcript hooks without owning writes', () => {
+    const { registry, createTranscript, onSnapshot, onRefreshApplied } = makeRegistry()
+    const view = registry.getOrCreate({ botId: ' bot-1 ', sessionId: ' session-a ', viewId: ' chat:1 ' })
+    const target = createTranscript.mock.calls[0]![0]
 
-    first.transcript.loadingMessages.value = true
-    first.transcript.loadingOlder.value = true
-    first.transcript.hasMoreOlder.value = false
-    first.transcript.hasLoadedOlder.value = true
+    expect(target).toEqual({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:1' })
+    view.transcript.hooks.onSnapshot('session-a', [])
+    view.transcript.hooks.onRefreshApplied('bot-1', 'session-a', '2026-01-01T00:00:00.000Z')
 
-    expect(second.transcript.loadingMessages.value).toBe(false)
-    expect(second.transcript.loadingOlder.value).toBe(false)
-    expect(second.transcript.hasMoreOlder.value).toBe(true)
-    expect(second.transcript.hasLoadedOlder.value).toBe(false)
+    expect(onSnapshot).toHaveBeenCalledWith(view, 'session-a', [])
+    expect(onRefreshApplied).toHaveBeenCalledWith(view, 'session-a', '2026-01-01T00:00:00.000Z')
+    expect(view.initialized).toBe(true)
   })
 
-  it('keeps drafts isolated and promotes only the matching panel view', () => {
-    const { registry } = makeRegistry()
-    const first = registry.getOrCreate({ botId: 'bot-1', sessionId: null, viewId: 'chat:1' })
-    const second = registry.getOrCreate({ botId: 'bot-1', sessionId: null, viewId: 'chat:2' })
-    first.transcript.appendToView(userTurn('draft-a'))
-    second.transcript.appendToView(userTurn('draft-b'))
-
+  it('promotes a draft through the injected transcript callback without mutating messages', () => {
+    const { registry, onPromoteTranscript, onDisposeTranscript } = makeRegistry()
+    const draft = registry.getOrCreate({ botId: 'bot-1', sessionId: null, viewId: 'chat:1' })
+    const immutableMessages = Object.freeze<ChatMessage[]>([])
+    draft.transcript.messages = immutableMessages as unknown as ChatMessage[]
     registry.bindPanel('chat:1', { botId: 'bot-1', sessionId: null, viewId: 'chat:1' }, true)
-    registry.bindPanel('chat:2', { botId: 'bot-1', sessionId: null, viewId: 'chat:2' }, true)
+
     const promoted = registry.promoteDraft('bot-1', 'chat:1', 'session-a')
 
-    expect(promoted.transcript.messages.map(message => message.id)).toEqual(['draft-a'])
-    expect(registry.getSession('bot-1', 'session-a')).toBe(promoted)
+    expect(onPromoteTranscript).toHaveBeenCalledOnce()
+    expect(onPromoteTranscript).toHaveBeenCalledWith(promoted.transcript, draft.transcript)
+    expect(promoted.transcript.messages).toEqual([])
+    expect(draft.transcript.messages).toBe(immutableMessages)
+    expect(onDisposeTranscript).toHaveBeenCalledWith(draft.transcript)
+    expect(registry.getPanel('chat:1')).toBe(promoted)
     expect(registry.getDraft('bot-1', 'chat:1')).toBeUndefined()
-    expect(registry.getDraft('bot-1', 'chat:2')?.transcript.messages.map(message => message.id)).toEqual(['draft-b'])
   })
 
-  it('shares the selected Computer between panels for the same Session', () => {
-    const { registry } = makeRegistry()
-    const first = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:1' })
-    const second = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:2' })
+  it('promotes into an existing session without merging transcript content itself', () => {
+    const { registry, onPromoteTranscript, onDisposeTranscript } = makeRegistry()
+    const session = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-a', viewId: 'session-panel' })
+    const draft = registry.getOrCreate({ botId: 'bot-1', sessionId: null, viewId: 'draft-panel' })
+    session.transcript.messages.push(pendingApprovalTurn('settled'))
+    draft.transcript.messages.push(pendingUserInputTurn('optimistic'))
+    registry.bindPanel('draft-panel', { botId: 'bot-1', sessionId: null, viewId: 'draft-panel' }, true)
 
-    first.workspaceTargetId.value = 'computer-b'
-    first.workspaceTargetSnapshot.value = {
-      target_id: 'computer-b',
-      kind: 'remote',
-      name: 'Computer B',
-    }
-    first.workspaceTargetSelectionSource.value = 'user'
+    const promoted = registry.promoteDraft('bot-1', 'draft-panel', 'session-a')
 
-    expect(second.workspaceTargetId.value).toBe('computer-b')
-    expect(second.workspaceTargetSnapshot.value?.name).toBe('Computer B')
-    expect(second.workspaceTargetSelectionSource.value).toBe('user')
+    expect(promoted).toBe(session)
+    expect(session.transcript.messages).toHaveLength(1)
+    expect(draft.transcript.messages).toHaveLength(1)
+    expect(onPromoteTranscript).toHaveBeenCalledWith(session.transcript, draft.transcript)
+    expect(onDisposeTranscript).toHaveBeenCalledWith(draft.transcript)
+    expect(registry.getPanel('draft-panel')).toBe(session)
   })
 
-  it('carries the draft Computer selection into the promoted Session', () => {
+  it('carries draft workspace selection metadata into the promoted session', () => {
     const { registry } = makeRegistry()
     const draft = registry.getOrCreate({ botId: 'bot-1', sessionId: null, viewId: 'chat:1' })
     draft.workspaceTargetId.value = 'computer-b'
@@ -185,38 +193,53 @@ describe('chat view registry', () => {
     expect(hidden?.deactivatedSession?.sessionId).toBe('session-a')
   })
 
-  it('keeps a shared Session intact when one of its panels closes', () => {
-    const { registry } = makeRegistry()
+  it('keeps a shared session entry when one panel closes', () => {
+    const { registry, onDisposeTranscript } = makeRegistry()
     const target = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:left' }
     const shared = registry.bindPanel('chat:left', target, true).view
     registry.bindPanel('chat:right', { ...target, viewId: 'chat:right' }, true)
-    shared.transcript.appendToView(userTurn('shared'))
 
     registry.unbindPanel('chat:left')
 
     expect(registry.getPanel('chat:left')).toBeUndefined()
     expect(registry.getPanel('chat:right')).toBe(shared)
-    expect(shared.transcript.messages.map(message => message.id)).toEqual(['shared'])
     expect(shared.visiblePanelIds).toEqual(new Set(['chat:right']))
+    expect(onDisposeTranscript).not.toHaveBeenCalled()
   })
 
-  it('evicts an attached hidden Session and recreates it when the panel returns', () => {
-    const { registry, onEvict } = makeRegistry({ cacheLimit: 0 })
+  it('evicts by notifying transcript disposal without invoking a mutation method', () => {
+    const { registry, onDisposeTranscript, onEvict } = makeRegistry({ cacheLimit: 0 })
     const target = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:1' }
     const attached = registry.bindPanel('chat:1', target, true).view
-    attached.transcript.appendToView(userTurn('kept'))
+    Object.freeze(attached.transcript.messages)
 
     registry.setPanelVisible('chat:1', false)
     registry.prune()
 
     expect(registry.getPanel('chat:1')).toBeUndefined()
+    expect(onDisposeTranscript).toHaveBeenCalledOnce()
+    expect(onDisposeTranscript).toHaveBeenCalledWith(attached.transcript)
+    expect(onEvict).toHaveBeenCalledOnce()
     expect(onEvict).toHaveBeenCalledWith(attached)
-    const rebound = registry.bindPanel('chat:1', target, true).view
-    expect(rebound).not.toBe(attached)
-    expect(rebound.transcript.messages).toEqual([])
   })
 
-  it('counts attached hidden Sessions against the shared cache limit', () => {
+  it('notifies eviction when the last panel releases a draft view', () => {
+    const { registry, onDisposeTranscript, onEvict } = makeRegistry()
+    const draft = registry.bindPanel('draft:1', {
+      botId: 'bot-1',
+      sessionId: null,
+      viewId: 'draft:1',
+    }, true).view
+
+    registry.unbindPanel('draft:1')
+
+    expect(registry.getDraft('bot-1', 'draft:1')).toBeUndefined()
+    expect(onDisposeTranscript).toHaveBeenCalledWith(draft.transcript)
+    expect(onEvict).toHaveBeenCalledOnce()
+    expect(onEvict).toHaveBeenCalledWith(draft)
+  })
+
+  it('counts attached hidden sessions against the cache limit', () => {
     const { registry } = makeRegistry({ cacheLimit: 1 })
     registry.bindPanel('chat:1', {
       botId: 'bot-1',
@@ -236,16 +259,32 @@ describe('chat view registry', () => {
     expect(registry.getSession('bot-1', 'session-detached')).toBe(detached)
   })
 
+  it('invalidates a cached pane lookup when its hidden attached view is evicted', () => {
+    const { registry } = makeRegistry({ cacheLimit: 0 })
+    const target = { botId: 'bot-1', sessionId: 'session-attached', viewId: 'chat:1' }
+    const paneView = computed(() => {
+      void registry.revision.value
+      return registry.getOrCreate(target)
+    })
+    const first = paneView.value
+    registry.bindPanel('chat:1', target, true)
+
+    registry.setPanelVisible('chat:1', false)
+
+    expect(paneView.value).not.toBe(first)
+    expect(paneView.value.transcript).not.toBe(first.transcript)
+  })
+
   it('evicts least-recent hidden sessions but protects visible, streaming, and pending views', () => {
     const streaming = new Set(['bot-1:streaming'])
-    const { registry, onEvict } = makeRegistry({ cacheLimit: 4, streaming })
+    const { registry, onDisposeTranscript } = makeRegistry({ cacheLimit: 4, streaming })
     registry.bindPanel('chat:visible', { botId: 'bot-1', sessionId: 'visible', viewId: 'chat:visible' }, true)
     registry.getOrCreate({ botId: 'bot-1', sessionId: 'streaming', viewId: 'chat:streaming' })
     const pending = registry.getOrCreate({ botId: 'bot-1', sessionId: 'pending', viewId: 'chat:pending' })
-    pending.transcript.appendToView(pendingApprovalTurn('pending'))
+    pending.transcript.messages.push(pendingApprovalTurn('pending'))
     const asking = registry.getOrCreate({ botId: 'bot-1', sessionId: 'asking', viewId: 'chat:asking' })
-    asking.transcript.appendToView(pendingUserInputTurn('asking'))
-    registry.getOrCreate({ botId: 'bot-1', sessionId: 'oldest', viewId: 'chat:oldest' })
+    asking.transcript.messages.push(pendingUserInputTurn('asking'))
+    const oldest = registry.getOrCreate({ botId: 'bot-1', sessionId: 'oldest', viewId: 'chat:oldest' })
     registry.getOrCreate({ botId: 'bot-1', sessionId: 'newest', viewId: 'chat:newest' })
 
     registry.prune()
@@ -255,6 +294,20 @@ describe('chat view registry', () => {
     expect(registry.getSession('bot-1', 'pending')).toBeDefined()
     expect(registry.getSession('bot-1', 'asking')).toBeDefined()
     expect(registry.getSession('bot-1', 'oldest')).toBeUndefined()
-    expect(onEvict).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'oldest' }))
+    expect(onDisposeTranscript).toHaveBeenCalledWith(oldest.transcript)
+  })
+
+  it('disposes every owned transcript on reset without mutating transcript data', () => {
+    const { registry, onDisposeTranscript } = makeRegistry()
+    const first = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:1' })
+    const second = registry.getOrCreate({ botId: 'bot-2', sessionId: 'session-b', viewId: 'chat:2' })
+    const firstMessages = first.transcript.messages
+    const secondMessages = second.transcript.messages
+
+    registry.resetAll()
+
+    expect(onDisposeTranscript).toHaveBeenCalledTimes(2)
+    expect(first.transcript.messages).toBe(firstMessages)
+    expect(second.transcript.messages).toBe(secondMessages)
   })
 })

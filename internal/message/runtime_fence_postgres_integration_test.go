@@ -2,9 +2,11 @@ package message
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -94,6 +96,122 @@ func TestPostgresRuntimeFenceUnfencedReplacementIsAtomic(t *testing.T) {
 	}
 	if forkMessageID != "assistant-parent" {
 		t.Fatalf("fork message id = %q, want assistant-parent", forkMessageID)
+	}
+}
+
+func TestPostgresRuntimeRetryClonesRequestWithoutMovingSupersededRows(t *testing.T) {
+	ctx := context.Background()
+	pool := openRuntimeFencePostgresPool(t, ctx)
+	botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
+	service := NewService(nil, postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool)))
+
+	oldUser, err := service.Persist(ctx, PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+		Content:     []byte(`{"role":"user","content":"inspect the diagram"}`),
+		Metadata:    map[string]any{"origin": "retry-source"},
+		DisplayText: "inspect the diagram",
+		Assets: []AssetRef{{
+			ContentHash: "sha256:retry-source", Role: "attachment", Ordinal: 0,
+			Name: "diagram.png", Metadata: map[string]any{"storage_key": "media/diagram.png"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("persist retry source request: %v", err)
+	}
+	oldAssistant, err := service.Persist(ctx, PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"old answer"}`), TurnRequestMessageID: oldUser.ID,
+	})
+	if err != nil {
+		t.Fatalf("persist retry source assistant: %v", err)
+	}
+	oldTurn, err := service.GetVisibleTurnByMessage(ctx, sessionID.String(), oldAssistant.ID)
+	if err != nil {
+		t.Fatalf("load retry source turn: %v", err)
+	}
+
+	type rowCoordinates struct {
+		turnID       string
+		position     int64
+		messageSeq   int64
+		visible      bool
+		supersededBy *string
+	}
+	loadCoordinates := func(messageID string) rowCoordinates {
+		t.Helper()
+		var coordinates rowCoordinates
+		if err := pool.QueryRow(ctx, `
+			SELECT turn_id::text, turn_position, turn_message_seq, turn_visible, turn_superseded_by_turn_id::text
+			FROM bot_history_messages WHERE id = $1
+		`, messageID).Scan(&coordinates.turnID, &coordinates.position, &coordinates.messageSeq, &coordinates.visible, &coordinates.supersededBy); err != nil {
+			t.Fatalf("load coordinates for %s: %v", messageID, err)
+		}
+		return coordinates
+	}
+	oldUserBefore := loadCoordinates(oldUser.ID)
+	oldAssistantBefore := loadCoordinates(oldAssistant.ID)
+
+	reservation, err := service.ReserveRuntimeTurn(ctx, botID.String(), sessionID.String(), "")
+	if err != nil {
+		t.Fatalf("reserve retry turn: %v", err)
+	}
+	assistantRow := RuntimeRowReservation{
+		MessageID: uuid.NewString(), TurnID: reservation.TurnID,
+		TurnPosition: reservation.TurnPosition, TurnMessageSeq: 2,
+	}
+	persisted, handled, err := service.PersistRound(ctx, []PersistInput{{
+		MessageID: assistantRow.MessageID, BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"new answer"}`), SkipHistoryTurn: true,
+		TurnID: assistantRow.TurnID, TurnPosition: assistantRow.TurnPosition, TurnMessageSeq: assistantRow.TurnMessageSeq,
+	}}, RoundPersistenceOptions{Replacement: &TurnReplacement{
+		OldTurnID: oldTurn.ID, RequestMessageID: reservation.Request.MessageID,
+		TurnID: reservation.TurnID, TurnPosition: reservation.TurnPosition, Reason: "retry",
+	}})
+	if err != nil || !handled || len(persisted) != 2 {
+		t.Fatalf("persist runtime retry = (%d, %v, %v), want cloned request + assistant", len(persisted), handled, err)
+	}
+	if persisted[0].ID != reservation.Request.MessageID || persisted[1].ID != assistantRow.MessageID {
+		t.Fatalf("runtime retry persisted identities = %#v", persisted)
+	}
+
+	visible, err := service.ListBySession(ctx, sessionID.String())
+	if err != nil {
+		t.Fatalf("list visible runtime retry: %v", err)
+	}
+	if len(visible) != 2 || visible[0].ID != reservation.Request.MessageID || visible[1].ID != assistantRow.MessageID {
+		t.Fatalf("visible runtime retry rows = %#v", visible)
+	}
+	cloned := visible[0]
+	var clonedContent, sourceContent any
+	if err := json.Unmarshal(cloned.Content, &clonedContent); err != nil {
+		t.Fatalf("decode cloned request content: %v", err)
+	}
+	if err := json.Unmarshal(oldUser.Content, &sourceContent); err != nil {
+		t.Fatalf("decode source request content: %v", err)
+	}
+	if !reflect.DeepEqual(clonedContent, sourceContent) || cloned.DisplayContent != oldUser.DisplayContent || cloned.Metadata["origin"] != "retry-source" {
+		t.Fatalf("cloned request content = %#v, source = %#v", cloned, oldUser)
+	}
+	if len(cloned.Assets) != 1 || cloned.Assets[0].ContentHash != "sha256:retry-source" || cloned.Assets[0].Name != "diagram.png" {
+		t.Fatalf("cloned request assets = %#v", cloned.Assets)
+	}
+	if cloned.TurnID != reservation.TurnID || cloned.TurnPosition != reservation.TurnPosition || cloned.TurnMessageSeq != 1 {
+		t.Fatalf("cloned request coordinates = %#v", cloned)
+	}
+
+	oldUserAfter := loadCoordinates(oldUser.ID)
+	oldAssistantAfter := loadCoordinates(oldAssistant.ID)
+	for label, pair := range map[string][2]rowCoordinates{
+		"user":      {oldUserBefore, oldUserAfter},
+		"assistant": {oldAssistantBefore, oldAssistantAfter},
+	} {
+		before, after := pair[0], pair[1]
+		if after.turnID != before.turnID || after.position != before.position || after.messageSeq != before.messageSeq {
+			t.Fatalf("superseded %s coordinates moved: before=%#v after=%#v", label, before, after)
+		}
+		if after.visible || after.supersededBy == nil || *after.supersededBy != reservation.TurnID {
+			t.Fatalf("superseded %s state = %#v", label, after)
+		}
 	}
 }
 

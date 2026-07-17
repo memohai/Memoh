@@ -138,22 +138,6 @@ describe('assistant stream registry', () => {
     await otherBot.completion
   })
 
-  it('routes missing event ids only when the session has one unambiguous stream', async () => {
-    const { registry } = makeRegistry()
-    const first = track(registry, 'stream-a')
-
-    expect(registry.streamIdForEvent('bot-1', { session_id: 'session-a' })).toBe('stream-a')
-    expect(registry.streamIdForEvent('bot-1', { stream_id: 'explicit', session_id: 'session-a' })).toBe('explicit')
-
-    const second = track(registry, 'stream-b')
-    expect(registry.streamIdForEvent('bot-1', { session_id: 'session-a' })).toBe('session:bot-1:session-a:agent-stream')
-    expect(registry.streamIdForEvent('bot-1', {}, '')).toBe('bot:bot-1:legacy-stream')
-
-    registry.resolveAssistantStream('stream-a')
-    registry.resolveAssistantStream('stream-b')
-    await Promise.all([first.completion, second.completion])
-  })
-
   it('keeps a shared continuation turn streaming until every stream finishes', async () => {
     const { registry } = makeRegistry()
     const turn = assistantTurn('shared-turn')
@@ -171,48 +155,6 @@ describe('assistant stream registry', () => {
     registry.resolveAssistantStream('main-stream')
     await first
     expect(turn.streaming).toBe(false)
-  })
-
-  it('maps resumed stream block ids after the existing assistant turn', async () => {
-    const { registry } = makeRegistry()
-    const turn = assistantTurn('resumed-turn')
-    turn.messages.push({
-      id: 4,
-      type: 'tool',
-      name: 'ask_user',
-      input: {},
-      tool_call_id: 'call-ask',
-      running: false,
-      toolCallId: 'call-ask',
-      toolName: 'ask_user',
-      result: null,
-      done: true,
-    })
-    const completion = registry.trackAssistantStream({
-      streamId: 'response-stream',
-      assistantTurn: turn,
-      botId: 'bot-1',
-      sessionId: 'session-a',
-    })
-
-    expect(registry.mapAssistantStreamMessage('response-stream', {
-      id: 0,
-      type: 'reasoning',
-      content: 'Continuing',
-    })).toMatchObject({ id: 5, content: 'Continuing' })
-    expect(registry.mapAssistantStreamMessage('response-stream', {
-      id: 0,
-      type: 'reasoning',
-      content: 'Continuing with more detail',
-    })).toMatchObject({ id: 5, content: 'Continuing with more detail' })
-    expect(registry.mapAssistantStreamMessage('response-stream', {
-      id: 1,
-      type: 'text',
-      content: 'Done',
-    })).toMatchObject({ id: 6, content: 'Done' })
-
-    registry.resolveAssistantStream('response-stream')
-    await completion
   })
 
   it('binds a deferred stream once and retains created-session metadata past terminal', async () => {

@@ -70,6 +70,14 @@ type runtimeFencedSessionMetadataWriter interface {
 	UpdateSessionMetadataWithRuntimeFence(ctx context.Context, arg sqlc.UpdateSessionMetadataWithRuntimeFenceParams) (sqlc.BotSession, error)
 }
 
+type sessionTurnPositionAllocator interface {
+	AllocateSessionTurnPosition(ctx context.Context, sessionID pgtype.UUID) (int64, error)
+}
+
+type reservedMessageWriter interface {
+	CreateReservedMessage(ctx context.Context, arg sqlc.CreateReservedMessageParams) (sqlc.CreateReservedMessageRow, error)
+}
+
 // NewService creates a message service.
 func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.Publisher) *DBService {
 	if log == nil {
@@ -84,6 +92,54 @@ func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.P
 		logger:    log.With(slog.String("service", "message")),
 		publisher: publisher,
 	}
+}
+
+// ReserveRuntimeTurn advances the session-owned position counter before any
+// runtime row is published. The counter remains authoritative because writers
+// outside the Redis runtime path can also append to the same session.
+func (s *DBService) ReserveRuntimeTurn(ctx context.Context, botID, sessionID, requestMessageID string) (RuntimeTurnReservation, error) {
+	if s == nil || s.queries == nil {
+		return RuntimeTurnReservation{}, errors.New("message service not configured")
+	}
+	pgSessionID, err := dbpkg.ParseUUID(strings.TrimSpace(sessionID))
+	if err != nil {
+		return RuntimeTurnReservation{}, fmt.Errorf("invalid session id: %w", err)
+	}
+	requestMessageID = strings.TrimSpace(requestMessageID)
+	if requestMessageID == "" {
+		requestMessageID = uuid.NewString()
+	} else if _, err := dbpkg.ParseUUID(requestMessageID); err != nil {
+		return RuntimeTurnReservation{}, fmt.Errorf("invalid request message id: %w", err)
+	}
+	turnID := uuid.NewString()
+	var position int64
+	allocate := func(queries dbstore.Queries) error {
+		allocator, ok := queries.(sessionTurnPositionAllocator)
+		if !ok {
+			return errors.New("message store does not support runtime turn reservations")
+		}
+		var allocateErr error
+		position, allocateErr = allocator.AllocateSessionTurnPosition(ctx, pgSessionID)
+		return allocateErr
+	}
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		if err := runtimefence.InTransaction(ctx, s.queries, botID, sessionID, allocate); err != nil {
+			return RuntimeTurnReservation{}, err
+		}
+	} else if err := allocate(s.queries); err != nil {
+		return RuntimeTurnReservation{}, err
+	}
+	return RuntimeTurnReservation{
+		TurnID:       turnID,
+		TurnPosition: position,
+		Request: RuntimeRowReservation{
+			MessageID:      requestMessageID,
+			Role:           "user",
+			TurnID:         turnID,
+			TurnPosition:   position,
+			TurnMessageSeq: 1,
+		},
+	}, nil
 }
 
 // Persist writes a single message to bot_history_messages.
@@ -107,6 +163,32 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 }
 
 func (s *DBService) persistOnce(ctx context.Context, input PersistInput) (Message, error) {
+	if hasRuntimeRowReservation(input) {
+		var result Message
+		persistReserved := func(queries dbstore.Queries) error {
+			txService := *s
+			txService.queries = queries
+			var err error
+			result, err = txService.persistReservedMessage(ctx, input, true)
+			return err
+		}
+		if _, fenced := runtimefence.FromContext(ctx); fenced {
+			if err := runtimefence.InTransaction(ctx, s.queries, input.BotID, input.SessionID, persistReserved); err != nil {
+				return Message{}, err
+			}
+			return result, nil
+		}
+		if txer, ok := s.queries.(transactionalQueries); ok {
+			if err := txer.InTx(ctx, persistReserved); err != nil {
+				return Message{}, err
+			}
+			return result, nil
+		}
+		if err := persistReserved(s.queries); err != nil {
+			return Message{}, err
+		}
+		return result, nil
+	}
 	if _, fenced := runtimefence.FromContext(ctx); fenced {
 		var result Message
 		if err := runtimefence.InTransaction(ctx, s.queries, input.BotID, input.SessionID, func(queries dbstore.Queries) error {
@@ -271,8 +353,9 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 	if s == nil || s.queries == nil || len(inputs) == 0 {
 		return nil, false, nil
 	}
+	reservedRound := hasRuntimeRowReservation(inputs[0])
 	_, fenced := runtimefence.FromContext(ctx)
-	if !fenced && options.Replacement == nil {
+	if !fenced && options.Replacement == nil && !reservedRound {
 		return nil, false, nil
 	}
 	botID := strings.TrimSpace(inputs[0].BotID)
@@ -285,11 +368,17 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 			return nil, true, errors.New("atomic round spans multiple sessions")
 		}
 	}
+	for _, input := range inputs {
+		if hasRuntimeRowReservation(input) != reservedRound {
+			return nil, true, errors.New("atomic round mixes reserved and unreserved rows")
+		}
+	}
 
 	const maxTurnSequenceRetries = 3
 	var lastErr error
 	for attempt := 0; attempt < maxTurnSequenceRetries; attempt++ {
 		persisted := make([]Message, 0, len(inputs))
+		published := make([]Message, 0, len(inputs))
 		persist := func(queries dbstore.Queries) error {
 			txService := *s
 			txService.queries = queries
@@ -300,7 +389,13 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 				if !input.SkipHistoryTurn {
 					input.TurnRequestMessageID = turnRequestMessageID
 				}
-				message, err := txService.persist(ctx, input)
+				var message Message
+				var err error
+				if reservedRound {
+					message, err = txService.persistReservedMessage(ctx, input, options.Replacement == nil)
+				} else {
+					message, err = txService.persist(ctx, input)
+				}
 				if err != nil {
 					return err
 				}
@@ -308,10 +403,17 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 					turnRequestMessageID = message.ID
 				}
 				persisted = append(persisted, message)
+				if !input.SkipHistoryTurn {
+					published = append(published, message)
+				}
 			}
 			if options.Replacement != nil {
-				if err := txService.replacePersistedRound(ctx, sessionID, persisted, *options.Replacement); err != nil {
+				clonedRequest, err := txService.replacePersistedRound(ctx, sessionID, persisted, *options.Replacement)
+				if err != nil {
 					return err
+				}
+				if clonedRequest != nil {
+					persisted = append([]Message{*clonedRequest}, persisted...)
 				}
 			}
 			return nil
@@ -327,10 +429,8 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 			err = txer.InTx(ctx, persist)
 		}
 		if err == nil {
-			for i, message := range persisted {
-				if !inputs[i].SkipHistoryTurn {
-					s.publishMessageCreated(message)
-				}
+			for _, message := range published {
+				s.publishMessageCreated(message)
 			}
 			return persisted, true, nil
 		}
@@ -558,6 +658,64 @@ func (s *DBService) withCanonicalTurnTransaction(
 		return runtimefence.ErrTransactionsUnsupported
 	}
 	return txer.InTx(ctx, run)
+
+func hasRuntimeRowReservation(input PersistInput) bool {
+	return strings.TrimSpace(input.MessageID) != "" ||
+		strings.TrimSpace(input.TurnID) != "" ||
+		input.TurnPosition != 0 ||
+		input.TurnMessageSeq != 0
+}
+
+func (s *DBService) persistReservedMessage(ctx context.Context, input PersistInput, visible bool) (Message, error) {
+	if strings.TrimSpace(input.MessageID) == "" || strings.TrimSpace(input.TurnID) == "" || input.TurnPosition <= 0 || input.TurnMessageSeq <= 0 {
+		return Message{}, errors.New("runtime row reservation is incomplete")
+	}
+	prepared, err := s.preparePersistMessage(ctx, input)
+	if err != nil {
+		return Message{}, err
+	}
+	if !prepared.sessionID.Valid {
+		return Message{}, errors.New("reserved runtime row requires a session id")
+	}
+	messageID, err := dbpkg.ParseUUID(strings.TrimSpace(input.MessageID))
+	if err != nil {
+		return Message{}, fmt.Errorf("invalid reserved message id: %w", err)
+	}
+	turnID, err := dbpkg.ParseUUID(strings.TrimSpace(input.TurnID))
+	if err != nil {
+		return Message{}, fmt.Errorf("invalid reserved turn id: %w", err)
+	}
+	writer, ok := s.queries.(reservedMessageWriter)
+	if !ok {
+		return Message{}, errors.New("message store does not support reserved runtime rows")
+	}
+	row, err := writer.CreateReservedMessage(ctx, sqlc.CreateReservedMessageParams{
+		MessageID:               messageID,
+		BotID:                   prepared.createArg.BotID,
+		SessionID:               prepared.sessionID,
+		SenderChannelIdentityID: prepared.createArg.SenderChannelIdentityID,
+		SenderUserID:            prepared.createArg.SenderUserID,
+		ExternalMessageID:       prepared.createArg.ExternalMessageID,
+		SourceReplyToMessageID:  prepared.createArg.SourceReplyToMessageID,
+		Role:                    prepared.createArg.Role,
+		Content:                 prepared.createArg.Content,
+		Metadata:                prepared.createArg.Metadata,
+		Usage:                   prepared.createArg.Usage,
+		SessionMode:             prepared.createArg.SessionMode,
+		RuntimeType:             prepared.createArg.RuntimeType,
+		ModelID:                 prepared.createArg.ModelID,
+		EventID:                 prepared.createArg.EventID,
+		DisplayText:             prepared.createArg.DisplayText,
+		TurnID:                  turnID,
+		TurnPosition:            pgtype.Int8{Int64: input.TurnPosition, Valid: true},
+		TurnMessageSeq:          pgtype.Int8{Int64: input.TurnMessageSeq, Valid: true},
+		TurnVisible:             visible,
+	})
+	if err != nil {
+		return Message{}, err
+	}
+	result := toMessageFromReserved(row, prepared.metadata)
+	return s.finishPersistedMessage(ctx, result, messageID, input.Assets)
 }
 
 func isToolTailRoundShape(inputs []PersistInput) bool {
@@ -1373,7 +1531,10 @@ func (s *DBService) GetByIDBySession(ctx context.Context, sessionID string, mess
 	return msgs[0], nil
 }
 
-func (s *DBService) ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string) ([]Message, error) {
+// ListVisibleFromBySession is an internal resolver primitive. maxCount=0 asks
+// for the complete replacement tail so retry/edit can rebuild history without
+// splitting a logical turn; bounded reads are useful only to its focused tests.
+func (s *DBService) ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string, maxCount int32) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, err
@@ -1385,11 +1546,36 @@ func (s *DBService) ListVisibleFromBySession(ctx context.Context, sessionID stri
 	rows, err := s.queries.ListVisibleMessagesFromBySession(ctx, sqlc.ListVisibleMessagesFromBySessionParams{
 		SessionID: pgSessionID,
 		MessageID: pgMessageID,
+		MaxCount:  maxCount,
 	})
 	if err != nil {
 		return nil, err
 	}
 	msgs := toMessagesFromVisibleFromBySession(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
+// ListVisibleMessagesByTurnIDBySession returns every visible persisted row in
+// one exact turn. The turn, rather than an arbitrary row page, is the handoff
+// unit between runtime state and durable history.
+func (s *DBService) ListVisibleMessagesByTurnIDBySession(ctx context.Context, sessionID string, turnID string) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	pgTurnID, err := dbpkg.ParseUUID(turnID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListVisibleMessagesByTurnIDBySession(ctx, sqlc.ListVisibleMessagesByTurnIDBySessionParams{
+		SessionID: pgSessionID,
+		TurnID:    pgTurnID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromVisibleTurnBySession(rows)
 	s.enrichAssets(ctx, msgs)
 	return msgs, nil
 }
@@ -1425,28 +1611,28 @@ func (s *DBService) GetLatestVisibleTurnBySession(ctx context.Context, sessionID
 	return toHistoryTurn(row), nil
 }
 
-func (s *DBService) replacePersistedRound(ctx context.Context, sessionID string, persisted []Message, replacement TurnReplacement) error {
+func (s *DBService) replacePersistedRound(ctx context.Context, sessionID string, persisted []Message, replacement TurnReplacement) (*Message, error) {
 	requestMessageID := strings.TrimSpace(replacement.RequestMessageID)
 	if requestMessageID == "" {
 		requestMessageID = firstPersistedRoleID(persisted, "user")
 	}
 	assistantMessageID := firstPersistedRoleID(persisted, "assistant")
 	if assistantMessageID == "" {
-		return errors.New("replacement assistant message was not persisted")
+		return nil, errors.New("replacement assistant message was not persisted")
 	}
-	if _, err := replaceHistoryTurn(ctx, s.queries, sessionID, replacement.OldTurnID, requestMessageID, assistantMessageID, replacement.Reason); err != nil {
-		return fmt.Errorf("replace persisted history turn: %w", err)
+	if _, err := replaceHistoryTurn(ctx, s.queries, sessionID, replacement.OldTurnID, requestMessageID, assistantMessageID, replacement.TurnID, replacement.TurnPosition, replacement.Reason); err != nil {
+		return nil, fmt.Errorf("replace persisted history turn: %w", err)
 	}
 	if replacement.SessionMetadata == nil {
-		return nil
+		return s.loadClonedRuntimeRequest(ctx, sessionID, requestMessageID, persisted, replacement)
 	}
 	metadata, err := json.Marshal(replacement.SessionMetadata)
 	if err != nil {
-		return fmt.Errorf("marshal replacement session metadata: %w", err)
+		return nil, fmt.Errorf("marshal replacement session metadata: %w", err)
 	}
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fence, fenced := runtimefence.FromContext(ctx)
 	if !fenced {
@@ -1454,17 +1640,17 @@ func (s *DBService) replacePersistedRound(ctx context.Context, sessionID string,
 			Metadata: metadata,
 			ID:       pgSessionID,
 		}); err != nil {
-			return fmt.Errorf("update replacement session metadata: %w", err)
+			return nil, fmt.Errorf("update replacement session metadata: %w", err)
 		}
-		return nil
+		return s.loadClonedRuntimeRequest(ctx, sessionID, requestMessageID, persisted, replacement)
 	}
 	writer, ok := s.queries.(runtimeFencedSessionMetadataWriter)
 	if !ok {
-		return errors.New("message store does not support fenced session metadata updates")
+		return nil, errors.New("message store does not support fenced session metadata updates")
 	}
 	pgBotID, err := dbpkg.ParseUUID(fence.BotID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := writer.UpdateSessionMetadataWithRuntimeFence(ctx, sqlc.UpdateSessionMetadataWithRuntimeFenceParams{
 		Metadata:            metadata,
@@ -1472,11 +1658,22 @@ func (s *DBService) replacePersistedRound(ctx context.Context, sessionID string,
 		BotID:               pgBotID,
 		RuntimeFencingToken: fence.Token,
 	}); errors.Is(err, pgx.ErrNoRows) {
-		return runtimefence.ErrStale
+		return nil, runtimefence.ErrStale
 	} else if err != nil {
-		return fmt.Errorf("update replacement session metadata: %w", err)
+		return nil, fmt.Errorf("update replacement session metadata: %w", err)
 	}
-	return nil
+	return s.loadClonedRuntimeRequest(ctx, sessionID, requestMessageID, persisted, replacement)
+}
+
+func (s *DBService) loadClonedRuntimeRequest(ctx context.Context, sessionID, requestMessageID string, persisted []Message, replacement TurnReplacement) (*Message, error) {
+	if strings.TrimSpace(replacement.TurnID) == "" || firstPersistedRoleID(persisted, "user") != "" || strings.TrimSpace(requestMessageID) == "" {
+		return nil, nil
+	}
+	request, err := s.GetByIDBySession(ctx, sessionID, requestMessageID)
+	if err != nil {
+		return nil, fmt.Errorf("load cloned replacement request: %w", err)
+	}
+	return &request, nil
 }
 
 func firstPersistedRoleID(messages []Message, role string) string {
@@ -1495,6 +1692,8 @@ func replaceHistoryTurn(
 	oldTurnID string,
 	requestMessageID string,
 	assistantMessageID string,
+	replacementTurnID string,
+	replacementTurnPosition int64,
 	reason string,
 ) (sqlc.ReplaceHistoryTurnRow, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
@@ -1513,17 +1712,26 @@ func replaceHistoryTurn(
 	if err != nil {
 		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid assistant message id: %w", err)
 	}
+	pgReplacementTurnID, err := parseOptionalUUID(replacementTurnID)
+	if err != nil {
+		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid replacement turn id: %w", err)
+	}
+	if pgReplacementTurnID.Valid != (replacementTurnPosition > 0) {
+		return sqlc.ReplaceHistoryTurnRow{}, errors.New("replacement turn id and position must be provided together")
+	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "replace"
 	}
 	return queries.ReplaceHistoryTurn(ctx, sqlc.ReplaceHistoryTurnParams{
-		OldTurnID:          pgOldTurnID,
-		SessionID:          pgSessionID,
-		RequestMessageID:   pgRequestMessageID,
-		AssistantMessageID: pgAssistantMessageID,
-		SupersededAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-		SupersededReason:   pgtype.Text{String: reason, Valid: true},
+		OldTurnID:               pgOldTurnID,
+		SessionID:               pgSessionID,
+		RequestMessageID:        pgRequestMessageID,
+		AssistantMessageID:      pgAssistantMessageID,
+		ReplacementTurnID:       pgReplacementTurnID,
+		ReplacementTurnPosition: pgtype.Int8{Int64: replacementTurnPosition, Valid: replacementTurnPosition > 0},
+		SupersededAt:            pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		SupersededReason:        pgtype.Text{String: reason, Valid: true},
 	})
 }
 
@@ -1532,11 +1740,11 @@ func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID
 	var err error
 	if _, fenced := runtimefence.FromContext(ctx); fenced {
 		err = runtimefence.InTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
-			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, "", 0, reason)
 			return err
 		})
 	} else {
-		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, "", 0, reason)
 	}
 	if err != nil {
 		return HistoryTurn{}, err
@@ -1662,8 +1870,35 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 	)
 }
 
+func toMessageFromReserved(row sqlc.CreateReservedMessageRow, metadata map[string]any) Message {
+	message := toMessageFieldsWithMetadata(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		pgtype.Text{},
+		pgtype.Text{},
+		extractPlatformFromMetadataMap(metadata),
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+		metadata,
+	)
+	setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+	return message
+}
+
 func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
-	return toMessageFieldsWithMetadata(
+	message := toMessageFieldsWithMetadata(
 		row.ID,
 		createArg.BotID,
 		createArg.SessionID,
@@ -1685,10 +1920,12 @@ func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow
 		row.CreatedAt,
 		metadata,
 	)
+	setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+	return message
 }
 
 func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHistoryTurnByRequestAndBindRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
-	return toMessageFieldsWithMetadata(
+	message := toMessageFieldsWithMetadata(
 		row.ID,
 		createArg.BotID,
 		createArg.SessionID,
@@ -1710,6 +1947,8 @@ func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHi
 		row.CreatedAt,
 		metadata,
 	)
+	setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+	return message
 }
 
 func toMessageFromToolTailRound(row sqlc.CreateToolTailRoundRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
@@ -2249,7 +2488,9 @@ func toMessagesFromList(rows []sqlc.ListMessagesRow) []Message {
 func toMessagesFromSessionList(rows []sqlc.ListMessagesBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromSessionListRow(row))
+		message := toMessageFromSessionListRow(row)
+		setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+		messages = append(messages, message)
 	}
 	return messages
 }
@@ -2297,7 +2538,9 @@ func toMessagesFromLatest(rows []sqlc.ListMessagesLatestRow) []Message {
 func toMessagesFromLatestBySession(rows []sqlc.ListMessagesLatestBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromLatestBySessionRow(row))
+		message := toMessageFromLatestBySessionRow(row)
+		setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+		messages = append(messages, message)
 	}
 	return messages
 }
@@ -2305,7 +2548,9 @@ func toMessagesFromLatestBySession(rows []sqlc.ListMessagesLatestBySessionRow) [
 func toMessagesFromLatestUIBySession(rows []sqlc.ListMessagesLatestUIBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromLatestUIBySessionRow(row))
+		message := toMessageFromLatestUIBySessionRow(row)
+		setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+		messages = append(messages, message)
 	}
 	return messages
 }
@@ -2322,7 +2567,10 @@ func toMessagesFromBefore(rows []sqlc.ListMessagesBeforeRow) []Message {
 func toMessagesFromBeforeBySession(rows []sqlc.ListMessagesBeforeBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
-		messages = append(messages, toMessageFromBeforeBySessionRow(rows[i]))
+		row := rows[i]
+		message := toMessageFromBeforeBySessionRow(row)
+		setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+		messages = append(messages, message)
 	}
 	return messages
 }
@@ -2330,7 +2578,10 @@ func toMessagesFromBeforeBySession(rows []sqlc.ListMessagesBeforeBySessionRow) [
 func toMessagesFromBeforeCursorBySession(rows []sqlc.ListMessagesBeforeCursorBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
-		messages = append(messages, toMessageFromBeforeCursorBySessionRow(rows[i]))
+		row := rows[i]
+		message := toMessageFromBeforeCursorBySessionRow(row)
+		setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+		messages = append(messages, message)
 	}
 	return messages
 }
@@ -2338,7 +2589,9 @@ func toMessagesFromBeforeCursorBySession(rows []sqlc.ListMessagesBeforeCursorByS
 func toMessagesFromLocateWindowByExternalIDBySession(rows []sqlc.LocateMessagesWindowByExternalIDBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromLocateWindowByExternalIDBySessionRow(row))
+		message := toMessageFromLocateWindowByExternalIDBySessionRow(row)
+		setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+		messages = append(messages, message)
 	}
 	return messages
 }
@@ -2346,12 +2599,67 @@ func toMessagesFromLocateWindowByExternalIDBySession(rows []sqlc.LocateMessagesW
 func toMessagesFromVisibleFromBySession(rows []sqlc.ListVisibleMessagesFromBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromVisibleFromBySessionRow(row))
+		message := toMessageFromVisibleFromBySessionRow(row)
+		setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+		messages = append(messages, message)
 	}
 	return messages
 }
 
+func toMessagesFromVisibleTurnBySession(rows []sqlc.ListVisibleMessagesByTurnIDBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		message := toMessageFromVisibleTurnBySessionRow(row)
+		setMessageTurn(&message, row.TurnID, row.TurnPosition, row.TurnMessageSeq)
+		messages = append(messages, message)
+	}
+	return messages
+}
+
+func setMessageTurn(message *Message, turnID pgtype.UUID, turnPosition, turnMessageSeq pgtype.Int8) {
+	if message == nil {
+		return
+	}
+	if turnID.Valid {
+		message.TurnID = turnID.String()
+	}
+	if turnPosition.Valid {
+		message.TurnPosition = turnPosition.Int64
+	}
+	if turnMessageSeq.Valid {
+		message.TurnMessageSeq = turnMessageSeq.Int64
+	}
+}
+
 func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySessionRow) Message {
+	m := toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
+}
+
+func toMessageFromVisibleTurnBySessionRow(row sqlc.ListVisibleMessagesByTurnIDBySessionRow) Message {
 	m := toMessageFields(
 		row.ID,
 		row.BotID,

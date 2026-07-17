@@ -148,7 +148,7 @@ func (r *Resolver) ensureRequiredHistoryMessage(ctx context.Context, messages []
 			return messages, nil
 		}
 	}
-	window, err := r.messageService.ListVisibleFromBySession(ctx, req.SessionID, messageID)
+	window, err := r.messageService.ListVisibleFromBySession(ctx, req.SessionID, messageID, 0)
 	if err != nil {
 		return nil, err
 	}

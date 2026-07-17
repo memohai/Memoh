@@ -93,10 +93,15 @@ type localChannelResolver interface {
 	PrepareUserMessageWS(ctx context.Context, req conversation.ChatRequest) (conversation.ChatRequest, error)
 	PrepareEditLatestMessageWS(ctx context.Context, input flow.EditLatestMessageInput) (flow.PreparedReplacementWS, error)
 	PrepareRetryLatestMessageWS(ctx context.Context, input flow.RetryLatestMessageInput) (flow.PreparedReplacementWS, error)
+	ReserveRuntimeTurn(ctx context.Context, req conversation.ChatRequest, requestMessageID string) (conversation.ChatRequest, messagepkg.RuntimeTurnReservation, error)
 	PrepareToolApprovalResponse(ctx context.Context, input flow.ToolApprovalResponseInput) (runtimefence.PreservedDecision, error)
+	PrepareDeferredToolApprovalContinuation(ctx context.Context, input flow.ToolApprovalResponseInput) (flow.DeferredContinuation, error)
 	PrepareUserInputResponse(ctx context.Context, input flow.UserInputResponseInput) (runtimefence.PreservedDecision, error)
+	PrepareDeferredUserInputContinuation(ctx context.Context, input flow.UserInputResponseInput) (flow.DeferredContinuation, error)
 	RespondToolApproval(ctx context.Context, input flow.ToolApprovalResponseInput, eventCh chan<- flow.WSStreamEvent) error
+	RespondToolApprovalContinuation(ctx context.Context, input flow.ToolApprovalResponseInput, continuation flow.DeferredContinuation, eventCh chan<- flow.WSStreamEvent) error
 	RespondUserInput(ctx context.Context, input flow.UserInputResponseInput, eventCh chan<- flow.WSStreamEvent) error
+	RespondUserInputContinuation(ctx context.Context, input flow.UserInputResponseInput, continuation flow.DeferredContinuation, eventCh chan<- flow.WSStreamEvent) error
 	DeferSessionCompaction(botID, sessionID, streamID string) func()
 	SessionTurnActive(botID, sessionID string) bool
 	StreamChatWS(ctx context.Context, req conversation.ChatRequest, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error
@@ -2166,13 +2171,20 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				suppressActivePromptAttach := activeStreams.hasSession(sessionID)
 				releaseWSMessageTurn := h.enterWSMessageTurn(botID, sessionID, streamID)
-				h.startWSStreamWithAdmissionBuilder(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws approval stream error", releaseWSMessageTurn, runtimefence.ActivationOptions{PreserveDecision: &preserved}, func(context.Context) (sessionruntime.RunAdmissionView, error) {
-					return sessionruntime.RunAdmissionView{}, nil
+				var continuation flow.DeferredContinuation
+				h.startWSStreamWithAdmissionBuilder(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws approval stream error", releaseWSMessageTurn, runtimefence.ActivationOptions{PreserveDecision: &preserved}, func(ctx context.Context) (sessionruntime.RunAdmissionView, error) {
+					prepared, prepareErr := h.resolver.PrepareDeferredToolApprovalContinuation(ctx, responseInput)
+					if prepareErr != nil {
+						return sessionruntime.RunAdmissionView{}, prepareErr
+					}
+					continuation = prepared
+					reservation := prepared.TurnReservation()
+					return sessionruntime.RunAdmissionView{TurnReservation: &reservation, RowLedger: prepared.InitialRowLedger()}, nil
 				},
 					func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, _ <-chan struct{}, _ <-chan conversation.InjectMessage) error {
 						input := responseInput
 						input.SuppressActivePromptAttach = suppressActivePromptAttach
-						return h.resolver.RespondToolApproval(ctx, input, eventCh)
+						return h.resolver.RespondToolApprovalContinuation(ctx, input, continuation, eventCh)
 					},
 				)
 			}
@@ -2221,13 +2233,20 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				suppressActivePromptAttach := activeStreams.hasSession(sessionID)
 				releaseWSMessageTurn := h.enterWSMessageTurn(botID, sessionID, streamID)
-				h.startWSStreamWithAdmissionBuilder(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws user input stream error", releaseWSMessageTurn, runtimefence.ActivationOptions{PreserveDecision: &preserved}, func(context.Context) (sessionruntime.RunAdmissionView, error) {
-					return sessionruntime.RunAdmissionView{}, nil
+				var continuation flow.DeferredContinuation
+				h.startWSStreamWithAdmissionBuilder(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws user input stream error", releaseWSMessageTurn, runtimefence.ActivationOptions{PreserveDecision: &preserved}, func(ctx context.Context) (sessionruntime.RunAdmissionView, error) {
+					prepared, prepareErr := h.resolver.PrepareDeferredUserInputContinuation(ctx, responseInput)
+					if prepareErr != nil {
+						return sessionruntime.RunAdmissionView{}, prepareErr
+					}
+					continuation = prepared
+					reservation := prepared.TurnReservation()
+					return sessionruntime.RunAdmissionView{TurnReservation: &reservation, RowLedger: prepared.InitialRowLedger()}, nil
 				},
 					func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, _ <-chan struct{}, _ <-chan conversation.InjectMessage) error {
 						input := responseInput
 						input.SuppressActivePromptAttach = suppressActivePromptAttach
-						return h.resolver.RespondUserInput(ctx, input, eventCh)
+						return h.resolver.RespondUserInputContinuation(ctx, input, continuation, eventCh)
 					},
 				)
 			}
@@ -2507,6 +2526,18 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					if persistErr != nil {
 						return sessionruntime.RunAdmissionView{}, persistErr
 					}
+					reservation := messagepkg.RuntimeTurnReservation{
+						TurnID:       persisted.TurnID,
+						TurnPosition: persisted.TurnPosition,
+						Request: messagepkg.RuntimeRowReservation{
+							MessageID:      persisted.ID,
+							Role:           "user",
+							TurnID:         persisted.TurnID,
+							TurnPosition:   persisted.TurnPosition,
+							TurnMessageSeq: persisted.TurnMessageSeq,
+						},
+					}
+					prepared.RuntimeTurn = &reservation
 					preparedReq = &prepared
 					turns := conversation.ConvertMessagesToUITurns([]messagepkg.Message{persisted})
 					if len(turns) > 0 {
@@ -2517,23 +2548,33 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 							Data:      turns[0],
 						})
 					}
-					return sessionruntime.RunAdmissionView{}, nil
+					return sessionruntime.RunAdmissionView{TurnReservation: &reservation}, nil
 				}
 				if acpInfo.IsACP {
-					// ACP owns its leading-user persistence and historically bypasses
-					// the in-process model runtime's user-message hook.
-					preparedReq = &req
+					// ACP persists its leading user row inside the ACP runner, but the
+					// row still belongs to the same runtime-to-history identity ledger.
+					prepared, reservation, reserveErr := h.resolver.ReserveRuntimeTurn(ctx, req, "")
+					if reserveErr != nil {
+						return sessionruntime.RunAdmissionView{}, reserveErr
+					}
+					preparedReq = &prepared
 					return sessionruntime.RunAdmissionView{
-						RequestUserTurn: flow.RuntimeRequestUserTurn(req, time.Now().UTC()),
+						RequestUserTurn: flow.RuntimeRequestUserTurn(prepared, time.Now().UTC()),
+						TurnReservation: &reservation,
 					}, nil
 				}
 				prepared, prepareErr := h.resolver.PrepareUserMessageWS(ctx, req)
 				if prepareErr != nil {
 					return sessionruntime.RunAdmissionView{}, prepareErr
 				}
+				prepared, reservation, reserveErr := h.resolver.ReserveRuntimeTurn(ctx, prepared, "")
+				if reserveErr != nil {
+					return sessionruntime.RunAdmissionView{}, reserveErr
+				}
 				preparedReq = &prepared
 				return sessionruntime.RunAdmissionView{
 					RequestUserTurn: flow.RuntimeRequestUserTurn(prepared, time.Now().UTC()),
+					TurnReservation: &reservation,
 				}, nil
 			}
 			h.startWSStreamWithAdmissionBuilder(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws stream error", releaseActiveWSTurn, runtimefence.ActivationOptions{}, admissionBuilder,
@@ -2605,7 +2646,13 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if err := h.resolver.ValidatePreparedReplacementWS(ctx, prepared); err != nil {
 					return sessionruntime.RunAdmissionView{}, err
 				}
-				return sessionruntime.RunAdmissionView{Operation: runtimeOperationFromPreparedReplacement(prepared)}, nil
+				nextReq, reservation, reserveErr := h.resolver.ReserveRuntimeTurn(ctx, prepared.Request, "")
+				if reserveErr != nil {
+					return sessionruntime.RunAdmissionView{}, reserveErr
+				}
+				prepared.Request = nextReq
+				prepared.RequestMessageID = reservation.Request.MessageID
+				return sessionruntime.RunAdmissionView{Operation: runtimeOperationFromPreparedReplacement(prepared), TurnReservation: &reservation}, nil
 			},
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}, _ <-chan conversation.InjectMessage) error {
 					return h.resolver.StreamPreparedReplacementWS(ctx, prepared, eventCh, abortCh)
@@ -2695,7 +2742,17 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if attachmentErr != nil {
 					return sessionruntime.RunAdmissionView{}, attachmentErr
 				}
-				return sessionruntime.RunAdmissionView{Operation: runtimeOperationFromPreparedReplacement(prepared)}, nil
+				nextReq, reservation, reserveErr := h.resolver.ReserveRuntimeTurn(ctx, prepared.Request, "")
+				if reserveErr != nil {
+					return sessionruntime.RunAdmissionView{}, reserveErr
+				}
+				prepared.Request = nextReq
+				if prepared.Operation.ReplacementUserTurn != nil {
+					prepared.Operation.ReplacementUserTurn.ID = reservation.Request.MessageID
+					prepared.Operation.ReplacementUserTurn.TurnPosition = reservation.TurnPosition
+					prepared.Operation.ReplacementUserTurn.TurnMessageSeq = 1
+				}
+				return sessionruntime.RunAdmissionView{Operation: runtimeOperationFromPreparedReplacement(prepared), TurnReservation: &reservation}, nil
 			},
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}, _ <-chan conversation.InjectMessage) error {
 					return h.resolver.StreamPreparedReplacementWS(ctx, prepared, eventCh, abortCh)

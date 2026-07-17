@@ -252,7 +252,7 @@ func (s *fakeAgentMessageService) GetByIDBySession(_ context.Context, sessionID 
 	return messagepkg.Message{}, nil
 }
 
-func (s *fakeAgentMessageService) ListVisibleFromBySession(_ context.Context, sessionID string, messageID string) ([]messagepkg.Message, error) {
+func (s *fakeAgentMessageService) ListVisibleFromBySession(_ context.Context, sessionID string, messageID string, _ int32) ([]messagepkg.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	msgs := s.messages[sessionID]
@@ -262,6 +262,18 @@ func (s *fakeAgentMessageService) ListVisibleFromBySession(_ context.Context, se
 		}
 	}
 	return nil, nil
+}
+
+func (s *fakeAgentMessageService) ListVisibleMessagesByTurnIDBySession(_ context.Context, sessionID string, turnID string) ([]messagepkg.Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var messages []messagepkg.Message
+	for _, msg := range s.messages[sessionID] {
+		if msg.TurnID == turnID {
+			messages = append(messages, msg)
+		}
+	}
+	return messages, nil
 }
 
 func (*fakeAgentMessageService) GetVisibleTurnByMessage(context.Context, string, string) (messagepkg.HistoryTurn, error) {

@@ -54,6 +54,7 @@ export async function fetchMessagesUI(
       limit: options?.limit ?? 30,
       format: 'ui',
       ...(options?.beforeMessageId?.trim() ? { before_message_id: options.beforeMessageId.trim() } : {}),
+      ...(options?.turnId?.trim() ? { turn_id: options.turnId.trim() } : {}),
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
     },
     throwOnError: true,

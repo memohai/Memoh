@@ -92,6 +92,8 @@ export type ActiveChatTarget =
 export interface ChatUserTurn {
   id: string
   serverId?: string
+  turnPosition?: number
+  turnMessageSeq?: number
   role: 'user'
   text: string
   userMessageKind?: string
@@ -113,11 +115,14 @@ export interface ChatUserTurn {
   // a (optimistic, server) pair to drop, so any new code path that creates a
   // client-only turn before the server acknowledges it MUST set this.
   __optimistic?: boolean
+  syncState?: ChatMessageSyncState
 }
 
 export interface ChatAssistantTurn {
   id: string
   serverId?: string
+  turnPosition?: number
+  turnMessageSeq?: number
   role: 'assistant'
   messages: ContentBlock[]
   timestamp: string
@@ -129,17 +134,33 @@ export interface ChatAssistantTurn {
   // Client-only terminal feedback has no database message identity and must
   // never be used as a retry/edit/fork target.
   __ephemeral?: boolean
+  syncState?: ChatMessageSyncState
 }
 
 export interface ChatSystemTurn {
   id: string
   serverId?: string
+  turnPosition?: number
+  turnMessageSeq?: number
   role: 'system'
   kind: 'background_task'
   backgroundTask: BackgroundTask
   timestamp: string
   platform?: string
   streaming: boolean
+  syncState?: ChatMessageSyncState
+}
+
+export type ChatRunState = 'admitting' | 'running' | 'aborting' | 'completed' | 'aborted' | 'errored' | 'lost'
+export type ChatPresence = 'optimistic' | 'live' | 'settled'
+export type ChatPersistence = 'unknown' | 'persisted' | 'vanished'
+
+export interface ChatMessageSyncState {
+  run: ChatRunState
+  presence: ChatPresence
+  persistence: ChatPersistence
+  streamId?: string
+  generation?: string
 }
 
 export type ChatMessage = ChatUserTurn | ChatAssistantTurn | ChatSystemTurn

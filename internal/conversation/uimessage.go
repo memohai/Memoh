@@ -48,9 +48,22 @@ type UIForwardRef struct {
 	Date               int64  `json:"date,omitempty"`
 }
 
+// UIRowIdentity records one durable source row behind a rendered block.
+type UIRowIdentity struct {
+	StableID       string `json:"stable_id"`
+	Role           string `json:"role,omitempty"`
+	TurnID         string `json:"turn_id,omitempty"`
+	TurnPosition   int64  `json:"turn_position"`
+	TurnMessageSeq int64  `json:"turn_message_seq"`
+}
+
 // UIMessage is the normalized assistant output block used by the web frontend.
 type UIMessage struct {
 	ID                int                  `json:"id"`
+	StableID          string               `json:"stable_id,omitempty"`
+	TurnPosition      int64                `json:"turn_position,omitempty"`
+	TurnMessageSeq    int64                `json:"turn_message_seq,omitempty"`
+	RowIdentities     []UIRowIdentity      `json:"row_identities,omitempty"`
 	Type              UIMessageType        `json:"type"`
 	Content           string               `json:"content,omitempty"`
 	Name              string               `json:"name,omitempty"`
@@ -106,6 +119,8 @@ type UITurn struct {
 	SenderUserID      string            `json:"sender_user_id,omitempty"`
 	ExternalMessageID string            `json:"external_message_id,omitempty"`
 	ID                string            `json:"id,omitempty"`
+	TurnPosition      int64             `json:"turn_position,omitempty"`
+	TurnMessageSeq    int64             `json:"turn_message_seq,omitempty"`
 }
 
 // UIBackgroundTask is the compact background exec state sent to the Web UI.
@@ -127,20 +142,25 @@ type UIBackgroundTask struct {
 // UIMessageStreamEvent is the generic event shape accepted by the UI stream converter.
 // The handler layer adapts agent/channel events to this struct to avoid package cycles.
 type UIMessageStreamEvent struct {
-	Type        string
-	Delta       string
-	ToolName    string
-	ToolCallID  string
-	Input       any
-	Output      any
-	Progress    any
-	Attachments []UIAttachment
-	Error       string
-	ApprovalID  string
-	UserInputID string
-	ShortID     int
-	Status      string
-	Metadata    map[string]any
+	Type           string
+	Delta          string
+	ToolName       string
+	ToolCallID     string
+	Input          any
+	Output         any
+	Progress       any
+	Attachments    []UIAttachment
+	Error          string
+	ApprovalID     string
+	UserInputID    string
+	ShortID        int
+	Status         string
+	Metadata       map[string]any
+	StableID       string
+	TurnID         string
+	TurnPosition   int64
+	TurnMessageSeq int64
+	RowIdentities  []UIRowIdentity
 }
 
 var (

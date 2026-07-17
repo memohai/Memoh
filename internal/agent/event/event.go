@@ -31,7 +31,18 @@ const (
 	Retry               StreamEventType = "retry"
 	Progress            StreamEventType = "progress"
 	Error               StreamEventType = "error"
+	ModelStepStart      StreamEventType = "model_step_start"
 )
+
+// RowIdentity identifies one durable history row represented by a projected
+// stream block. A tool block may reference both call and result rows.
+type RowIdentity struct {
+	StableID       string `json:"stable_id"`
+	Role           string `json:"role,omitempty"`
+	TurnID         string `json:"turn_id,omitempty"`
+	TurnPosition   int64  `json:"turn_position"`
+	TurnMessageSeq int64  `json:"turn_message_seq"`
+}
 
 // StreamEvent is emitted by an agent runtime during streaming. The JSON
 // shape is the wire format WebSocket clients consume; do not change tags.
@@ -62,6 +73,13 @@ type StreamEvent struct {
 	StepNumber       int              `json:"stepNumber,omitempty"`
 	TotalSteps       int              `json:"totalSteps,omitempty"`
 	ProgressStatus   string           `json:"progressStatus,omitempty"`
+	StableID         string           `json:"stable_id,omitempty"`
+	TurnID           string           `json:"turn_id,omitempty"`
+	TurnPosition     int64            `json:"turn_position,omitempty"`
+	TurnMessageSeq   int64            `json:"turn_message_seq,omitempty"`
+	RowIdentities    []RowIdentity    `json:"row_identities,omitempty"`
+	LedgerRows       []RowIdentity    `json:"ledger_rows,omitempty"`
+	ResetLedger      bool             `json:"reset_ledger,omitempty"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

@@ -445,6 +445,76 @@ func TestACPTerminalStreamEventFallsBackToTranscriptEvents(t *testing.T) {
 	}
 }
 
+func TestStreamACPAgentWSTerminalProjectionUsesPersistedRows(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		result       acpclient.PromptResult
+		promptErr    error
+		terminalType agentpkg.StreamEventType
+	}{
+		{
+			name: "success",
+			result: acpclient.PromptResult{
+				Output:     []sdk.Message{sdk.AssistantMessage("done")},
+				StopReason: "end_turn",
+			},
+			terminalType: agentpkg.EventEnd,
+		},
+		{
+			name:         "abort",
+			promptErr:    errors.New("ACP process exited"),
+			terminalType: agentpkg.EventAbort,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			turn := runtimeRowTestTurn()
+			messages := &acpProjectionMessageService{}
+			pool := &recordingACPPrompter{result: tt.result, err: tt.promptErr}
+			resolver := &Resolver{
+				messageService: messages,
+				acpPool:        pool,
+				botPermissions: allowWorkspaceExecFor("user-1"),
+				sessionService: acpRuntimeSessionServiceForTest("user-1"),
+				logger:         slog.New(slog.DiscardHandler),
+			}
+
+			eventCh := make(chan WSStreamEvent, 16)
+			if err := resolver.streamACPAgentWS(
+				context.Background(),
+				conversation.ChatRequest{
+					BotID: "bot-1", SessionID: "session-1", Query: "inspect",
+					RuntimeTurn: turn, UserMessagePersisted: true, PersistedUserMessageID: turn.Request.MessageID,
+				},
+				eventCh,
+				make(chan struct{}),
+			); err != nil {
+				t.Fatalf("streamACPAgentWS() error = %v", err)
+			}
+
+			terminal := requireStreamEvent(t, drainAgentEvents(t, eventCh), tt.terminalType)
+			projection, ok := conversation.RuntimePersistedProjectionFromMetadata(terminal.Metadata)
+			if !ok {
+				t.Fatalf("terminal metadata = %#v, want persisted projection", terminal.Metadata)
+			}
+			if len(messages.roundInputs) != 1 || len(projection.AssistantMessages) != 1 {
+				t.Fatalf("persisted/projection rows = %d/%d, want 1/1", len(messages.roundInputs), len(projection.AssistantMessages))
+			}
+			persisted := messages.roundInputs[0]
+			projected := projection.AssistantMessages[0]
+			if persisted.MessageID == "" || projected.StableID != persisted.MessageID {
+				t.Fatalf("projected stable ID = %q, want persisted %q", projected.StableID, persisted.MessageID)
+			}
+			if projected.TurnPosition != persisted.TurnPosition || projected.TurnMessageSeq != persisted.TurnMessageSeq {
+				t.Fatalf("projected row identity = %#v, want persisted %#v", projected, persisted)
+			}
+		})
+	}
+}
+
 func TestStreamACPAgentWSRechecksRuntimeOwnerWorkspaceExecBeforePrompt(t *testing.T) {
 	t.Parallel()
 
@@ -988,6 +1058,67 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 	}
 	if assistantMeta["stop_reason"] != "end_turn" {
 		t.Fatalf("stop_reason = %#v, want end_turn", assistantMeta["stop_reason"])
+	}
+}
+
+func TestPersistACPLeadingUserMessageKeepsRuntimeReservation(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	messages := &recordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	prepared, err := resolver.persistACPLeadingUserMessage(context.Background(), conversation.ChatRequest{
+		BotID: "bot-1", SessionID: "session-1", Query: "inspect", RuntimeTurn: turn,
+	})
+	if err != nil {
+		t.Fatalf("persistACPLeadingUserMessage() error = %v", err)
+	}
+	if !prepared.UserMessagePersisted || len(messages.persisted) != 1 {
+		t.Fatalf("prepared/persisted = %#v/%d", prepared, len(messages.persisted))
+	}
+	input := messages.persisted[0]
+	if input.MessageID != turn.Request.MessageID || input.TurnID != turn.TurnID || input.TurnPosition != turn.TurnPosition || input.TurnMessageSeq != 1 {
+		t.Fatalf("ACP leading user reservation = %#v", input)
+	}
+}
+
+func TestPersistACPRoundKeepsRuntimeAssistantReservation(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	assistantRow := messagepkg.RuntimeRowReservation{
+		MessageID:      "33333333-3333-3333-3333-333333333333",
+		Role:           "assistant",
+		TurnID:         turn.TurnID,
+		TurnPosition:   turn.TurnPosition,
+		TurnMessageSeq: 2,
+	}
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	err := resolver.persistACPRound(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID: "bot-1", SessionID: "session-1", Query: "inspect",
+			RuntimeTurn: turn, UserMessagePersisted: true, PersistedUserMessageID: turn.Request.MessageID,
+		},
+		"codex",
+		"/data/app",
+		acpclient.PromptResult{Output: []sdk.Message{sdk.AssistantMessage("done")}, StopReason: "end_turn"},
+		nil,
+		[]messagepkg.RuntimeRowReservation{assistantRow},
+	)
+	if err != nil {
+		t.Fatalf("persistACPRound returned error: %v", err)
+	}
+	if len(messages.roundInputs) != 1 {
+		t.Fatalf("atomic ACP inputs = %d, want one terminal assistant", len(messages.roundInputs))
+	}
+	input := messages.roundInputs[0]
+	if input.MessageID != assistantRow.MessageID || input.TurnID != turn.TurnID || input.TurnPosition != turn.TurnPosition || input.TurnMessageSeq != 2 {
+		t.Fatalf("ACP assistant reservation = %#v", input)
+	}
+	if len(messages.persisted) != 0 || len(messages.batchInputs) != 0 {
+		t.Fatalf("ACP runtime used non-atomic fallback: persist=%d batch=%d", len(messages.persisted), len(messages.batchInputs))
 	}
 }
 
@@ -1788,6 +1919,21 @@ type recordingACPPrompter struct {
 	onPrompt     func()
 	streamEvents []event.StreamEvent
 	afterEvents  func()
+}
+
+type acpProjectionMessageService struct {
+	atomicRecordingMessageService
+}
+
+func (s *acpProjectionMessageService) PersistRound(ctx context.Context, inputs []messagepkg.PersistInput, options messagepkg.RoundPersistenceOptions) ([]messagepkg.Message, bool, error) {
+	persisted, handled, err := s.atomicRecordingMessageService.PersistRound(ctx, inputs, options)
+	for index := range persisted {
+		persisted[index].ID = inputs[index].MessageID
+		persisted[index].TurnID = inputs[index].TurnID
+		persisted[index].TurnPosition = inputs[index].TurnPosition
+		persisted[index].TurnMessageSeq = inputs[index].TurnMessageSeq
+	}
+	return persisted, handled, err
 }
 
 type storeRoundMemoryProvider struct {

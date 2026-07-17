@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 const (
@@ -121,20 +122,22 @@ type QueuedRunView struct {
 }
 
 type CurrentRunView struct {
-	StreamID            string                   `json:"stream_id"`
-	Generation          string                   `json:"generation" validate:"required"`
-	Status              string                   `json:"status"`
-	OwnerID             string                   `json:"owner_id,omitempty"`
-	OwnerLeaseExpiresAt *time.Time               `json:"owner_lease_expires_at,omitempty"`
-	StartedAt           time.Time                `json:"started_at"`
-	UpdatedAt           time.Time                `json:"updated_at"`
-	Messages            []conversation.UIMessage `json:"messages"`
-	RequestUserTurn     *conversation.UITurn     `json:"request_user_turn,omitempty"`
-	HistoryCommitted    bool                     `json:"history_committed,omitempty"`
-	CanonicalReady      bool                     `json:"canonical_ready"`
-	Error               string                   `json:"error,omitempty"`
-	Steer               *SteerState              `json:"steer,omitempty"`
-	Operation           *RunOperationView        `json:"operation,omitempty"`
+	StreamID            string                             `json:"stream_id"`
+	Generation          string                             `json:"generation" validate:"required"`
+	Status              string                             `json:"status"`
+	OwnerID             string                             `json:"owner_id,omitempty"`
+	OwnerLeaseExpiresAt *time.Time                         `json:"owner_lease_expires_at,omitempty"`
+	StartedAt           time.Time                          `json:"started_at"`
+	UpdatedAt           time.Time                          `json:"updated_at"`
+	Messages            []conversation.UIMessage           `json:"messages"`
+	RowLedger           []conversation.UIRowIdentity       `json:"row_ledger"`
+	RequestUserTurn     *conversation.UITurn               `json:"request_user_turn,omitempty"`
+	HistoryCommitted    bool                               `json:"history_committed,omitempty"`
+	CanonicalReady      bool                               `json:"canonical_ready"`
+	Error               string                             `json:"error,omitempty"`
+	Steer               *SteerState                        `json:"steer,omitempty"`
+	Operation           *RunOperationView                  `json:"operation,omitempty"`
+	TurnReservation     *messagepkg.RuntimeTurnReservation `json:"turn_reservation,omitempty"`
 }
 
 // RunAdmissionView is the canonical state published when a reserved run
@@ -144,6 +147,8 @@ type CurrentRunView struct {
 type RunAdmissionView struct {
 	RequestUserTurn *conversation.UITurn
 	Operation       *RunOperationView
+	TurnReservation *messagepkg.RuntimeTurnReservation
+	RowLedger       []conversation.UIRowIdentity
 }
 
 // RunStartOptions contains the complete admission and owner-local control
@@ -192,12 +197,14 @@ type Event struct {
 // RuntimeDelta carries only the state changed by one committed runtime
 // transition. Full snapshots are reserved for hydration and gap recovery.
 type RuntimeDelta struct {
-	CurrentRunView  *CurrentRunView          `json:"current_run_view,omitempty"`
-	Run             *CurrentRunPatch         `json:"run,omitempty"`
-	MessageAppends  []RuntimeMessageAppend   `json:"message_appends,omitempty"`
-	ProgressAppends []RuntimeProgressAppend  `json:"progress_appends,omitempty"`
-	MessageUpserts  []conversation.UIMessage `json:"message_upserts,omitempty"`
-	ResetMessages   bool                     `json:"reset_messages,omitempty"`
+	CurrentRunView   *CurrentRunView              `json:"current_run_view,omitempty"`
+	Run              *CurrentRunPatch             `json:"run,omitempty"`
+	MessageAppends   []RuntimeMessageAppend       `json:"message_appends,omitempty"`
+	ProgressAppends  []RuntimeProgressAppend      `json:"progress_appends,omitempty"`
+	MessageUpserts   []conversation.UIMessage     `json:"message_upserts,omitempty"`
+	ResetMessages    bool                         `json:"reset_messages,omitempty"`
+	RowLedgerUpserts []conversation.UIRowIdentity `json:"row_ledger_upserts,omitempty"`
+	ResetRowLedger   bool                         `json:"reset_row_ledger,omitempty"`
 }
 
 type CurrentRunPatch struct {
@@ -212,9 +219,13 @@ type CurrentRunPatch struct {
 }
 
 type RuntimeMessageAppend struct {
-	ID      int                        `json:"id"`
-	Type    conversation.UIMessageType `json:"type"`
-	Content string                     `json:"content"`
+	ID             int                          `json:"id"`
+	StableID       string                       `json:"stable_id,omitempty"`
+	TurnPosition   int64                        `json:"turn_position,omitempty"`
+	TurnMessageSeq int64                        `json:"turn_message_seq,omitempty"`
+	RowIdentities  []conversation.UIRowIdentity `json:"row_identities,omitempty"`
+	Type           conversation.UIMessageType   `json:"type"`
+	Content        string                       `json:"content"`
 }
 
 type RuntimeProgressAppend struct {

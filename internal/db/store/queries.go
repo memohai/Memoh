@@ -300,6 +300,7 @@ type Queries interface {
 	ListMessagesSince(ctx context.Context, arg dbsqlc.ListMessagesSinceParams) ([]dbsqlc.ListMessagesSinceRow, error)
 	ListMessagesSinceBySession(ctx context.Context, arg dbsqlc.ListMessagesSinceBySessionParams) ([]dbsqlc.ListMessagesSinceBySessionRow, error)
 	ListVisibleMessagesFromBySession(ctx context.Context, arg dbsqlc.ListVisibleMessagesFromBySessionParams) ([]dbsqlc.ListVisibleMessagesFromBySessionRow, error)
+	ListVisibleMessagesByTurnIDBySession(ctx context.Context, arg dbsqlc.ListVisibleMessagesByTurnIDBySessionParams) ([]dbsqlc.ListVisibleMessagesByTurnIDBySessionRow, error)
 	ListModels(ctx context.Context) ([]dbsqlc.Model, error)
 	ListModelsByModelID(ctx context.Context, modelID string) ([]dbsqlc.Model, error)
 	ListModelsByProviderClientType(ctx context.Context, clientType string) ([]dbsqlc.Model, error)

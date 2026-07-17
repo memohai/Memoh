@@ -308,6 +308,7 @@ type resolvedContext struct {
 	query                       string // headerified persistable query
 	userMessageAlreadyInContext bool
 	injectedRecords             *[]conversation.InjectedMessageRecord
+	recordInjectedMessage       func(conversation.InjectedMessageRecord)
 	estimatedTokens             int // estimated input token count for compaction
 	compactableTokens           int // raw history eligible for compaction
 	compactableTokensKnown      bool
@@ -506,6 +507,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	runCfg = runCfg.RefreshContextFrag()
 
 	var injectedRecords *[]conversation.InjectedMessageRecord
+	var recordInjectedMessage func(conversation.InjectedMessageRecord)
 	if req.InjectCh != nil {
 		agentInjectCh := make(chan agentpkg.InjectMessage, cap(req.InjectCh))
 		go func() {
@@ -529,13 +531,16 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		records := make([]conversation.InjectedMessageRecord, 0)
 		injectedRecords = &records
 		var recMu sync.Mutex
-		runCfg.InjectedRecorder = func(headerifiedText string, _ []sdk.ImagePart, insertAfter int) {
+		recordInjectedMessage = func(record conversation.InjectedMessageRecord) {
 			recMu.Lock()
-			*injectedRecords = append(*injectedRecords, conversation.InjectedMessageRecord{
+			*injectedRecords = append(*injectedRecords, record)
+			recMu.Unlock()
+		}
+		runCfg.InjectedRecorder = func(headerifiedText string, _ []sdk.ImagePart, insertAfter int) {
+			recordInjectedMessage(conversation.InjectedMessageRecord{
 				HeaderifiedText: headerifiedText,
 				InsertAfter:     insertAfter,
 			})
-			recMu.Unlock()
 		}
 	}
 
@@ -546,6 +551,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		query:                       headerifiedQuery,
 		userMessageAlreadyInContext: usePipeline,
 		injectedRecords:             injectedRecords,
+		recordInjectedMessage:       recordInjectedMessage,
 		estimatedTokens:             estimatedTokens,
 		compactableTokens:           compactableTokens,
 		compactableTokensKnown:      compactableTokensKnown,

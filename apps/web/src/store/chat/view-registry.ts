@@ -1,6 +1,5 @@
-import { ref } from 'vue'
+import { readonly, ref } from 'vue'
 import type { UITurn } from '@/composables/api/useChat.types'
-import { createTranscriptController, type TranscriptDeps } from './transcript'
 import type {
   ChatMessage,
   ChatViewTarget,
@@ -13,15 +12,26 @@ export const CHAT_SESSION_VIEW_CACHE_LIMIT = 12
 export type { ChatViewTarget } from './types'
 
 export type ChatViewKind = 'session' | 'draft'
-export type ChatTranscriptController = ReturnType<typeof createTranscriptController>
+export interface ChatTranscriptReader {
+  readonly messages: readonly ChatMessage[]
+}
 
-export interface ChatViewEntry {
+export type ChatTranscriptController = ChatTranscriptReader
+
+export interface ChatTranscriptHooks {
+  onSnapshot: (targetSessionId: string | undefined, turns: UITurn[]) => void
+  onRefreshApplied: (botId: string, targetSessionId: string, latestTimestamp?: string) => void
+}
+
+export interface ChatViewEntry<
+  TTranscript extends ChatTranscriptReader = ChatTranscriptController,
+> {
   key: string
   kind: ChatViewKind
   botId: string
   sessionId: string | null
   viewId: string
-  transcript: ChatTranscriptController
+  transcript: TTranscript
   attachedPanelIds: Set<string>
   visiblePanelIds: Set<string>
   initialized: boolean
@@ -31,18 +41,23 @@ export interface ChatViewEntry {
   lastAccess: number
 }
 
-interface ChatViewRegistryDeps extends Omit<TranscriptDeps, 'currentBotId' | 'sessionId'> {
+export interface ChatViewRegistryDeps<TTranscript extends ChatTranscriptReader> {
   cacheLimit?: number
   isSessionStreaming?: (botId: string, sessionId: string) => boolean
-  onSnapshot?: (view: ChatViewEntry, targetSessionId: string | undefined, turns: UITurn[]) => void
-  onRefreshApplied?: (view: ChatViewEntry, targetSessionId: string, latestTimestamp?: string) => void
-  onEvict?: (view: ChatViewEntry) => void
+  createTranscript: (target: ChatViewTarget, hooks: ChatTranscriptHooks) => TTranscript
+  onPromoteTranscript: (target: TTranscript, source: TTranscript) => void
+  onDisposeTranscript: (transcript: TTranscript) => void
+  onEvict?: (view: ChatViewEntry<TTranscript>) => void
+  onSnapshot?: (view: ChatViewEntry<TTranscript>, targetSessionId: string | undefined, turns: UITurn[]) => void
+  onRefreshApplied?: (view: ChatViewEntry<TTranscript>, targetSessionId: string, latestTimestamp?: string) => void
 }
 
-export interface ChatViewBindingChange {
-  view: ChatViewEntry
-  activatedSession: ChatViewEntry | null
-  deactivatedSession: ChatViewEntry | null
+export interface ChatViewBindingChange<
+  TTranscript extends ChatTranscriptReader = ChatTranscriptController,
+> {
+  view: ChatViewEntry<TTranscript>
+  activatedSession: ChatViewEntry<TTranscript> | null
+  deactivatedSession: ChatViewEntry<TTranscript> | null
 }
 
 function normalize(value: string | null | undefined): string {
@@ -66,7 +81,7 @@ export function chatViewKey(target: ChatViewTarget): string {
     : chatDraftViewKey(botId, viewId)
 }
 
-function hasPendingInteraction(messages: ChatMessage[]): boolean {
+function hasPendingInteraction(messages: readonly ChatMessage[]): boolean {
   for (const message of messages) {
     if (message.role !== 'assistant') continue
     for (const block of message.messages) {
@@ -86,36 +101,40 @@ function hasPendingInteraction(messages: ChatMessage[]): boolean {
 
 // Owns the in-memory working set for chat panes. Session entries are shared by
 // (bot, session); drafts are isolated by their stable dockview panel id.
-export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
+export function createChatViewRegistry<TTranscript extends ChatTranscriptReader>(
+  deps: ChatViewRegistryDeps<TTranscript>,
+) {
   const cacheLimit = Math.max(0, deps.cacheLimit ?? CHAT_SESSION_VIEW_CACHE_LIMIT)
-  const views = new Map<string, ChatViewEntry>()
+  const views = new Map<string, ChatViewEntry<TTranscript>>()
   const panelKeys = new Map<string, string>()
+  const revision = ref(0)
   let accessClock = 0
 
-  function touch(view: ChatViewEntry) {
+  function touch(view: ChatViewEntry<TTranscript>) {
     view.lastAccess = ++accessClock
     return view
   }
 
-  function createView(target: ChatViewTarget): ChatViewEntry {
+  function createView(target: ChatViewTarget): ChatViewEntry<TTranscript> {
     const botId = normalize(target.botId)
     const sessionId = normalize(target.sessionId) || null
     const viewId = normalize(target.viewId)
     if (!botId) throw new Error('Chat view requires a bot id')
     if (!sessionId && !viewId) throw new Error('Draft chat view requires a stable view id')
 
-    const currentBotId = ref<string | null>(botId)
-    const currentSessionId = ref<string | null>(sessionId)
-    const transcript = createTranscriptController({
-      currentBotId,
-      sessionId: currentSessionId,
-      rememberBackgroundTask: deps.rememberBackgroundTask,
-      applyPendingBackgroundEventsToTool: deps.applyPendingBackgroundEventsToTool,
-      bumpFsChangedAtIfFsMutation: deps.bumpFsChangedAtIfFsMutation,
-      fetchMessages: deps.fetchMessages,
-      locateMessage: deps.locateMessage,
+    const normalizedTarget = { botId, sessionId, viewId }
+    const viewRef: { current?: ChatViewEntry<TTranscript> } = {}
+    const transcript = deps.createTranscript(normalizedTarget, {
+      onSnapshot: (targetSessionId, turns) => {
+        if (viewRef.current) deps.onSnapshot?.(viewRef.current, targetSessionId, turns)
+      },
+      onRefreshApplied: (_botId, targetSessionId, latestTimestamp) => {
+        if (!viewRef.current) return
+        viewRef.current.initialized = true
+        deps.onRefreshApplied?.(viewRef.current, targetSessionId, latestTimestamp)
+      },
     })
-    const view: ChatViewEntry = {
+    const view: ChatViewEntry<TTranscript> = {
       key: chatViewKey({ botId, sessionId, viewId }),
       kind: sessionId ? 'session' : 'draft',
       botId,
@@ -130,43 +149,37 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       workspaceTargetSelectionSource: ref('unset'),
       lastAccess: 0,
     }
-    transcript.setSnapshotHook((targetSessionId, turns) => {
-      deps.onSnapshot?.(view, targetSessionId, turns)
-    })
-    transcript.setRefreshAppliedHook((_botId, targetSessionId, latestTimestamp) => {
-      view.initialized = true
-      deps.onRefreshApplied?.(view, targetSessionId, latestTimestamp)
-    })
+    viewRef.current = view
     views.set(view.key, view)
     return touch(view)
   }
 
-  function get(target: ChatViewTarget): ChatViewEntry | undefined {
+  function get(target: ChatViewTarget): ChatViewEntry<TTranscript> | undefined {
     const view = views.get(chatViewKey(target))
     return view ? touch(view) : undefined
   }
 
-  function getOrCreate(target: ChatViewTarget): ChatViewEntry {
+  function getOrCreate(target: ChatViewTarget): ChatViewEntry<TTranscript> {
     return get(target) ?? createView(target)
   }
 
-  function getSession(botId: string, sessionId: string): ChatViewEntry | undefined {
+  function getSession(botId: string, sessionId: string): ChatViewEntry<TTranscript> | undefined {
     const view = views.get(chatSessionViewKey(botId, sessionId))
     return view ? touch(view) : undefined
   }
 
-  function getDraft(botId: string, viewId: string): ChatViewEntry | undefined {
+  function getDraft(botId: string, viewId: string): ChatViewEntry<TTranscript> | undefined {
     const view = views.get(chatDraftViewKey(botId, viewId))
     return view ? touch(view) : undefined
   }
 
-  function getPanel(panelId: string): ChatViewEntry | undefined {
+  function getPanel(panelId: string): ChatViewEntry<TTranscript> | undefined {
     const key = panelKeys.get(normalize(panelId))
     const view = key ? views.get(key) : undefined
     return view ? touch(view) : undefined
   }
 
-  function mustRetain(view: ChatViewEntry): boolean {
+  function mustRetain(view: ChatViewEntry<TTranscript>): boolean {
     // A dock tab is only an address back to this view. Keeping it attached must
     // not turn an arbitrary number of hidden tabs into an unbounded cache.
     if (view.visiblePanelIds.size > 0) return true
@@ -175,15 +188,16 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     return hasPendingInteraction(view.transcript.messages)
   }
 
-  function evict(view: ChatViewEntry) {
+  function evict(view: ChatViewEntry<TTranscript>) {
     views.delete(view.key)
     for (const panelId of view.attachedPanelIds) {
       if (panelKeys.get(panelId) === view.key) panelKeys.delete(panelId)
     }
     view.attachedPanelIds.clear()
     view.visiblePanelIds.clear()
-    view.transcript.resetUserScope()
+    deps.onDisposeTranscript(view.transcript)
     deps.onEvict?.(view)
+    revision.value += 1
   }
 
   function prune() {
@@ -201,7 +215,10 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     }
   }
 
-  function removePanelFromView(panelId: string, view: ChatViewEntry): ChatViewEntry | null {
+  function removePanelFromView(
+    panelId: string,
+    view: ChatViewEntry<TTranscript>,
+  ): ChatViewEntry<TTranscript> | null {
     const wasLastVisibleSession = view.kind === 'session'
       && view.visiblePanelIds.has(panelId)
       && view.visiblePanelIds.size === 1
@@ -215,12 +232,16 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     return wasLastVisibleSession ? view : null
   }
 
-  function bindPanel(panelId: string, target: ChatViewTarget, visible: boolean): ChatViewBindingChange {
+  function bindPanel(
+    panelId: string,
+    target: ChatViewTarget,
+    visible: boolean,
+  ): ChatViewBindingChange<TTranscript> {
     const id = normalize(panelId)
     if (!id) throw new Error('Chat view binding requires a panel id')
     const next = getOrCreate(target)
     const previousKey = panelKeys.get(id)
-    let deactivatedSession: ChatViewEntry | null = null
+    let deactivatedSession: ChatViewEntry<TTranscript> | null = null
     if (previousKey && previousKey !== next.key) {
       const previous = views.get(previousKey)
       if (previous) deactivatedSession = removePanelFromView(id, previous)
@@ -237,7 +258,10 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     return { view: next, activatedSession, deactivatedSession }
   }
 
-  function setPanelVisible(panelId: string, visible: boolean): ChatViewBindingChange | null {
+  function setPanelVisible(
+    panelId: string,
+    visible: boolean,
+  ): ChatViewBindingChange<TTranscript> | null {
     const id = normalize(panelId)
     const key = panelKeys.get(id)
     const view = key ? views.get(key) : undefined
@@ -258,7 +282,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     return { view, activatedSession, deactivatedSession }
   }
 
-  function unbindPanel(panelId: string): ChatViewEntry | null {
+  function unbindPanel(panelId: string): ChatViewEntry<TTranscript> | null {
     const id = normalize(panelId)
     const key = panelKeys.get(id)
     const view = key ? views.get(key) : undefined
@@ -268,7 +292,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     return deactivated
   }
 
-  function promoteDraft(botId: string, viewId: string, sessionId: string): ChatViewEntry {
+  function promoteDraft(botId: string, viewId: string, sessionId: string): ChatViewEntry<TTranscript> {
     const bid = normalize(botId)
     const vid = normalize(viewId)
     const sid = normalize(sessionId)
@@ -279,10 +303,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     const sessionKey = chatSessionViewKey(bid, sid)
     const existing = views.get(sessionKey)
     if (existing && existing !== draft) {
-      const knownTurns = new Set(existing.transcript.messages)
-      existing.transcript.appendToView(
-        ...draft.transcript.messages.filter(turn => !knownTurns.has(turn)),
-      )
+      deps.onPromoteTranscript(existing.transcript, draft.transcript)
       existing.initialized ||= draft.initialized
       if (draft.workspaceTargetSelectionSource.value !== 'unset') {
         existing.workspaceTargetId.value = draft.workspaceTargetId.value
@@ -299,17 +320,15 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       views.delete(draft.key)
       draft.attachedPanelIds.clear()
       draft.visiblePanelIds.clear()
+      deps.onDisposeTranscript(draft.transcript)
       touch(existing)
       prune()
       return existing
     }
 
     views.delete(draft.key)
-    // The transcript's target refs are intentionally private. Replacing its
-    // draft controller would lose optimistic object identity, so move the
-    // existing turns into a session-bound controller instead.
     const replacement = createView({ botId: bid, sessionId: sid, viewId: vid })
-    replacement.transcript.appendToView(...draft.transcript.messages)
+    deps.onPromoteTranscript(replacement.transcript, draft.transcript)
     replacement.initialized = draft.initialized
     replacement.workspaceTargetId.value = draft.workspaceTargetId.value
     replacement.workspaceTargetSnapshot.value = draft.workspaceTargetSnapshot.value
@@ -323,6 +342,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     for (const panelId of draft.visiblePanelIds) replacement.visiblePanelIds.add(panelId)
     draft.attachedPanelIds.clear()
     draft.visiblePanelIds.clear()
+    deps.onDisposeTranscript(draft.transcript)
     touch(replacement)
     prune()
     return replacement
@@ -345,11 +365,12 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     panelKeys.clear()
   }
 
-  function entries(): ChatViewEntry[] {
+  function entries(): ChatViewEntry<TTranscript>[] {
     return [...views.values()]
   }
 
   return {
+    revision: readonly(revision),
     get,
     getOrCreate,
     getSession,

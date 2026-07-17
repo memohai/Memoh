@@ -47,8 +47,9 @@ func (*agentToolPlaceholderProvider) DoStream(_ context.Context, _ sdk.GenerateP
 	return &sdk.StreamResult{Stream: ch}, nil
 }
 
-// TestAgentStreamEmitsToolCallInputStartThenStart asserts that a tool call
-// produces a lightweight EventToolCallInputStart (name + call ID, no input)
+// TestAgentStreamEmitsToolCallInputStartThenStart asserts that a model step is
+// announced before its tool events, then a tool call produces a lightweight
+// EventToolCallInputStart (name + call ID, no input)
 // when the SDK emits ToolInputStartPart, followed by a EventToolCallStart
 // carrying the fully-assembled Input when StreamToolCallPart arrives. The
 // early input-start lets the Web UI render the tool block while arguments are
@@ -72,27 +73,30 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 		events = append(events, event)
 	}
 
-	if len(events) != 4 {
-		t.Fatalf("expected 4 events, got %d: %#v", len(events), events)
+	if len(events) != 5 {
+		t.Fatalf("expected 5 events, got %d: %#v", len(events), events)
 	}
 	if events[0].Type != EventAgentStart {
 		t.Fatalf("expected first event %q, got %#v", EventAgentStart, events[0])
 	}
-	if events[1].Type != EventToolCallInputStart || events[1].ToolCallID != "call-1" || events[1].ToolName != "write" {
-		t.Fatalf("unexpected tool call input start event: %#v", events[1])
+	if events[1].Type != EventModelStepStart {
+		t.Fatalf("expected model step event %q, got %#v", EventModelStepStart, events[1])
 	}
-	if events[1].Input != nil {
-		t.Fatalf("expected tool call input start to carry no input, got %#v", events[1].Input)
+	if events[2].Type != EventToolCallInputStart || events[2].ToolCallID != "call-1" || events[2].ToolName != "write" {
+		t.Fatalf("unexpected tool call input start event: %#v", events[2])
 	}
-	if events[2].Type != EventToolCallStart || events[2].ToolCallID != "call-1" || events[2].ToolName != "write" {
-		t.Fatalf("unexpected tool call start event: %#v", events[2])
+	if events[2].Input != nil {
+		t.Fatalf("expected tool call input start to carry no input, got %#v", events[2].Input)
+	}
+	if events[3].Type != EventToolCallStart || events[3].ToolCallID != "call-1" || events[3].ToolName != "write" {
+		t.Fatalf("unexpected tool call start event: %#v", events[3])
 	}
 	expectedInput := map[string]any{"path": "/tmp/long.txt"}
-	if !reflect.DeepEqual(events[2].Input, expectedInput) {
-		t.Fatalf("expected tool call start input %#v, got %#v", expectedInput, events[2].Input)
+	if !reflect.DeepEqual(events[3].Input, expectedInput) {
+		t.Fatalf("expected tool call start input %#v, got %#v", expectedInput, events[3].Input)
 	}
-	if events[3].Type != EventAgentEnd {
-		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[3])
+	if events[4].Type != EventAgentEnd {
+		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[4])
 	}
 }
 

@@ -411,7 +411,7 @@ func (r *Resolver) prepareForkAnchorUpdate(ctx context.Context, sessionID string
 		return nil, nil
 	}
 
-	replacedTail, err := r.messageService.ListVisibleFromBySession(ctx, sessionID, replacedTailStartMessageID)
+	replacedTail, err := r.messageService.ListVisibleFromBySession(ctx, sessionID, replacedTailStartMessageID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("load replaced tail for fork anchor update: %w", err)
 	}

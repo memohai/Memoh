@@ -12,7 +12,7 @@ import {
   cloneToolApprovalState,
   cloneUserInputState,
   isOptimisticTurn,
-  isSameLogicalTurn,
+  hasSameTurnIdentity,
   mergeApprovalState,
   nextId,
   normalizeAttachment,
@@ -34,6 +34,7 @@ import type {
   BackgroundTask,
   ChatAssistantTurn,
   ChatMessage,
+  ChatMessageSyncState,
   ChatUserTurn,
   ContentBlock,
   ToolCallBlock,
@@ -72,6 +73,7 @@ export interface TranscriptDeps {
   sessionId: Ref<string | null>
   rememberBackgroundTask: (task: BackgroundTask) => BackgroundTask
   applyPendingBackgroundEventsToTool: (block: ToolCallBlock) => void
+  mergeBackgroundTaskIntoMatchingTools: (task: BackgroundTask, messages: ChatMessage[]) => void
   bumpFsChangedAtIfFsMutation: (message: UIMessage) => void
   fetchMessages: (botId: string, sessionId: string, options?: FetchMessagesOptions) => Promise<UITurn[]>
   locateMessage: (botId: string, sessionId: string, externalMessageId: string, before?: number, after?: number) => Promise<LocateMessageResult>
@@ -93,6 +95,7 @@ export function createTranscriptController({
   sessionId,
   rememberBackgroundTask,
   applyPendingBackgroundEventsToTool,
+  mergeBackgroundTaskIntoMatchingTools,
   bumpFsChangedAtIfFsMutation,
   fetchMessages,
   locateMessage,
@@ -107,6 +110,13 @@ export function createTranscriptController({
   let onSnapshot: SnapshotHook = () => {}
   let onRefreshApplied: RefreshAppliedHook = () => {}
   let refreshPromise: { key: string; promise: Promise<void> } | null = null
+  let initialMessagesLoad: {
+    botId: string
+    sessionId: string
+    generation: number
+    version: number
+    turns: Promise<UITurn[]>
+  } | null = null
   let historyGeneration = 0
   let loadingMessagesVersion = 0
   let loadingOlderVersion = 0
@@ -159,6 +169,8 @@ export function createTranscriptController({
         : turn.text ?? ''
       return {
         id: String(turn.id ?? nextId()),
+        turnPosition: turn.turn_position,
+        turnMessageSeq: turn.turn_message_seq,
         role: 'user',
         text,
         userMessageKind,
@@ -174,6 +186,7 @@ export function createTranscriptController({
         externalMessageId: (turn.external_message_id ?? '').trim() || undefined,
         streaming: false,
         isSelf: resolveIsSelf(turn),
+        syncState: { run: 'completed', presence: 'settled', persistence: 'persisted' },
       }
     }
 
@@ -185,23 +198,29 @@ export function createTranscriptController({
       const latest = rememberBackgroundTask(task)
       return {
         id: String(turn.id ?? `system-${latest.taskId}`),
+        turnPosition: turn.turn_position,
+        turnMessageSeq: turn.turn_message_seq,
         role: 'system',
         kind: 'background_task',
         backgroundTask: latest,
         timestamp: normalizeTimestamp(turn.timestamp),
         platform: (turn.platform ?? '').trim() || undefined,
         streaming: false,
+        syncState: { run: 'completed', presence: 'settled', persistence: 'persisted' },
       }
     }
 
     return {
       id: String(turn.id ?? nextId()),
+      turnPosition: turn.turn_position,
+      turnMessageSeq: turn.turn_message_seq,
       role: 'assistant',
       messages: (turn.messages ?? []).map(normalizeUIMessage),
       timestamp: normalizeTimestamp(turn.timestamp),
       platform: (turn.platform ?? '').trim() || undefined,
       externalMessageId: (turn.external_message_id ?? '').trim() || undefined,
       streaming: false,
+      syncState: { run: 'completed', presence: 'settled', persistence: 'persisted' },
     }
   }
 
@@ -375,18 +394,29 @@ export function createTranscriptController({
 
   // Preserve client render keys across REST snapshots. Server ids remain in
   // serverId so Vue does not remount the just-streamed tail and break scroll pinning.
+  function isUnsettledTurn(turn: ChatMessage) {
+    return isOptimisticTurn(turn) || turn.syncState?.presence === 'live'
+  }
+
   function adoptRenderIdentity(incoming: ChatMessage[]) {
     if (messages.length === 0 || incoming.length === 0) return
     const adopted = new Set<ChatMessage>()
     const adopt = (twin: ChatMessage, existing: ChatMessage) => {
       adopted.add(twin)
+      if (
+        existing.syncState?.presence === 'settled'
+        && existing.syncState.persistence === 'persisted'
+      ) {
+        twin.syncState = { ...existing.syncState }
+      }
       if (twin.id === existing.id) return
       twin.serverId = twin.serverId ?? twin.id
       twin.id = existing.id
     }
     const byServerId = new Map<string, ChatMessage>()
     for (const existing of messages) {
-      if (existing.serverId) byServerId.set(existing.serverId, existing)
+      const id = serverMessageId(existing)
+      if (id) byServerId.set(id, existing)
     }
     for (const twin of incoming) {
       const prior = byServerId.get(twin.serverId ?? twin.id)
@@ -394,15 +424,16 @@ export function createTranscriptController({
     }
     for (let i = 0; i < messages.length; i += 1) {
       const existing = messages[i]
-      if (!existing || existing.role !== 'user' || !isOptimisticTurn(existing)) continue
-      const twinIndex = incoming.findIndex(turn => !adopted.has(turn) && isSameLogicalTurn(existing, turn))
+      if (!existing || existing.role !== 'user' || !isUnsettledTurn(existing)) continue
+      const twinIndex = incoming.findIndex(turn => !adopted.has(turn) && hasSameTurnIdentity(existing, turn))
       if (twinIndex === -1) continue
       adopt(incoming[twinIndex]!, existing)
       const existingNext = messages[i + 1]
       const incomingNext = incoming[twinIndex + 1]
       if (
-        existingNext?.role === 'assistant' && isOptimisticTurn(existingNext)
+        existingNext?.role === 'assistant' && isUnsettledTurn(existingNext)
         && incomingNext?.role === 'assistant' && !adopted.has(incomingNext)
+        && hasSameTurnIdentity(existingNext, incomingNext)
       ) {
         adopt(incomingNext, existingNext)
       }
@@ -426,37 +457,9 @@ export function createTranscriptController({
       const sendInFlight = messages.some(turn =>
         isOptimisticTurn(turn) && turn.role === 'assistant' && turn.streaming)
       if (sendInFlight) {
-        // Text match (not isSameLogicalTurn): its 5s timestamp tolerance can
-        // reject a genuine server twin (clock skew, slow persist), which
-        // would duplicate the user turn here. Counted per occurrence, not a
-        // set: the snapshot absorbs one optimistic turn per matching row, so
-        // re-sending a prompt whose text already exists in history does not
-        // get swallowed by its older persisted twin.
-        const nextUserTextCounts = new Map<string, number>()
-        for (const turn of next) {
-          if (turn.role !== 'user') continue
-          const text = turn.text.trim()
-          nextUserTextCounts.set(text, (nextUserTextCounts.get(text) ?? 0) + 1)
-        }
-        // The snapshot's rows first cover the user turns that were already
-        // non-optimistic locally (they ARE those rows, minus paging drift);
-        // only the remainder can absorb optimistic turns.
-        for (const turn of messages) {
-          if (turn.role !== 'user' || isOptimisticTurn(turn)) continue
-          const text = turn.text.trim()
-          const left = nextUserTextCounts.get(text)
-          if (left) nextUserTextCounts.set(text, left - 1)
-        }
-        const orphans = messages.filter((turn) => {
-          if (!isOptimisticTurn(turn) || turn.role !== 'user') return false
-          const text = turn.text.trim()
-          const left = nextUserTextCounts.get(text)
-          if (left) {
-            nextUserTextCounts.set(text, left - 1)
-            return false
-          }
-          return true
-        })
+        const orphans = messages.filter(turn => isOptimisticTurn(turn)
+          && turn.role === 'user'
+          && !next.some(candidate => hasSameTurnIdentity(turn, candidate)))
         messages.splice(0, messages.length, ...next, ...orphans)
         return
       }
@@ -469,9 +472,9 @@ export function createTranscriptController({
     adoptRenderIdentity(incoming)
     const matched = new Set<string>()
     for (let i = 0; i < messages.length; i += 1) {
-      const optimistic = messages[i]
-      if (!optimistic || !isOptimisticTurn(optimistic)) continue
-      const replacement = incoming.find(turn => !matched.has(turn.id) && isSameLogicalTurn(optimistic, turn))
+      const unsettled = messages[i]
+      if (!unsettled || !isUnsettledTurn(unsettled)) continue
+      const replacement = incoming.find(turn => !matched.has(turn.id) && hasSameTurnIdentity(unsettled, turn))
       if (replacement) {
         messages[i] = replacement
         matched.add(replacement.id)
@@ -481,6 +484,126 @@ export function createTranscriptController({
     for (const item of messages) merged.set(item.id, item)
     for (const item of incoming) merged.set(item.id, item)
     messages.splice(0, messages.length, ...sortChatMessages([...merged.values()]))
+  }
+
+  // A terminal runtime handoff must invalidate any older hydration that is
+  // still in flight, while merging only the one authoritative persisted turn.
+  function mergePersistedTurn(items: UITurn[], targetSessionId?: string) {
+    historyGeneration += 1
+    onSnapshot(targetSessionId, items)
+    mergeMessages(items, targetSessionId)
+  }
+
+  function replacePersistedWindow(items: UITurn[], targetSessionId?: string) {
+    historyGeneration += 1
+    onSnapshot(targetSessionId, items)
+    const incoming = sortChatMessages(normalizeTurns(items, targetSessionId))
+    adoptRenderIdentity(incoming)
+    const retained = messages.filter(turn => {
+      if (turn.syncState?.persistence === 'persisted') return false
+      return !incoming.some(candidate => hasSameTurnIdentity(turn, candidate))
+    })
+    const retainedSet = new Set(retained)
+    const slots = Array.from({ length: incoming.length + 1 }, () => [] as ChatMessage[])
+    const incomingIndexFor = (turn: ChatMessage) => incoming.findIndex(candidate => hasSameTurnIdentity(turn, candidate))
+
+    for (let index = 0; index < messages.length; index += 1) {
+      const turn = messages[index]
+      if (!turn || !retainedSet.has(turn)) continue
+      let slot = -1
+      for (let previous = index - 1; previous >= 0; previous -= 1) {
+        const anchor = messages[previous]
+        if (!anchor || anchor.syncState?.persistence !== 'persisted') continue
+        const incomingIndex = incomingIndexFor(anchor)
+        if (incomingIndex >= 0) {
+          slot = incomingIndex + 1
+          break
+        }
+      }
+      if (slot < 0) {
+        for (let next = index + 1; next < messages.length; next += 1) {
+          const anchor = messages[next]
+          if (!anchor || anchor.syncState?.persistence !== 'persisted') continue
+          const incomingIndex = incomingIndexFor(anchor)
+          if (incomingIndex >= 0) {
+            slot = incomingIndex
+            break
+          }
+        }
+      }
+      slots[slot < 0 ? incoming.length : slot]!.push(turn)
+    }
+
+    const reconciled = [...slots[0]!]
+    for (let index = 0; index < incoming.length; index += 1) {
+      reconciled.push(incoming[index]!, ...slots[index + 1]!)
+    }
+    messages.splice(0, messages.length, ...reconciled)
+  }
+
+  // Applies a bounded authoritative history response only when both views
+  // contain the requested durable anchor. This lets callers fall back to a
+  // full reset without first destroying a still-valid local transcript.
+  function replacePersistedSuffix(items: UITurn[], anchorMessageId: string, targetSessionId?: string): boolean {
+    const anchorId = anchorMessageId.trim()
+    if (!anchorId) return false
+
+    const localAnchorIndex = messages.findIndex(turn =>
+      turn.syncState?.persistence === 'persisted' && serverMessageId(turn) === anchorId)
+    if (localAnchorIndex < 0) return false
+    if (!items.some(turn => String(turn.id ?? '').trim() === anchorId)) return false
+
+    const normalized = sortChatMessages(normalizeTurns(items, targetSessionId))
+    const incomingAnchorIndex = normalized.findIndex(turn => serverMessageId(turn) === anchorId)
+    if (incomingAnchorIndex < 0) return false
+
+    const incoming = normalized.slice(incomingAnchorIndex)
+    historyGeneration += 1
+    onSnapshot(targetSessionId, items)
+    adoptRenderIdentity(incoming)
+
+    const prefix = messages.slice(0, localAnchorIndex)
+    const localSuffix = messages.slice(localAnchorIndex)
+    const retained = localSuffix.filter(turn =>
+      isUnsettledTurn(turn) && !incoming.some(candidate => hasSameTurnIdentity(turn, candidate)))
+    const retainedSet = new Set(retained)
+    const slots = Array.from({ length: incoming.length + 1 }, () => [] as ChatMessage[])
+    const incomingIndexFor = (turn: ChatMessage) => incoming.findIndex(candidate =>
+      hasSameTurnIdentity(turn, candidate))
+
+    for (let index = 0; index < localSuffix.length; index += 1) {
+      const turn = localSuffix[index]
+      if (!turn || !retainedSet.has(turn)) continue
+      let slot = -1
+      for (let previous = index - 1; previous >= 0; previous -= 1) {
+        const anchor = localSuffix[previous]
+        if (!anchor) continue
+        const incomingIndex = incomingIndexFor(anchor)
+        if (incomingIndex >= 0) {
+          slot = incomingIndex + 1
+          break
+        }
+      }
+      if (slot < 0) {
+        for (let next = index + 1; next < localSuffix.length; next += 1) {
+          const anchor = localSuffix[next]
+          if (!anchor) continue
+          const incomingIndex = incomingIndexFor(anchor)
+          if (incomingIndex >= 0) {
+            slot = incomingIndex
+            break
+          }
+        }
+      }
+      slots[slot < 0 ? incoming.length : slot]!.push(turn)
+    }
+
+    const reconciled = [...prefix, ...slots[0]!]
+    for (let index = 0; index < incoming.length; index += 1) {
+      reconciled.push(incoming[index]!, ...slots[index + 1]!)
+    }
+    messages.splice(0, messages.length, ...reconciled)
+    return true
   }
 
   const PAGE_SIZE = 30
@@ -494,6 +617,7 @@ export function createTranscriptController({
     loadingMessagesVersion += 1
     loadingOlderVersion += 1
     refreshPromise = null
+    initialMessagesLoad = null
     replaceMessages([])
     hasMoreOlder.value = options.hasMoreOlder === true
     hasLoadedOlder.value = false
@@ -506,6 +630,7 @@ export function createTranscriptController({
     loadingMessagesVersion += 1
     loadingOlderVersion += 1
     refreshPromise = null
+    initialMessagesLoad = null
     hasLoadedOlder.value = false
     loadingMessages.value = false
     loadingOlder.value = false
@@ -520,6 +645,7 @@ export function createTranscriptController({
     historyGeneration += 1
     loadingOlderVersion += 1
     refreshPromise = null
+    initialMessagesLoad = null
     replaceMessages(items, targetSessionId)
     hasMoreOlder.value = true
     hasLoadedOlder.value = false
@@ -593,8 +719,56 @@ export function createTranscriptController({
     }
   }
 
+  function beginInitialMessagesLoad(botId: string, targetSessionId: string) {
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return null
+    if (
+      initialMessagesLoad
+      && initialMessagesLoad.botId === bid
+      && initialMessagesLoad.sessionId === sid
+      && initialMessagesLoad.generation === historyGeneration
+    ) return initialMessagesLoad
+    loadingMessages.value = true
+    const version = ++loadingMessagesVersion
+    const generation = historyGeneration
+    initialMessagesLoad = {
+      botId: bid,
+      sessionId: sid,
+      generation,
+      version,
+      turns: fetchMessages(bid, sid, { limit: PAGE_SIZE }),
+    }
+    return initialMessagesLoad
+  }
+
+  function applyInitialMessagesLoad(load: NonNullable<ReturnType<typeof beginInitialMessagesLoad>>, turns: UITurn[]) {
+    if (!isCurrentHistoryContext(load.botId, load.sessionId, load.generation)) return false
+    if (hasLoadedOlder.value) {
+      mergeMessages(turns, load.sessionId)
+    } else {
+      replaceMessages(turns, load.sessionId, { preserveOptimistic: true })
+      hasMoreOlder.value = true
+    }
+    onRefreshApplied(load.botId, load.sessionId, messages[messages.length - 1]?.timestamp)
+    return true
+  }
+
+  function finishInitialMessagesLoad(load: NonNullable<ReturnType<typeof beginInitialMessagesLoad>>) {
+    if (initialMessagesLoad === load) initialMessagesLoad = null
+    if (load.version === loadingMessagesVersion) loadingMessages.value = false
+  }
+
   function fetchSessionWindow(botId: string, targetSessionId: string): Promise<UITurn[]> {
-    return fetchMessages(botId, targetSessionId, { limit: PAGE_SIZE })
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    if (
+      initialMessagesLoad
+      && initialMessagesLoad.botId === bid
+      && initialMessagesLoad.sessionId === sid
+      && initialMessagesLoad.generation === historyGeneration
+    ) return initialMessagesLoad.turns
+    return fetchMessages(bid, sid, { limit: PAGE_SIZE })
   }
 
   async function loadOlderMessages(): Promise<number> {
@@ -710,6 +884,16 @@ export function createTranscriptController({
     messages.push(...turns)
   }
 
+  function insertTurnAt(index: number, turn: ChatMessage) {
+    messages.splice(Math.max(0, Math.min(index, messages.length)), 0, turn)
+  }
+
+  function replaceTurnAt(index: number, turn: ChatMessage) {
+    if (index < 0 || index >= messages.length) return false
+    messages.splice(index, 1, turn)
+    return true
+  }
+
   function prependToView(...turns: ChatMessage[]) {
     messages.unshift(...turns)
   }
@@ -770,6 +954,7 @@ export function createTranscriptController({
       timestamp: new Date().toISOString(),
       streaming: true,
       __optimistic: true,
+      syncState: { run: 'admitting', presence: 'optimistic', persistence: 'unknown' },
     }
   }
 
@@ -789,7 +974,76 @@ export function createTranscriptController({
       streaming: false,
       isSelf: true,
       __optimistic: true,
+      syncState: {
+        run: 'admitting',
+        presence: 'optimistic',
+        persistence: 'unknown',
+        streamId: externalMessageId?.trim() || undefined,
+      },
     }
+  }
+
+  function setMessageSyncState(turn: ChatMessage, state: ChatMessageSyncState) {
+    turn.syncState = {
+      ...state,
+      streamId: state.streamId?.trim() || undefined,
+      generation: state.generation?.trim() || undefined,
+    }
+    if (state.presence !== 'optimistic') turn.__optimistic = false
+  }
+
+  function adoptRuntimeUserTurn(existing: ChatUserTurn, canonical: ChatUserTurn) {
+    const id = existing.id
+    const serverId = existing.serverId ?? canonical.serverId
+    const isSelf = existing.isSelf || canonical.isSelf
+    Object.assign(existing, canonical, { id, serverId, isSelf, __optimistic: false })
+  }
+
+  function setAssistantRowIdentity(
+    turn: ChatAssistantTurn,
+    identity: { stableId?: string, turnPosition?: number, turnMessageSeq?: number },
+  ) {
+    turn.serverId = identity.stableId?.trim() || turn.serverId
+    turn.turnPosition = identity.turnPosition
+    turn.turnMessageSeq = identity.turnMessageSeq
+  }
+
+  function setAssistantStreaming(turn: ChatAssistantTurn, streaming: boolean) {
+    turn.streaming = streaming
+  }
+
+  function clearAssistantMessages(turn: ChatAssistantTurn) {
+    turn.messages = []
+  }
+
+  function appendAssistantContent(
+    turn: ChatAssistantTurn,
+    id: number,
+    type: 'text' | 'reasoning',
+    content: string,
+  ): boolean {
+    const block = turn.messages.find(message => message.id === id && message.type === type)
+    if (!block || (block.type !== 'text' && block.type !== 'reasoning')) return false
+    block.content += content
+    return true
+  }
+
+  function appendToolProgress(
+    turn: ChatAssistantTurn,
+    id: number,
+    progress: unknown,
+    input: { present: boolean, value?: unknown },
+  ): boolean {
+    const block = turn.messages.find((message): message is ToolCallBlock =>
+      message.id === id && message.type === 'tool')
+    if (!block) return false
+    block.progress = [...(block.progress ?? []), progress]
+    if (input.present) block.input = input.value
+    return true
+  }
+
+  function applyBackgroundTask(task: BackgroundTask) {
+    mergeBackgroundTaskIntoMatchingTools(rememberBackgroundTask(task), messages)
   }
 
   // Tool updates are partial snapshots. Preserve fields that an earlier stream
@@ -1084,12 +1338,18 @@ export function createTranscriptController({
     normalizeTurns,
     replaceMessages,
     mergeMessages,
+    mergePersistedTurn,
+    replacePersistedWindow,
+    replacePersistedSuffix,
     clearHistoryView,
     prepareForInitialization,
     markHistoryEmpty,
     replaceHistoryView,
     refreshCurrentSession,
     loadInitialMessages,
+    beginInitialMessagesLoad,
+    applyInitialMessagesLoad,
+    finishInitialMessagesLoad,
     fetchSessionWindow,
     loadOlderMessages,
     findMessageIdByExternalId,
@@ -1098,6 +1358,8 @@ export function createTranscriptController({
     appendTurnToSession,
     reattachTurnToSession,
     appendToView,
+    insertTurnAt,
+    replaceTurnAt,
     prependToView,
     removeFromView,
     removeTurnFromSession,
@@ -1105,6 +1367,14 @@ export function createTranscriptController({
     restoreTailFromOptimistic,
     createOptimisticAssistantTurn,
     createOptimisticUserTurn,
+    adoptRuntimeUserTurn,
+    setAssistantRowIdentity,
+    setMessageSyncState,
+    setAssistantStreaming,
+    clearAssistantMessages,
+    appendAssistantContent,
+    appendToolProgress,
+    applyBackgroundTask,
     upsertAssistantUIMessage,
     replaceAssistantUIMessageSnapshot,
     hasVisibleAssistantBlocks,

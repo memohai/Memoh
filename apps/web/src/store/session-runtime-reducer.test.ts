@@ -38,6 +38,7 @@ function runningSnapshot(seq = 1, epoch = ''): SessionruntimeSnapshot {
       generation: 'generation-1',
       status: 'running',
       messages: [],
+      row_ledger: [],
     },
   }
 }
@@ -618,6 +619,56 @@ describe('session runtime reducer', () => {
 
     expect(result.state.snapshot?.current_run_view?.messages).toEqual([{ id: 0, type: 'text', content: 'new' }])
     expect(snapshot.current_run_view?.messages).toEqual([{ id: 0, type: 'text', content: 'old' }])
+  })
+
+  it('upserts runtime ledger rows and replaces them at the terminal handoff', () => {
+    const snapshot = runningSnapshot(1)
+    snapshot.current_run_view!.row_ledger = [{
+      stable_id: 'request-row',
+      role: 'user',
+      turn_id: 'turn-4',
+      turn_position: 4,
+      turn_message_seq: 1,
+    }]
+
+    const live = reduceSessionRuntimeDelta({ snapshot, seq: 1 }, {
+      type: 'runtime_delta',
+      epoch: 'epoch-1',
+      stream_id: 'stream-1',
+      seq: 2,
+      delta: {
+        row_ledger_upserts: [{
+          stable_id: 'assistant-row',
+          role: 'assistant',
+          turn_id: 'turn-4',
+          turn_position: 4,
+          turn_message_seq: 2,
+        }],
+      },
+    }, 'bot-1', 'session-1')
+    expect(live.state.snapshot?.current_run_view?.row_ledger?.map(row => row.stable_id))
+      .toEqual(['request-row', 'assistant-row'])
+
+    const settled = reduceSessionRuntimeDelta(live.state, {
+      type: 'runtime_delta',
+      epoch: 'epoch-1',
+      stream_id: 'stream-1',
+      seq: 3,
+      delta: {
+        reset_row_ledger: true,
+        row_ledger_upserts: [{
+          stable_id: 'committed-row',
+          role: 'assistant',
+          turn_id: 'turn-4',
+          turn_position: 4,
+          turn_message_seq: 2,
+        }],
+      },
+    }, 'bot-1', 'session-1')
+    expect(settled.state.snapshot?.current_run_view?.row_ledger?.map(row => row.stable_id))
+      .toEqual(['committed-row'])
+    expect(snapshot.current_run_view?.row_ledger?.map(row => row.stable_id))
+      .toEqual(['request-row'])
   })
 
   it('rejects a self-contained delta across an unpublished sequence', () => {

@@ -60,6 +60,100 @@ func TestPostgresReplaceTurnRetryHidesSupersededAssistant(t *testing.T) {
 	assertPostgresMessageVisibility(t, ctx, tx, assistant.ID, false, true)
 }
 
+func TestPostgresListVisibleFromUsesHiddenMessageAsTurnAnchor(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresMessageTestTx(t, ctx)
+	setupPostgresMessageTestFixtures(t, ctx, tx)
+
+	const (
+		hiddenAnchorID  = "00000000-0000-0000-0000-000000074141"
+		visibleSameTurn = "00000000-0000-0000-0000-000000074142"
+		visibleNextTurn = "00000000-0000-0000-0000-000000074143"
+		olderVisibleID  = "00000000-0000-0000-0000-000000074144"
+	)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content,
+			turn_id, turn_position, turn_message_seq, turn_visible, turn_superseded_at
+		)
+		VALUES
+			($1, $5, $6, 'user', '{"role":"user","content":"older"}'::jsonb, '00000000-0000-0000-0000-000000074150', 4, 1, true, NULL),
+			($2, $5, $6, 'user', '{"role":"user","content":"superseded"}'::jsonb, '00000000-0000-0000-0000-000000074151', 5, 1, false, now()),
+			($3, $5, $6, 'assistant', '{"role":"assistant","content":"replacement"}'::jsonb, '00000000-0000-0000-0000-000000074152', 5, 2, true, NULL),
+			($4, $5, $6, 'user', '{"role":"user","content":"next"}'::jsonb, '00000000-0000-0000-0000-000000074153', 6, 1, true, NULL)
+	`, olderVisibleID, hiddenAnchorID, visibleSameTurn, visibleNextTurn, postgresMessageTestBotID, postgresMessageTestSessionID); err != nil {
+		t.Fatalf("insert visible-window fixtures: %v", err)
+	}
+
+	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)))
+	messages, err := svc.ListVisibleFromBySession(ctx, postgresMessageTestSessionID, hiddenAnchorID, 0)
+	if err != nil {
+		t.Fatalf("list visible messages from hidden anchor: %v", err)
+	}
+	got := make([]string, 0, len(messages))
+	for _, message := range messages {
+		got = append(got, message.ID)
+	}
+	want := []string{visibleSameTurn, visibleNextTurn}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("visible window ids = %#v, want %#v", got, want)
+	}
+}
+
+func TestPostgresListVisibleMessagesByTurnIDReturnsCompleteOrderedTurn(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresMessageTestTx(t, ctx)
+	setupPostgresMessageTestFixtures(t, ctx, tx)
+
+	const (
+		turnID      = "00000000-0000-0000-0000-000000075000"
+		otherTurnID = "00000000-0000-0000-0000-000000075001"
+		rowCount    = 35
+	)
+	for seq := 1; seq <= rowCount; seq++ {
+		role := "assistant"
+		if seq == 1 {
+			role = "user"
+		}
+		messageID := fmt.Sprintf("00000000-0000-0000-0001-%012d", seq)
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO bot_history_messages (
+				id, bot_id, session_id, role, content,
+				turn_id, turn_position, turn_message_seq, turn_visible
+			)
+			VALUES ($1, $2, $3, $4, '{}'::jsonb, $5, 75, $6, true)
+		`, messageID, postgresMessageTestBotID, postgresMessageTestSessionID, role, turnID, seq); err != nil {
+			t.Fatalf("insert exact-turn row %d: %v", seq, err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content,
+			turn_id, turn_position, turn_message_seq, turn_visible
+		)
+		VALUES
+			('00000000-0000-0000-0001-000000000036', $1, $2, 'assistant', '{}'::jsonb, $3, 75, 36, false),
+			('00000000-0000-0000-0001-000000000037', $1, $2, 'user', '{}'::jsonb, $4, 76, 1, true)
+	`, postgresMessageTestBotID, postgresMessageTestSessionID, turnID, otherTurnID); err != nil {
+		t.Fatalf("insert exact-turn exclusion rows: %v", err)
+	}
+
+	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)))
+	messages, err := svc.ListVisibleMessagesByTurnIDBySession(ctx, postgresMessageTestSessionID, turnID)
+	if err != nil {
+		t.Fatalf("list exact visible turn: %v", err)
+	}
+	if len(messages) != rowCount {
+		t.Fatalf("exact turn rows = %d, want %d without row limit", len(messages), rowCount)
+	}
+	for index, message := range messages {
+		wantSeq := int64(index + 1)
+		if message.TurnID != turnID || message.TurnPosition != 75 || message.TurnMessageSeq != wantSeq {
+			t.Fatalf("row %d identity = %q/%d/%d, want %s/75/%d", index, message.TurnID, message.TurnPosition, message.TurnMessageSeq, turnID, wantSeq)
+		}
+	}
+}
+
 func TestPostgresReplaceTurnAdvancesSessionCompactionEpoch(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresMessageTestTx(t, ctx)
@@ -295,8 +389,8 @@ func setupPostgresMessageTestFixtures(t *testing.T, ctx context.Context, tx pgx.
 		t.Fatalf("insert user: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO bots (id, owner_user_id, name)
-		VALUES ($1, $2, $3)
+		INSERT INTO bots (id, owner_user_id, type, name)
+		VALUES ($1, $2, 'personal', $3)
 	`, postgresMessageTestBotID, postgresMessageTestUserID, name); err != nil {
 		t.Fatalf("insert bot: %v", err)
 	}

@@ -27,6 +27,7 @@
           "text": "new prompt",
           "timestamp": "2026-07-10T00:01:00Z"
         },
+        "row_ledger": [],
         "started_at": "2026-07-10T00:00:00Z",
         "status": "running",
         "stream_id": "stream-generation-reuse",
@@ -63,6 +64,7 @@
           "canonical_ready": false,
           "generation": "generation-a",
           "messages": [],
+          "row_ledger": [],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "admitting",
           "stream_id": "stream-generation-reuse",
@@ -92,6 +94,7 @@
             "text": "old prompt",
             "timestamp": "2026-07-10T00:00:00Z"
           },
+          "row_ledger": [],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-generation-reuse",
@@ -149,6 +152,7 @@
           "canonical_ready": false,
           "generation": "generation-b",
           "messages": [],
+          "row_ledger": [],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "admitting",
           "stream_id": "stream-generation-reuse",
@@ -178,6 +182,7 @@
             "text": "new prompt",
             "timestamp": "2026-07-10T00:01:00Z"
           },
+          "row_ledger": [],
           "started_at": "2026-07-10T00:00:00Z",
           "status": "running",
           "stream_id": "stream-generation-reuse",

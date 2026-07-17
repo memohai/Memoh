@@ -195,6 +195,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	if readMediaState != nil {
+		readMediaState.syntheticRowRecorder = cfg.SyntheticRowRecorder
+	}
 	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, true)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
@@ -336,6 +339,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		switch p := part.(type) {
 		case *sdk.StartPart:
 			_ = p // stream start already emitted
+
+		case *sdk.StartStepPart:
+			if !sendEvent(ctx, ch, StreamEvent{Type: EventModelStepStart}) {
+				aborted = true
+			}
 
 		case *sdk.TextStartPart:
 			if !sendEvent(ctx, ch, StreamEvent{Type: EventTextStart}) {
@@ -728,6 +736,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	}
 	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	if readMediaState != nil {
+		readMediaState.syntheticRowRecorder = cfg.SyntheticRowRecorder
+	}
 	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, false)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
@@ -1476,6 +1487,10 @@ func (a *Agent) runMidStreamRetry(
 				break
 			}
 			switch rp := retryPart.(type) {
+			case *sdk.StartStepPart:
+				if !sendEvent(sendCtx, ch, StreamEvent{Type: EventModelStepStart}) {
+					aborted = true
+				}
 			case *sdk.TextStartPart:
 				if !sendEvent(sendCtx, ch, StreamEvent{Type: EventTextStart}) {
 					aborted = true

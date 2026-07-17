@@ -294,7 +294,7 @@ func TestPrepareEditLatestMessageWSBuildsCanonicalReplacementUserTurn(t *testing
 	}
 }
 
-func (s *forkAnchorMessageService) ListVisibleFromBySession(context.Context, string, string) ([]messagepkg.Message, error) {
+func (s *forkAnchorMessageService) ListVisibleFromBySession(context.Context, string, string, int32) ([]messagepkg.Message, error) {
 	return append([]messagepkg.Message(nil), s.visibleFrom...), nil
 }
 

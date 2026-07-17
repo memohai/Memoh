@@ -153,8 +153,10 @@ describe('useChat.ws', () => {
     first.open()
     second.open()
 
-    first.emit({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' })
-    second.emit({ type: 'message', stream_id: 'stream-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
+    const firstSnapshot = structuredClone(richActiveRunContractFixture.runtime_snapshot)
+    const secondSnapshot = structuredClone(runtimeRecoveryContractFixture.runtime_snapshot)
+    first.emit(firstSnapshot)
+    second.emit(secondSnapshot)
     const runtimeDelta = {
       type: 'runtime_delta',
       bot_id: 'bot-1',
@@ -169,10 +171,10 @@ describe('useChat.ws', () => {
     first.emit(runtimeDelta)
 
     expect(firstHandler).toHaveBeenCalledTimes(2)
-    expect(firstHandler).toHaveBeenCalledWith({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' })
+    expect(firstHandler).toHaveBeenCalledWith(firstSnapshot)
     expect(firstHandler).toHaveBeenCalledWith(runtimeDelta)
     expect(secondHandler).toHaveBeenCalledTimes(1)
-    expect(secondHandler).toHaveBeenCalledWith({ type: 'message', stream_id: 'stream-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
+    expect(secondHandler).toHaveBeenCalledWith(secondSnapshot)
   })
 
   it('parses the Go-generated runtime contract through the websocket transport', () => {
@@ -266,7 +268,7 @@ describe('useChat.ws', () => {
     const socket = MockWebSocket.instances[0]!
     socket.open()
 
-    expect(() => socket.emit({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' })).toThrow(failure)
+    expect(() => socket.emit(structuredClone(richActiveRunContractFixture.runtime_snapshot))).toThrow(failure)
   })
 
   it('reconnects without replaying commands sent while disconnected', () => {

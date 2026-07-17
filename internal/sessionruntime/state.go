@@ -8,6 +8,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 func runtimeDeltaForAgentEvent(event agentpkg.StreamEvent, messages []conversation.UIMessage) (RuntimeDelta, bool) {
@@ -22,9 +23,13 @@ func runtimeDeltaForAgentEvent(event agentpkg.StreamEvent, messages []conversati
 		}
 		message := messages[len(messages)-1]
 		return RuntimeDelta{MessageAppends: []RuntimeMessageAppend{{
-			ID:      message.ID,
-			Type:    message.Type,
-			Content: event.Delta,
+			ID:             message.ID,
+			StableID:       message.StableID,
+			TurnPosition:   message.TurnPosition,
+			TurnMessageSeq: message.TurnMessageSeq,
+			RowIdentities:  append([]conversation.UIRowIdentity(nil), message.RowIdentities...),
+			Type:           message.Type,
+			Content:        event.Delta,
 		}}}, true
 	case agentpkg.EventToolCallProgress:
 		if len(messages) == 0 {
@@ -206,7 +211,36 @@ func normalizeRunAdmission(admission RunAdmissionView) (RunAdmissionView, error)
 	if err != nil {
 		return RunAdmissionView{}, err
 	}
-	return RunAdmissionView{RequestUserTurn: requestUserTurn, Operation: operation}, nil
+	reservation, err := normalizeTurnReservation(admission.TurnReservation)
+	if err != nil {
+		return RunAdmissionView{}, err
+	}
+	rowLedger := make([]conversation.UIRowIdentity, len(admission.RowLedger))
+	copy(rowLedger, admission.RowLedger)
+	return RunAdmissionView{
+		RequestUserTurn: requestUserTurn,
+		Operation:       operation,
+		TurnReservation: reservation,
+		RowLedger:       rowLedger,
+	}, nil
+}
+
+func normalizeTurnReservation(reservation *messagepkg.RuntimeTurnReservation) (*messagepkg.RuntimeTurnReservation, error) {
+	if reservation == nil {
+		return nil, nil
+	}
+	clone := *reservation
+	clone.TurnID = strings.TrimSpace(clone.TurnID)
+	clone.Request.MessageID = strings.TrimSpace(clone.Request.MessageID)
+	clone.Request.Role = strings.ToLower(strings.TrimSpace(clone.Request.Role))
+	clone.Request.TurnID = strings.TrimSpace(clone.Request.TurnID)
+	if clone.TurnID == "" || clone.TurnPosition <= 0 || clone.Request.MessageID == "" {
+		return nil, errors.New("runtime turn reservation is incomplete")
+	}
+	if clone.Request.Role != "user" || clone.Request.TurnID != clone.TurnID || clone.Request.TurnPosition != clone.TurnPosition || clone.Request.TurnMessageSeq != 1 {
+		return nil, errors.New("runtime request row does not match its turn reservation")
+	}
+	return &clone, nil
 }
 
 func normalizeRequestUserTurn(turn *conversation.UITurn) (*conversation.UITurn, error) {

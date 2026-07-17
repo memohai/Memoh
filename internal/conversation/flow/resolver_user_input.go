@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -119,6 +118,40 @@ func (r *Resolver) prepareUserInputResponseTarget(ctx context.Context, input Use
 }
 
 func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
+	return r.respondUserInput(ctx, input, nil, eventCh)
+}
+
+// PrepareDeferredUserInputContinuation fixes the row allocation before the
+// fallback run becomes active, without submitting or canceling the request.
+func (r *Resolver) PrepareDeferredUserInputContinuation(ctx context.Context, input UserInputResponseInput) (DeferredContinuation, error) {
+	if r.userInput == nil {
+		return DeferredContinuation{}, errors.New("user input service not configured")
+	}
+	target, err := r.userInput.ResolveTarget(ctx, userinput.ResolveInput{
+		BotID:                  input.BotID,
+		SessionID:              input.SessionID,
+		ExplicitID:             firstNonEmpty(input.ExplicitID, input.UserInputID),
+		ReplyExternalMessageID: input.ReplyExternalMessageID,
+	})
+	if err != nil {
+		return DeferredContinuation{}, err
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return DeferredContinuation{}, err
+	}
+	if userinput.IsACPMCPRequest(target) || r.userInput.CanRespond(target) {
+		return DeferredContinuation{}, errors.New("user input still belongs to a live waiter")
+	}
+	return r.prepareDeferredContinuation(ctx, target.SessionID, target.ToolCallID)
+}
+
+// RespondUserInputContinuation consumes the plan already published by
+// admission, preserving the response row identity across runtime and DB.
+func (r *Resolver) RespondUserInputContinuation(ctx context.Context, input UserInputResponseInput, continuation DeferredContinuation, eventCh chan<- WSStreamEvent) error {
+	return r.respondUserInput(ctx, input, &continuation, eventCh)
+}
+
+func (r *Resolver) respondUserInput(ctx context.Context, input UserInputResponseInput, continuation *DeferredContinuation, eventCh chan<- WSStreamEvent) error {
 	if r.userInput == nil {
 		return errors.New("user input service not configured")
 	}
@@ -161,6 +194,13 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 			return err
 		}
 		return emitApprovalAck(ctx, eventCh)
+	}
+	if !isACPMCP && !input.ResolveOnly && continuation == nil && r.continueUserInputFn == nil {
+		prepared, prepareErr := r.prepareDeferredContinuation(ctx, target.SessionID, target.ToolCallID)
+		if prepareErr != nil {
+			return prepareErr
+		}
+		continuation = &prepared
 	}
 	var activePrompt *acpActivePromptSubscription
 	if isACPMCP && eventCh != nil && !input.SuppressActivePromptAttach {
@@ -228,7 +268,7 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 	}
 	continueFn := r.continueUserInputFn
 	if continueFn == nil {
-		continueFn = r.storeUserInputResultAndContinue
+		return r.storeUserInputResultAndContinue(ctx, resolved, input, toolResult, *continuation, eventCh)
 	}
 	return continueFn(ctx, resolved, input, toolResult, eventCh)
 }
@@ -404,7 +444,7 @@ func splitUserInputAnswerText(text string) []string {
 	return parts
 }
 
-func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, continuation DeferredContinuation, eventCh chan<- WSStreamEvent) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	target, err := r.resolveWorkspaceTargetSnapshot(ctx, input.BotID, req.WorkspaceTargetID)
@@ -424,13 +464,14 @@ func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req user
 		WorkspaceTargetID:       req.WorkspaceTargetID,
 		WorkspaceTarget:         target,
 	}
-	if err := r.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
+	continuation, err = r.persistDeferredResponse(ctx, storeReq, modelMessages, continuation)
+	if err != nil {
 		return err
 	}
-	return r.continueUserInputSession(ctx, req, input, eventCh)
+	return r.continueUserInputSession(ctx, req, input, continuation, eventCh)
 }
 
-func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
+func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, continuation DeferredContinuation, eventCh chan<- WSStreamEvent) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	resolved, err := r.ResolveRunConfig(ctx,
@@ -470,35 +511,7 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	stream := r.agent.Stream(ctx, cfg)
-	stored := false
-	for event := range stream {
-		data, err := json.Marshal(event)
-		if err != nil {
-			continue
-		}
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if snap, ok := extractTerminalSnapshot(data); ok {
-				if storeErr := r.persistTerminalSnapshot(
-					context.WithoutCancel(ctx),
-					chatReq,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
-					snap,
-				); storeErr != nil {
-					return storeErr
-				}
-				stored = true
-			}
-		}
-		if eventCh != nil {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-	return nil
+	return r.continueDeferredSession(ctx, continuation, cfg, chatReq, resolvedContext{model: models.GetResponse{ID: resolved.ModelID}}, eventCh)
 }
 
 func withLocalWebUserInputReplyTarget(req userinput.Request) userinput.Request {

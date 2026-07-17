@@ -149,6 +149,11 @@ type RunConfig struct {
 	// Returning an error cancels the remaining run before another model step.
 	OnStepCompleted func(context.Context, *sdk.StepResult) error
 
+	// SyntheticRowRecorder reserves durable ordering for generated context
+	// messages that are included in terminal output but have no live stream
+	// event of their own, such as read_media's image-only user message.
+	SyntheticRowRecorder func(role string)
+
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step
 	// boundaries while tools handle waiting and result inspection.
