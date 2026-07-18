@@ -89,6 +89,99 @@ func (*modelStreamMessageService) ListActiveSinceBySession(context.Context, stri
 	return nil, errors.New("history unavailable")
 }
 
+// askUserPersistenceCase is the shared scenario shape for the StreamChat and
+// StreamChatWS terminal-persistence-before-prompt suites below; abortAfterPersist
+// only applies to the WS suite.
+type askUserPersistenceCase struct {
+	name              string
+	persistErr        error
+	failFirst         error
+	workspaceErr      error
+	idleTimeout       time.Duration
+	persistDelay      time.Duration
+	wantPrompt        bool
+	wantPersist       bool
+	wantAttempts      int32
+	wantErr           error
+	abortAfterPersist bool
+}
+
+func askUserPersistenceCases(ambiguousErr error) []askUserPersistenceCase {
+	return []askUserPersistenceCase{
+		{name: "persisted response", wantPrompt: true, wantPersist: true, wantAttempts: 1},
+		{name: "terminal persistence outlives idle timeout", idleTimeout: 250 * time.Millisecond, persistDelay: 500 * time.Millisecond, wantPrompt: true, wantPersist: true, wantAttempts: 1},
+		{name: "safe transient persistence failure", failFirst: dbstore.MarkPersistenceRetrySafe(errors.New("transient persist failure")), wantPrompt: true, wantPersist: true, wantAttempts: 2},
+		{name: "ambiguous persistence failure", failFirst: ambiguousErr, wantAttempts: 1, wantErr: ambiguousErr},
+		{name: "persistence failure", persistErr: errors.New("persist ask_user response"), wantAttempts: 1},
+		{name: "post commit workspace failure", workspaceErr: errors.New("persist workspace target"), wantPrompt: true, wantPersist: true, wantAttempts: 1},
+		{name: "transient then post commit failure", failFirst: dbstore.MarkPersistenceRetrySafe(errors.New("transient persist failure")), workspaceErr: errors.New("persist workspace target"), wantPrompt: true, wantPersist: true, wantAttempts: 2},
+	}
+}
+
+// newAskUserPersistenceHarness builds the resolver/queries/messages/inputs
+// fixture shared by the StreamChat and StreamChatWS terminal-persistence
+// suites; callers still drive their own event stream and synchronization.
+func newAskUserPersistenceHarness(t *testing.T, tt askUserPersistenceCase) (resolver *Resolver, messages *modelStreamMessageService, inputs *fakeUserInputService, modelID string) {
+	t.Helper()
+
+	server := newAskUserStreamServer()
+	t.Cleanup(server.Close)
+
+	provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000731", string(models.ClientTypeOpenAICompletions), true)
+	provider.Config = []byte(fmt.Sprintf(`{"api_key":"test-key","base_url":%q}`, server.URL))
+	model := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000732", "ask-user-persistence-model", provider.ID, models.ModelTypeChat, true)
+	model.Config = []byte(`{"compatibilities":["tool-call"]}`)
+	queries := &modelStreamQueries{modelSelectionFakeQueries: &modelSelectionFakeQueries{
+		models:   map[string]sqlc.Model{model.ModelID: model},
+		provider: provider,
+	}}
+	messages = &modelStreamMessageService{
+		recordingMessageService: &recordingMessageService{persistErr: tt.persistErr},
+		failFirst:               tt.failFirst,
+	}
+	inputs = &fakeUserInputService{createFn: func(input userinput.CreatePendingInput) (userinput.Request, error) {
+		payload, err := userinput.ParseAskUserPayload(input.Input)
+		if err != nil {
+			return userinput.Request{}, err
+		}
+		raw, _ := input.Input.(map[string]any)
+		return userinput.Request{
+			ID:         "00000000-0000-4000-8000-000000000733",
+			BotID:      input.BotID,
+			SessionID:  input.SessionID,
+			ToolCallID: input.ToolCallID,
+			ToolName:   input.ToolName,
+			ShortID:    1,
+			Status:     userinput.StatusPending,
+			Input:      raw,
+			UIPayload:  payload,
+		}, nil
+	}}
+	logger := slog.New(slog.DiscardHandler)
+	agent := agentpkg.New(agentpkg.Deps{})
+	agent.SetToolProviders([]agenttools.ToolProvider{agenttools.NewAskUserProvider(logger)})
+	resolver = NewResolver(
+		logger,
+		models.NewService(logger, queries),
+		queries,
+		nil,
+		messages,
+		settings.NewService(logger, queries, nil, nil),
+		nil,
+		agent,
+		time.UTC,
+		time.Second,
+	)
+	resolver.userInput = inputs
+	if tt.idleTimeout > 0 {
+		resolver.idleTimeoutOptions = &idleTimeoutOptions{baseTimeout: tt.idleTimeout}
+	}
+	if tt.workspaceErr != nil {
+		resolver.sessionService = streamWorkspaceFailureSessionService(tt.workspaceErr)
+	}
+	return resolver, messages, inputs, model.ModelID
+}
+
 func TestStreamChatReportsTerminalPersistenceFailure(t *testing.T) {
 	wantErr := errors.New("persist model response")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -148,49 +241,9 @@ func TestStreamChatReportsTerminalPersistenceFailure(t *testing.T) {
 
 func TestStreamChatPublishesAskUserOnlyAfterTerminalPersistence(t *testing.T) {
 	ambiguousErr := errors.New("ambiguous commit result")
-	for _, tt := range []struct {
-		name         string
-		persistErr   error
-		failFirst    error
-		workspaceErr error
-		idleTimeout  time.Duration
-		persistDelay time.Duration
-		wantPrompt   bool
-		wantPersist  bool
-		wantAttempts int32
-		wantErr      error
-	}{
-		{name: "persisted response", wantPrompt: true, wantPersist: true, wantAttempts: 1},
-		{name: "terminal persistence outlives idle timeout", idleTimeout: 250 * time.Millisecond, persistDelay: 500 * time.Millisecond, wantPrompt: true, wantPersist: true, wantAttempts: 1},
-		{name: "safe transient persistence failure", failFirst: dbstore.MarkPersistenceRetrySafe(errors.New("transient persist failure")), wantPrompt: true, wantPersist: true, wantAttempts: 2},
-		{name: "ambiguous persistence failure", failFirst: ambiguousErr, wantAttempts: 1, wantErr: ambiguousErr},
-		{name: "persistence failure", persistErr: errors.New("persist ask_user response"), wantAttempts: 1},
-		{name: "post commit workspace failure", workspaceErr: errors.New("persist workspace target"), wantPrompt: true, wantPersist: true, wantAttempts: 1},
-		{name: "transient then post commit failure", failFirst: dbstore.MarkPersistenceRetrySafe(errors.New("transient persist failure")), workspaceErr: errors.New("persist workspace target"), wantPrompt: true, wantPersist: true, wantAttempts: 2},
-	} {
+	for _, tt := range askUserPersistenceCases(ambiguousErr) {
 		t.Run(tt.name, func(t *testing.T) {
-			server := newAskUserStreamServer()
-			defer server.Close()
-
-			provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000711", string(models.ClientTypeOpenAICompletions), true)
-			provider.Config = []byte(fmt.Sprintf(`{"api_key":"test-key","base_url":%q}`, server.URL))
-			model := modelSelectionModelRow(
-				t,
-				"00000000-0000-0000-0000-000000000712",
-				"ask-user-stream-persistence-model",
-				provider.ID,
-				models.ModelTypeChat,
-				true,
-			)
-			model.Config = []byte(`{"compatibilities":["tool-call"]}`)
-			queries := &modelStreamQueries{modelSelectionFakeQueries: &modelSelectionFakeQueries{
-				models:   map[string]sqlc.Model{model.ModelID: model},
-				provider: provider,
-			}}
-			messages := &modelStreamMessageService{
-				recordingMessageService: &recordingMessageService{persistErr: tt.persistErr},
-				failFirst:               tt.failFirst,
-			}
+			resolver, messages, inputs, modelID := newAskUserPersistenceHarness(t, tt)
 			var persistenceStarted <-chan struct{}
 			var terminalPersistStarted <-chan struct{}
 			var releasePersistence func()
@@ -208,53 +261,13 @@ func TestStreamChatPublishesAskUserOnlyAfterTerminalPersistence(t *testing.T) {
 					persistenceStarted = started
 				}
 			}
-			inputs := &fakeUserInputService{createFn: func(input userinput.CreatePendingInput) (userinput.Request, error) {
-				payload, err := userinput.ParseAskUserPayload(input.Input)
-				if err != nil {
-					return userinput.Request{}, err
-				}
-				raw, _ := input.Input.(map[string]any)
-				return userinput.Request{
-					ID:         "00000000-0000-4000-8000-000000000713",
-					BotID:      input.BotID,
-					SessionID:  input.SessionID,
-					ToolCallID: input.ToolCallID,
-					ToolName:   input.ToolName,
-					ShortID:    1,
-					Status:     userinput.StatusPending,
-					Input:      raw,
-					UIPayload:  payload,
-				}, nil
-			}}
-			logger := slog.New(slog.DiscardHandler)
-			agent := agentpkg.New(agentpkg.Deps{})
-			agent.SetToolProviders([]agenttools.ToolProvider{agenttools.NewAskUserProvider(logger)})
-			resolver := NewResolver(
-				logger,
-				models.NewService(logger, queries),
-				queries,
-				nil,
-				messages,
-				settings.NewService(logger, queries, nil, nil),
-				nil,
-				agent,
-				time.UTC,
-				time.Second,
-			)
-			resolver.userInput = inputs
-			if tt.idleTimeout > 0 {
-				resolver.idleTimeoutOptions = &idleTimeoutOptions{baseTimeout: tt.idleTimeout}
-			}
-			if tt.workspaceErr != nil {
-				resolver.sessionService = streamWorkspaceFailureSessionService(tt.workspaceErr)
-			}
 
 			req := conversation.ChatRequest{
 				BotID:                storeRoundBotID,
 				ChatID:               "chat-1",
 				SessionID:            "33333333-3333-3333-3333-333333333333",
 				Query:                "ask me",
-				Model:                model.ModelID,
+				Model:                modelID,
 				SessionType:          "chat",
 				UserMessagePersisted: tt.idleTimeout > 0,
 				SkipTitleGeneration:  true,
@@ -356,43 +369,12 @@ func TestStreamChatPublishesAskUserOnlyAfterTerminalPersistence(t *testing.T) {
 
 func TestStreamChatWSPublishesAskUserOnlyAfterTerminalPersistence(t *testing.T) {
 	ambiguousErr := errors.New("ambiguous commit result")
-	for _, tt := range []struct {
-		name              string
-		persistErr        error
-		failFirst         error
-		workspaceErr      error
-		idleTimeout       time.Duration
-		persistDelay      time.Duration
-		wantPrompt        bool
-		wantPersist       bool
-		wantAttempts      int32
-		wantErr           error
-		abortAfterPersist bool
-	}{
-		{name: "persisted response", wantPrompt: true, wantPersist: true, wantAttempts: 1},
-		{name: "terminal persistence outlives idle timeout", idleTimeout: 250 * time.Millisecond, persistDelay: 500 * time.Millisecond, wantPrompt: true, wantPersist: true, wantAttempts: 1},
-		{name: "safe transient persistence failure", failFirst: dbstore.MarkPersistenceRetrySafe(errors.New("transient persist failure")), wantPrompt: true, wantPersist: true, wantAttempts: 2},
-		{name: "ambiguous persistence failure", failFirst: ambiguousErr, wantAttempts: 1, wantErr: ambiguousErr},
-		{name: "persistence failure", persistErr: errors.New("persist ask_user response"), wantAttempts: 1},
-		{name: "post commit workspace failure", workspaceErr: errors.New("persist workspace target"), wantPrompt: true, wantPersist: true, wantAttempts: 1},
-		{name: "transient then post commit failure", failFirst: dbstore.MarkPersistenceRetrySafe(errors.New("transient persist failure")), workspaceErr: errors.New("persist workspace target"), wantPrompt: true, wantPersist: true, wantAttempts: 2},
-		{name: "abort after persistence", wantPersist: true, wantAttempts: 1, abortAfterPersist: true},
-	} {
+	cases := append(askUserPersistenceCases(ambiguousErr), askUserPersistenceCase{
+		name: "abort after persistence", wantPersist: true, wantAttempts: 1, abortAfterPersist: true,
+	})
+	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			server := newAskUserStreamServer()
-			defer server.Close()
-
-			provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000721", string(models.ClientTypeOpenAICompletions), true)
-			provider.Config = []byte(fmt.Sprintf(`{"api_key":"test-key","base_url":%q}`, server.URL))
-			model := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000722", "ask-user-ws-persistence-model", provider.ID, models.ModelTypeChat, true)
-			model.Config = []byte(`{"compatibilities":["tool-call"]}`)
-			queries := &modelStreamQueries{modelSelectionFakeQueries: &modelSelectionFakeQueries{
-				models: map[string]sqlc.Model{model.ModelID: model}, provider: provider,
-			}}
-			messages := &modelStreamMessageService{
-				recordingMessageService: &recordingMessageService{persistErr: tt.persistErr},
-				failFirst:               tt.failFirst,
-			}
+			resolver, messages, _, modelID := newAskUserPersistenceHarness(t, tt)
 			var terminalPersistStarted <-chan struct{}
 			var releaseTerminalPersistence func()
 			if tt.idleTimeout > 0 {
@@ -404,30 +386,6 @@ func TestStreamChatWSPublishesAskUserOnlyAfterTerminalPersistence(t *testing.T) 
 				messages.persistStarted = started
 				messages.persistRelease = release
 				defer releaseTerminalPersistence()
-			}
-			inputs := &fakeUserInputService{createFn: func(input userinput.CreatePendingInput) (userinput.Request, error) {
-				payload, err := userinput.ParseAskUserPayload(input.Input)
-				if err != nil {
-					return userinput.Request{}, err
-				}
-				raw, _ := input.Input.(map[string]any)
-				return userinput.Request{
-					ID: "00000000-0000-4000-8000-000000000723", BotID: input.BotID, SessionID: input.SessionID,
-					ToolCallID: input.ToolCallID, ToolName: input.ToolName, ShortID: 1, Status: userinput.StatusPending,
-					Input: raw, UIPayload: payload,
-				}, nil
-			}}
-			logger := slog.New(slog.DiscardHandler)
-			agent := agentpkg.New(agentpkg.Deps{})
-			agent.SetToolProviders([]agenttools.ToolProvider{agenttools.NewAskUserProvider(logger)})
-			resolver := NewResolver(logger, models.NewService(logger, queries), queries, nil, messages,
-				settings.NewService(logger, queries, nil, nil), nil, agent, time.UTC, time.Second)
-			resolver.userInput = inputs
-			if tt.idleTimeout > 0 {
-				resolver.idleTimeoutOptions = &idleTimeoutOptions{baseTimeout: tt.idleTimeout}
-			}
-			if tt.workspaceErr != nil {
-				resolver.sessionService = streamWorkspaceFailureSessionService(tt.workspaceErr)
 			}
 
 			eventCh := make(chan WSStreamEvent)
@@ -443,7 +401,7 @@ func TestStreamChatWSPublishesAskUserOnlyAfterTerminalPersistence(t *testing.T) 
 			go func() {
 				req := conversation.ChatRequest{
 					BotID: storeRoundBotID, ChatID: "chat-1", SessionID: "33333333-3333-3333-3333-333333333333",
-					Query: "ask me", Model: model.ModelID, SessionType: "chat", UserMessagePersisted: tt.idleTimeout > 0, SkipTitleGeneration: true,
+					Query: "ask me", Model: modelID, SessionType: "chat", UserMessagePersisted: tt.idleTimeout > 0, SkipTitleGeneration: true,
 				}
 				if tt.workspaceErr != nil {
 					req.WorkspaceTarget = &conversation.WorkspaceTarget{TargetID: "workspace-1", Kind: "local"}

@@ -112,29 +112,9 @@ func TestFlowAndPipelineTrimmingKeepMultipleArtifactsAtTightBudget(t *testing.T)
 		ExternalMessageID: "current",
 		Query:             "current request",
 	}
-	ctx := context.Background()
-	loaded, err := resolver.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), sessionID, defaultMaxContextMinutes)
-	if err != nil {
-		t.Fatalf("loadHistoryRecords() error = %v", err)
-	}
-	loaded, err = resolver.replaceCompactedMessages(ctx, sessionID, compactionSummaryScope(
-		req.BotID,
-		req.ChatID,
-		req.SessionID,
-		req.ConversationType,
-		req.ConversationName,
-		req.ReplyTarget,
-	), pruneHistoryForGateway(loaded), compactionArtifactBoundary{})
-	if err != nil {
-		t.Fatalf("replaceCompactedMessages() error = %v", err)
-	}
 	current := conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(req.Query)}
 	budget := estimateMessageTokens(current)
-	flowMessages, flowRecords, _ := trimMessagesAndRecordsByTokens(nil, loaded, budget)
-	pipelineBuild, err := resolver.buildPipelineContext(ctx, req, budget, req.Query)
-	if err != nil {
-		t.Fatalf("buildPipelineContext() error = %v", err)
-	}
+	flowMessages, flowRecords, pipelineBuild := buildCompactedParityContexts(t, resolver, req, budget)
 
 	assertSemanticMessageParity(t, flowMessages, pipelineBuild.Messages)
 	if got, want := normalizedParityTexts(flowMessages), []string{
@@ -256,6 +236,40 @@ func buildUncompactedParityContexts(
 		t.Fatalf("loadHistoryRecords() error = %v", err)
 	}
 	loaded = pruneHistoryForGateway(loaded)
+	flowMessages, flowRecords, _ := trimMessagesAndRecordsByTokens(nil, loaded, budget)
+	pipelineBuild, err := resolver.buildPipelineContext(ctx, req, budget, req.Query)
+	if err != nil {
+		t.Fatalf("buildPipelineContext() error = %v", err)
+	}
+	return flowMessages, flowRecords, pipelineBuild
+}
+
+// buildCompactedParityContexts additionally replays compaction artifacts over
+// the loaded history before trimming, mirroring buildUncompactedParityContexts
+// for scenarios that assert parity across compacted summaries.
+func buildCompactedParityContexts(
+	t *testing.T,
+	resolver *Resolver,
+	req conversation.ChatRequest,
+	budget int,
+) ([]conversation.ModelMessage, []historyfrag.HistoryRecord, pipelineContextBuild) {
+	t.Helper()
+	ctx := context.Background()
+	loaded, err := resolver.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.SessionID, defaultMaxContextMinutes)
+	if err != nil {
+		t.Fatalf("loadHistoryRecords() error = %v", err)
+	}
+	loaded, err = resolver.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(
+		req.BotID,
+		req.ChatID,
+		req.SessionID,
+		req.ConversationType,
+		req.ConversationName,
+		req.ReplyTarget,
+	), pruneHistoryForGateway(loaded), compactionArtifactBoundary{})
+	if err != nil {
+		t.Fatalf("replaceCompactedMessages() error = %v", err)
+	}
 	flowMessages, flowRecords, _ := trimMessagesAndRecordsByTokens(nil, loaded, budget)
 	pipelineBuild, err := resolver.buildPipelineContext(ctx, req, budget, req.Query)
 	if err != nil {

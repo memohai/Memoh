@@ -26,24 +26,6 @@ type atomicReplacementMessageService struct {
 	replacementCommitted bool
 }
 
-type secondProjectionFailureMessageService struct {
-	recordingMessageService
-	persistCalls int
-}
-
-func (s *secondProjectionFailureMessageService) Persist(ctx context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
-	s.persistCalls++
-	if s.persistCalls == 2 {
-		return messagepkg.Message{}, errors.New("persist approved projection")
-	}
-	return s.recordingMessageService.Persist(ctx, input)
-}
-
-func (s *secondProjectionFailureMessageService) PersistTurnResponseTail(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, error) {
-	s.persisted = append(s.persisted, inputs...)
-	return recordedMessages(inputs), nil
-}
-
 type orderedTurnReplacer interface {
 	ReplaceTurnOrdered(context.Context, string, string, string, string, []string, string) (messagepkg.HistoryTurn, error)
 }
@@ -342,7 +324,7 @@ func TestACPProjectionFailureKeepsLastDurableStatusCovered(t *testing.T) {
 		{Type: agentpkg.EventToolCallEnd, ToolCallID: "write-1", ToolName: "write", Result: map[string]any{"ok": true}},
 		{Type: agentpkg.EventTextDelta, Delta: "done"},
 	}
-	messages := &secondProjectionFailureMessageService{}
+	messages := &nthPersistFailureMessageService{failOnCall: 2, err: errors.New("persist approved projection")}
 	resolver := &Resolver{
 		messageService: messages,
 		acpPool: &recordingACPPrompter{

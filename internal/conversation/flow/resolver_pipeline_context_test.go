@@ -380,6 +380,194 @@ func TestBuildPipelineContextForceKeepsCurrentRenderedMessagePastBudget(t *testi
 	}
 }
 
+func TestLoadContextHistoryProjectionRestoresTurnResponsesForConflictingArtifact(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID      = "11111111-1111-1111-1111-111111111111"
+		sessionID  = "22222222-2222-2222-2222-222222222222"
+		artifactID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+		userID     = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+		responseID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	)
+	now := time.Now().UTC()
+	originalUser := pipelineHistoryMessage(t, userID, botID, sessionID, "external", now.Add(-time.Hour), "user", "original")
+	oldResponse := pipelineHistoryMessage(t, responseID, botID, sessionID, "", now.Add(-48*time.Hour), "assistant", "raw response")
+	mutatedUser := pipelineHistoryMessage(t, userID, botID, sessionID, "external", originalUser.CreatedAt, "user", "mutated")
+	queries := &recordingCompactionLogQueries{logs: []sqlc.BotHistoryMessageCompact{
+		pipelineArtifactRow(t, artifactID, botID, sessionID, "summary", []messagepkg.Message{oldResponse, originalUser}, now),
+	}}
+	messages := &pipelineContextMessageService{
+		rows:                   []messagepkg.Message{mutatedUser},
+		uncoveredTurnResponses: []messagepkg.Message{oldResponse},
+	}
+	resolver := &Resolver{logger: slog.New(slog.DiscardHandler), messageService: messages, queries: queries}
+
+	projection, err := resolver.LoadContextHistoryProjection(context.Background(), botID, sessionID)
+	if err != nil {
+		t.Fatalf("LoadContextHistoryProjection() error = %v", err)
+	}
+	if len(projection.CompactionArtifacts) != 0 || len(projection.TurnResponses) != 1 || projection.TurnResponses[0].SourceMessageID != responseID {
+		t.Fatalf("conflicting projection = %#v", projection)
+	}
+	if len(messages.coveredMessageIDs) != 0 {
+		t.Fatalf("conflicting artifact excluded raw rows: %#v", messages.coveredMessageIDs)
+	}
+}
+
+func TestLoadContextHistoryProjectionRestoresTurnResponsesForInvalidArtifact(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID      = "11111111-1111-1111-1111-111111111111"
+		sessionID  = "22222222-2222-2222-2222-222222222222"
+		artifactID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+		responseID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	)
+	response := pipelineHistoryMessage(t, responseID, botID, sessionID, "", time.Now().UTC().Add(-48*time.Hour), "assistant", "raw response")
+	row := pipelineArtifactRow(t, artifactID, botID, sessionID, "summary", []messagepkg.Message{response}, time.Now().UTC())
+	row.Coverage = []byte("{")
+	messages := &pipelineContextMessageService{uncoveredTurnResponses: []messagepkg.Message{response}}
+	resolver := &Resolver{
+		logger:         slog.New(slog.DiscardHandler),
+		messageService: messages,
+		queries:        &recordingCompactionLogQueries{logs: []sqlc.BotHistoryMessageCompact{row}},
+	}
+
+	projection, err := resolver.LoadContextHistoryProjection(context.Background(), botID, sessionID)
+	if err != nil {
+		t.Fatalf("LoadContextHistoryProjection() error = %v", err)
+	}
+	if len(projection.CompactionArtifacts) != 0 || len(projection.TurnResponses) != 1 || projection.TurnResponses[0].SourceMessageID != responseID {
+		t.Fatalf("invalid-artifact projection = %#v", projection)
+	}
+	if len(messages.coveredMessageIDs) != 0 {
+		t.Fatalf("invalid artifact excluded raw rows: %#v", messages.coveredMessageIDs)
+	}
+}
+
+func TestLoadContextHistoryProjectionUsesLatestCursorBeyondUncoveredResponses(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+	old := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Millisecond)
+	latest := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	oldResponse := pipelineHistoryMessage(
+		t,
+		"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		"11111111-1111-1111-1111-111111111111",
+		sessionID,
+		"",
+		old,
+		"assistant",
+		"old uncovered response",
+	)
+	messages := &pipelineContextMessageService{
+		uncoveredTurnResponses: []messagepkg.Message{oldResponse},
+		latestTurnResponseAt:   latest,
+	}
+	resolver := &Resolver{logger: slog.New(slog.DiscardHandler), messageService: messages}
+
+	projection, err := resolver.LoadContextHistoryProjection(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		sessionID,
+	)
+	if err != nil {
+		t.Fatalf("LoadContextHistoryProjection() error = %v", err)
+	}
+	if projection.LatestTurnResponseAtMs != latest.UnixMilli() {
+		t.Fatalf("latest turn response = %d, want %d", projection.LatestTurnResponseAtMs, latest.UnixMilli())
+	}
+}
+
+func TestBuildPipelineContextRestoresPreparedCurrentQueryWhenRenderedContextIsStale(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.PushEvent(sessionID, pipelineMessageEvent(sessionID, "external-old", time.Now().UTC().Add(-time.Minute).UnixMilli(), "old rendered message"))
+	resolver := &Resolver{logger: slog.New(slog.DiscardHandler), pipeline: p}
+	prepared := FormatUserHeader(UserMessageHeaderInput{
+		MessageID:        "external-current",
+		DisplayName:      "Alice",
+		Channel:          "telegram",
+		ConversationType: "group",
+		Target:           "room",
+		AttachmentPaths:  []string{"/data/report.pdf"},
+		Time:             time.Unix(1_000, 0).UTC(),
+	}, "current user query")
+
+	built, err := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{
+		SessionID:         sessionID,
+		ExternalMessageID: "external-current",
+		Query:             "current user query",
+	}, 0, prepared)
+	if err != nil {
+		t.Fatalf("buildPipelineContext() error = %v", err)
+	}
+	if len(built.Messages) != 2 || !strings.Contains(built.Messages[1].TextContent(), `<attachment path="/data/report.pdf"/>`) {
+		t.Fatalf("prepared current query metadata was lost: %#v", modelMessageTexts(built.Messages))
+	}
+}
+
+func TestBuildPipelineContextReplacesRenderedCurrentMessageWithPreparedQuery(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+	now := time.Now().UTC()
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.PushEvent(sessionID, pipelineMessageEvent(sessionID, "external-prior", now.Add(-2*time.Minute).UnixMilli(), "prior message"))
+	current := pipelineMessageEvent(sessionID, "external-current", now.Add(-time.Minute).UnixMilli(), "[voice attachment]")
+	current.ReplyToMessageID = "external-prior"
+	current.ReplyToSender = "Bob"
+	current.ReplyToPreview = "prior message"
+	current.ForwardInfo = &pipelinepkg.ForwardInfo{MessageID: "forward-1", SenderName: "Source Room"}
+	p.PushEvent(sessionID, current)
+	resolver := &Resolver{logger: slog.New(slog.DiscardHandler), pipeline: p}
+	prepared := FormatUserHeader(UserMessageHeaderInput{
+		MessageID:          "external-current",
+		DisplayName:        "Alice",
+		Channel:            "telegram",
+		ConversationType:   "group",
+		Target:             "room",
+		Time:               now.Add(-time.Minute),
+		ReplyToMessageID:   "external-prior",
+		ReplySender:        "Bob",
+		ReplyPreview:       "prior message",
+		ForwardedFrom:      "Source Room",
+		ForwardedMessageID: "forward-1",
+	}, "[Voice message transcription]\nship the fix")
+
+	built, err := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{
+		SessionID:         sessionID,
+		ExternalMessageID: "external-current",
+		Query:             "[Voice message transcription]\nship the fix",
+	}, 0, prepared)
+	if err != nil {
+		t.Fatalf("buildPipelineContext() error = %v", err)
+	}
+	if len(built.Messages) != 1 {
+		t.Fatalf("messages = %#v, want one merged rendered user message", modelMessageTexts(built.Messages))
+	}
+	got := built.Messages[0].TextContent()
+	if !strings.Contains(got, "prior message") || !strings.Contains(got, "ship the fix") {
+		t.Fatalf("prepared current query did not replace the rendered payload: %q", got)
+	}
+	if strings.Contains(got, "[voice attachment]") {
+		t.Fatalf("stale rendered current payload survived replacement: %q", got)
+	}
+	for _, want := range []string{
+		`<in-reply-to id="external-prior" sender="Bob">prior message</in-reply-to>`,
+		`forwarded_from="Source Room"`,
+		`forwarded_message_id="forward-1"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("prepared current query lost reply/forward context %q: %q", want, got)
+		}
+	}
+}
+
 type pipelineContextMessageService struct {
 	messagepkg.Service
 	rows                       []messagepkg.Message

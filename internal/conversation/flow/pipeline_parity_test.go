@@ -1,7 +1,6 @@
 package flow
 
 import (
-	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -84,41 +83,9 @@ func TestFlowAndPipelinePathsProduceEquivalentMultiArtifactContext(t *testing.T)
 		Query:             "current question",
 		ExternalMessageID: "external-current",
 	}
-	ctx := context.Background()
+	flowMessages, flowRecords, pipelineBuild := buildCompactedParityContexts(t, resolver, req, budget)
 
-	loaded, err := resolver.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), sessionID, defaultMaxContextMinutes)
-	if err != nil {
-		t.Fatalf("loadHistoryRecords() error = %v", err)
-	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded, err = resolver.replaceCompactedMessages(ctx, sessionID, compactionSummaryScope(
-		req.BotID,
-		req.ChatID,
-		req.SessionID,
-		req.ConversationType,
-		req.ConversationName,
-		req.ReplyTarget,
-	), loaded, compactionArtifactBoundary{})
-	if err != nil {
-		t.Fatalf("replaceCompactedMessages() error = %v", err)
-	}
-	flowMessages, flowRecords, _ := trimMessagesAndRecordsByTokens(nil, loaded, budget)
-	pipelineBuild, err := resolver.buildPipelineContext(ctx, req, budget, req.Query)
-	if err != nil {
-		t.Fatalf("buildPipelineContext() error = %v", err)
-	}
-
-	if len(flowMessages) != len(pipelineBuild.Messages) {
-		t.Fatalf("message counts: flow=%d pipeline=%d\nflow=%#v\npipeline=%#v",
-			len(flowMessages), len(pipelineBuild.Messages), modelMessageTexts(flowMessages), modelMessageTexts(pipelineBuild.Messages))
-	}
-	for i := range flowMessages {
-		flowRole, flowText := normalizeParityMessage(flowMessages[i])
-		pipelineRole, pipelineText := normalizeParityMessage(pipelineBuild.Messages[i])
-		if flowRole != pipelineRole || flowText != pipelineText {
-			t.Fatalf("message %d mismatch: flow=(%q, %q) pipeline=(%q, %q)", i, flowRole, flowText, pipelineRole, pipelineText)
-		}
-	}
+	assertSemanticMessageParity(t, flowMessages, pipelineBuild.Messages)
 	flowFrags := historyContextFragsForMessages(flowMessages, flowRecords)
 	pipelineFrags := historyContextFragsForMessages(pipelineBuild.Messages, pipelineBuild.HistoryRecords)
 	assertParitySummaryFrags(t, "flow", flowFrags, []string{artifactA, artifactB})
@@ -148,17 +115,7 @@ func TestFlowAndPipelineTrimmingProduceEquivalentNotice(t *testing.T) {
 		{message: latest},
 	}, budget)
 
-	if len(flowMessages) != len(pipelineBuild.Messages) {
-		t.Fatalf("message counts: flow=%d pipeline=%d\nflow=%#v\npipeline=%#v",
-			len(flowMessages), len(pipelineBuild.Messages), modelMessageTexts(flowMessages), modelMessageTexts(pipelineBuild.Messages))
-	}
-	for i := range flowMessages {
-		flowRole, flowText := normalizeParityMessage(flowMessages[i])
-		pipelineRole, pipelineText := normalizeParityMessage(pipelineBuild.Messages[i])
-		if flowRole != pipelineRole || flowText != pipelineText {
-			t.Fatalf("message %d mismatch: flow=(%q, %q) pipeline=(%q, %q)", i, flowRole, flowText, pipelineRole, pipelineText)
-		}
-	}
+	assertSemanticMessageParity(t, flowMessages, pipelineBuild.Messages)
 	if flowEstimate != pipelineBuild.EstimatedTokens {
 		t.Fatalf("estimated tokens: flow=%d pipeline=%d", flowEstimate, pipelineBuild.EstimatedTokens)
 	}
@@ -326,29 +283,7 @@ func TestFlowAndPipelinePathsAlignAgedOutArtifactsAcrossRounds(t *testing.T) {
 		Query:             "current question",
 		ExternalMessageID: "external-current",
 	}
-	ctx := context.Background()
-
-	loaded, err := resolver.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), sessionID, defaultMaxContextMinutes)
-	if err != nil {
-		t.Fatalf("loadHistoryRecords() error = %v", err)
-	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded, err = resolver.replaceCompactedMessages(ctx, sessionID, compactionSummaryScope(
-		req.BotID,
-		req.ChatID,
-		req.SessionID,
-		req.ConversationType,
-		req.ConversationName,
-		req.ReplyTarget,
-	), loaded, compactionArtifactBoundary{})
-	if err != nil {
-		t.Fatalf("replaceCompactedMessages() error = %v", err)
-	}
-	flowMessages, flowRecords, _ := trimMessagesAndRecordsByTokens(nil, loaded, budget)
-	pipelineBuild, err := resolver.buildPipelineContext(ctx, req, budget, req.Query)
-	if err != nil {
-		t.Fatalf("buildPipelineContext() error = %v", err)
-	}
+	flowMessages, flowRecords, pipelineBuild := buildCompactedParityContexts(t, resolver, req, budget)
 
 	wantTexts := []string{
 		"ancient span",
@@ -372,13 +307,7 @@ func TestFlowAndPipelinePathsAlignAgedOutArtifactsAcrossRounds(t *testing.T) {
 			}
 		}
 	}
-	for i := range flowMessages {
-		flowRole, flowText := normalizeParityMessage(flowMessages[i])
-		pipelineRole, pipelineText := normalizeParityMessage(pipelineBuild.Messages[i])
-		if flowRole != pipelineRole || flowText != pipelineText {
-			t.Fatalf("message %d mismatch: flow=(%q, %q) pipeline=(%q, %q)", i, flowRole, flowText, pipelineRole, pipelineText)
-		}
-	}
+	assertSemanticMessageParity(t, flowMessages, pipelineBuild.Messages)
 	flowFrags := historyContextFragsForMessages(flowMessages, flowRecords)
 	pipelineFrags := historyContextFragsForMessages(pipelineBuild.Messages, pipelineBuild.HistoryRecords)
 	assertParitySummaryFrags(t, "flow", flowFrags, []string{artifactOld, artifactInside, artifactMid})
