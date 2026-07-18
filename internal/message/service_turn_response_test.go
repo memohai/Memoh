@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,6 +266,292 @@ func TestPersistRoundDoesNotPublishSkippedMessages(t *testing.T) {
 	if len(publisher.events) != 0 {
 		t.Fatalf("published events = %d, want 0 before replacement turn is linked", len(publisher.events))
 	}
+}
+
+func TestPersistRoundLocksDeliveryClaimsAfterWritingResponse(t *testing.T) {
+	t.Parallel()
+
+	queries := &turnResponseDeliveryQueries{}
+	service := NewService(nil, queries)
+	inputs := turnResponseTailInputs()[:1]
+
+	messages, handled, err := service.PersistRound(context.Background(), inputs, RoundPersistenceOptions{
+		DeliveryClaims: testDeliveryClaims(),
+	})
+	if err != nil {
+		t.Fatalf("PersistRound() error = %v", err)
+	}
+	if !handled {
+		t.Fatal("PersistRound() handled = false")
+	}
+	if len(messages) != 1 || len(queries.committed) != 1 {
+		t.Fatalf("persisted messages = %d/%d, want 1/1", len(messages), len(queries.committed))
+	}
+	if len(queries.committedLocks) != 2 {
+		t.Fatalf("locked delivery claims = %#v, want 2", queries.committedLocks)
+	}
+	if got := strings.Join(queries.committedOperations, " "); got != "message claim claim" {
+		t.Fatalf("transaction operations = %q, want message before claims", got)
+	}
+	for i, claim := range testDeliveryClaims() {
+		locked := queries.committedLocks[i]
+		if locked.EventID.String() != claim.EventID || locked.ClaimToken.String() != claim.ClaimToken {
+			t.Fatalf("locked delivery claim %d = %#v, want %#v", i, locked, claim)
+		}
+	}
+}
+
+func TestPersistRoundRollsBackWhenDeliveryClaimIsStale(t *testing.T) {
+	t.Parallel()
+
+	queries := &turnResponseDeliveryQueries{lockRows: []bool{true, false}}
+	service := NewService(nil, queries)
+	_, handled, err := service.PersistRound(context.Background(), turnResponseTailInputs()[:1], RoundPersistenceOptions{
+		DeliveryClaims: testDeliveryClaims(),
+	})
+	if err == nil {
+		t.Fatal("PersistRound() error = nil for stale delivery claim")
+	}
+	if !handled {
+		t.Fatal("PersistRound() handled = false")
+	}
+	if len(queries.committed) != 0 || len(queries.committedLocks) != 0 {
+		t.Fatalf("committed responses/claims = %d/%d, want rollback", len(queries.committed), len(queries.committedLocks))
+	}
+}
+
+func TestPersistRoundRejectsInvalidClaimBackedRounds(t *testing.T) {
+	t.Parallel()
+
+	valid := testDeliveryClaims()[0]
+	base := turnResponseTailInputs()[0]
+	for _, tc := range []struct {
+		name   string
+		input  PersistInput
+		claims []DeliveryClaim
+		secret string
+	}{
+		{name: "no response", input: func() PersistInput {
+			input := base
+			input.Role = "user"
+			return input
+		}(), claims: []DeliveryClaim{valid}},
+		{name: "skip history", input: func() PersistInput {
+			input := base
+			input.SkipHistoryTurn = true
+			return input
+		}(), claims: []DeliveryClaim{valid}},
+		{name: "missing request boundary", input: func() PersistInput {
+			input := base
+			input.TurnRequestMessageID = ""
+			return input
+		}(), claims: []DeliveryClaim{valid}},
+		{name: "invalid token", input: base, claims: []DeliveryClaim{{EventID: valid.EventID, ClaimToken: "sensitive-token"}}, secret: "sensitive-token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := &turnResponseDeliveryQueries{}
+			service := NewService(nil, queries)
+			_, handled, err := service.PersistRound(context.Background(), []PersistInput{tc.input}, RoundPersistenceOptions{
+				DeliveryClaims: tc.claims,
+			})
+			if err == nil {
+				t.Fatal("PersistRound() error = nil")
+			}
+			if !handled {
+				t.Fatal("PersistRound() handled = false")
+			}
+			if tc.secret != "" && strings.Contains(err.Error(), tc.secret) {
+				t.Fatalf("validation error leaked claim token: %v", err)
+			}
+			if queries.txCalls != 0 {
+				t.Fatalf("transaction calls = %d, want validation before transaction", queries.txCalls)
+			}
+		})
+	}
+}
+
+func TestPersistTurnResponseWithCursorCompletesEveryDeliveryClaim(t *testing.T) {
+	t.Parallel()
+
+	queries := &turnResponseDeliveryQueries{}
+	service := NewService(nil, queries)
+	update := testDiscussCursorUpdate()
+	update.DeliveryClaims = testDeliveryClaims()
+
+	if _, err := service.PersistTurnResponseWithCursor(context.Background(), turnResponseTailInputs()[:1], update); err != nil {
+		t.Fatalf("PersistTurnResponseWithCursor() error = %v", err)
+	}
+	if len(queries.committedClaims) != 2 {
+		t.Fatalf("committed delivery claims = %#v, want 2", queries.committedClaims)
+	}
+	for i, claim := range update.DeliveryClaims {
+		if queries.committedClaims[i].EventID.String() != claim.EventID ||
+			queries.committedClaims[i].ClaimToken.String() != claim.ClaimToken {
+			t.Fatalf("committed delivery claim %d = %#v, want %#v", i, queries.committedClaims[i], claim)
+		}
+		if got := queries.committedClaims[i].ResponseMessageID.String(); got != "88888888-8888-8888-8888-888888888888" {
+			t.Fatalf("delivery claim %d response evidence = %s", i, got)
+		}
+	}
+}
+
+func TestPersistTurnResponseWithCursorRollsBackWhenLaterDeliveryClaimIsStale(t *testing.T) {
+	t.Parallel()
+
+	queries := &turnResponseDeliveryQueries{completeRows: []int64{1, 0}}
+	publisher := &recordingPublisher{}
+	service := NewService(nil, queries, publisher)
+	update := testDiscussCursorUpdate()
+	update.DeliveryClaims = testDeliveryClaims()
+
+	if _, err := service.PersistTurnResponseWithCursor(context.Background(), turnResponseTailInputs()[:1], update); err == nil {
+		t.Fatal("PersistTurnResponseWithCursor() error = nil for stale delivery claim")
+	}
+	if len(queries.committed) != 0 || queries.committedCursor != nil || len(queries.committedClaims) != 0 {
+		t.Fatalf("committed response/cursor/claims = %d/%#v/%d, want rollback", len(queries.committed), queries.committedCursor, len(queries.committedClaims))
+	}
+	if len(publisher.events) != 0 {
+		t.Fatalf("published events = %d, want 0 before commit", len(publisher.events))
+	}
+}
+
+func TestPersistTurnResponseWithCursorRejectsInvalidDeliveryClaims(t *testing.T) {
+	t.Parallel()
+
+	valid := testDeliveryClaims()
+	for _, tc := range []struct {
+		name   string
+		claims []DeliveryClaim
+		secret string
+	}{
+		{name: "invalid event id", claims: []DeliveryClaim{{EventID: "bad", ClaimToken: valid[0].ClaimToken}}},
+		{name: "invalid claim token", claims: []DeliveryClaim{{EventID: valid[0].EventID, ClaimToken: "sensitive-token"}}, secret: "sensitive-token"},
+		{name: "duplicate event", claims: []DeliveryClaim{valid[0], valid[0]}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := &turnResponseDeliveryQueries{}
+			service := NewService(nil, queries)
+			update := testDiscussCursorUpdate()
+			update.DeliveryClaims = tc.claims
+
+			_, err := service.PersistTurnResponseWithCursor(context.Background(), turnResponseTailInputs()[:1], update)
+			if err == nil {
+				t.Fatal("PersistTurnResponseWithCursor() error = nil")
+			}
+			if tc.secret != "" && strings.Contains(err.Error(), tc.secret) {
+				t.Fatalf("validation error leaked claim token: %v", err)
+			}
+			if queries.txCalls != 0 {
+				t.Fatalf("transaction calls = %d, want validation before transaction", queries.txCalls)
+			}
+		})
+	}
+}
+
+func TestPersistTurnResponseWithCursorRejectsClaimsWithoutResponseEvidence(t *testing.T) {
+	t.Parallel()
+
+	queries := &turnResponseDeliveryQueries{}
+	service := NewService(nil, queries)
+	input := turnResponseTailInputs()[0]
+	input.Role = "user"
+	input.Content = []byte(`{"role":"user","content":"internal decoration"}`)
+	input.ContinueHistoryTurn = true
+	update := testDiscussCursorUpdate()
+	update.DeliveryClaims = testDeliveryClaims()
+
+	if _, err := service.PersistTurnResponseWithCursor(context.Background(), []PersistInput{input}, update); err == nil {
+		t.Fatal("PersistTurnResponseWithCursor() error = nil without response evidence")
+	}
+	if queries.txCalls != 0 {
+		t.Fatalf("transaction calls = %d, want validation before transaction", queries.txCalls)
+	}
+}
+
+func TestListVisibleTurnResponsesByRequestUsesExactTurnAnchor(t *testing.T) {
+	const (
+		sessionID = "22222222-2222-2222-2222-222222222222"
+		requestID = "44444444-4444-4444-4444-444444444444"
+	)
+	queries := &turnResponseReplayQueries{rows: []sqlc.ListVisibleTurnResponsesByRequestRow{
+		{ID: testMessageUUID("55555555-5555-5555-5555-555555555555"), Role: "assistant", Content: []byte(`{"role":"assistant","content":"calling"}`), CreatedAt: pgtype.Timestamptz{Time: time.Unix(1, 0), Valid: true}},
+		{ID: testMessageUUID("66666666-6666-6666-6666-666666666666"), Role: "tool", Content: []byte(`{"role":"tool","content":"done"}`), CreatedAt: pgtype.Timestamptz{Time: time.Unix(2, 0), Valid: true}},
+	}}
+	service := NewService(nil, queries)
+
+	messages, err := service.ListVisibleTurnResponsesByRequest(context.Background(), sessionID, requestID)
+	if err != nil {
+		t.Fatalf("ListVisibleTurnResponsesByRequest() error = %v", err)
+	}
+	if queries.arg.SessionID.String() != sessionID || queries.arg.RequestMessageID.String() != requestID {
+		t.Fatalf("query anchor = %s/%s, want %s/%s", queries.arg.SessionID.String(), queries.arg.RequestMessageID.String(), sessionID, requestID)
+	}
+	if len(messages) != 2 || messages[0].Role != "assistant" || messages[1].Role != "tool" {
+		t.Fatalf("messages = %#v, want ordered assistant/tool tail", messages)
+	}
+}
+
+func TestTurnResponseReplayQueriesStartAfterArbitraryRequest(t *testing.T) {
+	messagesSQL, err := os.ReadFile("../../db/postgres/queries/messages.sql")
+	if err != nil {
+		t.Fatalf("read message queries: %v", err)
+	}
+	responseQuery := namedQuery(t, string(messagesSQL), "ListVisibleTurnResponsesByRequest")
+	for _, required := range []string{
+		"request.turn_id",
+		"request.turn_message_seq",
+		"MIN(next_request.turn_message_seq)",
+		"next_request.event_id IS NOT NULL",
+		"response.turn_message_seq > target.turn_message_seq",
+		"response.turn_message_seq < target.next_event_user_seq",
+	} {
+		if !strings.Contains(responseQuery, required) {
+			t.Fatalf("ListVisibleTurnResponsesByRequest is missing %q", required)
+		}
+	}
+	if strings.Contains(responseQuery, "request.turn_message_seq = 1") {
+		t.Fatal("ListVisibleTurnResponsesByRequest only accepts a turn-leading request")
+	}
+
+	eventsSQL, err := os.ReadFile("../../db/postgres/queries/session_events.sql")
+	if err != nil {
+		t.Fatalf("read session event queries: %v", err)
+	}
+	deliveryQuery := namedQuery(t, string(eventsSQL), "GetSessionEventDeliveryState")
+	if count := strings.Count(deliveryQuery, "response.turn_message_seq > history.turn_message_seq"); count != 2 {
+		t.Fatalf("GetSessionEventDeliveryState strict response boundaries = %d, want 2", count)
+	}
+	for _, required := range []string{
+		"AS replay_response_persisted",
+		"next_request.event_id IS NOT NULL",
+		"next_request.turn_message_seq > visible_history.turn_message_seq",
+		"next_request.turn_message_seq < response.turn_message_seq",
+	} {
+		if !strings.Contains(deliveryQuery, required) {
+			t.Fatalf("GetSessionEventDeliveryState is missing %q", required)
+		}
+	}
+	completionQuery := namedQuery(t, string(eventsSQL), "CompleteSessionEventDelivery")
+	if count := strings.Count(completionQuery, "response.turn_message_seq > history.turn_message_seq"); count != 1 {
+		t.Fatalf("CompleteSessionEventDelivery response lower bounds = %d, want 1", count)
+	}
+	if strings.Contains(completionQuery, "next_request") {
+		t.Fatal("CompleteSessionEventDelivery incorrectly requires strict replay ownership")
+	}
+}
+
+func namedQuery(t *testing.T, source, name string) string {
+	t.Helper()
+	startMarker := "-- name: " + name + " "
+	start := strings.Index(source, startMarker)
+	if start < 0 {
+		t.Fatalf("query %s not found", name)
+	}
+	rest := source[start+len(startMarker):]
+	if end := strings.Index(rest, "\n-- name: "); end >= 0 {
+		rest = rest[:end]
+	}
+	return rest
 }
 
 type commitAwareTailPublisher struct {
@@ -573,4 +861,112 @@ func turnResponseTailInputs() []PersistInput {
 			TurnRequestMessageID: requestID,
 		},
 	}
+}
+
+type turnResponseDeliveryQueries struct {
+	dbstore.Queries
+	txCalls             int
+	completeRows        []int64
+	lockRows            []bool
+	committed           []sqlc.CreateMessageInHistoryTurnByRequestAndBindParams
+	committedCursor     *sqlc.UpsertSessionDiscussCursorParams
+	committedClaims     []sqlc.CompleteSessionEventDeliveryWithResponseParams
+	committedLocks      []sqlc.LockSessionEventDeliveryClaimParams
+	committedOperations []string
+}
+
+func (*turnResponseDeliveryQueries) SupportsTransactions() bool { return true }
+
+func (q *turnResponseDeliveryQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
+	q.txCalls++
+	base := &turnResponseTailTxQueries{}
+	tx := &turnResponseDeliveryTxQueries{
+		turnResponseTailTxQueries: base,
+		completeRows:              q.completeRows,
+		lockRows:                  q.lockRows,
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	q.committed = append(q.committed, base.staged...)
+	q.committedCursor = base.stagedCursor
+	q.committedClaims = append(q.committedClaims, tx.stagedClaims...)
+	q.committedLocks = append(q.committedLocks, tx.stagedLocks...)
+	q.committedOperations = append(q.committedOperations, tx.operations...)
+	return nil
+}
+
+type turnResponseDeliveryTxQueries struct {
+	*turnResponseTailTxQueries
+	completeRows  []int64
+	completeCalls int
+	lockRows      []bool
+	lockCalls     int
+	stagedClaims  []sqlc.CompleteSessionEventDeliveryWithResponseParams
+	stagedLocks   []sqlc.LockSessionEventDeliveryClaimParams
+	operations    []string
+}
+
+func (q *turnResponseDeliveryTxQueries) CreateMessageInHistoryTurnByRequestAndBind(
+	ctx context.Context,
+	arg sqlc.CreateMessageInHistoryTurnByRequestAndBindParams,
+) (sqlc.CreateMessageInHistoryTurnByRequestAndBindRow, error) {
+	row, err := q.turnResponseTailTxQueries.CreateMessageInHistoryTurnByRequestAndBind(ctx, arg)
+	if err == nil {
+		q.operations = append(q.operations, "message")
+	}
+	return row, err
+}
+
+func (q *turnResponseDeliveryTxQueries) LockSessionEventDeliveryClaim(
+	_ context.Context,
+	arg sqlc.LockSessionEventDeliveryClaimParams,
+) (bool, error) {
+	locked := true
+	if q.lockCalls < len(q.lockRows) {
+		locked = q.lockRows[q.lockCalls]
+	}
+	q.lockCalls++
+	if !locked {
+		return false, pgx.ErrNoRows
+	}
+	q.stagedLocks = append(q.stagedLocks, arg)
+	q.operations = append(q.operations, "claim")
+	return true, nil
+}
+
+func (q *turnResponseDeliveryTxQueries) CompleteSessionEventDeliveryWithResponse(
+	_ context.Context,
+	arg sqlc.CompleteSessionEventDeliveryWithResponseParams,
+) (int64, error) {
+	rows := int64(1)
+	if q.completeCalls < len(q.completeRows) {
+		rows = q.completeRows[q.completeCalls]
+	}
+	q.completeCalls++
+	if rows == 1 {
+		q.stagedClaims = append(q.stagedClaims, arg)
+	}
+	return rows, nil
+}
+
+func testDeliveryClaims() []DeliveryClaim {
+	return []DeliveryClaim{
+		{EventID: "44444444-4444-4444-4444-444444444444", ClaimToken: "55555555-5555-5555-5555-555555555555"},
+		{EventID: "66666666-6666-6666-6666-666666666666", ClaimToken: "99999999-9999-9999-9999-999999999999"},
+	}
+}
+
+type turnResponseReplayQueries struct {
+	dbstore.Queries
+	arg  sqlc.ListVisibleTurnResponsesByRequestParams
+	rows []sqlc.ListVisibleTurnResponsesByRequestRow
+}
+
+func (q *turnResponseReplayQueries) ListVisibleTurnResponsesByRequest(
+	_ context.Context,
+	arg sqlc.ListVisibleTurnResponsesByRequestParams,
+) ([]sqlc.ListVisibleTurnResponsesByRequestRow, error) {
+	q.arg = arg
+	return q.rows, nil
 }

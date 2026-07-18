@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
@@ -30,9 +28,9 @@ func TestActiveSessionMessagePreservesDurableHistoryPosition(t *testing.T) {
 	t.Parallel()
 
 	message := toMessageFromActiveSinceBySessionRow(sqlc.ListActiveMessagesSinceBySessionRow{
-		ID:             historyPositionUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-		BotID:          historyPositionUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
-		SessionID:      historyPositionUUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+		ID:             testMessageUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+		BotID:          testMessageUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+		SessionID:      testMessageUUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
 		Role:           "assistant",
 		Content:        []byte(`{"role":"assistant","content":"answer"}`),
 		TurnPosition:   7,
@@ -87,12 +85,4 @@ func TestListExternalMessagePositionsBySessionReturnsEarliestDurablePositions(t 
 	}) {
 		t.Fatalf("positions = %#v", positions)
 	}
-}
-
-func historyPositionUUID(value string) pgtype.UUID {
-	var id pgtype.UUID
-	if err := id.Scan(value); err != nil {
-		panic(err)
-	}
-	return id
 }
