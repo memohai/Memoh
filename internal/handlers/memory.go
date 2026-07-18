@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -684,6 +685,17 @@ func requireMemoryOwnedByBot(botID, memoryID string) error {
 	return nil
 }
 
+func memoryIDFromPath(c echo.Context) string {
+	memoryID := strings.TrimSpace(c.Param("memory_id"))
+	if c.Request().URL.RawPath == "" {
+		return memoryID
+	}
+	if decoded, err := url.PathUnescape(memoryID); err == nil {
+		return strings.TrimSpace(decoded)
+	}
+	return memoryID
+}
+
 // @Summary Delete memories
 // @Description Delete specific memories by IDs, or delete all memories if no IDs are provided
 // @Tags memory
@@ -762,7 +774,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 		return checkErr
 	}
 
-	memoryID := strings.TrimSpace(c.Param("memory_id"))
+	memoryID := memoryIDFromPath(c)
 	if memoryID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
 	}
@@ -800,7 +812,7 @@ func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
 	if checkErr != nil {
 		return checkErr
 	}
-	memoryID := strings.TrimSpace(c.Param("memory_id"))
+	memoryID := memoryIDFromPath(c)
 	if memoryID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
 	}
