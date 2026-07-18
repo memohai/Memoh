@@ -532,16 +532,9 @@ func newQueuedEventDeliveryProcessor(
 	writer messagepkg.Writer,
 	pipeline *pipelinepkg.Pipeline,
 ) (*ChannelInboundProcessor, *RouteDispatcher, *fakeChatGateway) {
-	routes := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat", RouteID: "route"}}
-	gateway := &fakeChatGateway{}
+	t.Helper()
+	processor, _, gateway := newEventDeliveryProcessor(sessionpkg.TypeChat, queries, writer, pipeline)
 	dispatcher := NewRouteDispatcher(slog.Default())
-	processor := NewChannelInboundProcessor(slog.Default(), nil, routes, writer, gateway, nil, nil, "", 0)
-	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{
-		ID:      deliverySessionID,
-		Type:    sessionpkg.TypeChat,
-		Runtime: sessionpkg.RuntimeModel,
-	}})
-	processor.SetPipeline(pipeline, pipelinepkg.NewEventStore(nil, queries), nil)
 	processor.SetDispatcher(dispatcher)
 	t.Cleanup(processor.Close)
 	return processor, dispatcher, gateway

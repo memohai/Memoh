@@ -13,20 +13,22 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
+func newInjectionRedeliveryFixture(t *testing.T) (*ChannelInboundProcessor, *durableEventQueries, *durableHistoryWriter, *fakeChatGateway, *RouteDispatcher) {
+	t.Helper()
+	queries := &durableEventQueries{}
+	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
+	processor, _, gateway := newEventDeliveryProcessor(sessionpkg.TypeChat, queries, writer, pipeline)
+	dispatcher := NewRouteDispatcher(nil)
+	processor.SetDispatcher(dispatcher)
+	return processor, queries, writer, gateway, dispatcher
+}
+
 func TestAcceptedButUnconsumedInjectionReleasesDeliveryForRetry(t *testing.T) {
 	t.Parallel()
 
-	queries := &durableEventQueries{}
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	processor, _, _ := newEventDeliveryProcessor(
-		sessionpkg.TypeChat,
-		queries,
-		&durableHistoryWriter{queries: queries, pipeline: pipeline},
-		pipeline,
-	)
-	dispatcher := NewRouteDispatcher(nil)
+	processor, queries, _, _, dispatcher := newInjectionRedeliveryFixture(t)
 	dispatcher.MarkActive("route")
-	processor.SetDispatcher(dispatcher)
 	sender := &fakeReplySender{}
 
 	if err := processor.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), sender); err != nil {
@@ -56,17 +58,8 @@ func TestAcceptedButUnconsumedInjectionReleasesDeliveryForRetry(t *testing.T) {
 func TestPersistedInjectionCompletesOnlyAfterSuccessfulStream(t *testing.T) {
 	t.Parallel()
 
-	queries := &durableEventQueries{}
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	processor, _, _ := newEventDeliveryProcessor(
-		sessionpkg.TypeChat,
-		queries,
-		&durableHistoryWriter{queries: queries, pipeline: pipeline},
-		pipeline,
-	)
-	dispatcher := NewRouteDispatcher(nil)
+	processor, queries, _, _, dispatcher := newInjectionRedeliveryFixture(t)
 	injectCh := dispatcher.MarkActive("route")
-	processor.SetDispatcher(dispatcher)
 
 	if err := processor.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{}); err != nil {
 		t.Fatalf("HandleInbound() error = %v", err)
@@ -95,17 +88,8 @@ func TestPersistedInjectionCompletesOnlyAfterSuccessfulStream(t *testing.T) {
 func TestLeaseLostPersistedInjectionRedeliveryDoesNotCompleteDuplicate(t *testing.T) {
 	t.Parallel()
 
-	queries := &durableEventQueries{}
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	processor, _, _ := newEventDeliveryProcessor(
-		sessionpkg.TypeChat,
-		queries,
-		&durableHistoryWriter{queries: queries, pipeline: pipeline},
-		pipeline,
-	)
-	dispatcher := NewRouteDispatcher(nil)
+	processor, queries, _, _, dispatcher := newInjectionRedeliveryFixture(t)
 	injectCh := dispatcher.MarkActive("route")
-	processor.SetDispatcher(dispatcher)
 	streamCtx, cancelStream := context.WithCancel(context.Background())
 	defer cancelStream()
 	streamKey := deliveryBotID + ":route"
@@ -157,18 +141,8 @@ func TestLeaseLostPersistedInjectionRedeliveryDoesNotCompleteDuplicate(t *testin
 func TestPersistedInjectionReplaysAfterStreamFinalizationFails(t *testing.T) {
 	t.Parallel()
 
-	queries := &durableEventQueries{}
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
-	processor, _, gateway := newEventDeliveryProcessor(
-		sessionpkg.TypeChat,
-		queries,
-		writer,
-		pipeline,
-	)
-	dispatcher := NewRouteDispatcher(nil)
+	processor, queries, writer, gateway, dispatcher := newInjectionRedeliveryFixture(t)
 	injectCh := dispatcher.MarkActive("route")
-	processor.SetDispatcher(dispatcher)
 	gatewayCalls := 0
 	gateway.onChat = func(conversation.ChatRequest) { gatewayCalls++ }
 	sender := &fakeReplySender{}
@@ -218,18 +192,8 @@ func TestPersistedInjectionReplaysAfterStreamFinalizationFails(t *testing.T) {
 func TestPersistedInjectionReplaysWhileRouteIsActive(t *testing.T) {
 	t.Parallel()
 
-	queries := &durableEventQueries{}
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
-	processor, _, gateway := newEventDeliveryProcessor(
-		sessionpkg.TypeChat,
-		queries,
-		writer,
-		pipeline,
-	)
-	dispatcher := NewRouteDispatcher(nil)
+	processor, queries, writer, gateway, dispatcher := newInjectionRedeliveryFixture(t)
 	injectCh := dispatcher.MarkActive("route")
-	processor.SetDispatcher(dispatcher)
 	gatewayCalls := 0
 	gateway.onChat = func(conversation.ChatRequest) { gatewayCalls++ }
 	sender := &fakeReplySender{}
@@ -299,18 +263,8 @@ func TestPersistedInjectionReplaysWhileRouteIsActive(t *testing.T) {
 func TestPersistedInjectionResponseCommittedBetweenStateReadAndClaimReplays(t *testing.T) {
 	t.Parallel()
 
-	queries := &durableEventQueries{}
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
-	processor, _, gateway := newEventDeliveryProcessor(
-		sessionpkg.TypeChat,
-		queries,
-		writer,
-		pipeline,
-	)
-	dispatcher := NewRouteDispatcher(nil)
+	processor, queries, writer, gateway, dispatcher := newInjectionRedeliveryFixture(t)
 	injectCh := dispatcher.MarkActive("route")
-	processor.SetDispatcher(dispatcher)
 	gatewayCalls := 0
 	gateway.onChat = func(conversation.ChatRequest) { gatewayCalls++ }
 	sender := &fakeReplySender{}
@@ -423,13 +377,8 @@ func TestPersistedInjectionHistoryCommittedWhileClaimWaitsReplays(t *testing.T) 
 func TestCoverageOnlyInjectionCompletesWithoutTouchingActiveRoute(t *testing.T) {
 	t.Parallel()
 
-	queries := &durableEventQueries{}
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
-	processor, _, gateway := newEventDeliveryProcessor(sessionpkg.TypeChat, queries, writer, pipeline)
-	dispatcher := NewRouteDispatcher(nil)
+	processor, queries, writer, gateway, dispatcher := newInjectionRedeliveryFixture(t)
 	firstInjectCh := dispatcher.MarkActive("route")
-	processor.SetDispatcher(dispatcher)
 	if err := processor.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{}); err != nil {
 		t.Fatalf("first HandleInbound() error = %v", err)
 	}
@@ -478,17 +427,8 @@ func TestCoverageOnlyInjectionCompletesWithoutTouchingActiveRoute(t *testing.T) 
 func TestInjectedDeliveryLeaseLossCancelsOwningStream(t *testing.T) {
 	t.Parallel()
 
-	queries := &durableEventQueries{}
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	processor, _, _ := newEventDeliveryProcessor(
-		sessionpkg.TypeChat,
-		queries,
-		&durableHistoryWriter{queries: queries, pipeline: pipeline},
-		pipeline,
-	)
-	dispatcher := NewRouteDispatcher(nil)
+	processor, _, _, _, dispatcher := newInjectionRedeliveryFixture(t)
 	dispatcher.MarkActive("route")
-	processor.SetDispatcher(dispatcher)
 	streamCtx, cancelStream := context.WithCancel(context.Background())
 	processor.activeStreams.Store(deliveryBotID+":route", cancelStream)
 

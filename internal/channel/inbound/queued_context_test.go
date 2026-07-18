@@ -51,6 +51,29 @@ func (a *queuedIdentityACL) Evaluate(ctx context.Context, req acl.EvaluateReques
 	return req.ChannelIdentityID == a.allowedChannelIdentityID, nil
 }
 
+func queuedIdentityContext() context.Context {
+	return WithIdentityState(context.Background(), IdentityState{Identity: InboundIdentity{
+		BotID:             deliveryBotID,
+		ChannelIdentityID: "queued-channel-identity",
+		UserID:            "queued-user",
+		DisplayName:       "Queued User",
+		ForceReply:        true,
+	}})
+}
+
+func setACPQueuedSession(processor *ChannelInboundProcessor) {
+	session := SessionResult{
+		ID:                    deliverySessionID,
+		Type:                  sessionpkg.TypeACPAgent,
+		Runtime:               sessionpkg.RuntimeACPAgent,
+		RuntimeOwnerAccountID: "queued-user",
+	}
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{
+		activeSession: session,
+		sessions:      map[string]SessionResult{deliverySessionID: session},
+	})
+}
+
 func TestDrainQueueUsesQueuedTaskContextAndIdentity(t *testing.T) {
 	queries := &durableEventQueries{}
 	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
@@ -115,15 +138,8 @@ func TestQueuedReplayTerminatesWhenACLWasRevokedAfterEnqueue(t *testing.T) {
 	processor.SetACLService(aclService)
 	dispatcher.MarkActive("route")
 	sender := &fakeReplySender{}
-	queuedCtx := WithIdentityState(context.Background(), IdentityState{Identity: InboundIdentity{
-		BotID:             deliveryBotID,
-		ChannelIdentityID: "queued-channel-identity",
-		UserID:            "queued-user",
-		DisplayName:       "Queued User",
-		ForceReply:        true,
-	}})
 
-	if err := processor.HandleInbound(queuedCtx, deliveryConfig(), queuedDeliveryMessage(), sender); err != nil {
+	if err := processor.HandleInbound(queuedIdentityContext(), deliveryConfig(), queuedDeliveryMessage(), sender); err != nil {
 		t.Fatalf("enqueue HandleInbound() error = %v", err)
 	}
 	processor.drainQueue(context.Background(), "route")
@@ -153,29 +169,13 @@ func TestQueuedReplayTerminatesWhenACPAccessWasRevokedAfterEnqueue(t *testing.T)
 	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
 	writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
 	processor, dispatcher, gateway := newQueuedEventDeliveryProcessor(t, queries, writer, pipeline)
-	session := SessionResult{
-		ID:                    deliverySessionID,
-		Type:                  sessionpkg.TypeACPAgent,
-		Runtime:               sessionpkg.RuntimeACPAgent,
-		RuntimeOwnerAccountID: "queued-user",
-	}
-	processor.SetSessionEnsurer(&fakeSessionEnsurer{
-		activeSession: session,
-		sessions:      map[string]SessionResult{deliverySessionID: session},
-	})
+	setACPQueuedSession(processor)
 	permission := &queuedRevokedPermission{}
 	processor.SetBotPermissionChecker(permission)
 	dispatcher.MarkActive("route")
 	sender := &fakeReplySender{}
-	queuedCtx := WithIdentityState(context.Background(), IdentityState{Identity: InboundIdentity{
-		BotID:             deliveryBotID,
-		ChannelIdentityID: "queued-channel-identity",
-		UserID:            "queued-user",
-		DisplayName:       "Queued User",
-		ForceReply:        true,
-	}})
 
-	if err := processor.HandleInbound(queuedCtx, deliveryConfig(), queuedDeliveryMessage(), sender); err != nil {
+	if err := processor.HandleInbound(queuedIdentityContext(), deliveryConfig(), queuedDeliveryMessage(), sender); err != nil {
 		t.Fatalf("enqueue HandleInbound() error = %v", err)
 	}
 	processor.drainQueue(context.Background(), "route")
@@ -202,29 +202,13 @@ func TestQueuedReplayCompletesBeforeBestEffortACPFeedback(t *testing.T) {
 	writer := &orderedCompletionWriter{base: baseWriter, timeline: &timeline}
 	processor, dispatcher, gateway := newQueuedEventDeliveryProcessor(t, queries, writer, pipeline)
 	processor.queueRetryDelay = func(int) time.Duration { return time.Hour }
-	session := SessionResult{
-		ID:                    deliverySessionID,
-		Type:                  sessionpkg.TypeACPAgent,
-		Runtime:               sessionpkg.RuntimeACPAgent,
-		RuntimeOwnerAccountID: "queued-user",
-	}
-	processor.SetSessionEnsurer(&fakeSessionEnsurer{
-		activeSession: session,
-		sessions:      map[string]SessionResult{deliverySessionID: session},
-	})
+	setACPQueuedSession(processor)
 	permission := &queuedRevokedPermission{}
 	processor.SetBotPermissionChecker(permission)
 	dispatcher.MarkActive("route")
 	sender := &queuedLifecycleSender{timeline: &timeline, failSend: true}
-	queuedCtx := WithIdentityState(context.Background(), IdentityState{Identity: InboundIdentity{
-		BotID:             deliveryBotID,
-		ChannelIdentityID: "queued-channel-identity",
-		UserID:            "queued-user",
-		DisplayName:       "Queued User",
-		ForceReply:        true,
-	}})
 
-	if err := processor.HandleInbound(queuedCtx, deliveryConfig(), queuedDeliveryMessage(), sender); err != nil {
+	if err := processor.HandleInbound(queuedIdentityContext(), deliveryConfig(), queuedDeliveryMessage(), sender); err != nil {
 		t.Fatalf("enqueue HandleInbound() error = %v", err)
 	}
 	processor.drainQueue(context.Background(), "route")
@@ -251,28 +235,12 @@ func TestQueuedReplayDoesNotRepeatACPFeedbackAfterTerminalCompletion(t *testing.
 	writer := &orderedCompletionWriter{base: baseWriter, timeline: &timeline}
 	processor, dispatcher, _ := newQueuedEventDeliveryProcessor(t, queries, writer, pipeline)
 	processor.queueRetryDelay = func(int) time.Duration { return time.Millisecond }
-	session := SessionResult{
-		ID:                    deliverySessionID,
-		Type:                  sessionpkg.TypeACPAgent,
-		Runtime:               sessionpkg.RuntimeACPAgent,
-		RuntimeOwnerAccountID: "queued-user",
-	}
-	processor.SetSessionEnsurer(&fakeSessionEnsurer{
-		activeSession: session,
-		sessions:      map[string]SessionResult{deliverySessionID: session},
-	})
+	setACPQueuedSession(processor)
 	processor.SetBotPermissionChecker(&queuedRevokedPermission{})
 	dispatcher.MarkActive("route")
 	sender := &queuedLifecycleSender{timeline: &timeline}
-	queuedCtx := WithIdentityState(context.Background(), IdentityState{Identity: InboundIdentity{
-		BotID:             deliveryBotID,
-		ChannelIdentityID: "queued-channel-identity",
-		UserID:            "queued-user",
-		DisplayName:       "Queued User",
-		ForceReply:        true,
-	}})
 
-	if err := processor.HandleInbound(queuedCtx, deliveryConfig(), queuedDeliveryMessage(), sender); err != nil {
+	if err := processor.HandleInbound(queuedIdentityContext(), deliveryConfig(), queuedDeliveryMessage(), sender); err != nil {
 		t.Fatalf("enqueue HandleInbound() error = %v", err)
 	}
 	processor.drainQueue(context.Background(), "route")

@@ -13,7 +13,7 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
-func TestDiscussInboundPersistsTriggerBeforeNotification(t *testing.T) {
+func newTurnBindingProcessor(sessionID, sessionType string) (*ChannelInboundProcessor, *fakeChatService) {
 	chatSvc := &fakeChatService{
 		resolveResult: route.ResolveConversationResult{ChatID: "chat", RouteID: "route"},
 		persistedID:   "persisted-user-message",
@@ -30,30 +30,51 @@ func TestDiscussInboundPersistsTriggerBeforeNotification(t *testing.T) {
 		0,
 	)
 	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{
-		ID:      "discuss-session",
-		Type:    sessionpkg.TypeDiscuss,
+		ID:      sessionID,
+		Type:    sessionType,
 		Runtime: sessionpkg.RuntimeModel,
 	}})
+	return processor, chatSvc
+}
+
+func setFixedTranscription(processor *ChannelInboundProcessor, text string) {
+	processor.mediaService = &fakeMediaIngestor{}
+	processor.sttModelResolver = fixedTranscriptionModelResolver("stt-model")
+	processor.transcriber = fixedTranscriber(text)
+}
+
+func turnBindingConfig() channel.ChannelConfig {
+	return channel.ChannelConfig{ID: "config", BotID: "bot", ChannelType: channel.ChannelType("test")}
+}
+
+func turnBindingTextMessage() channel.InboundMessage {
+	return channel.InboundMessage{
+		BotID:       "bot",
+		Channel:     channel.ChannelType("test"),
+		Message:     channel.Message{ID: "external-message", Text: "hello"},
+		ReplyTarget: "target",
+		Sender:      channel.Identity{SubjectID: "sender", DisplayName: "User"},
+		Conversation: channel.Conversation{
+			ID:   "conversation",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+}
+
+func turnBindingVoiceMessage() channel.InboundMessage {
+	msg := turnBindingTextMessage()
+	msg.Message.Text = ""
+	msg.Message.Attachments = []channel.Attachment{{Type: channel.AttachmentVoice, ContentHash: "voice-hash", Mime: "audio/ogg", Name: "voice.ogg"}}
+	return msg
+}
+
+func TestDiscussInboundPersistsTriggerBeforeNotification(t *testing.T) {
+	processor, chatSvc := newTurnBindingProcessor("discuss-session", sessionpkg.TypeDiscuss)
 	processor.SetPipeline(pipelinepkg.NewPipeline(pipelinepkg.RenderParams{}), nil, nil)
 	notifier := &recordingDiscussNotifier{messages: chatSvc}
 	processor.discussDriver = notifier
 
-	err := processor.HandleInbound(
-		context.Background(),
-		channel.ChannelConfig{ID: "config", BotID: "bot", ChannelType: channel.ChannelType("test")},
-		channel.InboundMessage{
-			BotID:       "bot",
-			Channel:     channel.ChannelType("test"),
-			Message:     channel.Message{ID: "external-message", Text: "hello"},
-			ReplyTarget: "target",
-			Sender:      channel.Identity{SubjectID: "sender", DisplayName: "User"},
-			Conversation: channel.Conversation{
-				ID:   "conversation",
-				Type: channel.ConversationTypePrivate,
-			},
-		},
-		&fakeReplySender{},
-	)
+	err := processor.HandleInbound(context.Background(), turnBindingConfig(), turnBindingTextMessage(), &fakeReplySender{})
 	if err != nil {
 		t.Fatalf("HandleInbound() error = %v", err)
 	}
@@ -72,49 +93,13 @@ func TestDiscussInboundPersistsTriggerBeforeNotification(t *testing.T) {
 }
 
 func TestDiscussInboundTranscribesVoiceBeforePersistenceAndNotification(t *testing.T) {
-	chatSvc := &fakeChatService{
-		resolveResult: route.ResolveConversationResult{ChatID: "chat", RouteID: "route"},
-		persistedID:   "persisted-user-message",
-	}
-	processor := NewChannelInboundProcessor(
-		slog.Default(),
-		nil,
-		chatSvc,
-		chatSvc,
-		&fakeChatGateway{},
-		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channel-identity"}},
-		&fakePolicyService{},
-		"",
-		0,
-	)
-	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{
-		ID:      "discuss-session",
-		Type:    sessionpkg.TypeDiscuss,
-		Runtime: sessionpkg.RuntimeModel,
-	}})
+	processor, chatSvc := newTurnBindingProcessor("discuss-session", sessionpkg.TypeDiscuss)
 	processor.SetPipeline(pipelinepkg.NewPipeline(pipelinepkg.RenderParams{}), nil, nil)
-	processor.mediaService = &fakeMediaIngestor{}
-	processor.sttModelResolver = fixedTranscriptionModelResolver("stt-model")
-	processor.transcriber = fixedTranscriber("ship the fix")
+	setFixedTranscription(processor, "ship the fix")
 	notifier := &recordingDiscussNotifier{messages: chatSvc}
 	processor.discussDriver = notifier
 
-	err := processor.HandleInbound(
-		context.Background(),
-		channel.ChannelConfig{ID: "config", BotID: "bot", ChannelType: channel.ChannelType("test")},
-		channel.InboundMessage{
-			BotID:       "bot",
-			Channel:     channel.ChannelType("test"),
-			Message:     channel.Message{ID: "external-message", Attachments: []channel.Attachment{{Type: channel.AttachmentVoice, ContentHash: "voice-hash", Mime: "audio/ogg", Name: "voice.ogg"}}},
-			ReplyTarget: "target",
-			Sender:      channel.Identity{SubjectID: "sender", DisplayName: "User"},
-			Conversation: channel.Conversation{
-				ID:   "conversation",
-				Type: channel.ConversationTypePrivate,
-			},
-		},
-		&fakeReplySender{},
-	)
+	err := processor.HandleInbound(context.Background(), turnBindingConfig(), turnBindingVoiceMessage(), &fakeReplySender{})
 	if err != nil {
 		t.Fatalf("HandleInbound() error = %v", err)
 	}
@@ -127,47 +112,12 @@ func TestDiscussInboundTranscribesVoiceBeforePersistenceAndNotification(t *testi
 }
 
 func TestChatInboundTranscribesVoiceBeforePipelineProjection(t *testing.T) {
-	chatSvc := &fakeChatService{
-		resolveResult: route.ResolveConversationResult{ChatID: "chat", RouteID: "route"},
-	}
-	processor := NewChannelInboundProcessor(
-		slog.Default(),
-		nil,
-		chatSvc,
-		chatSvc,
-		&fakeChatGateway{},
-		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channel-identity"}},
-		&fakePolicyService{},
-		"",
-		0,
-	)
-	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{
-		ID:      "chat-session",
-		Type:    sessionpkg.TypeChat,
-		Runtime: sessionpkg.RuntimeModel,
-	}})
+	processor, _ := newTurnBindingProcessor("chat-session", sessionpkg.TypeChat)
 	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
 	processor.SetPipeline(pipeline, nil, nil)
-	processor.mediaService = &fakeMediaIngestor{}
-	processor.sttModelResolver = fixedTranscriptionModelResolver("stt-model")
-	processor.transcriber = fixedTranscriber("ship the fix")
+	setFixedTranscription(processor, "ship the fix")
 
-	err := processor.HandleInbound(
-		context.Background(),
-		channel.ChannelConfig{ID: "config", BotID: "bot", ChannelType: channel.ChannelType("test")},
-		channel.InboundMessage{
-			BotID:       "bot",
-			Channel:     channel.ChannelType("test"),
-			Message:     channel.Message{ID: "external-message", Attachments: []channel.Attachment{{Type: channel.AttachmentVoice, ContentHash: "voice-hash", Mime: "audio/ogg", Name: "voice.ogg"}}},
-			ReplyTarget: "target",
-			Sender:      channel.Identity{SubjectID: "sender", DisplayName: "User"},
-			Conversation: channel.Conversation{
-				ID:   "conversation",
-				Type: channel.ConversationTypePrivate,
-			},
-		},
-		&fakeReplySender{},
-	)
+	err := processor.HandleInbound(context.Background(), turnBindingConfig(), turnBindingVoiceMessage(), &fakeReplySender{})
 	if err != nil {
 		t.Fatalf("HandleInbound() error = %v", err)
 	}

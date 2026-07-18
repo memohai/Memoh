@@ -65,60 +65,47 @@ func (q *snapshotEventQueries) appendEvent(row dbsqlc.BotSessionEvent) {
 }
 
 func TestCompletedRedeliveryRefreshesWarmPipelineFromDurableSnapshot(t *testing.T) {
-	queries := seededDurableEventQueries(t, true)
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	pipeline.PushEvent(deliverySessionID, pipelinepkg.ServiceEvent{
-		SessionID:    deliverySessionID,
-		EventID:      "event_id:stale-local",
-		Action:       pipelinepkg.ServiceChatRenamed,
-		ReceivedAtMs: time.Unix(1_699_999_000, 0).UnixMilli(),
-		EventCursor:  1,
-		NewTitle:     "stale local title",
-	})
-	writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
-	processor, _, gateway := newEventDeliveryProcessor(sessionpkg.TypeChat, queries, writer, pipeline)
-	gatewayCalls := 0
-	gateway.onChat = func(_ conversation.ChatRequest) { gatewayCalls++ }
+	for _, tt := range []struct {
+		name      string
+		listErr   error
+		wantErr   bool
+		wantTitle string
+	}{
+		{name: "success", wantTitle: "stored title"},
+		{name: "snapshot failure", listErr: errors.New("snapshot unavailable"), wantErr: true, wantTitle: "stale local title"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			queries := seededDurableEventQueries(t, true)
+			queries.listErr = tt.listErr
+			pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+			pipeline.PushEvent(deliverySessionID, pipelinepkg.ServiceEvent{
+				SessionID:    deliverySessionID,
+				EventID:      "event_id:stale-local",
+				Action:       pipelinepkg.ServiceChatRenamed,
+				ReceivedAtMs: time.Unix(1_699_999_000, 0).UnixMilli(),
+				EventCursor:  1,
+				NewTitle:     "stale local title",
+			})
+			writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
+			processor, _, gateway := newEventDeliveryProcessor(sessionpkg.TypeChat, queries, writer, pipeline)
+			gatewayCalls := 0
+			gateway.onChat = func(_ conversation.ChatRequest) { gatewayCalls++ }
 
-	if err := processor.HandleInbound(deliveryContext(), deliveryConfig(), deliveryMessage(), &fakeReplySender{}); err != nil {
-		t.Fatalf("HandleInbound() error = %v", err)
-	}
-	ic, _ := pipeline.GetIC(deliverySessionID)
-	if ic.ChatTitle != "stored title" {
-		t.Fatalf("warm pipeline title = %q, want durable stored title", ic.ChatTitle)
-	}
-	if gatewayCalls != 0 {
-		t.Fatalf("gateway calls = %d, want completed redelivery to return", gatewayCalls)
-	}
-}
-
-func TestCompletedRedeliverySnapshotFailureSkipsProjectionAndGateway(t *testing.T) {
-	queries := seededDurableEventQueries(t, true)
-	queries.listErr = errors.New("snapshot unavailable")
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	pipeline.PushEvent(deliverySessionID, pipelinepkg.ServiceEvent{
-		SessionID:    deliverySessionID,
-		EventID:      "event_id:stale-local",
-		Action:       pipelinepkg.ServiceChatRenamed,
-		ReceivedAtMs: time.Unix(1_699_999_000, 0).UnixMilli(),
-		EventCursor:  1,
-		NewTitle:     "stale local title",
-	})
-	writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
-	processor, _, gateway := newEventDeliveryProcessor(sessionpkg.TypeChat, queries, writer, pipeline)
-	gatewayCalls := 0
-	gateway.onChat = func(_ conversation.ChatRequest) { gatewayCalls++ }
-
-	err := processor.HandleInbound(deliveryContext(), deliveryConfig(), deliveryMessage(), &fakeReplySender{})
-	if err == nil {
-		t.Fatal("HandleInbound() error = nil, want snapshot failure")
-	}
-	ic, _ := pipeline.GetIC(deliverySessionID)
-	if ic.ChatTitle != "stale local title" {
-		t.Fatalf("warm pipeline title = %q, want unchanged local projection", ic.ChatTitle)
-	}
-	if gatewayCalls != 0 {
-		t.Fatalf("gateway calls = %d, want snapshot failure to fail closed", gatewayCalls)
+			err := processor.HandleInbound(deliveryContext(), deliveryConfig(), deliveryMessage(), &fakeReplySender{})
+			if tt.wantErr && err == nil {
+				t.Fatal("HandleInbound() error = nil, want snapshot failure")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("HandleInbound() error = %v", err)
+			}
+			ic, _ := pipeline.GetIC(deliverySessionID)
+			if ic.ChatTitle != tt.wantTitle {
+				t.Fatalf("warm pipeline title = %q, want %q", ic.ChatTitle, tt.wantTitle)
+			}
+			if gatewayCalls != 0 {
+				t.Fatalf("gateway calls = %d, want completed redelivery to return before reaching the gateway", gatewayCalls)
+			}
+		})
 	}
 }
 
@@ -428,14 +415,8 @@ func snapshotEventRow(t *testing.T, rowID, externalMessageID string, event pipel
 
 func newSnapshotDeliveryProcessor(t *testing.T, queries *snapshotEventQueries, pipeline *pipelinepkg.Pipeline) (*ChannelInboundProcessor, *fakeChatGateway) {
 	t.Helper()
-	routes := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat", RouteID: "route"}}
-	gateway := &fakeChatGateway{}
 	writer := &durableHistoryWriter{queries: queries.durableEventQueries, pipeline: pipeline}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, routes, writer, gateway, nil, nil, "", 0)
-	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{
-		ID: deliverySessionID, Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel,
-	}})
-	processor.SetPipeline(pipeline, pipelinepkg.NewEventStore(nil, queries), nil)
+	processor, _, gateway := newEventDeliveryProcessor(sessionpkg.TypeChat, queries, writer, pipeline)
 	t.Cleanup(processor.Close)
 	return processor, gateway
 }

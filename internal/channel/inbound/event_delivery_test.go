@@ -352,59 +352,9 @@ func TestCompletedNonDiscussEventSkipsProjectionAndGateway(t *testing.T) {
 	}
 }
 
-func TestConcurrentNonDiscussDuplicateStartsGatewayOnceAndReleasesAfterFailure(t *testing.T) {
-	queries := &durableEventQueries{}
-	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
-	writer := &durableHistoryWriter{queries: queries, pipeline: pipeline}
-	routes := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat", RouteID: "route"}}
-	gateway := &blockingDeliveryGateway{started: make(chan struct{}), release: make(chan struct{}), onSuccess: queries.markDeliveryHandled}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, routes, writer, gateway, nil, nil, "", 0)
-	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{
-		ID:      deliverySessionID,
-		Type:    sessionpkg.TypeChat,
-		Runtime: sessionpkg.RuntimeModel,
-	}})
-	processor.SetPipeline(pipeline, pipelinepkg.NewEventStore(nil, queries), nil)
-
-	var releaseOnce sync.Once
-	defer releaseOnce.Do(func() { close(gateway.release) })
-	firstDone := make(chan error, 1)
-	go func() {
-		firstDone <- processor.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{})
-	}()
-	<-gateway.started
-
-	secondDone := make(chan error, 1)
-	go func() {
-		secondDone <- processor.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{})
-	}()
-	select {
-	case err := <-secondDone:
-		if !errors.Is(err, ErrEventDeliveryInFlight) {
-			t.Fatalf("concurrent duplicate HandleInbound() error = %v, want in-flight", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("concurrent duplicate did not return while first delivery was in flight")
-	}
-	if got := gateway.calls.Load(); got != 1 {
-		t.Fatalf("gateway calls while first delivery is in flight = %d, want 1", got)
-	}
-
-	releaseOnce.Do(func() { close(gateway.release) })
-	if err := <-firstDone; err == nil {
-		t.Fatal("first HandleInbound() error = nil, want provider failure")
-	}
-	if err := processor.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{}); err != nil {
-		t.Fatalf("retry after provider failure HandleInbound() error = %v", err)
-	}
-	if got := gateway.calls.Load(); got != 2 {
-		t.Fatalf("gateway calls after provider retry = %d, want 2", got)
-	}
-}
-
 func newEventDeliveryProcessor(
 	sessionType string,
-	queries *durableEventQueries,
+	queries dbstore.Queries,
 	writer messagepkg.Writer,
 	pipeline *pipelinepkg.Pipeline,
 ) (*ChannelInboundProcessor, *countingDiscussNotifier, *fakeChatGateway) {

@@ -216,45 +216,65 @@ func TestNonDiscussRedeliveryReplaysDurableResponseWithoutGateway(t *testing.T) 
 	}
 }
 
-func TestConcurrentNonDiscussDuplicateAcrossProcessorsStartsGatewayOnce(t *testing.T) {
-	queries := &durableEventQueries{}
-	gateway := &blockingDeliveryGateway{started: make(chan struct{}), release: make(chan struct{}), onSuccess: queries.markDeliveryHandled}
-	first := newCrossProcessDeliveryProcessor(queries, gateway)
-	second := newCrossProcessDeliveryProcessor(queries, gateway)
-	var releaseOnce sync.Once
-	defer releaseOnce.Do(func() { close(gateway.release) })
+func TestConcurrentNonDiscussDuplicateStartsGatewayOnce(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		second func(first *ChannelInboundProcessor, queries *durableEventQueries, gateway flow.Runner) *ChannelInboundProcessor
+	}{
+		{
+			name: "same processor",
+			second: func(first *ChannelInboundProcessor, _ *durableEventQueries, _ flow.Runner) *ChannelInboundProcessor {
+				return first
+			},
+		},
+		{
+			name: "across processors",
+			second: func(_ *ChannelInboundProcessor, queries *durableEventQueries, gateway flow.Runner) *ChannelInboundProcessor {
+				return newCrossProcessDeliveryProcessor(queries, gateway)
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			queries := &durableEventQueries{}
+			gateway := &blockingDeliveryGateway{started: make(chan struct{}), release: make(chan struct{}), onSuccess: queries.markDeliveryHandled}
+			first := newCrossProcessDeliveryProcessor(queries, gateway)
+			second := tt.second(first, queries, gateway)
+			var releaseOnce sync.Once
+			defer releaseOnce.Do(func() { close(gateway.release) })
 
-	firstDone := make(chan error, 1)
-	go func() {
-		firstDone <- first.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{})
-	}()
-	<-gateway.started
+			firstDone := make(chan error, 1)
+			go func() {
+				firstDone <- first.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{})
+			}()
+			<-gateway.started
 
-	secondDone := make(chan error, 1)
-	go func() {
-		secondDone <- second.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{})
-	}()
-	select {
-	case err := <-secondDone:
-		if !errors.Is(err, ErrEventDeliveryInFlight) {
-			t.Fatalf("competing processor HandleInbound() error = %v, want in-flight", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("competing processor did not return while first lease was active")
-	}
-	if got := gateway.calls.Load(); got != 1 {
-		t.Fatalf("cross-process gateway calls while first delivery is active = %d, want 1", got)
-	}
+			secondDone := make(chan error, 1)
+			go func() {
+				secondDone <- second.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{})
+			}()
+			select {
+			case err := <-secondDone:
+				if !errors.Is(err, ErrEventDeliveryInFlight) {
+					t.Fatalf("competing HandleInbound() error = %v, want in-flight", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("competing delivery did not return while first lease was active")
+			}
+			if got := gateway.calls.Load(); got != 1 {
+				t.Fatalf("gateway calls while first delivery is active = %d, want 1", got)
+			}
 
-	releaseOnce.Do(func() { close(gateway.release) })
-	if err := <-firstDone; err == nil {
-		t.Fatal("first HandleInbound() error = nil, want provider failure")
-	}
-	if err := second.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{}); err != nil {
-		t.Fatalf("retry after first processor failure HandleInbound() error = %v", err)
-	}
-	if got := gateway.calls.Load(); got != 2 {
-		t.Fatalf("gateway calls after released lease = %d, want 2", got)
+			releaseOnce.Do(func() { close(gateway.release) })
+			if err := <-firstDone; err == nil {
+				t.Fatal("first HandleInbound() error = nil, want provider failure")
+			}
+			if err := second.HandleInbound(deliveryContext(), deliveryConfig(), deliveryChatMessage(), &fakeReplySender{}); err != nil {
+				t.Fatalf("retry after first delivery failure HandleInbound() error = %v", err)
+			}
+			if got := gateway.calls.Load(); got != 2 {
+				t.Fatalf("gateway calls after released lease = %d, want 2", got)
+			}
+		})
 	}
 }
 
