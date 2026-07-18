@@ -3,67 +3,12 @@ package pipeline
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
 )
-
-type leaseQueries struct {
-	dbstore.Queries
-
-	mu                sync.Mutex
-	now               time.Time
-	claimUntil        time.Time
-	claimStarted      chan struct{}
-	claimRelease      chan struct{}
-	claimOnce         sync.Once
-	claimFromReturn   time.Duration
-	renewStarted      chan struct{}
-	renewRelease      chan struct{}
-	renewOnce         sync.Once
-	token             pgtype.UUID
-	until             time.Time
-	renewErr          error
-	historyReady      bool
-	completed         bool
-	forceCompleteRows bool
-	completeRows      int64
-	completeErr       error
-	completionReads   int
-	completionReadErr error
-}
-
-func (q *leaseQueries) ClaimSessionEventDelivery(_ context.Context, arg sqlc.ClaimSessionEventDeliveryParams) (pgtype.Timestamptz, error) {
-	if q.claimStarted != nil {
-		q.claimOnce.Do(func() { close(q.claimStarted) })
-	}
-	if q.claimRelease != nil {
-		<-q.claimRelease
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.completed {
-		return pgtype.Timestamptz{}, pgx.ErrNoRows
-	}
-	if q.token.Valid && q.token != arg.ClaimToken && q.until.After(q.now) {
-		return pgtype.Timestamptz{}, pgx.ErrNoRows
-	}
-	q.token = arg.ClaimToken
-	q.until = q.claimUntil
-	if q.claimFromReturn > 0 {
-		q.until = time.Now().Add(q.claimFromReturn)
-	}
-	if q.until.IsZero() {
-		q.until = q.now.Add(time.Duration(arg.LeaseMs) * time.Millisecond)
-	}
-	return pgtype.Timestamptz{Time: q.until, Valid: true}, nil
-}
 
 func TestEventDeliveryLeaseStartsLocalDeadlineAfterClaimReturns(t *testing.T) {
 	t.Parallel()
@@ -111,57 +56,6 @@ func TestEventDeliveryLeaseStartsLocalDeadlineAfterClaimReturns(t *testing.T) {
 	}
 }
 
-func (q *leaseQueries) CompleteSessionEventDelivery(_ context.Context, arg sqlc.CompleteSessionEventDeliveryParams) (int64, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.completeErr != nil {
-		return 0, q.completeErr
-	}
-	if q.forceCompleteRows {
-		return q.completeRows, nil
-	}
-	if !q.historyReady || !q.token.Valid || q.token != arg.ClaimToken {
-		return 0, nil
-	}
-	q.completed = true
-	q.token = pgtype.UUID{}
-	q.until = time.Time{}
-	return 1, nil
-}
-
-func (q *leaseQueries) IsSessionEventDeliveryCompleted(_ context.Context, _ pgtype.UUID) (bool, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.completionReads++
-	if q.completionReadErr != nil {
-		return false, q.completionReadErr
-	}
-	return q.completed, nil
-}
-
-func (q *leaseQueries) RenewSessionEventDelivery(ctx context.Context, arg sqlc.RenewSessionEventDeliveryParams) (pgtype.Timestamptz, error) {
-	if q.renewStarted != nil {
-		q.renewOnce.Do(func() { close(q.renewStarted) })
-	}
-	if q.renewRelease != nil {
-		select {
-		case <-q.renewRelease:
-		case <-ctx.Done():
-			return pgtype.Timestamptz{}, ctx.Err()
-		}
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.renewErr != nil {
-		return pgtype.Timestamptz{}, q.renewErr
-	}
-	if !q.token.Valid || q.token != arg.ClaimToken {
-		return pgtype.Timestamptz{}, pgx.ErrNoRows
-	}
-	q.until = q.now.Add(time.Duration(arg.LeaseMs) * time.Millisecond)
-	return pgtype.Timestamptz{Time: q.until, Valid: true}, nil
-}
-
 func TestEventDeliveryLeaseReleaseCancelsInFlightRenewal(t *testing.T) {
 	t.Parallel()
 
@@ -195,17 +89,6 @@ func TestEventDeliveryLeaseReleaseCancelsInFlightRenewal(t *testing.T) {
 		err := <-released
 		t.Fatalf("Release() waited for renewal timeout: %v", err)
 	}
-}
-
-func (q *leaseQueries) ReleaseSessionEventDelivery(_ context.Context, arg sqlc.ReleaseSessionEventDeliveryParams) (int64, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if !q.token.Valid || q.token != arg.ClaimToken {
-		return 0, nil
-	}
-	q.token = pgtype.UUID{}
-	q.until = time.Time{}
-	return 1, nil
 }
 
 func TestEventDeliveryLeaseExcludesCompetingStoreAndRecoversAfterExpiry(t *testing.T) {
@@ -486,11 +369,4 @@ func TestEventDeliveryLeaseDoneClosesWhenReleased(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("lease Done did not close after release")
 	}
-}
-
-func newTestLeaseStore(queries dbstore.Queries, duration, renewInterval time.Duration) *EventStore {
-	store := NewEventStore(nil, queries)
-	store.deliveryLeaseDuration = duration
-	store.deliveryRenewInterval = renewInterval
-	return store
 }

@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
-
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
@@ -438,19 +436,6 @@ func TestCoverageSensitiveGatesUseLatestExternalMutation(t *testing.T) {
 	if wasRecentlyMentioned(rc[1:], 400) {
 		t.Fatal("self-sent mutation must not activate mention gate")
 	}
-}
-
-func sdkMessageText(messages []sdk.Message) string {
-	var text strings.Builder
-	for _, message := range messages {
-		for _, part := range message.Content {
-			if value, ok := part.(sdk.TextPart); ok {
-				text.WriteString(value.Text)
-				text.WriteByte('\n')
-			}
-		}
-	}
-	return text.String()
 }
 
 func TestHandleReplyWithAgentTrimsDiscussContextToModelBudget(t *testing.T) {

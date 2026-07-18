@@ -349,12 +349,6 @@ type cursorOnlyResolver struct {
 
 func (*cursorOnlyResolver) ScheduleCompaction(context.Context, string, string, string, int, int) {}
 
-func leaseQueriesCompleted(queries *leaseQueries) bool {
-	queries.mu.Lock()
-	defer queries.mu.Unlock()
-	return queries.completed
-}
-
 type ambiguousDiscussCursorStore struct {
 	persisted   DiscussCursorPosition
 	upsertCalls int
