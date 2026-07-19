@@ -27,12 +27,15 @@
               <TableHead>{{ t('people.role') }}</TableHead>
               <TableHead>{{ t('common.status') }}</TableHead>
               <TableHead>{{ t('people.lastLogin') }}</TableHead>
+              <TableHead class="w-24 text-right">
+                {{ t('common.actions') }}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             <TableRow v-if="loading && users.length === 0">
               <TableCell
-                :colspan="4"
+                :colspan="5"
                 class="p-0"
               >
                 <div class="space-y-2 p-3">
@@ -46,7 +49,7 @@
             </TableRow>
             <TableRow v-else-if="users.length === 0">
               <TableCell
-                :colspan="4"
+                :colspan="5"
                 class="h-28 text-center text-muted-foreground"
               >
                 {{ t('people.empty') }}
@@ -110,6 +113,42 @@
               </TableCell>
               <TableCell class="text-muted-foreground">
                 {{ formatMemberDate(user.last_login_at, t('people.never')) }}
+              </TableCell>
+              <TableCell>
+                <div class="flex justify-end gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    :title="t('people.resetPassword')"
+                    :aria-label="t('people.resetPasswordFor', { name: memberName(user) })"
+                    :disabled="isUserPending(user)"
+                    @click="openResetDialog(user)"
+                  >
+                    <KeyRound class="size-4" />
+                  </Button>
+                  <ConfirmPopover
+                    :title="t('people.removeMember')"
+                    :message="t('people.removeConfirm', { name: memberName(user) })"
+                    :confirm-text="t('people.removeMember')"
+                    variant="destructive"
+                    :loading="isUserPending(user)"
+                    @confirm="removeMember(user)"
+                  >
+                    <template #trigger>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        :title="t('people.removeMember')"
+                        :aria-label="t('people.removeMemberFor', { name: memberName(user) })"
+                        :disabled="isSelf(user) || isUserPending(user)"
+                      >
+                        <Trash2 class="size-4" />
+                      </Button>
+                    </template>
+                  </ConfirmPopover>
+                </div>
               </TableCell>
             </TableRow>
           </TableBody>
@@ -239,6 +278,60 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <Dialog v-model:open="resetDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ t('people.resetPassword') }}</DialogTitle>
+          <DialogDescription>
+            {{ t('people.resetPasswordDescription', { name: resetTargetName }) }}
+          </DialogDescription>
+        </DialogHeader>
+
+        <FormStack>
+          <FieldStack
+            :label="t('settings.newPassword')"
+            for="people-reset-password"
+          >
+            <Input
+              id="people-reset-password"
+              v-model="resetForm.password"
+              type="password"
+              autocomplete="new-password"
+            />
+          </FieldStack>
+          <FieldStack
+            :label="t('settings.confirmPassword')"
+            for="people-reset-confirm-password"
+          >
+            <Input
+              id="people-reset-confirm-password"
+              v-model="resetForm.confirmPassword"
+              type="password"
+              autocomplete="new-password"
+            />
+          </FieldStack>
+        </FormStack>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="resettingPassword"
+            @click="resetDialogOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
+            type="button"
+            :loading="resettingPassword"
+            @click="resetPassword"
+          >
+            {{ t('people.resetPassword') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </PageShell>
 </template>
 
@@ -246,7 +339,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
-import { UserPlus } from 'lucide-vue-next'
+import { KeyRound, Trash2, UserPlus } from 'lucide-vue-next'
 import {
   Alert,
   AlertDescription,
@@ -258,6 +351,7 @@ import {
   Button,
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -277,6 +371,7 @@ import {
   TableHeader,
   TableRow,
 } from '@felinic/ui'
+import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
@@ -285,13 +380,16 @@ import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import {
+  deleteUsersById,
   getUsers,
   postUsers,
   putUsersById,
+  putUsersByIdPassword,
 } from '@memohai/sdk'
 import type {
   AccountsAccount,
   AccountsCreateAccountRequest,
+  AccountsResetPasswordRequest,
   AccountsUpdateAccountRequest,
 } from '@memohai/sdk'
 
@@ -304,10 +402,13 @@ type UserAccount = AccountsAccount
 const users = ref<UserAccount[]>([])
 const loading = ref(false)
 const creating = ref(false)
+const resettingPassword = ref(false)
 const loadError = ref('')
 const pendingUserIds = ref<Set<string>>(new Set())
 
 const createDialogOpen = ref(false)
+const resetDialogOpen = ref(false)
+const resetTarget = ref<UserAccount | null>(null)
 
 const createForm = reactive({
   username: '',
@@ -319,12 +420,18 @@ const createForm = reactive({
   confirmPassword: '',
 })
 
+const resetForm = reactive({
+  password: '',
+  confirmPassword: '',
+})
+
 const membersTitle = computed(() =>
   users.value.length
     ? `${t('people.members')} · ${users.value.length}`
     : t('people.members'),
 )
 const currentUserId = computed(() => userStore.userInfo.id)
+const resetTargetName = computed(() => resetTarget.value ? memberName(resetTarget.value) : '')
 
 onMounted(() => {
   void loadUsers()
@@ -398,6 +505,13 @@ function openCreateDialog() {
   createDialogOpen.value = true
 }
 
+function openResetDialog(user: UserAccount) {
+  resetTarget.value = user
+  resetForm.password = ''
+  resetForm.confirmPassword = ''
+  resetDialogOpen.value = true
+}
+
 function validatePasswordPair(password: string, confirmPassword: string): boolean {
   if (!password.trim()) {
     toast.error(t('settings.passwordRequired'))
@@ -462,6 +576,54 @@ async function updateUserStatus(user: UserAccount, isActive: boolean) {
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('people.statusUpdateFailed'), { prefixFallback: true }))
     await loadUsers()
+  } finally {
+    setUserPending(userID, false)
+  }
+}
+
+async function resetPassword() {
+  const target = resetTarget.value
+  if (!target?.id) return
+  const password = resetForm.password.trim()
+  const confirmPassword = resetForm.confirmPassword.trim()
+  if (!validatePasswordPair(password, confirmPassword)) return
+
+  resettingPassword.value = true
+  setUserPending(target.id, true)
+  try {
+    const body: AccountsResetPasswordRequest = {
+      new_password: password,
+    }
+    await putUsersByIdPassword({
+      path: { id: target.id },
+      body,
+      throwOnError: true,
+    })
+    toast.success(t('people.resetPasswordSuccess'))
+    resetDialogOpen.value = false
+    resetTarget.value = null
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('people.resetPasswordFailed'), { prefixFallback: true }))
+  } finally {
+    setUserPending(target.id, false)
+    resettingPassword.value = false
+  }
+}
+
+async function removeMember(user: UserAccount) {
+  const userID = user.id
+  if (!userID || isSelf(user)) return
+
+  setUserPending(userID, true)
+  try {
+    await deleteUsersById({
+      path: { id: userID },
+      throwOnError: true,
+    })
+    toast.success(t('people.removeSuccess'))
+    await loadUsers()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('people.removeFailed'), { prefixFallback: true }))
   } finally {
     setUserPending(userID, false)
   }

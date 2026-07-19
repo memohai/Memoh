@@ -6,7 +6,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func TestUsersHandlerDoesNotRegisterAdminPasswordReset(t *testing.T) {
+func TestUsersHandlerRegistersPasswordManagementRoutes(t *testing.T) {
 	e := echo.New()
 	(&UsersHandler{}).Register(e)
 
@@ -17,7 +17,7 @@ func TestUsersHandlerDoesNotRegisterAdminPasswordReset(t *testing.T) {
 	if !routes["PUT /users/me/password"] {
 		t.Fatal("self-service password update route is not registered")
 	}
-	if routes["PUT /users/:id/password"] {
-		t.Fatal("team-admin password reset route must not be registered")
+	if !routes["PUT /users/:id/password"] {
+		t.Fatal("admin password reset route is not registered")
 	}
 }

@@ -352,6 +352,26 @@ func (s *Service) UpdatePassword(ctx context.Context, userID, currentPassword, n
 	})
 }
 
+// ResetPassword sets a new password without requiring the current one.
+// The account store scopes the target to the current team, which keeps this
+// administrative operation safe even though credentials live on users.
+func (s *Service) ResetPassword(ctx context.Context, userID, newPassword string) error {
+	if s.store == nil {
+		return errors.New("account store not configured")
+	}
+	if strings.TrimSpace(newPassword) == "" {
+		return errors.New("new password is required")
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return s.store.UpdatePassword(ctx, dbstore.UpdateAccountPasswordInput{
+		UserID:       userID,
+		PasswordHash: string(hashed),
+	})
+}
+
 // RemoveMember deactivates the current workspace membership without changing
 // the global principal or credentials.
 func (s *Service) RemoveMember(ctx context.Context, userID string) error {
