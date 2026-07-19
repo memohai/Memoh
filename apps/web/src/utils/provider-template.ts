@@ -1,4 +1,4 @@
-import type { ProvidertemplatesGetResponse } from '@memohai/sdk'
+import type { ProvidersGetResponse, ProvidertemplatesGetResponse } from '@memohai/sdk'
 
 export interface ProviderConfigField {
   key: string
@@ -59,6 +59,24 @@ export function templateConfigFields(template?: ProvidertemplatesGetResponse | n
 
 export function templateDefaultConfig(template?: ProvidertemplatesGetResponse | null): Record<string, unknown> {
   return { ...((asRecord(template?.default_config) ?? {})) }
+}
+
+export function providerConfigDefaults(schema: unknown): Record<string, unknown> {
+  return Object.fromEntries(normalizeProviderConfigFields(schema)
+    .filter(field => !field.secret && field.example !== undefined)
+    .map(field => [field.key, field.example]))
+}
+
+export function providerDraftFromTemplate(template: ProvidertemplatesGetResponse): ProvidersGetResponse {
+  return {
+    provider_template_id: template.id,
+    name: template.name ?? template.key ?? '',
+    client_type: template.driver ?? '',
+    icon: template.icon,
+    enable: false,
+    config: templateDefaultConfig(template),
+    metadata: { ...((asRecord(template.metadata) ?? {})) },
+  }
 }
 
 export function isTemplateConfigured(template: ProvidertemplatesGetResponse): boolean {

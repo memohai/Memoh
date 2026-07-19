@@ -1207,6 +1207,7 @@
       "yandex": "Yandex"
     },
     "fetchProviderNames": {
+      "native": "Native",
       "jina": "Jina Reader",
       "cloudflare_markdown": "Cloudflare Markdown"
     }

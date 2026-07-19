@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, provide, reactive, ref, watch } from 'vue'
-import { useQuery, useQueryCache } from '@pinia/colada'
-import { getFetchProviders, getFetchProvidersMeta, getSearchProviders } from '@memohai/sdk'
-import type { FetchprovidersGetResponse, FetchprovidersProviderMeta, SearchprovidersGetResponse } from '@memohai/sdk'
-import { Plus } from 'lucide-vue-next'
+import { computed, provide, ref } from 'vue'
+import { useQuery } from '@pinia/colada'
+import { getFetchProviders, getFetchProvidersMeta, getSearchProviders, getSearchProvidersMeta } from '@memohai/sdk'
+import type {
+  FetchprovidersGetResponse,
+  FetchprovidersProviderMeta,
+  SearchprovidersGetResponse,
+  SearchprovidersProviderMeta,
+} from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import AddFetchProvider from './components/add-fetch-provider.vue'
-import AddSearchProvider from './components/add-search-provider.vue'
 import FetchProviderSetting from './components/fetch-provider-setting.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
@@ -16,12 +18,12 @@ import PageShell from '@/components/page-shell/index.vue'
 import SectionGroup from '@/components/section-group/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
+import { providerConfigDefaults } from '@/utils/provider-template'
 
 const { t } = useI18n()
-const queryCache = useQueryCache()
 
 const SEARCH_PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
-const FETCH_PROVIDER_TYPES = ['jina', 'cloudflare_markdown'] as const
+const FETCH_PROVIDER_TYPES = ['native', 'jina', 'cloudflare_markdown'] as const
 
 const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['search-providers'],
@@ -47,8 +49,18 @@ const { data: fetchProviderMetaData } = useQuery({
   },
 })
 
+const { data: searchProviderMetaData } = useQuery({
+  key: () => ['search-providers-meta'],
+  query: async () => {
+    const { data } = await getSearchProvidersMeta({ throwOnError: true })
+    return data
+  },
+})
+
 const curProvider = ref<SearchprovidersGetResponse>()
 const curFetchProvider = ref<FetchprovidersGetResponse>()
+const optimisticSearchProviders = ref<Record<string, SearchprovidersGetResponse>>({})
+const optimisticFetchProviders = ref<Record<string, FetchprovidersGetResponse>>({})
 provide('curSearchProvider', curProvider)
 provide('curFetchProvider', curFetchProvider)
 
@@ -57,12 +69,6 @@ type WebDetail =
   | { kind: 'search', provider: SearchprovidersGetResponse }
   | { kind: 'fetch', provider: FetchprovidersGetResponse }
 const detailKind = ref<WebDetailKind>('search')
-const openStatus = reactive({
-  addSearchOpen: false,
-  addFetchOpen: false,
-})
-const initialSearchProvider = ref('')
-const initialFetchProvider = ref('')
 
 function sortByEnabled<T extends { enable?: boolean }>(list: T[]) {
   return [...list].sort((a, b) => Number(b.enable !== false) - Number(a.enable !== false))
@@ -71,28 +77,39 @@ function sortByEnabled<T extends { enable?: boolean }>(list: T[]) {
 const providers = computed<SearchprovidersGetResponse[]>(() =>
   Array.isArray(providerData.value) ? sortByEnabled(providerData.value) : [],
 )
-const searchItems = computed(() => SEARCH_PROVIDER_TYPES.map(provider => ({
-  provider,
-  instance: providers.value.find(item => item.provider === provider),
-})))
-
-const fetchProviders = computed<FetchprovidersGetResponse[]>(() => {
-  if (!Array.isArray(fetchProviderData.value)) return []
-  return [...fetchProviderData.value].sort((a, b) => {
-    if (a.provider === 'native') return -1
-    if (b.provider === 'native') return 1
-    return Number(b.enable !== false) - Number(a.enable !== false)
-  })
-})
+const searchProviderMetas = computed<SearchprovidersProviderMeta[]>(() =>
+  Array.isArray(searchProviderMetaData.value) ? searchProviderMetaData.value : [],
+)
 const fetchProviderMetas = computed<FetchprovidersProviderMeta[]>(() =>
   Array.isArray(fetchProviderMetaData.value) ? fetchProviderMetaData.value : [],
 )
-const availableFetchTemplates = computed(() => FETCH_PROVIDER_TYPES
-  .filter(provider => !fetchProviders.value.some(instance => instance.provider === provider))
-  .map(provider => ({
-    provider,
-    meta: fetchProviderMetas.value.find(item => item.provider === provider),
-  })))
+
+const searchItems = computed<SearchprovidersGetResponse[]>(() => SEARCH_PROVIDER_TYPES.map((provider) => {
+  const meta = searchProviderMetas.value.find(item => item.provider === provider)
+  return providers.value.find(item => item.provider === provider)
+    ?? optimisticSearchProviders.value[provider]
+    ?? {
+      name: meta?.display_name ?? t(`webSearch.providerNames.${provider}`, provider),
+      provider,
+      enable: false,
+      config: providerConfigDefaults(meta?.config_schema),
+    }
+}))
+
+const fetchProviders = computed<FetchprovidersGetResponse[]>(() =>
+  Array.isArray(fetchProviderData.value) ? fetchProviderData.value : [],
+)
+const fetchItems = computed<FetchprovidersGetResponse[]>(() => FETCH_PROVIDER_TYPES.map((provider) => {
+  const meta = fetchProviderMetas.value.find(item => item.provider === provider)
+  return fetchProviders.value.find(item => item.provider === provider)
+    ?? optimisticFetchProviders.value[provider]
+    ?? {
+      name: meta?.display_name ?? t(`webSearch.fetchProviderNames.${provider}`, provider),
+      provider,
+      enable: provider === 'native',
+      config: providerConfigDefaults(meta?.config_schema),
+    }
+}))
 
 // Page-owned query key, valued `kind:id` so refresh restores which pane.
 const {
@@ -104,8 +121,8 @@ const {
 } = useRoutedViewSwap<WebDetail>({
   key: 'webProvider',
   items: () => [
-    ...providers.value.map(provider => ({ kind: 'search' as const, provider })),
-    ...fetchProviders.value.map(provider => ({ kind: 'fetch' as const, provider })),
+    ...searchItems.value.map(provider => ({ kind: 'search' as const, provider })),
+    ...fetchItems.value.map(provider => ({ kind: 'fetch' as const, provider })),
   ],
   selected: () => {
     if (detailKind.value === 'search' && curProvider.value) {
@@ -121,7 +138,7 @@ const {
     curProvider.value = detail?.kind === 'search' ? detail.provider : undefined
     curFetchProvider.value = detail?.kind === 'fetch' ? detail.provider : undefined
   },
-  getRouteValue: detail => `${detail.kind}:${detail.provider.id}`,
+  getRouteValue: detail => `${detail.kind}:${detail.provider.provider}`,
   isLoading: (routeValue) => {
     if (routeValue.startsWith('search:')) return providersLoading.value
     if (routeValue.startsWith('fetch:')) return fetchProvidersLoading.value
@@ -138,35 +155,27 @@ function openProvider(provider: SearchprovidersGetResponse) {
   openDetail({ kind: 'search', provider })
 }
 
-function openSearchItem(item: { provider: string, instance?: SearchprovidersGetResponse }) {
-  if (item.instance) {
-    openProvider(item.instance)
-    return
-  }
-  initialSearchProvider.value = item.provider
-  openStatus.addSearchOpen = true
-}
-
 function openFetchProvider(provider: FetchprovidersGetResponse) {
   openDetail({ kind: 'fetch', provider })
 }
 
-function openAddFetch(provider: string) {
-  initialFetchProvider.value = provider
-  openStatus.addFetchOpen = true
+function handleSearchMaterialized(provider: SearchprovidersGetResponse) {
+  if (!provider.provider) return
+  optimisticSearchProviders.value = {
+    ...optimisticSearchProviders.value,
+    [provider.provider]: provider,
+  }
+  curProvider.value = provider
 }
 
-watch(() => openStatus.addSearchOpen, (isOpen, wasOpen) => {
-  if (wasOpen && !isOpen) {
-    queryCache.invalidateQueries({ key: ['search-providers'] })
+function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
+  if (!provider.provider) return
+  optimisticFetchProviders.value = {
+    ...optimisticFetchProviders.value,
+    [provider.provider]: provider,
   }
-})
-
-watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
-  if (wasOpen && !isOpen) {
-    queryCache.invalidateQueries({ key: ['fetch-providers'] })
-  }
-})
+  curFetchProvider.value = provider
+}
 </script>
 
 <template>
@@ -185,26 +194,19 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
         >
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <BackendCard
-              v-for="item in searchItems"
-              :key="item.provider"
-              :name="item.instance?.name ?? t(`webSearch.providerNames.${item.provider}`, item.provider)"
-              :subtitle="item.instance ? '' : t('provider.templateNotConfigured')"
-              :enabled="item.instance?.enable !== false && !!item.instance"
-              @click="openSearchItem(item)"
+              v-for="provider in searchItems"
+              :key="provider.provider"
+              :name="provider.name ?? ''"
+              :enabled="provider.enable !== false && !!provider.id"
+              @click="openProvider(provider)"
             >
               <template #leading>
                 <span class="flex size-10 items-center justify-center">
                   <SearchProviderLogo
-                    :provider="item.provider"
+                    :provider="provider.provider || ''"
                     size="md"
                   />
                 </span>
-              </template>
-              <template
-                v-if="!item.instance"
-                #trailing
-              >
-                <Plus class="size-4 shrink-0 text-muted-foreground" />
               </template>
             </BackendCard>
           </div>
@@ -216,14 +218,14 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
           :description="t('webSearch.fetchHint')"
         >
           <div
-            v-if="fetchProviders.length + availableFetchTemplates.length > 0"
+            v-if="fetchItems.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
-              v-for="provider in fetchProviders"
-              :key="provider.id"
+              v-for="provider in fetchItems"
+              :key="provider.provider"
               :name="provider.name ?? ''"
-              :enabled="provider.enable !== false"
+              :enabled="provider.enable !== false && (provider.provider === 'native' || !!provider.id)"
               @click="openFetchProvider(provider)"
             >
               <template #leading>
@@ -235,25 +237,6 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
                 </span>
               </template>
             </BackendCard>
-            <BackendCard
-              v-for="template in availableFetchTemplates"
-              :key="`template:${template.provider}`"
-              :name="template.meta?.display_name ?? t(`webSearch.fetchProviderNames.${template.provider}`, template.provider)"
-              :subtitle="t('provider.templateNotConfigured')"
-              @click="openAddFetch(template.provider)"
-            >
-              <template #leading>
-                <span class="flex size-10 items-center justify-center">
-                  <SearchProviderLogo
-                    :provider="template.provider"
-                    size="md"
-                  />
-                </span>
-              </template>
-              <template #trailing>
-                <Plus class="size-4 shrink-0 text-muted-foreground" />
-              </template>
-            </BackendCard>
           </div>
           <p
             v-else
@@ -263,17 +246,6 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
           </p>
         </SectionGroup>
       </div>
-
-      <AddSearchProvider
-        v-model:open="openStatus.addSearchOpen"
-        hide-trigger
-        :initial-provider="initialSearchProvider"
-      />
-      <AddFetchProvider
-        v-model:open="openStatus.addFetchOpen"
-        hide-trigger
-        :initial-provider="initialFetchProvider"
-      />
     </PageShell>
 
     <!-- Provider detail -->
@@ -281,11 +253,17 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
       v-else
       width="narrow"
       :back-label="t('webSearch.title')"
-      :loading="isDetailLoading || !(detailKind === 'search' ? curProvider?.id : curFetchProvider?.id)"
+      :loading="isDetailLoading || !(detailKind === 'search' ? curProvider : curFetchProvider)"
       @back="closeProvider"
     >
-      <ProviderSetting v-if="detailKind === 'search' && curProvider?.id" />
-      <FetchProviderSetting v-else-if="detailKind === 'fetch' && curFetchProvider?.id" />
+      <ProviderSetting
+        v-if="detailKind === 'search' && curProvider"
+        @materialized="handleSearchMaterialized"
+      />
+      <FetchProviderSetting
+        v-else-if="detailKind === 'fetch' && curFetchProvider"
+        @materialized="handleFetchMaterialized"
+      />
     </DetailPane>
   </SwapTransition>
 </template>

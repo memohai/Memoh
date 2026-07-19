@@ -20,6 +20,7 @@
         </p>
       </div>
       <ConfirmPopover
+        v-if="curProvider.id"
         :message="$t('memory.deleteConfirm')"
         :loading="deleteLoading"
         @confirm="handleDelete"
@@ -102,8 +103,12 @@ import {
 } from '@felinic/ui'
 import { Brain, Trash2 } from 'lucide-vue-next'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getMemoryProvidersMeta, putMemoryProvidersById, deleteMemoryProvidersById } from '@memohai/sdk'
-import type { AdaptersProviderGetResponse, AdaptersProviderMeta } from '@memohai/sdk'
+import { deleteMemoryProvidersById, getMemoryProvidersMeta, postMemoryProviders, putMemoryProvidersById } from '@memohai/sdk'
+import type {
+  AdaptersProviderCreateRequest,
+  AdaptersProviderGetResponse,
+  AdaptersProviderMeta,
+} from '@memohai/sdk'
 import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
@@ -117,6 +122,9 @@ const { t } = useI18n()
 const queryCache = useQueryCache()
 
 const curProvider = inject<Ref<AdaptersProviderGetResponse | null>>('curMemoryProvider')
+const emit = defineEmits<{
+  materialized: [provider: AdaptersProviderGetResponse]
+}>()
 
 const form = reactive({ name: '' })
 const configForm = reactive<Record<string, string>>({})
@@ -163,17 +171,39 @@ watch(curProvider!, (val) => {
 
 async function handleSave() {
   if (!curProvider?.value) return
+  const missing = providerSchema.value
+    ? Object.entries(providerSchema.value.fields ?? {}).find(([key, field]) => field.required && !String(configForm[key] ?? '').trim())
+    : undefined
+  if (missing) {
+    toast.error(t('provider.requiredField', { field: missing[1].title || missing[0] }))
+    return
+  }
   saveLoading.value = true
   try {
     const config: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(configForm)) {
       if (v) config[k] = v
     }
-    const { data } = await putMemoryProvidersById({
-      path: { id: curProvider.value.id! },
-      body: { name: form.name.trim(), config },
-      throwOnError: true,
-    })
+    let data: AdaptersProviderGetResponse | undefined
+    if (curProvider.value.id) {
+      const response = await putMemoryProvidersById({
+        path: { id: curProvider.value.id },
+        body: { name: form.name.trim(), config },
+        throwOnError: true,
+      })
+      data = response.data
+    } else {
+      const response = await postMemoryProviders({
+        body: {
+          name: form.name.trim(),
+          provider: curProvider.value.provider as AdaptersProviderCreateRequest['provider'],
+          config,
+        },
+        throwOnError: true,
+      })
+      data = response.data
+      if (data) emit('materialized', data)
+    }
     if (curProvider?.value && data) {
       Object.assign(curProvider.value, data)
     }
@@ -188,11 +218,11 @@ async function handleSave() {
 }
 
 async function handleDelete() {
-  if (!curProvider?.value) return
+  if (!curProvider?.value?.id) return
   deleteLoading.value = true
   try {
     await deleteMemoryProvidersById({
-      path: { id: curProvider.value.id! },
+      path: { id: curProvider.value.id },
       throwOnError: true,
     })
     toast.success(t('memory.deleteSuccess'))

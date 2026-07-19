@@ -17,6 +17,7 @@
         </div>
         <div class="ml-auto shrink-0">
           <ConfirmPopover
+            v-if="curProvider?.id"
             :message="$t('email.deleteConfirm')"
             :loading="deleteLoading"
             variant="destructive"
@@ -244,13 +245,23 @@ import {
   getEmailProvidersByIdOauthAuthorize,
   getEmailProvidersByIdOauthStatus,
   deleteEmailProvidersByIdOauthToken,
+  postEmailProviders,
 } from '@memohai/sdk'
-import type { EmailProviderResponse, EmailProviderMeta, EmailFieldSchema, HandlersEmailOAuthStatusResponse } from '@memohai/sdk'
+import type {
+  EmailCreateProviderRequest,
+  EmailFieldSchema,
+  EmailProviderMeta,
+  EmailProviderResponse,
+  HandlersEmailOAuthStatusResponse,
+} from '@memohai/sdk'
 
 const OAUTH_PROVIDERS = ['gmail']
 
 const { t, te } = useI18n()
 const curProvider = inject('curEmailProvider', ref<EmailProviderResponse>())
+const emit = defineEmits<{
+  materialized: [provider: EmailProviderResponse]
+}>()
 const curProviderId = computed(() => curProvider.value?.id)
 
 const { data: metaList } = useQuery({
@@ -299,19 +310,14 @@ const form = useForm({ validationSchema: schema })
 const configData = reactive<Record<string, unknown>>({})
 const visibleSecrets = reactive<Record<string, boolean>>({})
 
-let loadedProviderId = ''
-watch(() => curProvider.value?.id, (id) => {
-  if (!id || id === loadedProviderId) return
-  loadedProviderId = id
-  const p = curProvider.value
-  if (p) {
-    form.setValues({ name: p.name ?? '' })
-    const cfg = p.config ?? {}
-    Object.keys(configData).forEach((k) => delete configData[k])
-    Object.assign(configData, { ...cfg })
-    if (isOAuthProvider.value) {
-      void fetchOAuthStatus()
-    }
+watch(curProvider, (provider) => {
+  if (!provider) return
+  form.setValues({ name: provider.name ?? '' })
+  const cfg = provider.config ?? {}
+  Object.keys(configData).forEach((k) => delete configData[k])
+  Object.assign(configData, { ...cfg })
+  if (isOAuthProvider.value && provider.id) {
+    void fetchOAuthStatus()
   }
 }, { immediate: true })
 
@@ -325,7 +331,21 @@ watch([isOAuthProvider, curProviderId], () => {
 
 const { mutateAsync: submitUpdate, isLoading: editLoading } = useMutation({
   mutation: async (data: { name: string; config: Record<string, unknown> }) => {
-    if (!curProviderId.value) return
+    if (!curProviderId.value) {
+      const { data: created } = await postEmailProviders({
+        body: {
+          name: data.name,
+          provider: curProvider.value?.provider as EmailCreateProviderRequest['provider'],
+          config: data.config,
+        },
+        throwOnError: true,
+      })
+      if (created) {
+        curProvider.value = created
+        emit('materialized', created)
+      }
+      return created
+    }
     const { data: result } = await putEmailProvidersById({
       path: { id: curProviderId.value },
       body: { name: data.name, config: data.config },
@@ -345,6 +365,16 @@ const { mutateAsync: doDelete, isLoading: deleteLoading } = useMutation({
 })
 
 const handleSave = form.handleSubmit(async (values) => {
+  const missing = orderedFields.value.find((field) => {
+    if (!field.required || !field.key) return false
+    const value = configData[field.key]
+    if (field.type === 'bool') return value === undefined || value === null
+    return !String(value ?? '').trim()
+  })
+  if (missing) {
+    toast.error(t('provider.requiredField', { field: fieldLabel(missing) }))
+    return
+  }
   try {
     await submitUpdate({ name: values.name, config: { ...configData } })
     toast.success(t('provider.saveChanges'))
@@ -357,6 +387,7 @@ const handleSave = form.handleSubmit(async (values) => {
 })
 
 async function handleDelete() {
+  if (!curProviderId.value) return
   try {
     await doDelete()
     toast.success(t('common.deleteSuccess'))
@@ -369,7 +400,7 @@ const authorizeLoading = ref(false)
 const hasOAuthToken = computed(() => Boolean(oauthStatus.value?.has_token))
 const oauthTokenExpired = computed(() => Boolean(oauthStatus.value?.has_token && oauthStatus.value?.expired))
 const canAuthorize = computed(() => {
-  if (!isOAuthProvider.value) return false
+  if (!isOAuthProvider.value || !curProviderId.value) return false
   if (oauthStatusLoading.value) return false
   if (oauthStatus.value && !oauthStatus.value.configured) return false
   return true

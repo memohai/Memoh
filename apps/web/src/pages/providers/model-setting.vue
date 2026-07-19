@@ -22,6 +22,7 @@
         </div>
         <div class="ml-auto flex items-center gap-2">
           <ConfirmPopover
+            v-if="curProvider?.id"
             :message="$t('provider.deleteConfirm')"
             :loading="deleteLoading"
             @confirm="deleteProvider"
@@ -40,7 +41,7 @@
           </ConfirmPopover>
           <Switch
             :model-value="curProvider?.enable ?? true"
-            :disabled="!curProvider?.id || enableLoading"
+            :disabled="enableLoading"
             :aria-label="$t('provider.enable')"
             @update:model-value="handleToggleEnable"
           />
@@ -55,8 +56,9 @@
 
       <ModelList
         :provider-id="curProvider?.id"
-        :models="modelDataList"
+        :models="providerModels"
         :managed="isManagedModelCatalogClientType(curProvider?.client_type)"
+        :preview="!curProvider?.id"
         :delete-model-loading="deleteModelLoading"
         @edit="handleEditModel"
         @delete="deleteModel"
@@ -77,11 +79,19 @@ import ProviderForm from './components/provider-form.vue'
 import ModelList from './components/model-list.vue'
 import { computed, provide, reactive, ref, toRef, watch } from 'vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteModelsById } from '@memohai/sdk'
+import {
+  deleteModelsById,
+  deleteProvidersById,
+  getProvidersByIdModels,
+  postProvidersByIdImportModels,
+  postProvidersFromTemplate,
+  putProvidersById,
+} from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
 import { isManagedModelCatalogClientType } from '@/constants/client-types'
+import { useProviderTemplateModels } from '@/composables/useProviderTemplateModels'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{
@@ -106,12 +116,20 @@ function handleEditModel(model: ModelsGetResponse) {
 
 // ---- 当前 Provider（父级 v-model:provider 下发，子写回自动回传） ----
 const curProvider = defineModel<ProvidersGetResponse>('provider')
+const emit = defineEmits<{
+  materialized: [provider: ProvidersGetResponse]
+}>()
 const curProviderId = computed(() => curProvider.value?.id)
+const curProviderTemplateId = computed(() => curProviderId.value
+  ? undefined
+  : curProvider.value?.provider_template_id)
+const { models: templateModels } = useProviderTemplateModels(curProviderTemplateId)
 const enableLoading = ref(false)
 const { t } = useI18n()
 
 // ---- API Hooks ----
 const queryCache = useQueryCache()
+let materializePromise: Promise<ProvidersGetResponse> | null = null
 
 function invalidateProviderQueries() {
   queryCache.invalidateQueries({ key: ['providers'] })
@@ -133,7 +151,9 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
 
 const { mutate: changeProvider, isLoading: editLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
-    if (!curProviderId.value) return
+    if (!curProviderId.value) {
+      return materializeProvider(data, data.enable !== false)
+    }
     const { data: result } = await putProvidersById({
       path: { id: curProviderId.value },
       body: data as ProvidersUpdateRequest,
@@ -141,11 +161,68 @@ const { mutate: changeProvider, isLoading: editLoading } = useMutation({
     })
     return result
   },
-  onSettled: invalidateProviderQueries,
+  onSettled: () => {
+    invalidateProviderQueries()
+    queryCache.invalidateQueries({ key: ['provider-templates', 'llm'] })
+  },
 })
 
+async function materializeProvider(data: Record<string, unknown>, enable: boolean) {
+  if (curProvider.value?.id) return curProvider.value
+  if (materializePromise) return materializePromise
+
+  const templateId = curProvider.value?.provider_template_id
+  if (!templateId) throw new Error('provider template is missing')
+
+  materializePromise = (async () => {
+    const { data: created } = await postProvidersFromTemplate({
+      body: {
+        template_id: templateId,
+        domain: 'llm',
+        name: String(data.name ?? curProvider.value?.name ?? ''),
+        config: (data.config as Record<string, unknown> | undefined) ?? {},
+        metadata: (data.metadata as Record<string, unknown> | undefined) ?? {},
+      },
+      throwOnError: true,
+    })
+    if (!created?.id) throw new Error('provider creation returned no id')
+
+    let result = created
+    if (!enable) {
+      const response = await putProvidersById({
+        path: { id: created.id },
+        body: { enable: false },
+        throwOnError: true,
+      })
+      result = response.data ?? { ...created, enable: false }
+    }
+
+    curProvider.value = result
+    emit('materialized', result)
+
+    try {
+      await postProvidersByIdImportModels({
+        path: { id: created.id },
+        throwOnError: true,
+      })
+    } catch {
+      toast.error(t('models.importFailed'))
+    }
+
+    invalidateProviderQueries()
+    queryCache.invalidateQueries({ key: ['provider-templates', 'llm'] })
+    return result
+  })()
+
+  try {
+    return await materializePromise
+  } finally {
+    materializePromise = null
+  }
+}
+
 async function handleToggleEnable(value: boolean) {
-  if (!curProviderId.value || !curProvider.value) return
+  if (!curProvider.value) return
 
   const prev = curProvider.value.enable ?? true
   curProvider.value = {
@@ -155,6 +232,14 @@ async function handleToggleEnable(value: boolean) {
 
   enableLoading.value = true
   try {
+    if (!curProviderId.value) {
+      await materializeProvider({
+        name: curProvider.value.name,
+        config: curProvider.value.config ?? {},
+        metadata: curProvider.value.metadata ?? {},
+      }, value)
+      return
+    }
     await putProvidersById({
       path: { id: curProviderId.value },
       body: { enable: value },
@@ -191,6 +276,17 @@ const { data: modelDataList } = useQuery({
     return data
   },
   enabled: () => !!curProviderId.value,
+})
+
+const providerModels = computed<ModelsGetResponse[]>(() => {
+  if (curProviderId.value) return modelDataList.value ?? []
+  return templateModels.value.map(model => ({
+    model_id: model.model_id,
+    name: model.name,
+    type: model.type as ModelsGetResponse['type'],
+    config: model.config as ModelsGetResponse['config'],
+    enable: true,
+  }))
 })
 
 watch(curProvider, () => {

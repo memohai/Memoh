@@ -3,7 +3,7 @@ import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { Button } from '@felinic/ui'
 import { getProviderTemplates, getVideoProviders, postVideoProvidersByIdImportModels } from '@memohai/sdk'
-import type { ProvidertemplatesGetResponse, VideoProviderResponse } from '@memohai/sdk'
+import type { ProvidersGetResponse, ProvidertemplatesGetResponse, VideoProviderResponse } from '@memohai/sdk'
 import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
@@ -14,7 +14,7 @@ import PageShell from '@/components/page-shell/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import VideoProviderSetting from './provider-setting.vue'
-import { isTemplateConfigured } from '@/utils/provider-template'
+import { isTemplateConfigured, providerDraftFromTemplate } from '@/utils/provider-template'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
@@ -27,7 +27,7 @@ const { data: providersData, isLoading: providersLoading } = useQuery({
   },
 })
 
-const { data: templateData } = useQuery({
+const { data: templateData, isLoading: templatesLoading } = useQuery({
   key: () => ['provider-templates', 'video'],
   query: async () => {
     const { data } = await getProviderTemplates({ query: { domain: 'video' }, throwOnError: true })
@@ -35,7 +35,9 @@ const { data: templateData } = useQuery({
   },
 })
 
-const curProvider = ref<VideoProviderResponse>()
+type TemplateVideoProvider = VideoProviderResponse & { provider_template_id?: string }
+const curProvider = ref<TemplateVideoProvider>()
+const optimisticProvider = ref<TemplateVideoProvider>()
 provide('curVideoProvider', curProvider)
 
 const openStatus = reactive({ addOpen: false })
@@ -48,7 +50,18 @@ const providers = computed<VideoProviderResponse[]>(() => {
 const templates = computed<ProvidertemplatesGetResponse[]>(() =>
   Array.isArray(templateData.value) ? templateData.value : [],
 )
-const availableTemplates = computed(() => templates.value.filter(template => !isTemplateConfigured(template)))
+const availableTemplates = computed(() => templates.value.filter(template =>
+  !isTemplateConfigured(template)
+  && template.id !== optimisticProvider.value?.provider_template_id,
+))
+const catalogProviders = computed<TemplateVideoProvider[]>(() => {
+  const provider = optimisticProvider.value
+  if (!provider?.id || providers.value.some(item => item.id === provider.id)) return providers.value
+  return [provider, ...providers.value]
+})
+const templateDrafts = computed<TemplateVideoProvider[]>(() =>
+  availableTemplates.value.map(template => providerDraftFromTemplate(template) as TemplateVideoProvider),
+)
 
 // Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
 const {
@@ -57,17 +70,23 @@ const {
   isDetailLoading,
   openDetail: openProvider,
   backToList: closeProvider,
-} = useRoutedViewSwap({
+} = useRoutedViewSwap<TemplateVideoProvider>({
   key: 'videoProvider',
-  items: () => providers.value,
+  items: () => [...catalogProviders.value, ...templateDrafts.value],
   selected: () => curProvider.value,
   select: provider => curProvider.value = provider,
-  getRouteValue: provider => provider.id ?? '',
-  isLoading: () => providersLoading.value,
-  isReady: () => providersData.value !== undefined,
+  getRouteValue: provider => provider.provider_template_id
+    ? `template:${provider.provider_template_id}`
+    : provider.id ?? '',
+  isLoading: routeValue => routeValue.startsWith('template:')
+    ? templatesLoading.value || providersLoading.value
+    : providersLoading.value,
+  isReady: routeValue => routeValue.startsWith('template:')
+    ? templateData.value !== undefined && providersData.value !== undefined
+    : providersData.value !== undefined,
 })
 
-const addProviderNames = computed(() => providers.value.map((p) => ({ name: p.name })))
+const addProviderNames = computed(() => catalogProviders.value.map((p) => ({ name: p.name })))
 
 function getInitials(name: string | undefined) {
   const label = name?.trim() ?? ''
@@ -88,6 +107,12 @@ async function importVideoModels(providerId: string) {
 function openAddProvider(templateId?: string) {
   initialTemplateId.value = templateId ?? ''
   openStatus.addOpen = true
+}
+
+function handleMaterialized(provider: ProvidersGetResponse) {
+  const result = provider as TemplateVideoProvider
+  optimisticProvider.value = result
+  openProvider(result)
 }
 
 watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
@@ -118,11 +143,11 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
       </template>
 
       <div
-        v-if="providers.length + availableTemplates.length > 0"
+        v-if="catalogProviders.length + templateDrafts.length > 0"
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard
-          v-for="provider in providers"
+          v-for="provider in catalogProviders"
           :key="provider.id"
           :name="provider.name ?? ''"
           :enabled="provider.enable !== false"
@@ -145,29 +170,25 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
           </template>
         </BackendCard>
         <BackendCard
-          v-for="template in availableTemplates"
-          :key="`template:${template.id}`"
-          :name="template.name ?? ''"
-          :subtitle="t('provider.templateNotConfigured')"
-          @click="openAddProvider(template.id)"
+          v-for="provider in templateDrafts"
+          :key="`template:${provider.provider_template_id}`"
+          :name="provider.name ?? ''"
+          @click="openProvider(provider)"
         >
           <template #leading>
             <span class="flex size-10 items-center justify-center rounded-full bg-muted">
               <ProviderIcon
-                v-if="template.icon"
-                :icon="template.icon"
+                v-if="provider.icon"
+                :icon="provider.icon"
                 size="1.5em"
               />
               <span
                 v-else
                 class="text-xs font-medium text-muted-foreground"
               >
-                {{ getInitials(template.name) }}
+                {{ getInitials(provider.name) }}
               </span>
             </span>
-          </template>
-          <template #trailing>
-            <Plus class="size-4 shrink-0 text-muted-foreground" />
           </template>
         </BackendCard>
       </div>
@@ -193,10 +214,13 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
       v-else
       width="narrow"
       :back-label="t('video.title')"
-      :loading="isDetailLoading || !curProvider?.id"
+      :loading="isDetailLoading || !curProvider"
       @back="closeProvider"
     >
-      <VideoProviderSetting v-if="curProvider?.id" />
+      <VideoProviderSetting
+        v-if="curProvider"
+        @materialized="handleMaterialized"
+      />
     </DetailPane>
   </SwapTransition>
 </template>

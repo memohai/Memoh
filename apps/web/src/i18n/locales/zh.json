@@ -1207,6 +1207,7 @@
       "yandex": "Yandex"
     },
     "fetchProviderNames": {
+      "native": "原生抓取",
       "jina": "Jina Reader",
       "cloudflare_markdown": "Cloudflare Markdown"
     }

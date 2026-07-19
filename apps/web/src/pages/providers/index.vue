@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
 import {
   Button,
@@ -25,7 +25,7 @@ import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import { avatarInitials } from '@/composables/useAvatarInitials'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
-import { isTemplateConfigured } from '@/utils/provider-template'
+import { isTemplateConfigured, providerDraftFromTemplate, templateDefaultConfig } from '@/utils/provider-template'
 import ModelSetting from './model-setting.vue'
 
 const { t } = useI18n()
@@ -46,7 +46,7 @@ const { data: modelData } = useQuery({
   },
 })
 
-const { data: templateData } = useQuery({
+const { data: templateData, isLoading: templatesLoading } = useQuery({
   key: () => ['provider-templates', 'llm'],
   query: async () => {
     const { data } = await getProviderTemplates({ query: { domain: 'llm' }, throwOnError: true })
@@ -55,6 +55,8 @@ const { data: templateData } = useQuery({
 })
 
 const curProvider = ref<ProvidersGetResponse>()
+const curTemplate = ref<ProvidertemplatesGetResponse>()
+const optimisticProvider = ref<ProvidersGetResponse>()
 const searchQuery = ref('')
 const addOpen = ref(false)
 const initialTemplateId = ref('')
@@ -72,7 +74,26 @@ const templates = computed<ProvidertemplatesGetResponse[]>(() =>
   Array.isArray(templateData.value) ? templateData.value : [],
 )
 
-const availableTemplates = computed(() => templates.value.filter(template => !isTemplateConfigured(template)))
+const availableTemplates = computed(() => templates.value.filter(template =>
+  !isTemplateConfigured(template)
+  && template.id !== optimisticProvider.value?.provider_template_id,
+))
+
+const catalogProviders = computed(() => {
+  const provider = optimisticProvider.value
+  if (!provider?.id || providers.value.some(item => item.id === provider.id)) return providers.value
+  return [provider, ...providers.value]
+})
+
+watch(providers, (items) => {
+  if (optimisticProvider.value?.id && items.some(item => item.id === optimisticProvider.value?.id)) {
+    optimisticProvider.value = undefined
+  }
+})
+
+type ProviderDetail =
+  | { kind: 'provider', provider: ProvidersGetResponse }
+  | { kind: 'template', template: ProvidertemplatesGetResponse }
 
 // Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
 const {
@@ -81,14 +102,35 @@ const {
   isDetailLoading,
   openDetail: openProvider,
   backToList: closeProvider,
-} = useRoutedViewSwap({
+} = useRoutedViewSwap<ProviderDetail>({
   key: 'provider',
-  items: () => providers.value,
-  selected: () => curProvider.value,
-  select: provider => curProvider.value = provider,
-  getRouteValue: provider => provider.id ?? '',
-  isLoading: () => providersLoading.value,
-  isReady: () => providerData.value !== undefined,
+  items: () => [
+    ...catalogProviders.value.map(provider => ({ kind: 'provider' as const, provider })),
+    ...availableTemplates.value.map(template => ({ kind: 'template' as const, template })),
+  ],
+  selected: () => {
+    if (curTemplate.value) return { kind: 'template', template: curTemplate.value }
+    return curProvider.value ? { kind: 'provider', provider: curProvider.value } : undefined
+  },
+  select: (detail) => {
+    curTemplate.value = detail?.kind === 'template' ? detail.template : undefined
+    curProvider.value = detail?.kind === 'provider'
+      ? detail.provider
+      : detail?.kind === 'template'
+        ? providerDraftFromTemplate(detail.template)
+        : undefined
+  },
+  getRouteValue: detail => detail.kind === 'provider'
+    ? detail.provider.provider_template_id
+      ? `template:${detail.provider.provider_template_id}`
+      : (detail.provider.id ?? '')
+    : `template:${detail.template.id}`,
+  isLoading: routeValue => routeValue.startsWith('template:')
+    ? templatesLoading.value || providersLoading.value
+    : providersLoading.value,
+  isReady: routeValue => routeValue.startsWith('template:')
+    ? templateData.value !== undefined && providerData.value !== undefined
+    : providerData.value !== undefined,
 })
 
 const modelCountByProvider = computed(() => {
@@ -103,12 +145,12 @@ const modelCountByProvider = computed(() => {
 
 // Always offer search once there's anything to filter — a hidden-then-appearing
 // box read as inconsistent (some providers showed it, some didn't).
-const showSearch = computed(() => providers.value.length + availableTemplates.value.length > 0)
+const showSearch = computed(() => catalogProviders.value.length + availableTemplates.value.length > 0)
 
 const filteredProviders = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
-  if (!keyword) return providers.value
-  return providers.value.filter((p) => {
+  if (!keyword) return catalogProviders.value
+  return catalogProviders.value.filter((p) => {
     const name = (p.name ?? '').toLowerCase()
     const url = providerSubtitle(p).toLowerCase()
     return name.includes(keyword) || url.includes(keyword)
@@ -135,6 +177,27 @@ function providerSubtitle(provider: ProvidersGetResponse) {
 
 function modelCount(id: string | undefined) {
   return id ? (modelCountByProvider.value[id] ?? 0) : 0
+}
+
+function templateSubtitle(template: ProvidertemplatesGetResponse) {
+  const baseUrl = templateDefaultConfig(template).base_url
+  if (typeof baseUrl === 'string' && baseUrl) {
+    return baseUrl.replace(/^https?:\/\//, '')
+  }
+  return template.driver ?? ''
+}
+
+function openTemplate(template: ProvidertemplatesGetResponse) {
+  openProvider({ kind: 'template', template })
+}
+
+function openProviderInstance(provider: ProvidersGetResponse) {
+  openProvider({ kind: 'provider', provider })
+}
+
+function handleMaterialized(provider: ProvidersGetResponse) {
+  optimisticProvider.value = provider
+  openProvider({ kind: 'provider', provider })
 }
 
 function openAddProvider(templateId?: string) {
@@ -172,7 +235,7 @@ function openAddProvider(templateId?: string) {
       </template>
 
       <div
-        v-if="providers.length + availableTemplates.length > 0"
+        v-if="catalogProviders.length + availableTemplates.length > 0"
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard
@@ -181,7 +244,7 @@ function openAddProvider(templateId?: string) {
           :name="provider.name ?? ''"
           :subtitle="providerSubtitle(provider)"
           :enabled="provider.enable !== false"
-          @click="openProvider(provider)"
+          @click="openProviderInstance(provider)"
         >
           <template #leading>
             <span class="flex size-10 items-center justify-center rounded-full bg-muted">
@@ -217,8 +280,8 @@ function openAddProvider(templateId?: string) {
           v-for="template in filteredTemplates"
           :key="`template:${template.id}`"
           :name="template.name ?? ''"
-          :subtitle="t('provider.templateNotConfigured')"
-          @click="openAddProvider(template.id)"
+          :subtitle="templateSubtitle(template)"
+          @click="openTemplate(template)"
         >
           <template #leading>
             <span class="flex size-10 items-center justify-center rounded-full bg-muted">
@@ -234,9 +297,6 @@ function openAddProvider(templateId?: string) {
                 {{ avatarInitials(template.name, '?') }}
               </span>
             </span>
-          </template>
-          <template #trailing>
-            <Plus class="size-4 shrink-0 text-muted-foreground" />
           </template>
         </BackendCard>
       </div>
@@ -277,12 +337,13 @@ function openAddProvider(templateId?: string) {
       v-else
       width="narrow"
       :back-label="t('sidebar.providers')"
-      :loading="isDetailLoading || !curProvider?.id"
+      :loading="isDetailLoading || !curProvider"
       @back="closeProvider"
     >
       <ModelSetting
-        v-if="curProvider?.id"
+        v-if="curProvider"
         v-model:provider="curProvider"
+        @materialized="handleMaterialized"
       />
     </DetailPane>
   </SwapTransition>

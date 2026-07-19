@@ -1159,6 +1159,7 @@
       "yandex": "ヤンデックス"
     },
     "fetchProviderNames": {
+      "native": "ネイティブ取得",
       "jina": "Jina Reader",
       "cloudflare_markdown": "Cloudflare Markdown"
     }

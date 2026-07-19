@@ -3,7 +3,7 @@ import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { Button } from '@felinic/ui'
 import { getProviderTemplates, getSpeechProviders, getTranscriptionProviders, postSpeechProvidersByIdImportModels, postTranscriptionProvidersByIdImportModels } from '@memohai/sdk'
-import type { AudioSpeechProviderResponse, ProvidertemplatesGetResponse } from '@memohai/sdk'
+import type { AudioSpeechProviderResponse, ProvidersGetResponse, ProvidertemplatesGetResponse } from '@memohai/sdk'
 import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
@@ -16,7 +16,7 @@ import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import SpeechSetting from '@/pages/speech/components/provider-setting.vue'
 import TranscriptionSetting from '@/pages/transcription/provider-setting.vue'
-import { isTemplateConfigured } from '@/utils/provider-template'
+import { isTemplateConfigured, providerDraftFromTemplate } from '@/utils/provider-template'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
@@ -36,7 +36,7 @@ const { data: transcriptionData, isLoading: transcriptionLoading } = useQuery({
   },
 })
 
-const { data: speechTemplateData } = useQuery({
+const { data: speechTemplateData, isLoading: speechTemplatesLoading } = useQuery({
   key: () => ['provider-templates', 'speech'],
   query: async () => {
     const { data } = await getProviderTemplates({ query: { domain: 'speech' }, throwOnError: true })
@@ -44,7 +44,7 @@ const { data: speechTemplateData } = useQuery({
   },
 })
 
-const { data: transcriptionTemplateData } = useQuery({
+const { data: transcriptionTemplateData, isLoading: transcriptionTemplatesLoading } = useQuery({
   key: () => ['provider-templates', 'transcription'],
   query: async () => {
     const { data } = await getProviderTemplates({ query: { domain: 'transcription' }, throwOnError: true })
@@ -52,13 +52,19 @@ const { data: transcriptionTemplateData } = useQuery({
   },
 })
 
-const curTts = ref<AudioSpeechProviderResponse>()
-const curTranscription = ref<AudioSpeechProviderResponse>()
+type TemplateAudioProvider = AudioSpeechProviderResponse & {
+  provider_template_id?: string
+}
+
+const curTts = ref<TemplateAudioProvider>()
+const curTranscription = ref<TemplateAudioProvider>()
+const optimisticSpeechProvider = ref<TemplateAudioProvider>()
+const optimisticTranscriptionProvider = ref<TemplateAudioProvider>()
 provide('curTtsProvider', curTts)
 provide('curTranscriptionProvider', curTranscription)
 
 type VoiceDetailKind = 'speech' | 'transcription'
-type VoiceDetail = { kind: VoiceDetailKind, provider: AudioSpeechProviderResponse }
+type VoiceDetail = { kind: VoiceDetailKind, provider: TemplateAudioProvider }
 const detailKind = ref<VoiceDetailKind>('speech')
 const openStatus = reactive({ addSpeechOpen: false, addTranscriptionOpen: false })
 const initialSpeechTemplateId = ref('')
@@ -102,8 +108,30 @@ const speechTemplates = computed<ProvidertemplatesGetResponse[]>(() =>
 const transcriptionTemplates = computed<ProvidertemplatesGetResponse[]>(() =>
   Array.isArray(transcriptionTemplateData.value) ? transcriptionTemplateData.value : [],
 )
-const availableSpeechTemplates = computed(() => speechTemplates.value.filter(template => !isTemplateConfigured(template)))
-const availableTranscriptionTemplates = computed(() => transcriptionTemplates.value.filter(template => !isTemplateConfigured(template)))
+const availableSpeechTemplates = computed(() => speechTemplates.value.filter(template =>
+  !isTemplateConfigured(template)
+  && template.id !== optimisticSpeechProvider.value?.provider_template_id,
+))
+const availableTranscriptionTemplates = computed(() => transcriptionTemplates.value.filter(template =>
+  !isTemplateConfigured(template)
+  && template.id !== optimisticTranscriptionProvider.value?.provider_template_id,
+))
+const catalogSpeechProviders = computed<TemplateAudioProvider[]>(() => {
+  const provider = optimisticSpeechProvider.value
+  if (!provider?.id || speechProviders.value.some(item => item.id === provider.id)) return speechProviders.value
+  return sortByEnabled([provider, ...speechProviders.value])
+})
+const catalogTranscriptionProviders = computed<TemplateAudioProvider[]>(() => {
+  const provider = optimisticTranscriptionProvider.value
+  if (!provider?.id || transcriptionProviders.value.some(item => item.id === provider.id)) return transcriptionProviders.value
+  return sortByEnabled([provider, ...transcriptionProviders.value])
+})
+const speechTemplateDrafts = computed<TemplateAudioProvider[]>(() =>
+  availableSpeechTemplates.value.map(template => providerDraftFromTemplate(template) as TemplateAudioProvider),
+)
+const transcriptionTemplateDrafts = computed<TemplateAudioProvider[]>(() =>
+  availableTranscriptionTemplates.value.map(template => providerDraftFromTemplate(template) as TemplateAudioProvider),
+)
 
 // Page-owned query key, valued `kind:id` so refresh restores which pane.
 const {
@@ -115,8 +143,10 @@ const {
 } = useRoutedViewSwap<VoiceDetail>({
   key: 'voiceProvider',
   items: () => [
-    ...speechProviders.value.map(provider => ({ kind: 'speech' as const, provider })),
-    ...transcriptionProviders.value.map(provider => ({ kind: 'transcription' as const, provider })),
+    ...catalogSpeechProviders.value.map(provider => ({ kind: 'speech' as const, provider })),
+    ...speechTemplateDrafts.value.map(provider => ({ kind: 'speech' as const, provider })),
+    ...catalogTranscriptionProviders.value.map(provider => ({ kind: 'transcription' as const, provider })),
+    ...transcriptionTemplateDrafts.value.map(provider => ({ kind: 'transcription' as const, provider })),
   ],
   selected: () => {
     const provider = detailKind.value === 'speech' ? curTts.value : curTranscription.value
@@ -127,13 +157,27 @@ const {
     curTts.value = detail?.kind === 'speech' ? detail.provider : undefined
     curTranscription.value = detail?.kind === 'transcription' ? detail.provider : undefined
   },
-  getRouteValue: detail => `${detail.kind}:${detail.provider.id}`,
+  getRouteValue: detail => `${detail.kind}:${detail.provider.provider_template_id
+    ? `template:${detail.provider.provider_template_id}`
+    : detail.provider.id ?? ''}`,
   isLoading: (routeValue) => {
+    if (routeValue.startsWith('speech:template:')) {
+      return speechTemplatesLoading.value || speechLoading.value
+    }
+    if (routeValue.startsWith('transcription:template:')) {
+      return transcriptionTemplatesLoading.value || transcriptionLoading.value
+    }
     if (routeValue.startsWith('speech:')) return speechLoading.value
     if (routeValue.startsWith('transcription:')) return transcriptionLoading.value
     return false
   },
   isReady: (routeValue) => {
+    if (routeValue.startsWith('speech:template:')) {
+      return speechTemplateData.value !== undefined && speechData.value !== undefined
+    }
+    if (routeValue.startsWith('transcription:template:')) {
+      return transcriptionTemplateData.value !== undefined && transcriptionData.value !== undefined
+    }
     if (routeValue.startsWith('speech:')) return speechData.value !== undefined
     if (routeValue.startsWith('transcription:')) return transcriptionData.value !== undefined
     // Malformed / unknown kind — ready to reject immediately.
@@ -142,8 +186,8 @@ const {
 })
 
 const addProviderNames = computed(() => [
-  ...speechProviders.value.map((p) => ({ name: p.name })),
-  ...transcriptionProviders.value.map((p) => ({ name: p.name })),
+  ...catalogSpeechProviders.value.map((p) => ({ name: p.name })),
+  ...catalogTranscriptionProviders.value.map((p) => ({ name: p.name })),
 ])
 
 function getInitials(name: string | undefined) {
@@ -151,11 +195,11 @@ function getInitials(name: string | undefined) {
   return label ? label.slice(0, 2).toUpperCase() : '?'
 }
 
-function openSpeech(provider: AudioSpeechProviderResponse) {
+function openSpeech(provider: TemplateAudioProvider) {
   openDetail({ kind: 'speech', provider })
 }
 
-function openTranscription(provider: AudioSpeechProviderResponse) {
+function openTranscription(provider: TemplateAudioProvider) {
   openDetail({ kind: 'transcription', provider })
 }
 
@@ -167,6 +211,18 @@ function openAddSpeech(templateId?: string) {
 function openAddTranscription(templateId?: string) {
   initialTranscriptionTemplateId.value = templateId ?? ''
   openStatus.addTranscriptionOpen = true
+}
+
+function handleSpeechMaterialized(provider: ProvidersGetResponse) {
+  const result = provider as TemplateAudioProvider
+  optimisticSpeechProvider.value = result
+  openDetail({ kind: 'speech', provider: result })
+}
+
+function handleTranscriptionMaterialized(provider: ProvidersGetResponse) {
+  const result = provider as TemplateAudioProvider
+  optimisticTranscriptionProvider.value = result
+  openDetail({ kind: 'transcription', provider: result })
 }
 
 // Each section adds its own kind of provider, so refresh just that list when
@@ -208,11 +264,11 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
           </template>
 
           <div
-            v-if="speechProviders.length + availableSpeechTemplates.length > 0"
+            v-if="catalogSpeechProviders.length + speechTemplateDrafts.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
-              v-for="provider in speechProviders"
+              v-for="provider in catalogSpeechProviders"
               :key="provider.id"
               :name="provider.name ?? ''"
               :enabled="provider.enable !== false"
@@ -235,29 +291,25 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
               </template>
             </BackendCard>
             <BackendCard
-              v-for="template in availableSpeechTemplates"
-              :key="`template:${template.id}`"
-              :name="template.name ?? ''"
-              :subtitle="t('provider.templateNotConfigured')"
-              @click="openAddSpeech(template.id)"
+              v-for="provider in speechTemplateDrafts"
+              :key="`template:${provider.provider_template_id}`"
+              :name="provider.name ?? ''"
+              @click="openSpeech(provider)"
             >
               <template #leading>
                 <span class="flex size-10 items-center justify-center rounded-full bg-muted">
                   <ProviderIcon
-                    v-if="template.icon"
-                    :icon="template.icon"
+                    v-if="provider.icon"
+                    :icon="provider.icon"
                     size="1.5em"
                   />
                   <span
                     v-else
                     class="text-xs font-medium text-muted-foreground"
                   >
-                    {{ getInitials(template.name) }}
+                    {{ getInitials(provider.name) }}
                   </span>
                 </span>
-              </template>
-              <template #trailing>
-                <Plus class="size-4 shrink-0 text-muted-foreground" />
               </template>
             </BackendCard>
           </div>
@@ -286,11 +338,11 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
           </template>
 
           <div
-            v-if="transcriptionProviders.length + availableTranscriptionTemplates.length > 0"
+            v-if="catalogTranscriptionProviders.length + transcriptionTemplateDrafts.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
-              v-for="provider in transcriptionProviders"
+              v-for="provider in catalogTranscriptionProviders"
               :key="provider.id"
               :name="provider.name ?? ''"
               :enabled="provider.enable !== false"
@@ -313,29 +365,25 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
               </template>
             </BackendCard>
             <BackendCard
-              v-for="template in availableTranscriptionTemplates"
-              :key="`template:${template.id}`"
-              :name="template.name ?? ''"
-              :subtitle="t('provider.templateNotConfigured')"
-              @click="openAddTranscription(template.id)"
+              v-for="provider in transcriptionTemplateDrafts"
+              :key="`template:${provider.provider_template_id}`"
+              :name="provider.name ?? ''"
+              @click="openTranscription(provider)"
             >
               <template #leading>
                 <span class="flex size-10 items-center justify-center rounded-full bg-muted">
                   <ProviderIcon
-                    v-if="template.icon"
-                    :icon="template.icon"
+                    v-if="provider.icon"
+                    :icon="provider.icon"
                     size="1.5em"
                   />
                   <span
                     v-else
                     class="text-xs font-medium text-muted-foreground"
                   >
-                    {{ getInitials(template.name) }}
+                    {{ getInitials(provider.name) }}
                   </span>
                 </span>
-              </template>
-              <template #trailing>
-                <Plus class="size-4 shrink-0 text-muted-foreground" />
               </template>
             </BackendCard>
           </div>
@@ -373,11 +421,17 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
       v-else
       width="narrow"
       :back-label="t('voice.title')"
-      :loading="isDetailLoading || !(detailKind === 'speech' ? curTts?.id : curTranscription?.id)"
+      :loading="isDetailLoading || !(detailKind === 'speech' ? curTts : curTranscription)"
       @back="closeProvider"
     >
-      <SpeechSetting v-if="detailKind === 'speech' && curTts?.id" />
-      <TranscriptionSetting v-else-if="detailKind === 'transcription' && curTranscription?.id" />
+      <SpeechSetting
+        v-if="detailKind === 'speech' && curTts"
+        @materialized="handleSpeechMaterialized"
+      />
+      <TranscriptionSetting
+        v-else-if="detailKind === 'transcription' && curTranscription"
+        @materialized="handleTranscriptionMaterialized"
+      />
     </DetailPane>
   </SwapTransition>
 </template>

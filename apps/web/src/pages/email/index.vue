@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, provide, reactive, ref, watch } from 'vue'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { computed, provide, ref, watch } from 'vue'
+import { useQuery } from '@pinia/colada'
 import {
   InputGroup,
   InputGroupAddon,
@@ -8,7 +8,7 @@ import {
 } from '@felinic/ui'
 import { getEmailProviders, getEmailProvidersMeta } from '@memohai/sdk'
 import type { EmailProviderMeta, EmailProviderResponse } from '@memohai/sdk'
-import { Plus, Search } from 'lucide-vue-next'
+import { Search } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddEmailProvider from './components/add-email-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
@@ -18,9 +18,9 @@ import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
+import { providerConfigDefaults } from '@/utils/provider-template'
 
 const { t } = useI18n()
-const queryCache = useQueryCache()
 const EMAIL_PROVIDER_TYPES = ['generic', 'gmail', 'mailgun'] as const
 
 const { data: providerData, isLoading: providersLoading } = useQuery({
@@ -40,11 +40,11 @@ const { data: providerMetaData } = useQuery({
 })
 
 const curProvider = ref<EmailProviderResponse>()
+const optimisticProviders = ref<EmailProviderResponse[]>([])
 provide('curEmailProvider', curProvider)
 
 const searchQuery = ref('')
-const openStatus = reactive({ addOpen: false })
-const initialProvider = ref('')
+const addOpen = ref(false)
 
 const providers = computed<EmailProviderResponse[]>(() =>
   Array.isArray(providerData.value) ? providerData.value : [],
@@ -52,12 +52,42 @@ const providers = computed<EmailProviderResponse[]>(() =>
 const providerMetas = computed<EmailProviderMeta[]>(() =>
   Array.isArray(providerMetaData.value) ? providerMetaData.value : [],
 )
-const availableTemplates = computed(() => EMAIL_PROVIDER_TYPES
-  .filter(provider => !providers.value.some(instance => instance.provider === provider))
-  .map(provider => ({
-    provider,
-    meta: providerMetas.value.find(item => item.provider === provider),
-  })))
+
+const materializedProviders = computed<EmailProviderResponse[]>(() => [
+  ...optimisticProviders.value.filter(optimistic =>
+    !providers.value.some(provider => provider.id === optimistic.id),
+  ),
+  ...providers.value,
+])
+
+watch(providers, (items) => {
+  optimisticProviders.value = optimisticProviders.value.filter(optimistic =>
+    !items.some(provider => provider.id === optimistic.id),
+  )
+})
+
+const providerItems = computed<EmailProviderResponse[]>(() => {
+  const fixedItems = EMAIL_PROVIDER_TYPES.flatMap((provider) => {
+    const instances = materializedProviders.value.filter(instance => instance.provider === provider)
+    if (instances.length > 0) return instances
+
+    const meta = providerMetas.value.find(item => item.provider === provider)
+    return [{
+      name: meta?.display_name ?? provider,
+      provider,
+      config: providerConfigDefaults(meta?.config_schema),
+    }]
+  })
+  const otherItems = materializedProviders.value.filter(instance =>
+    !EMAIL_PROVIDER_TYPES.includes(instance.provider as typeof EMAIL_PROVIDER_TYPES[number]),
+  )
+  return [...fixedItems, ...otherItems]
+})
+
+function providerRouteValue(provider: EmailProviderResponse) {
+  if (provider.id) return provider.id
+  return provider.provider ? `template:${provider.provider}` : ''
+}
 
 // Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
 const {
@@ -68,45 +98,31 @@ const {
   backToList: closeProvider,
 } = useRoutedViewSwap({
   key: 'emailProvider',
-  items: () => providers.value,
+  items: () => providerItems.value,
   selected: () => curProvider.value,
   select: provider => curProvider.value = provider,
-  getRouteValue: provider => provider.id ?? '',
+  getRouteValue: providerRouteValue,
   isLoading: () => providersLoading.value,
   isReady: () => providerData.value !== undefined,
 })
 
-const showSearch = computed(() => providers.value.length + availableTemplates.value.length > 0)
+const showSearch = computed(() => providerItems.value.length > 0)
 
 const filteredProviders = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
-  if (!keyword) return providers.value
-  return providers.value.filter(p =>
+  if (!keyword) return providerItems.value
+  return providerItems.value.filter(p =>
     (p.name ?? '').toLowerCase().includes(keyword)
     || (p.provider ?? '').toLowerCase().includes(keyword),
   )
 })
 
-const filteredTemplates = computed(() => {
-  const keyword = searchQuery.value.trim().toLowerCase()
-  if (!keyword) return availableTemplates.value
-  return availableTemplates.value.filter(template =>
-    (template.meta?.display_name ?? '').toLowerCase().includes(keyword)
-    || template.provider.toLowerCase().includes(keyword),
-  )
-})
-
-function openAdd(provider: string) {
-  initialProvider.value = provider
-  openStatus.addOpen = true
-}
-
-// A provider may have been created in the add dialog — refresh on close.
-watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
-  if (wasOpen && !isOpen) {
-    queryCache.invalidateQueries({ key: ['email-providers'] })
+function handleMaterialized(provider: EmailProviderResponse) {
+  if (provider.id && !optimisticProviders.value.some(item => item.id === provider.id)) {
+    optimisticProviders.value = [provider, ...optimisticProviders.value]
   }
-})
+  openProvider(provider)
+}
 </script>
 
 <template>
@@ -131,15 +147,16 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
             />
           </InputGroup>
         </div>
+        <AddEmailProvider v-model:open="addOpen" />
       </template>
 
       <div
-        v-if="providers.length + availableTemplates.length > 0"
+        v-if="providerItems.length > 0"
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard
           v-for="provider in filteredProviders"
-          :key="provider.id"
+          :key="providerRouteValue(provider)"
           :name="provider.name ?? ''"
           @click="openProvider(provider)"
         >
@@ -152,33 +169,7 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
             </span>
           </template>
         </BackendCard>
-
-        <BackendCard
-          v-for="template in filteredTemplates"
-          :key="`template:${template.provider}`"
-          :name="template.meta?.display_name ?? template.provider"
-          :subtitle="t('provider.templateNotConfigured')"
-          @click="openAdd(template.provider)"
-        >
-          <template #leading>
-            <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-              <EmailProviderIcon
-                :provider="template.provider"
-                class="size-5 text-muted-foreground"
-              />
-            </span>
-          </template>
-          <template #trailing>
-            <Plus class="size-4 shrink-0 text-muted-foreground" />
-          </template>
-        </BackendCard>
       </div>
-
-      <AddEmailProvider
-        v-model:open="openStatus.addOpen"
-        hide-trigger
-        :initial-provider="initialProvider"
-      />
     </PageShell>
 
     <!-- Provider detail -->
@@ -186,10 +177,13 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
       v-else
       width="narrow"
       :back-label="t('email.title')"
-      :loading="isDetailLoading || !curProvider?.id"
+      :loading="isDetailLoading || !curProvider"
       @back="closeProvider"
     >
-      <ProviderSetting v-if="curProvider?.id" />
+      <ProviderSetting
+        v-if="curProvider"
+        @materialized="handleMaterialized"
+      />
     </DetailPane>
   </SwapTransition>
 </template>

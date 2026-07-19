@@ -25,15 +25,43 @@
 
     <template #body>
       <FormStack class="mt-4">
-        <FieldStack :label="$t('email.providerType')">
-          <div class="flex h-9 items-center gap-2 rounded-md border border-input bg-muted px-3 text-sm">
-            <EmailProviderIcon
-              :provider="initialProvider"
-              class="size-4 text-muted-foreground"
-            />
-            <span>{{ providerDisplayName }}</span>
-          </div>
-        </FieldStack>
+        <FormField
+          v-slot="{ componentField }"
+          name="provider"
+        >
+          <FieldStack
+            :label="$t('email.providerType')"
+            for="email-provider-type"
+          >
+            <FormControl>
+              <Select v-bind="componentField">
+                <SelectTrigger
+                  id="email-provider-type"
+                  class="w-full"
+                >
+                  <SelectValue :placeholder="$t('common.typePlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem
+                      v-for="meta in providerMetas"
+                      :key="meta.provider"
+                      :value="meta.provider!"
+                    >
+                      <span class="flex items-center gap-2">
+                        <EmailProviderIcon
+                          :provider="meta.provider"
+                          class="size-4 text-muted-foreground"
+                        />
+                        <span>{{ meta.display_name }}</span>
+                      </span>
+                    </SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </FormControl>
+          </FieldStack>
+        </FormField>
 
         <FormField
           v-slot="{ componentField }"
@@ -110,6 +138,7 @@ import {
   Label,
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -132,12 +161,10 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 import { normalizeProviderConfigFields } from '@/utils/provider-template'
 
 const open = defineModel<boolean>('open')
-const props = withDefaults(defineProps<{
+withDefaults(defineProps<{
   hideTrigger?: boolean
-  initialProvider?: string
 }>(), {
   hideTrigger: false,
-  initialProvider: '',
 })
 
 const { t } = useI18n()
@@ -156,14 +183,13 @@ const { data: providerMetaData } = useQuery({
 const providerMetas = computed<EmailProviderMeta[]>(() =>
   Array.isArray(providerMetaData.value) ? providerMetaData.value : [],
 )
-const selectedMeta = computed(() => providerMetas.value.find(meta => meta.provider === props.initialProvider))
-const providerDisplayName = computed(() => selectedMeta.value?.display_name ?? props.initialProvider)
-const configFields = computed(() => normalizeProviderConfigFields(selectedMeta.value?.config_schema))
-
 const schema = toTypedSchema(z.object({
   name: z.string().min(1, t('email.nameRequired')),
+  provider: z.string().min(1, t('email.providerTypeRequired')),
 }))
 const form = useForm({ validationSchema: schema })
+const selectedMeta = computed(() => providerMetas.value.find(meta => meta.provider === form.values.provider))
+const configFields = computed(() => normalizeProviderConfigFields(selectedMeta.value?.config_schema))
 
 function replaceConfig(config: Record<string, unknown>) {
   Object.keys(configData).forEach(key => delete configData[key])
@@ -177,8 +203,8 @@ function defaultConfig() {
 }
 
 function resetForm() {
-  form.resetForm({ values: { name: providerDisplayName.value } })
-  replaceConfig(defaultConfig())
+  form.resetForm({ values: { name: '', provider: '' } })
+  replaceConfig({})
 }
 
 function updateConfig(key: string, type: string, value: string | number) {
@@ -193,14 +219,16 @@ watch(open, (isOpen) => {
   if (isOpen) resetForm()
 })
 watch(selectedMeta, (meta, previous) => {
-  if (open.value && meta && meta !== previous) resetForm()
+  if (!open.value || !meta || meta === previous) return
+  form.setFieldValue('name', meta.display_name ?? meta.provider ?? '')
+  replaceConfig(defaultConfig())
 })
 
 const { mutateAsync: createProvider, isLoading } = useMutation({
-  mutation: async (value: { name: string }) => {
+  mutation: async (value: { name: string, provider: string }) => {
     const body: EmailCreateProviderRequest = {
       name: value.name.trim(),
-      provider: props.initialProvider,
+      provider: value.provider,
       config: { ...configData },
     }
     const { data } = await postEmailProviders({ body, throwOnError: true })
