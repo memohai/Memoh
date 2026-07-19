@@ -19,7 +19,7 @@ func TestDecodeArtifactCoverageAcceptsStrictAndLegacyEmptyCoverage(t *testing.T)
 	if err != nil {
 		t.Fatalf("DecodeArtifactCoverage(strict) error = %v", err)
 	}
-	if len(decoded) != 1 || decoded[0].Ref.ContentHash != strict.Ref.ContentHash {
+	if len(decoded) != 1 || decoded[0].Ref.ContentHash != strict.Ref.ContentHash || decoded[0].EventCursor != 0 {
 		t.Fatalf("DecodeArtifactCoverage(strict) = %#v", decoded)
 	}
 
@@ -48,6 +48,10 @@ func TestDecodeArtifactCoverageRejectsInvalidPersistedCoverage(t *testing.T) {
 	duplicate := strictTestCoveredSource("duplicate", 1)
 	newer := strictTestCoveredSource("newer", 2)
 	older := strictTestCoveredSource("older", 1)
+	negativeCursor := strictTestCoveredSource("negative-cursor", 1)
+	negativeCursor.EventCursor = -1
+	overflowCursor := strictTestCoveredSource("overflow-cursor", 1)
+	overflowCursor.EventCursor = 1 << 53
 
 	tests := []struct {
 		name    string
@@ -59,6 +63,8 @@ func TestDecodeArtifactCoverageRejectsInvalidPersistedCoverage(t *testing.T) {
 		{name: "canonical hash scope", covered: []CoveredSource{canonicalScope}, wantErr: "source_payload"},
 		{name: "duplicate stable key", covered: []CoveredSource{duplicate, duplicate}, wantErr: "duplicate"},
 		{name: "decreasing creation time", covered: []CoveredSource{newer, older}, wantErr: "created_at_ms"},
+		{name: "negative event cursor", covered: []CoveredSource{negativeCursor}, wantErr: "event_cursor"},
+		{name: "overflow event cursor", covered: []CoveredSource{overflowCursor}, wantErr: "event_cursor"},
 	}
 
 	for _, tt := range tests {
@@ -67,6 +73,50 @@ func TestDecodeArtifactCoverageRejectsInvalidPersistedCoverage(t *testing.T) {
 			_, err := DecodeArtifactCoverage(mustMarshalCoverage(t, tt.covered...))
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("DecodeArtifactCoverage() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDecodeArtifactCoverageValidatesRawEventCursorTypesAndBounds(t *testing.T) {
+	t.Parallel()
+
+	base := string(mustMarshalCoverage(t, strictTestCoveredSource("raw-cursor", 1)))
+	const insertionPoint = `"created_at_ms":1`
+	if !strings.Contains(base, insertionPoint) {
+		t.Fatalf("coverage fixture is missing %s: %s", insertionPoint, base)
+	}
+	withCursor := func(rawValue string) []byte {
+		return []byte(strings.Replace(base, insertionPoint, insertionPoint+`,"event_cursor":`+rawValue, 1))
+	}
+	tests := []struct {
+		name       string
+		rawValue   string
+		wantCursor int64
+		wantErr    bool
+	}{
+		{name: "zero is legacy unknown", rawValue: "0"},
+		{name: "null is legacy unknown", rawValue: "null"},
+		{name: "maximum JSON safe integer", rawValue: "9007199254740991", wantCursor: maxArtifactEventCursor},
+		{name: "negative integer", rawValue: "-1", wantErr: true},
+		{name: "integer above JSON safe range", rawValue: "9007199254740992", wantErr: true},
+		{name: "string", rawValue: `"20"`, wantErr: true},
+		{name: "fraction", rawValue: "20.5", wantErr: true},
+		{name: "boolean", rawValue: "true", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			decoded, err := DecodeArtifactCoverage(withCursor(tt.rawValue))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("DecodeArtifactCoverage(event_cursor=%s) succeeded: %#v", tt.rawValue, decoded)
+				}
+				return
+			}
+			if err != nil || len(decoded) != 1 || decoded[0].EventCursor != tt.wantCursor {
+				t.Fatalf("DecodeArtifactCoverage(event_cursor=%s) = %#v, %v; want cursor %d", tt.rawValue, decoded, err, tt.wantCursor)
 			}
 		})
 	}
@@ -162,6 +212,49 @@ func TestArtifactFrontierRejectsDerivedCoverageThatRewritesParentMetadata(t *tes
 			frontier := buildArtifactFrontier([]Artifact{parent, child})
 			if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueCoverageMismatch) {
 				t.Fatalf("rewritten parent metadata remained active: artifacts=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
+			}
+		})
+	}
+}
+
+func TestArtifactFrontierAllowsOnlyForwardCompatibleCoverageEventCursor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		parentCursor int64
+		childCursor  int64
+		wantActive   bool
+	}{
+		{name: "legacy remains unknown", wantActive: true},
+		{name: "legacy gains cursor", childCursor: 20, wantActive: true},
+		{name: "known cursor preserved", parentCursor: 20, childCursor: 20, wantActive: true},
+		{name: "known cursor removed", parentCursor: 20},
+		{name: "known cursor rewritten", parentCursor: 20, childCursor: 30},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			parent := testArtifact("cursor-parent")
+			child := testArtifact("cursor-child")
+			parent.SupersededBy = child.ID
+			parent.SupersededAt = time.Unix(1, 0)
+			parent.Coverage = testCoverage("row-1")
+			parent.Coverage[0].EventCursor = tt.parentCursor
+			child.ParentIDs = []string{parent.ID}
+			child.Coverage = append([]CoveredSource(nil), parent.Coverage...)
+			child.Coverage[0].EventCursor = tt.childCursor
+
+			frontier := buildArtifactFrontier([]Artifact{parent, child})
+			if tt.wantActive {
+				if len(frontier.Artifacts) != 1 || frontier.Artifacts[0].ID != child.ID {
+					t.Fatalf("forward-compatible cursor was rejected: artifacts=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
+				}
+				return
+			}
+			if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueCoverageMismatch) {
+				t.Fatalf("rewritten cursor remained active: artifacts=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
 			}
 		})
 	}

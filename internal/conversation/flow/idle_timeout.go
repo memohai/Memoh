@@ -12,15 +12,24 @@ type idleCancel struct {
 	cancel      context.CancelFunc
 	timer       *time.Timer
 	mu          sync.Mutex
-	fired       bool
+	state       idleTimerState
 	baseTimeout time.Duration
+	toolTimeout time.Duration
 	toolCalls   int
 }
+
+type idleTimerState uint8
+
+const (
+	idleTimerActive idleTimerState = iota
+	idleTimerFinished
+	idleTimerFired
+)
 
 func (ic *idleCancel) Reset() {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
-	if !ic.fired {
+	if ic.state == idleTimerActive {
 		ic.timer.Stop()
 		ic.timer.Reset(ic.currentTimeout())
 	}
@@ -34,15 +43,34 @@ func (ic *idleCancel) RecordToolCall() {
 }
 
 func (ic *idleCancel) Stop() {
+	ic.Finish()
+	ic.cancel()
+}
+
+func (ic *idleCancel) Finish() {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
-	ic.timer.Stop()
+	if ic.state == idleTimerActive {
+		ic.state = idleTimerFinished
+		ic.timer.Stop()
+	}
+}
+
+func (ic *idleCancel) fire() {
+	ic.mu.Lock()
+	if ic.state != idleTimerActive {
+		ic.mu.Unlock()
+		return
+	}
+	ic.state = idleTimerFired
+	ic.mu.Unlock()
+	ic.cancel()
 }
 
 func (ic *idleCancel) DidFire() bool {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
-	return ic.fired
+	return ic.state == idleTimerFired
 }
 
 // ToolCalls returns the number of tool calls recorded.
@@ -56,7 +84,7 @@ func (ic *idleCancel) ToolCalls() int {
 // Tool calls (especially spawn/subagent) can take minutes to complete, so the
 // extension per tool call is generous to avoid interrupting active work.
 func (ic *idleCancel) currentTimeout() time.Duration {
-	extra := time.Duration(ic.toolCalls) * 60 * time.Second
+	extra := time.Duration(ic.toolCalls) * ic.toolTimeout
 	timeout := ic.baseTimeout + extra
 	if timeout > 600*time.Second {
 		timeout = 600 * time.Second
@@ -64,28 +92,36 @@ func (ic *idleCancel) currentTimeout() time.Duration {
 	return timeout
 }
 
-const defaultIdleTimeout = 90 * time.Second
+const (
+	defaultIdleTimeout     = 90 * time.Second
+	defaultIdleToolTimeout = 60 * time.Second
+)
+
+type idleTimeoutOptions struct {
+	baseTimeout time.Duration
+	toolTimeout time.Duration
+}
 
 // withIdleTimeout returns a context that is cancelled if no Reset() call is
 // made within the adaptive idle timeout. The returned idleCancel must have
 // Reset() called for each meaningful event to prevent the timeout from firing.
-// The timeout adapts: base + 10s per tool call, capped at 300s.
-func withIdleTimeout(parent context.Context, baseTimeout ...time.Duration) (context.Context, *idleCancel) {
+// The timeout adapts: base + 60s per tool call, capped at 600s.
+func withIdleTimeout(parent context.Context, options *idleTimeoutOptions) (context.Context, *idleCancel) {
 	bt := defaultIdleTimeout
-	if len(baseTimeout) > 0 && baseTimeout[0] > 0 {
-		bt = baseTimeout[0]
+	toolTimeout := defaultIdleToolTimeout
+	if options != nil {
+		if options.baseTimeout > 0 {
+			bt = options.baseTimeout
+		}
+		toolTimeout = options.toolTimeout
 	}
 
 	ctx, cancel := context.WithCancel(parent)
 	ic := &idleCancel{
 		cancel:      cancel,
 		baseTimeout: bt,
+		toolTimeout: toolTimeout,
 	}
-	ic.timer = time.AfterFunc(bt, func() {
-		ic.mu.Lock()
-		ic.fired = true
-		ic.mu.Unlock()
-		cancel()
-	})
+	ic.timer = time.AfterFunc(bt, ic.fire)
 	return ctx, ic
 }

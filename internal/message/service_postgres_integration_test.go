@@ -253,6 +253,174 @@ func TestPostgresRepairSupersededMessageVisibilityMigration(t *testing.T) {
 	assertPostgresMessageVisibility(t, ctx, tx, "00000000-0000-0000-0000-000000074112", true, false)
 }
 
+func TestPostgresInjectedRequestReplaysOnlyItsFollowingResponses(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresMessageTestTx(t, ctx)
+	setupPostgresMessageTestFixtures(t, ctx, tx)
+
+	const (
+		firstEventID     = "00000000-0000-0000-0000-000000074201"
+		turnID           = "00000000-0000-0000-0000-000000074202"
+		originalUserID   = "00000000-0000-0000-0000-000000074203"
+		priorAssistantID = "00000000-0000-0000-0000-000000074204"
+		firstInjectedID  = "00000000-0000-0000-0000-000000074205"
+		finalAssistantID = "00000000-0000-0000-0000-000000074206"
+		secondEventID    = "00000000-0000-0000-0000-000000074207"
+		secondInjectedID = "00000000-0000-0000-0000-000000074208"
+	)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_session_events (
+			id, bot_id, session_id, event_kind, event_data, external_message_id, received_at_ms
+		)
+		VALUES
+			($1, $3, $4, 'message', '{}'::jsonb, 'injected-request-1', 1),
+			($2, $3, $4, 'message', '{}'::jsonb, 'injected-request-2', 2)
+	`, firstEventID, secondEventID, postgresMessageTestBotID, postgresMessageTestSessionID); err != nil {
+		t.Fatalf("insert injected event: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content, metadata, event_id,
+			turn_id, turn_position, turn_message_seq, turn_visible
+		)
+		VALUES
+			($1, $7, $8, 'user', '{"role":"user","content":"original"}'::jsonb, '{}'::jsonb, NULL, $9, 1, 1, true),
+			($2, $7, $8, 'assistant', '{"role":"assistant","content":"prior"}'::jsonb, '{}'::jsonb, NULL, $9, 1, 2, true),
+			($3, $7, $8, 'user', '{"role":"user","content":"first injected"}'::jsonb,
+			 '{"pipeline_delivery_state":"pending"}'::jsonb, $4, $9, 1, 3, true),
+			($5, $7, $8, 'user', '{"role":"user","content":"second injected"}'::jsonb,
+			 '{"pipeline_delivery_state":"pending"}'::jsonb, $6, $9, 1, 4, true)
+	`, originalUserID, priorAssistantID, firstInjectedID, firstEventID,
+		secondInjectedID, secondEventID, postgresMessageTestBotID, postgresMessageTestSessionID, turnID); err != nil {
+		t.Fatalf("insert injected turn: %v", err)
+	}
+
+	queries := dbsqlc.New(tx)
+	state, err := queries.GetSessionEventDeliveryState(ctx, mustTestUUID(t, firstEventID))
+	if err != nil {
+		t.Fatalf("read injected delivery state before response: %v", err)
+	}
+	if state.HistoryMessageID.String() != firstInjectedID || state.ResponsePersisted || state.ReplayResponsePersisted {
+		t.Fatalf("delivery state before response = request:%s covered:%t replay:%t, want %s/false/false",
+			state.HistoryMessageID.String(), state.ResponsePersisted, state.ReplayResponsePersisted, firstInjectedID)
+	}
+
+	service := NewService(nil, postgresstore.NewQueries(queries))
+	responses, err := service.ListVisibleTurnResponsesByRequest(ctx, postgresMessageTestSessionID, firstInjectedID)
+	if err != nil {
+		t.Fatalf("list injected responses before response: %v", err)
+	}
+	if len(responses) != 0 {
+		t.Fatalf("responses before injected reply = %#v, want none", responses)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content, metadata,
+			turn_id, turn_position, turn_message_seq, turn_visible
+		)
+		VALUES ($1, $2, $3, 'assistant', '{"role":"assistant","content":"final"}'::jsonb,
+			'{}'::jsonb, $4, 1, 5, true)
+	`, finalAssistantID, postgresMessageTestBotID, postgresMessageTestSessionID, turnID); err != nil {
+		t.Fatalf("insert response after injected request: %v", err)
+	}
+	state, err = queries.GetSessionEventDeliveryState(ctx, mustTestUUID(t, firstEventID))
+	if err != nil {
+		t.Fatalf("read first injected delivery state after response: %v", err)
+	}
+	if !state.ResponsePersisted || state.ReplayResponsePersisted {
+		t.Fatalf("first injected delivery coverage/replay = %t/%t, want true/false", state.ResponsePersisted, state.ReplayResponsePersisted)
+	}
+	responses, err = service.ListVisibleTurnResponsesByRequest(ctx, postgresMessageTestSessionID, firstInjectedID)
+	if err != nil {
+		t.Fatalf("list first injected responses after response: %v", err)
+	}
+	if len(responses) != 0 {
+		t.Fatalf("first injected responses = %#v, want none owned by later request", responses)
+	}
+
+	state, err = queries.GetSessionEventDeliveryState(ctx, mustTestUUID(t, secondEventID))
+	if err != nil {
+		t.Fatalf("read second injected delivery state after response: %v", err)
+	}
+	if !state.ResponsePersisted || !state.ReplayResponsePersisted {
+		t.Fatalf("second injected delivery coverage/replay = %t/%t, want true/true", state.ResponsePersisted, state.ReplayResponsePersisted)
+	}
+	responses, err = service.ListVisibleTurnResponsesByRequest(ctx, postgresMessageTestSessionID, secondInjectedID)
+	if err != nil {
+		t.Fatalf("list second injected responses after response: %v", err)
+	}
+	if len(responses) != 1 || responses[0].ID != finalAssistantID {
+		t.Fatalf("second injected responses = %#v, want only %s", responses, finalAssistantID)
+	}
+}
+
+func TestPostgresInjectedRequestsOwnOnlyResponsesBeforeNextEventUser(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresMessageTestTx(t, ctx)
+	setupPostgresMessageTestFixtures(t, ctx, tx)
+
+	const (
+		firstEventID      = "00000000-0000-0000-0000-000000074221"
+		secondEventID     = "00000000-0000-0000-0000-000000074222"
+		turnID            = "00000000-0000-0000-0000-000000074223"
+		firstUserID       = "00000000-0000-0000-0000-000000074224"
+		firstAssistantID  = "00000000-0000-0000-0000-000000074225"
+		secondUserID      = "00000000-0000-0000-0000-000000074226"
+		secondAssistantID = "00000000-0000-0000-0000-000000074227"
+	)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_session_events (
+			id, bot_id, session_id, event_kind, event_data, external_message_id, received_at_ms
+		)
+		VALUES
+			($1, $3, $4, 'message', '{}'::jsonb, 'owned-request-1', 1),
+			($2, $3, $4, 'message', '{}'::jsonb, 'owned-request-2', 2)
+	`, firstEventID, secondEventID, postgresMessageTestBotID, postgresMessageTestSessionID); err != nil {
+		t.Fatalf("insert owned response events: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content, metadata, event_id,
+			turn_id, turn_position, turn_message_seq, turn_visible
+		)
+		VALUES
+			($1, $7, $8, 'user', '{"role":"user","content":"first"}'::jsonb, '{}'::jsonb, $2, $9, 1, 1, true),
+			($3, $7, $8, 'assistant', '{"role":"assistant","content":"first answer"}'::jsonb, '{}'::jsonb, NULL, $9, 1, 2, true),
+			($4, $7, $8, 'user', '{"role":"user","content":"second"}'::jsonb, '{}'::jsonb, $5, $9, 1, 3, true),
+			($6, $7, $8, 'assistant', '{"role":"assistant","content":"second answer"}'::jsonb, '{}'::jsonb, NULL, $9, 1, 4, true)
+	`, firstUserID, firstEventID, firstAssistantID, secondUserID, secondEventID, secondAssistantID,
+		postgresMessageTestBotID, postgresMessageTestSessionID, turnID); err != nil {
+		t.Fatalf("insert owned response turn: %v", err)
+	}
+
+	queries := dbsqlc.New(tx)
+	service := NewService(nil, postgresstore.NewQueries(queries))
+	for _, tc := range []struct {
+		eventID    string
+		requestID  string
+		responseID string
+	}{
+		{eventID: firstEventID, requestID: firstUserID, responseID: firstAssistantID},
+		{eventID: secondEventID, requestID: secondUserID, responseID: secondAssistantID},
+	} {
+		state, err := queries.GetSessionEventDeliveryState(ctx, mustTestUUID(t, tc.eventID))
+		if err != nil {
+			t.Fatalf("read delivery state for %s: %v", tc.eventID, err)
+		}
+		if !state.ResponsePersisted || !state.ReplayResponsePersisted {
+			t.Fatalf("delivery %s coverage/replay = %t/%t, want true/true", tc.eventID, state.ResponsePersisted, state.ReplayResponsePersisted)
+		}
+		responses, err := service.ListVisibleTurnResponsesByRequest(ctx, postgresMessageTestSessionID, tc.requestID)
+		if err != nil {
+			t.Fatalf("list responses for %s: %v", tc.requestID, err)
+		}
+		if len(responses) != 1 || responses[0].ID != tc.responseID {
+			t.Fatalf("responses for %s = %#v, want %s", tc.requestID, responses, tc.responseID)
+		}
+	}
+}
+
 const (
 	postgresMessageTestUserID    = "00000000-0000-0000-0000-000000074101"
 	postgresMessageTestBotID     = "00000000-0000-0000-0000-000000074102"

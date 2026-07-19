@@ -77,6 +77,7 @@ type MessageEvent struct {
 	MessageID        string           `json:"message_id"`
 	Sender           *CanonicalUser   `json:"sender,omitempty"`
 	ReceivedAtMs     int64            `json:"received_at_ms"`
+	EventCursor      int64            `json:"event_cursor,omitempty"`
 	TimestampSec     int64            `json:"timestamp_sec"`
 	UTCOffsetMin     int              `json:"utc_offset_min"`
 	Content          []ContentNode    `json:"content"`
@@ -94,23 +95,30 @@ type MessageEvent struct {
 func (MessageEvent) Kind() EventKind          { return EventMessage }
 func (e MessageEvent) GetSessionID() string   { return e.SessionID }
 func (e MessageEvent) GetReceivedAtMs() int64 { return e.ReceivedAtMs }
+func (e MessageEvent) GetEventCursor() int64  { return e.EventCursor }
 
 // EditEvent represents a message edit.
 type EditEvent struct {
-	SessionID    string         `json:"session_id"`
-	EventID      string         `json:"event_id,omitempty"`
-	MessageID    string         `json:"message_id"`
-	Sender       *CanonicalUser `json:"sender,omitempty"`
-	ReceivedAtMs int64          `json:"received_at_ms"`
-	TimestampSec int64          `json:"timestamp_sec"`
-	UTCOffsetMin int            `json:"utc_offset_min"`
-	Content      []ContentNode  `json:"content"`
-	Attachments  []Attachment   `json:"attachments"`
+	SessionID       string         `json:"session_id"`
+	EventID         string         `json:"event_id,omitempty"`
+	MessageID       string         `json:"message_id"`
+	Sender          *CanonicalUser `json:"sender,omitempty"`
+	ReceivedAtMs    int64          `json:"received_at_ms"`
+	EventCursor     int64          `json:"event_cursor,omitempty"`
+	TimestampSec    int64          `json:"timestamp_sec"`
+	UTCOffsetMin    int            `json:"utc_offset_min"`
+	Content         []ContentNode  `json:"content"`
+	Attachments     []Attachment   `json:"attachments"`
+	IsSelfSent      bool           `json:"is_self_sent,omitempty"`
+	AddressingKnown bool           `json:"addressing_known,omitempty"`
+	MentionsMe      bool           `json:"mentions_me,omitempty"`
+	RepliesToMe     bool           `json:"replies_to_me,omitempty"`
 }
 
 func (EditEvent) Kind() EventKind          { return EventEdit }
 func (e EditEvent) GetSessionID() string   { return e.SessionID }
 func (e EditEvent) GetReceivedAtMs() int64 { return e.ReceivedAtMs }
+func (e EditEvent) GetEventCursor() int64  { return e.EventCursor }
 
 // DeleteEvent represents one or more deleted messages.
 type DeleteEvent struct {
@@ -118,6 +126,7 @@ type DeleteEvent struct {
 	EventID      string   `json:"event_id,omitempty"`
 	MessageIDs   []string `json:"message_ids"`
 	ReceivedAtMs int64    `json:"received_at_ms"`
+	EventCursor  int64    `json:"event_cursor,omitempty"`
 	TimestampSec int64    `json:"timestamp_sec"`
 	UTCOffsetMin int      `json:"utc_offset_min"`
 }
@@ -125,6 +134,7 @@ type DeleteEvent struct {
 func (DeleteEvent) Kind() EventKind          { return EventDelete }
 func (e DeleteEvent) GetSessionID() string   { return e.SessionID }
 func (e DeleteEvent) GetReceivedAtMs() int64 { return e.ReceivedAtMs }
+func (e DeleteEvent) GetEventCursor() int64  { return e.EventCursor }
 
 // ServiceAction classifies a group lifecycle event.
 type ServiceAction string
@@ -145,8 +155,10 @@ type ServiceEvent struct {
 	Action       ServiceAction  `json:"action"`
 	Actor        *CanonicalUser `json:"actor,omitempty"`
 	ReceivedAtMs int64          `json:"received_at_ms"`
+	EventCursor  int64          `json:"event_cursor,omitempty"`
 	TimestampSec int64          `json:"timestamp_sec"`
 	UTCOffsetMin int            `json:"utc_offset_min"`
+	IsSelfSent   bool           `json:"is_self_sent,omitempty"`
 
 	// Action-specific fields
 	Members  []CanonicalUser `json:"members,omitempty"`
@@ -161,10 +173,12 @@ type ServiceEvent struct {
 func (ServiceEvent) Kind() EventKind          { return EventService }
 func (e ServiceEvent) GetSessionID() string   { return e.SessionID }
 func (e ServiceEvent) GetReceivedAtMs() int64 { return e.ReceivedAtMs }
+func (e ServiceEvent) GetEventCursor() int64  { return e.EventCursor }
 
 // CanonicalEvent is the interface satisfied by all event types.
 type CanonicalEvent interface {
 	Kind() EventKind
 	GetSessionID() string
 	GetReceivedAtMs() int64
+	GetEventCursor() int64
 }

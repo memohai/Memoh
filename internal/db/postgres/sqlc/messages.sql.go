@@ -133,7 +133,15 @@ WITH target AS (
     request.session_id,
     request.turn_position,
     request.id AS request_message_id,
-    request.created_at AS request_created_at
+    request.created_at AS request_created_at,
+    COALESCE((
+      SELECT existing.turn_message_seq + 1
+      FROM bot_history_messages existing
+      WHERE existing.team_id = public.memoh_current_team_id()
+        AND existing.turn_id = request.turn_id
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
+    ), 1) AS assistant_message_seq
   FROM bot_history_messages request
   WHERE request.team_id = public.memoh_current_team_id() AND request.session_id = $1
     AND request.id = $2
@@ -144,7 +152,6 @@ WITH target AS (
       FROM bot_history_messages assistant
       WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = request.turn_id
         AND assistant.role = 'assistant'
-        AND assistant.turn_message_seq = 2
         AND assistant.turn_visible = true
     )
   LIMIT 1
@@ -154,7 +161,7 @@ linked AS (
   UPDATE bot_history_messages assistant
   SET turn_id = target.turn_id,
       turn_position = target.turn_position,
-      turn_message_seq = 2,
+      turn_message_seq = target.assistant_message_seq,
       turn_visible = true,
       turn_superseded_by_turn_id = NULL,
       turn_superseded_at = NULL,
@@ -222,7 +229,15 @@ WITH target AS (
     request.session_id,
     request.turn_position,
     request.id AS request_message_id,
-    request.created_at AS request_created_at
+    request.created_at AS request_created_at,
+    COALESCE((
+      SELECT existing.turn_message_seq + 1
+      FROM bot_history_messages existing
+      WHERE existing.team_id = public.memoh_current_team_id()
+        AND existing.turn_id = request.turn_id
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
+    ), 1) AS assistant_message_seq
   FROM bot_history_messages request
   WHERE request.team_id = public.memoh_current_team_id() AND request.session_id = $1
     AND request.role = 'user'
@@ -234,7 +249,6 @@ WITH target AS (
       FROM bot_history_messages assistant
       WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = request.turn_id
         AND assistant.role = 'assistant'
-        AND assistant.turn_message_seq = 2
         AND assistant.turn_visible = true
     )
   ORDER BY request.turn_position DESC
@@ -245,7 +259,7 @@ linked AS (
   UPDATE bot_history_messages assistant
   SET turn_id = target.turn_id,
       turn_position = target.turn_position,
-      turn_message_seq = 2,
+      turn_message_seq = target.assistant_message_seq,
       turn_visible = true,
       turn_superseded_by_turn_id = NULL,
       turn_superseded_at = NULL,
@@ -409,6 +423,23 @@ WHERE message.team_id = public.memoh_current_team_id()
 func (q *Queries) ClearHistoryBySession(ctx context.Context, targetSessionID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, clearHistoryBySession, targetSessionID)
 	return err
+}
+
+const completePendingHistoryDelivery = `-- name: CompletePendingHistoryDelivery :execrows
+UPDATE bot_history_messages
+SET metadata = jsonb_set(metadata, '{pipeline_delivery_state}', '"complete"'::jsonb, true)
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1::uuid
+  AND role = 'user'
+  AND metadata->>'pipeline_delivery_state' IN ('pending', 'complete')
+`
+
+func (q *Queries) CompletePendingHistoryDelivery(ctx context.Context, messageID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, completePendingHistoryDelivery, messageID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countMessagesByBot = `-- name: CountMessagesByBot :one
@@ -903,28 +934,19 @@ target AS MATERIALIZED (
     turns.turn_id,
     turns.session_id,
     turns.turn_position,
-    CASE
-      WHEN $2::text = 'assistant' AND NOT EXISTS (
-        SELECT 1
-        FROM bot_history_messages assistant
-        WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = turns.turn_id
-          AND assistant.role = 'assistant'
-          AND assistant.turn_message_seq = 2
-          AND assistant.turn_visible = true
-      ) THEN 2
-      ELSE COALESCE((
-        SELECT existing.turn_message_seq + 1
-        FROM bot_history_messages existing
-        WHERE existing.team_id = public.memoh_current_team_id() AND existing.turn_id = turns.turn_id
-        ORDER BY existing.turn_message_seq DESC
-        LIMIT 1
-      ), 1)
-    END AS turn_message_seq
+    COALESCE((
+      SELECT existing.turn_message_seq + 1
+      FROM bot_history_messages existing
+      WHERE existing.team_id = public.memoh_current_team_id()
+        AND existing.turn_id = turns.turn_id
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
+    ), 1) AS turn_message_seq
   FROM bot_history_messages turns
   JOIN owner_session owner ON owner.id = turns.session_id
   WHERE turns.team_id = public.memoh_current_team_id()
     AND turns.session_id = $1
-    AND turns.id = $3
+    AND turns.id = $2
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
     AND turns.turn_visible = true
@@ -954,13 +976,13 @@ inserted AS (
     turn_visible
   )
   SELECT
-    $4,
+    $3,
     target.session_id,
+    $4::uuid,
     $5::uuid,
-    $6::uuid,
+    $6::text,
     $7::text,
     $8::text,
-    $2::text,
     $9,
     $10,
     $11,
@@ -1014,13 +1036,13 @@ FROM inserted
 
 type CreateMessageInHistoryTurnByRequestParams struct {
 	SessionID               pgtype.UUID `json:"session_id"`
-	Role                    string      `json:"role"`
 	RequestMessageID        pgtype.UUID `json:"request_message_id"`
 	BotID                   pgtype.UUID `json:"bot_id"`
 	SenderChannelIdentityID pgtype.UUID `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID `json:"sender_user_id"`
 	ExternalMessageID       pgtype.Text `json:"external_message_id"`
 	SourceReplyToMessageID  pgtype.Text `json:"source_reply_to_message_id"`
+	Role                    string      `json:"role"`
 	Content                 []byte      `json:"content"`
 	Metadata                []byte      `json:"metadata"`
 	Usage                   []byte      `json:"usage"`
@@ -1053,13 +1075,13 @@ type CreateMessageInHistoryTurnByRequestRow struct {
 func (q *Queries) CreateMessageInHistoryTurnByRequest(ctx context.Context, arg CreateMessageInHistoryTurnByRequestParams) (CreateMessageInHistoryTurnByRequestRow, error) {
 	row := q.db.QueryRow(ctx, createMessageInHistoryTurnByRequest,
 		arg.SessionID,
-		arg.Role,
 		arg.RequestMessageID,
 		arg.BotID,
 		arg.SenderChannelIdentityID,
 		arg.SenderUserID,
 		arg.ExternalMessageID,
 		arg.SourceReplyToMessageID,
+		arg.Role,
 		arg.Content,
 		arg.Metadata,
 		arg.Usage,
@@ -1104,28 +1126,19 @@ target AS MATERIALIZED (
     turns.turn_id,
     turns.session_id,
     turns.turn_position,
-    CASE
-      WHEN $2::text = 'assistant' AND NOT EXISTS (
-        SELECT 1
-        FROM bot_history_messages assistant
-        WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = turns.turn_id
-          AND assistant.role = 'assistant'
-          AND assistant.turn_message_seq = 2
-          AND assistant.turn_visible = true
-      ) THEN 2
-      ELSE COALESCE((
-        SELECT existing.turn_message_seq + 1
-        FROM bot_history_messages existing
-        WHERE existing.team_id = public.memoh_current_team_id() AND existing.turn_id = turns.turn_id
-        ORDER BY existing.turn_message_seq DESC
-        LIMIT 1
-      ), 1)
-    END AS turn_message_seq
+    COALESCE((
+      SELECT existing.turn_message_seq + 1
+      FROM bot_history_messages existing
+      WHERE existing.team_id = public.memoh_current_team_id()
+        AND existing.turn_id = turns.turn_id
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
+    ), 1) AS turn_message_seq
   FROM bot_history_messages turns
   JOIN owner_session owner ON owner.id = turns.session_id
   WHERE turns.team_id = public.memoh_current_team_id()
     AND turns.session_id = $1
-    AND turns.id = $3
+    AND turns.id = $2
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
     AND turns.turn_visible = true
@@ -1155,13 +1168,13 @@ inserted AS (
     turn_visible
   )
   SELECT
-    $4,
+    $3,
     target.session_id,
+    $4::uuid,
     $5::uuid,
-    $6::uuid,
+    $6::text,
     $7::text,
     $8::text,
-    $2::text,
     $9,
     $10,
     $11,
@@ -1189,13 +1202,13 @@ JOIN target ON true
 
 type CreateMessageInHistoryTurnByRequestAndBindParams struct {
 	SessionID               pgtype.UUID `json:"session_id"`
-	Role                    string      `json:"role"`
 	RequestMessageID        pgtype.UUID `json:"request_message_id"`
 	BotID                   pgtype.UUID `json:"bot_id"`
 	SenderChannelIdentityID pgtype.UUID `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID `json:"sender_user_id"`
 	ExternalMessageID       pgtype.Text `json:"external_message_id"`
 	SourceReplyToMessageID  pgtype.Text `json:"source_reply_to_message_id"`
+	Role                    string      `json:"role"`
 	Content                 []byte      `json:"content"`
 	Metadata                []byte      `json:"metadata"`
 	Usage                   []byte      `json:"usage"`
@@ -1214,13 +1227,13 @@ type CreateMessageInHistoryTurnByRequestAndBindRow struct {
 func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context, arg CreateMessageInHistoryTurnByRequestAndBindParams) (CreateMessageInHistoryTurnByRequestAndBindRow, error) {
 	row := q.db.QueryRow(ctx, createMessageInHistoryTurnByRequestAndBind,
 		arg.SessionID,
-		arg.Role,
 		arg.RequestMessageID,
 		arg.BotID,
 		arg.SenderChannelIdentityID,
 		arg.SenderUserID,
 		arg.ExternalMessageID,
 		arg.SourceReplyToMessageID,
+		arg.Role,
 		arg.Content,
 		arg.Metadata,
 		arg.Usage,
@@ -1868,7 +1881,7 @@ SELECT
   target.session_id,
   target.turn_position::bigint AS position,
   ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'user' AND m.turn_message_seq = 1))[1])::uuid AS request_message_id,
-  ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant' AND m.turn_message_seq = 2))[1])::uuid AS assistant_message_id,
+  ((ARRAY_AGG(m.id ORDER BY m.turn_message_seq ASC, m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant'))[1])::uuid AS assistant_message_id,
   ((ARRAY_AGG(m.turn_superseded_by_turn_id ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_by_turn_id IS NOT NULL))[1])::uuid AS superseded_by_turn_id,
   MAX(m.turn_superseded_at)::timestamptz AS superseded_at,
   COALESCE(((ARRAY_AGG(m.turn_superseded_reason ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_reason IS NOT NULL))[1])::text, ''::text)::text AS superseded_reason,
@@ -1920,6 +1933,22 @@ func (q *Queries) GetHistoryTurnByID(ctx context.Context, arg GetHistoryTurnByID
 	return i, err
 }
 
+const getLatestActiveTurnResponseAtBySession = `-- name: GetLatestActiveTurnResponseAtBySession :one
+SELECT MAX(m.created_at)::timestamptz
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND m.role IN ('assistant', 'tool')
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+`
+
+func (q *Queries) GetLatestActiveTurnResponseAtBySession(ctx context.Context, sessionID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLatestActiveTurnResponseAtBySession, sessionID)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getLatestVisibleHistoryTurnBySession = `-- name: GetLatestVisibleHistoryTurnBySession :one
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
@@ -1937,7 +1966,7 @@ SELECT
   target.session_id,
   target.turn_position::bigint AS position,
   ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'user' AND m.turn_message_seq = 1))[1])::uuid AS request_message_id,
-  ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant' AND m.turn_message_seq = 2))[1])::uuid AS assistant_message_id,
+  ((ARRAY_AGG(m.id ORDER BY m.turn_message_seq ASC, m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant'))[1])::uuid AS assistant_message_id,
   ((ARRAY_AGG(m.turn_superseded_by_turn_id ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_by_turn_id IS NOT NULL))[1])::uuid AS superseded_by_turn_id,
   MAX(m.turn_superseded_at)::timestamptz AS superseded_at,
   COALESCE(((ARRAY_AGG(m.turn_superseded_reason ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_reason IS NOT NULL))[1])::text, ''::text)::text AS superseded_reason,
@@ -2267,7 +2296,7 @@ SELECT
   target.session_id,
   target.turn_position::bigint AS position,
   ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'user' AND m.turn_message_seq = 1))[1])::uuid AS request_message_id,
-  ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant' AND m.turn_message_seq = 2))[1])::uuid AS assistant_message_id,
+  ((ARRAY_AGG(m.id ORDER BY m.turn_message_seq ASC, m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant'))[1])::uuid AS assistant_message_id,
   ((ARRAY_AGG(m.turn_superseded_by_turn_id ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_by_turn_id IS NOT NULL))[1])::uuid AS superseded_by_turn_id,
   MAX(m.turn_superseded_at)::timestamptz AS superseded_at,
   COALESCE(((ARRAY_AGG(m.turn_superseded_reason ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_reason IS NOT NULL))[1])::text, ''::text)::text AS superseded_reason,
@@ -2502,8 +2531,8 @@ WITH target AS (
   FROM bot_history_messages assistant
   WHERE assistant.team_id = public.memoh_current_team_id() AND assistant.turn_id = $1
     AND assistant.role = 'assistant'
-    AND assistant.turn_message_seq = 2
     AND assistant.turn_visible = true
+  ORDER BY assistant.turn_message_seq, assistant.created_at, assistant.id
   LIMIT 1
 ),
 tail AS (
@@ -2511,7 +2540,12 @@ tail AS (
     m.id AS message_id,
     target.turn_id,
     target.turn_position,
-    2 + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id) AS turn_message_seq
+    (
+      SELECT COALESCE(MAX(existing.turn_message_seq), 0)
+      FROM bot_history_messages existing
+      WHERE existing.team_id = public.memoh_current_team_id()
+        AND existing.turn_id = target.turn_id
+    ) + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id) AS turn_message_seq
   FROM target
   JOIN bot_history_messages m
     ON m.session_id = target.session_id
@@ -2653,6 +2687,8 @@ SELECT
   m.event_id,
   m.display_text,
   m.compact_id,
+  COALESCE(m.turn_position, 0)::bigint AS turn_position,
+  COALESCE(m.turn_message_seq, 0)::bigint AS turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -2689,6 +2725,8 @@ type ListActiveMessagesSinceBySessionRow struct {
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
+	TurnPosition            int64              `json:"turn_position"`
+	TurnMessageSeq          int64              `json:"turn_message_seq"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -2721,6 +2759,8 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 			&i.EventID,
 			&i.DisplayText,
 			&i.CompactID,
+			&i.TurnPosition,
+			&i.TurnMessageSeq,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -2847,6 +2887,49 @@ func (q *Queries) ListAllMessagesForBackup(ctx context.Context, botID pgtype.UUI
 	return items, nil
 }
 
+const listExternalMessagePositionsBySession = `-- name: ListExternalMessagePositionsBySession :many
+SELECT DISTINCT ON (m.source_message_id)
+  COALESCE(m.source_message_id, '')::text AS external_message_id,
+  COALESCE(m.turn_position, 0)::bigint AS turn_position,
+  COALESCE(m.turn_message_seq, 0)::bigint AS turn_message_seq
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND m.source_message_id = ANY($2::text[])
+ORDER BY m.source_message_id, m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+`
+
+type ListExternalMessagePositionsBySessionParams struct {
+	SessionID          pgtype.UUID `json:"session_id"`
+	ExternalMessageIds []string    `json:"external_message_ids"`
+}
+
+type ListExternalMessagePositionsBySessionRow struct {
+	ExternalMessageID string `json:"external_message_id"`
+	TurnPosition      int64  `json:"turn_position"`
+	TurnMessageSeq    int64  `json:"turn_message_seq"`
+}
+
+func (q *Queries) ListExternalMessagePositionsBySession(ctx context.Context, arg ListExternalMessagePositionsBySessionParams) ([]ListExternalMessagePositionsBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listExternalMessagePositionsBySession, arg.SessionID, arg.ExternalMessageIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExternalMessagePositionsBySessionRow
+	for rows.Next() {
+		var i ListExternalMessagePositionsBySessionRow
+		if err := rows.Scan(&i.ExternalMessageID, &i.TurnPosition, &i.TurnMessageSeq); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHistoryTurnsByBot = `-- name: ListHistoryTurnsByBot :many
 SELECT
   m.turn_id AS id,
@@ -2854,7 +2937,7 @@ SELECT
   m.session_id,
   m.turn_position::bigint AS position,
   ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'user' AND m.turn_message_seq = 1))[1])::uuid AS request_message_id,
-  ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant' AND m.turn_message_seq = 2))[1])::uuid AS assistant_message_id,
+  ((ARRAY_AGG(m.id ORDER BY m.turn_message_seq ASC, m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant'))[1])::uuid AS assistant_message_id,
   ((ARRAY_AGG(m.turn_superseded_by_turn_id ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_by_turn_id IS NOT NULL))[1])::uuid AS superseded_by_turn_id,
   MAX(m.turn_superseded_at)::timestamptz AS superseded_at,
   COALESCE(((ARRAY_AGG(m.turn_superseded_reason ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_reason IS NOT NULL))[1])::text, ''::text)::text AS superseded_reason,
@@ -2915,11 +2998,94 @@ func (q *Queries) ListHistoryTurnsByBot(ctx context.Context, botID pgtype.UUID) 
 	return items, nil
 }
 
+const listMessageEventCursorsByIDs = `-- name: ListMessageEventCursorsByIDs :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.compact_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.event_id,
+  m.created_at,
+  CASE
+    WHEN source_event.event_data->>'event_cursor' ~ '^[1-9][0-9]{0,15}$' THEN
+      CASE
+        WHEN (source_event.event_data->>'event_cursor')::numeric <= 9007199254740991
+          THEN (source_event.event_data->>'event_cursor')::bigint
+        ELSE 0
+      END
+    ELSE 0
+  END::bigint AS event_cursor
+FROM bot_history_messages m
+LEFT JOIN bot_session_events source_event
+  ON source_event.id = m.event_id
+  AND source_event.bot_id = m.bot_id
+  AND source_event.session_id = m.session_id
+  AND source_event.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.id = ANY($1::uuid[])
+  AND m.bot_id = $2
+  AND m.session_id = $3
+ORDER BY m.id ASC
+`
+
+type ListMessageEventCursorsByIDsParams struct {
+	MessageIds []pgtype.UUID `json:"message_ids"`
+	BotID      pgtype.UUID   `json:"bot_id"`
+	SessionID  pgtype.UUID   `json:"session_id"`
+}
+
+type ListMessageEventCursorsByIDsRow struct {
+	ID                     pgtype.UUID        `json:"id"`
+	BotID                  pgtype.UUID        `json:"bot_id"`
+	SessionID              pgtype.UUID        `json:"session_id"`
+	CompactID              pgtype.UUID        `json:"compact_id"`
+	ExternalMessageID      pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID pgtype.Text        `json:"source_reply_to_message_id"`
+	EventID                pgtype.UUID        `json:"event_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	EventCursor            int64              `json:"event_cursor"`
+}
+
+func (q *Queries) ListMessageEventCursorsByIDs(ctx context.Context, arg ListMessageEventCursorsByIDsParams) ([]ListMessageEventCursorsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listMessageEventCursorsByIDs, arg.MessageIds, arg.BotID, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessageEventCursorsByIDsRow
+	for rows.Next() {
+		var i ListMessageEventCursorsByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.CompactID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.EventID,
+			&i.CreatedAt,
+			&i.EventCursor,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessageRefsByCompactID = `-- name: ListMessageRefsByCompactID :many
 SELECT
   m.id,
   m.bot_id,
-  m.session_id
+  m.session_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.created_at
 FROM bot_history_messages m
 WHERE m.team_id = public.memoh_current_team_id()
   AND m.compact_id = $1
@@ -2927,13 +3093,17 @@ ORDER BY m.created_at ASC, m.id ASC
 `
 
 type ListMessageRefsByCompactIDRow struct {
-	ID        pgtype.UUID `json:"id"`
-	BotID     pgtype.UUID `json:"bot_id"`
-	SessionID pgtype.UUID `json:"session_id"`
+	ID                     pgtype.UUID        `json:"id"`
+	BotID                  pgtype.UUID        `json:"bot_id"`
+	SessionID              pgtype.UUID        `json:"session_id"`
+	ExternalMessageID      pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID pgtype.Text        `json:"source_reply_to_message_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
-// Backfills coverage for summaries that predate persisted artifact coverage
-// without pulling every compacted row's full content/usage.
+// Backfills identity/anchor coverage for summaries that predate persisted
+// artifact coverage without pulling every compacted row's content, usage,
+// or assets.
 func (q *Queries) ListMessageRefsByCompactID(ctx context.Context, compactID pgtype.UUID) ([]ListMessageRefsByCompactIDRow, error) {
 	rows, err := q.db.Query(ctx, listMessageRefsByCompactID, compactID)
 	if err != nil {
@@ -2943,7 +3113,14 @@ func (q *Queries) ListMessageRefsByCompactID(ctx context.Context, compactID pgty
 	var items []ListMessageRefsByCompactIDRow
 	for rows.Next() {
 		var i ListMessageRefsByCompactIDRow
-		if err := rows.Scan(&i.ID, &i.BotID, &i.SessionID); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -4574,6 +4751,15 @@ SELECT
   m.metadata,
   m.usage,
   m.event_id,
+  CASE
+    WHEN source_event.event_data->>'event_cursor' ~ '^[1-9][0-9]{0,15}$' THEN
+      CASE
+        WHEN (source_event.event_data->>'event_cursor')::numeric <= 9007199254740991
+          THEN (source_event.event_data->>'event_cursor')::bigint
+        ELSE 0
+      END
+    ELSE 0
+  END::bigint AS event_cursor,
   m.display_text,
   m.compact_id,
   m.created_at,
@@ -4598,6 +4784,11 @@ JOIN bot_sessions s
 LEFT JOIN bot_channel_routes r
   ON r.id = s.route_id
  AND r.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_session_events source_event
+  ON source_event.id = m.event_id
+ AND source_event.bot_id = m.bot_id
+ AND source_event.session_id = m.session_id
+ AND source_event.team_id = public.memoh_current_team_id()
 WHERE m.team_id = public.memoh_current_team_id()
   AND m.session_id = $1
   -- A fresh pending claim is a 15-minute cross-process lease. Stale pending,
@@ -4632,6 +4823,7 @@ type ListUncompactedMessagesBySessionRow struct {
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	EventCursor             int64              `json:"event_cursor"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -4666,6 +4858,7 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 			&i.Metadata,
 			&i.Usage,
 			&i.EventID,
+			&i.EventCursor,
 			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
@@ -4676,6 +4869,69 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 			&i.ConversationType,
 			&i.ConversationName,
 			&i.ReplyTarget,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUncoveredTurnResponsesBySession = `-- name: ListUncoveredTurnResponsesBySession :many
+SELECT
+  m.id,
+  m.role,
+  m.content,
+  COALESCE(m.turn_position, 0)::bigint AS turn_position,
+  COALESCE(m.turn_message_seq, 0)::bigint AS turn_message_seq,
+  m.created_at
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND (
+    m.role IN ('assistant', 'tool')
+    OR (m.role = 'user' AND m.turn_message_seq > 1)
+  )
+  AND m.created_at >= $2
+  AND m.id <> ALL($3::uuid[])
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+`
+
+type ListUncoveredTurnResponsesBySessionParams struct {
+	SessionID         pgtype.UUID        `json:"session_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	CoveredMessageIds []pgtype.UUID      `json:"covered_message_ids"`
+}
+
+type ListUncoveredTurnResponsesBySessionRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	Role           string             `json:"role"`
+	Content        []byte             `json:"content"`
+	TurnPosition   int64              `json:"turn_position"`
+	TurnMessageSeq int64              `json:"turn_message_seq"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListUncoveredTurnResponsesBySession(ctx context.Context, arg ListUncoveredTurnResponsesBySessionParams) ([]ListUncoveredTurnResponsesBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listUncoveredTurnResponsesBySession, arg.SessionID, arg.CreatedAt, arg.CoveredMessageIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUncoveredTurnResponsesBySessionRow
+	for rows.Next() {
+		var i ListUncoveredTurnResponsesBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Role,
+			&i.Content,
+			&i.TurnPosition,
+			&i.TurnMessageSeq,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4790,6 +5046,80 @@ func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg List
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVisibleTurnResponsesByRequest = `-- name: ListVisibleTurnResponsesByRequest :many
+WITH target AS MATERIALIZED (
+  SELECT
+    request.turn_id,
+    request.turn_message_seq,
+    (
+      SELECT MIN(next_request.turn_message_seq)
+      FROM bot_history_messages next_request
+      WHERE next_request.team_id = public.memoh_current_team_id()
+        AND next_request.session_id = request.session_id
+        AND next_request.turn_id = request.turn_id
+        AND next_request.role = 'user'
+        AND next_request.event_id IS NOT NULL
+        AND next_request.turn_message_seq > request.turn_message_seq
+    ) AS next_event_user_seq
+  FROM bot_visible_history_messages request
+  WHERE request.team_id = public.memoh_current_team_id()
+    AND request.session_id = $1
+    AND request.id = $2
+    AND request.role = 'user'
+  LIMIT 1
+)
+SELECT
+  response.id,
+  response.role,
+  response.content,
+  response.created_at
+FROM bot_visible_history_messages response
+JOIN target ON target.turn_id = response.turn_id
+WHERE response.team_id = public.memoh_current_team_id()
+  AND response.session_id = $1
+  AND response.role IN ('assistant', 'tool')
+  AND response.turn_message_seq > target.turn_message_seq
+  AND (target.next_event_user_seq IS NULL OR response.turn_message_seq < target.next_event_user_seq)
+ORDER BY response.turn_message_seq ASC, response.created_at ASC, response.id ASC
+`
+
+type ListVisibleTurnResponsesByRequestParams struct {
+	SessionID        pgtype.UUID `json:"session_id"`
+	RequestMessageID pgtype.UUID `json:"request_message_id"`
+}
+
+type ListVisibleTurnResponsesByRequestRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	Role      string             `json:"role"`
+	Content   []byte             `json:"content"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListVisibleTurnResponsesByRequest(ctx context.Context, arg ListVisibleTurnResponsesByRequestParams) ([]ListVisibleTurnResponsesByRequestRow, error) {
+	rows, err := q.db.Query(ctx, listVisibleTurnResponsesByRequest, arg.SessionID, arg.RequestMessageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVisibleTurnResponsesByRequestRow
+	for rows.Next() {
+		var i ListVisibleTurnResponsesByRequestRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Role,
+			&i.Content,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -5198,7 +5528,7 @@ old_turn AS (
     old_turn_target.session_id,
     old_turn_target.turn_position::bigint AS position,
     ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'user' AND m.turn_message_seq = 1))[1])::uuid AS request_message_id,
-    ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant' AND m.turn_message_seq = 2))[1])::uuid AS assistant_message_id,
+    ((ARRAY_AGG(m.id ORDER BY m.turn_message_seq ASC, m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant'))[1])::uuid AS assistant_message_id,
     NULL::uuid AS superseded_by_turn_id,
     NULL::timestamptz AS superseded_at,
     NULL::text AS superseded_reason,
@@ -5231,40 +5561,86 @@ latest_turn AS (
   ORDER BY m.turn_position DESC, m.turn_message_seq DESC
   LIMIT 1
 ),
+replacement_sequence AS MATERIALIZED (
+  SELECT
+    sequence.message_id,
+    sequence.ordinality::bigint AS turn_message_seq
+  FROM UNNEST($3::uuid[]) WITH ORDINALITY AS sequence(message_id, ordinality)
+),
+replacement_sequence_summary AS (
+  SELECT
+    COUNT(*)::bigint AS message_count,
+    COUNT(DISTINCT sequence.message_id)::bigint AS distinct_message_count,
+    COUNT(*) FILTER (
+      WHERE sequence.message_id = $4::uuid
+    )::bigint AS request_count,
+    MIN(sequence.turn_message_seq) FILTER (
+      WHERE sequence.message_id = $4::uuid
+    )::bigint AS request_message_seq,
+    COUNT(*) FILTER (
+      WHERE sequence.message_id = $5::uuid
+    )::bigint AS assistant_count,
+    MIN(sequence.turn_message_seq) FILTER (
+      WHERE sequence.message_id = $5::uuid
+    )::bigint AS assistant_message_seq
+  FROM replacement_sequence sequence
+),
+replacement_messages AS MATERIALIZED (
+  SELECT
+    message.id,
+    sequence.turn_message_seq,
+    message.role
+  FROM replacement_sequence sequence
+  JOIN bot_history_messages message ON message.id = sequence.message_id
+  JOIN old_turn ON old_turn.session_id = message.session_id
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.bot_id = old_turn.bot_id
+    AND (
+      (
+        message.id = $4::uuid
+        AND message.role = 'user'
+        AND (
+          message.turn_id IS NULL
+          OR message.turn_id = old_turn.id
+        )
+      )
+      OR (
+        message.id <> $4::uuid
+        AND message.turn_id IS NULL
+      )
+    )
+  ORDER BY message.id
+  FOR UPDATE OF message
+),
 replacement_input AS (
   SELECT
     old_turn.id, old_turn.bot_id, old_turn.session_id, old_turn.position, old_turn.request_message_id, old_turn.assistant_message_id, old_turn.superseded_by_turn_id, old_turn.superseded_at, old_turn.superseded_reason, old_turn.created_at, old_turn.updated_at,
-    $3::uuid AS replacement_request_message_id,
-    $4::uuid AS replacement_assistant_message_id
+    $4::uuid AS replacement_request_message_id,
+    $5::uuid AS replacement_assistant_message_id,
+    summary.message_count AS replacement_message_count
   FROM old_turn
   JOIN latest_turn ON latest_turn.id = old_turn.id
   CROSS JOIN old_lock_guard
-  WHERE (
-      $3::uuid IS NULL
-      OR EXISTS (
-        SELECT 1
-        FROM bot_history_messages request_message
-        WHERE request_message.team_id = public.memoh_current_team_id() AND request_message.id = $3::uuid
-          AND request_message.session_id = old_turn.session_id
-          AND request_message.role = 'user'
-          AND (
-            request_message.turn_id IS NULL
-            OR request_message.turn_id = old_turn.id
-          )
-        FOR UPDATE
-      )
-    )
+  CROSS JOIN replacement_sequence_summary summary
+  WHERE summary.message_count > 0
+    AND summary.message_count = summary.distinct_message_count
+    AND summary.request_count = 1
+    AND summary.request_message_seq = 1
+    AND summary.assistant_count = 1
     AND (
-      $4::uuid IS NULL
-      OR EXISTS (
-        SELECT 1
-        FROM bot_history_messages assistant_message
-        WHERE assistant_message.team_id = public.memoh_current_team_id() AND assistant_message.id = $4::uuid
-          AND assistant_message.session_id = old_turn.session_id
-          AND assistant_message.role = 'assistant'
-          AND assistant_message.turn_id IS NULL
-        FOR UPDATE
-      )
+      SELECT COUNT(*)
+      FROM replacement_messages
+    ) = summary.message_count
+    AND EXISTS (
+      SELECT 1
+      FROM replacement_messages assistant
+      WHERE assistant.id = $5::uuid
+        AND assistant.role = 'assistant'
+    )
+    AND summary.assistant_message_seq = (
+      SELECT MIN(assistant.turn_message_seq)
+      FROM replacement_messages assistant
+      WHERE assistant.role = 'assistant'
     )
 ),
 affected_compaction_sessions AS MATERIALIZED (
@@ -5306,6 +5682,7 @@ replacement AS (
     next_position.position::bigint AS position,
     replacement_input.replacement_request_message_id AS request_message_id,
     replacement_input.replacement_assistant_message_id AS assistant_message_id,
+    replacement_input.replacement_message_count AS message_count,
     NULL::uuid AS superseded_by_turn_id,
     NULL::timestamptz AS superseded_at,
     NULL::text AS superseded_reason,
@@ -5317,8 +5694,8 @@ replacement AS (
 updated AS (
   UPDATE bot_history_messages old
   SET turn_superseded_by_turn_id = replacement.id,
-      turn_superseded_at = $5,
-      turn_superseded_reason = $6,
+      turn_superseded_at = $6,
+      turn_superseded_reason = $7,
       turn_visible = false
   FROM replacement
   WHERE old.team_id = public.memoh_current_team_id() AND old.turn_id = $2
@@ -5343,72 +5720,25 @@ hidden_old_messages AS (
 hidden_done AS (
   SELECT COUNT(*) AS count FROM hidden_old_messages
 ),
-linked_anchors AS (
+linked_replacement_messages AS (
   UPDATE bot_history_messages m
   SET turn_id = replacement.id,
       turn_position = replacement.position,
-      turn_message_seq = CASE
-        WHEN m.id = replacement.request_message_id THEN 1
-        WHEN m.id = replacement.assistant_message_id THEN 2
-        ELSE m.turn_message_seq
-      END,
+      turn_message_seq = replacement_message.turn_message_seq,
       turn_visible = true,
       turn_superseded_by_turn_id = NULL,
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM replacement
+  JOIN replacement_messages replacement_message ON true
   CROSS JOIN hidden_done
   JOIN updated_turn ON true
   WHERE m.team_id = public.memoh_current_team_id()
-    AND (
-      (
-        m.id = replacement.request_message_id
-        AND m.role = 'user'
-        AND (
-          m.turn_id IS NULL
-          OR m.turn_id = updated_turn.id
-        )
-      )
-      OR (
-        m.id = replacement.assistant_message_id
-        AND m.role = 'assistant'
-        AND m.turn_id IS NULL
-      )
-    )
+    AND m.id = replacement_message.id
   RETURNING m.id
 ),
-linked_tail AS (
-  UPDATE bot_history_messages m
-  SET turn_id = tail.turn_id,
-      turn_position = tail.turn_position,
-      turn_visible = true,
-      turn_message_seq = tail.turn_message_seq,
-      turn_superseded_by_turn_id = NULL,
-      turn_superseded_at = NULL,
-      turn_superseded_reason = NULL
-  FROM (
-    SELECT
-      m.id AS message_id,
-      replacement.id AS turn_id,
-      replacement.position AS turn_position,
-      2 + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id) AS turn_message_seq
-    FROM replacement
-    JOIN bot_history_messages assistant ON assistant.id = replacement.assistant_message_id AND assistant.team_id = public.memoh_current_team_id()
-    JOIN bot_history_messages m
-      ON m.session_id = replacement.session_id
-     AND m.role IN ('assistant', 'tool')
-    WHERE m.team_id = public.memoh_current_team_id() AND m.id <> replacement.assistant_message_id
-      AND m.turn_id IS NULL
-      AND (m.created_at, m.id) > (assistant.created_at, assistant.id)
-  ) tail
-  WHERE m.team_id = public.memoh_current_team_id() AND m.id = tail.message_id
-  RETURNING m.id
-),
-linked_anchors_done AS (
-  SELECT COUNT(*) AS count FROM linked_anchors
-),
-linked_tail_done AS (
-  SELECT COUNT(*) AS count FROM linked_tail
+linked_replacement_messages_done AS (
+  SELECT COUNT(*)::bigint AS count FROM linked_replacement_messages
 )
 SELECT replacement.id, replacement.bot_id, replacement.session_id, replacement.position::bigint AS position,
   replacement.request_message_id, replacement.assistant_message_id,
@@ -5416,17 +5746,17 @@ SELECT replacement.id, replacement.bot_id, replacement.session_id, replacement.p
   replacement.superseded_reason, replacement.created_at::timestamptz AS created_at, replacement.updated_at::timestamptz AS updated_at
 FROM replacement
 JOIN updated_turn ON true
-CROSS JOIN linked_anchors_done
-CROSS JOIN linked_tail_done
+JOIN linked_replacement_messages_done linked ON linked.count = replacement.message_count
 `
 
 type ReplaceHistoryTurnParams struct {
-	SessionID          pgtype.UUID        `json:"session_id"`
-	OldTurnID          pgtype.UUID        `json:"old_turn_id"`
-	RequestMessageID   pgtype.UUID        `json:"request_message_id"`
-	AssistantMessageID pgtype.UUID        `json:"assistant_message_id"`
-	SupersededAt       pgtype.Timestamptz `json:"superseded_at"`
-	SupersededReason   pgtype.Text        `json:"superseded_reason"`
+	SessionID             pgtype.UUID        `json:"session_id"`
+	OldTurnID             pgtype.UUID        `json:"old_turn_id"`
+	ReplacementMessageIds []pgtype.UUID      `json:"replacement_message_ids"`
+	RequestMessageID      pgtype.UUID        `json:"request_message_id"`
+	AssistantMessageID    pgtype.UUID        `json:"assistant_message_id"`
+	SupersededAt          pgtype.Timestamptz `json:"superseded_at"`
+	SupersededReason      pgtype.Text        `json:"superseded_reason"`
 }
 
 type ReplaceHistoryTurnRow struct {
@@ -5447,6 +5777,7 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg ReplaceHistoryTurn
 	row := q.db.QueryRow(ctx, replaceHistoryTurn,
 		arg.SessionID,
 		arg.OldTurnID,
+		arg.ReplacementMessageIds,
 		arg.RequestMessageID,
 		arg.AssistantMessageID,
 		arg.SupersededAt,
@@ -5626,7 +5957,7 @@ SELECT
   updated.session_id,
   updated.turn_position::bigint AS position,
   ((ARRAY_AGG(updated.id ORDER BY updated.created_at ASC, updated.id ASC) FILTER (WHERE updated.role = 'user' AND updated.turn_message_seq = 1))[1])::uuid AS request_message_id,
-  ((ARRAY_AGG(updated.id ORDER BY updated.created_at ASC, updated.id ASC) FILTER (WHERE updated.role = 'assistant' AND updated.turn_message_seq = 2))[1])::uuid AS assistant_message_id,
+  ((ARRAY_AGG(updated.id ORDER BY updated.turn_message_seq ASC, updated.created_at ASC, updated.id ASC) FILTER (WHERE updated.role = 'assistant'))[1])::uuid AS assistant_message_id,
   ((ARRAY_AGG(updated.turn_superseded_by_turn_id ORDER BY updated.turn_superseded_at DESC NULLS LAST, updated.created_at DESC, updated.id DESC) FILTER (WHERE updated.turn_superseded_by_turn_id IS NOT NULL))[1])::uuid AS superseded_by_turn_id,
   MAX(updated.turn_superseded_at)::timestamptz AS superseded_at,
   COALESCE(((ARRAY_AGG(updated.turn_superseded_reason ORDER BY updated.turn_superseded_at DESC NULLS LAST, updated.created_at DESC, updated.id DESC) FILTER (WHERE updated.turn_superseded_reason IS NOT NULL))[1])::text, ''::text)::text AS superseded_reason,

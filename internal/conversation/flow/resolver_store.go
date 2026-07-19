@@ -3,6 +3,8 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -11,6 +13,7 @@ import (
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 )
 
 func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string) error {
@@ -22,6 +25,7 @@ type storeRoundOptions struct {
 	SkipMemory              bool
 	AllowEmptyAssistantText bool
 	MessageMetadataByIndex  map[int]map[string]any
+	DiscussCursor           *messagepkg.DiscussCursorUpdate
 }
 
 func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) error {
@@ -37,7 +41,12 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 	// messages are written atomically (deferred persistence).
 	skipUserQuery := req.UserMessagePersisted || req.ReusePersistedUserMessage
 	for _, m := range messages {
-		if skipUserQuery && m.Role == "user" && strings.TrimSpace(m.TextContent()) == strings.TrimSpace(req.Query) {
+		query := strings.TrimSpace(req.Query)
+		matchesPersistedQuery := strings.TrimSpace(m.TextContent()) == query
+		if opts.DiscussCursor != nil && query == "" {
+			matchesPersistedQuery = false
+		}
+		if skipUserQuery && m.Role == "user" && matchesPersistedQuery {
 			skipUserQuery = false // only skip the first matching user message
 			continue
 		}
@@ -63,10 +72,24 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 	}
 
 	if len(filtered) == 0 {
+		if req.TurnReplacement != nil {
+			return nil, errors.New("replacement round has no persistable messages")
+		}
 		return nil, nil
 	}
 
-	persisted := r.storeMessages(ctx, req, filtered, modelID, opts)
+	forkAnchorUpdate := (*forkAnchorUpdate)(nil)
+	if req.TurnReplacement != nil {
+		forkAnchorUpdate = r.prepareForkAnchorUpdate(ctx, req.SessionID, req.HistoryCutoffBeforeMessageID)
+	}
+	persisted, err := r.storeMessages(ctx, req, filtered, modelID, opts)
+	if err != nil {
+		return persisted, err
+	}
+	if req.TurnReplacement != nil {
+		r.applyForkAnchorUpdate(context.WithoutCancel(ctx), req.SessionID, forkAnchorUpdate)
+		r.publishReplacementMessageCreated(req.BotID, persisted)
+	}
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
 		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
 	}
@@ -97,7 +120,59 @@ func isEmptyAssistantMessage(m conversation.ModelMessage) bool {
 // output) into bot_history_messages with full metadata, usage tracking,
 // and memory extraction. Used by the discuss driver so it shares the same
 // persistence quality as chat mode.
-func (r *Resolver) StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, sdkMessages []sdk.Message, modelID string) error {
+func (r *Resolver) StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, persistedUserMessageID string, sdkMessages []sdk.Message, modelID string) error {
+	return r.storeDiscussRound(ctx, botID, sessionID, channelIdentityID, currentPlatform, persistedUserMessageID, sdkMessages, modelID, nil)
+}
+
+func (r *Resolver) StoreRoundWithCursor(
+	ctx context.Context,
+	botID, sessionID, channelIdentityID, currentPlatform, persistedUserMessageID string,
+	sdkMessages []sdk.Message,
+	modelID string,
+	cursor pipelinepkg.DiscussCursorCommit,
+) (bool, error) {
+	claims := make([]messagepkg.DeliveryClaim, len(cursor.DeliveryClaims))
+	for i, claim := range cursor.DeliveryClaims {
+		claims[i] = messagepkg.DeliveryClaim{
+			EventID:    claim.EventID,
+			ClaimToken: claim.ClaimToken,
+		}
+	}
+	update := &messagepkg.DiscussCursorUpdate{
+		SessionID:           sessionID,
+		ScopeKey:            cursor.ScopeKey,
+		RouteID:             cursor.RouteID,
+		Source:              cursor.Source,
+		ConsumedCursor:      cursor.Position.SourceCursor,
+		ConsumedEventCursor: cursor.Position.EventCursor,
+		DeliveryClaims:      claims,
+	}
+	persisted, err := r.storeDiscussRoundResult(ctx, botID, sessionID, channelIdentityID, currentPlatform, persistedUserMessageID, sdkMessages, modelID, update)
+	return len(persisted) > 0, err
+}
+
+func (r *Resolver) storeDiscussRound(
+	ctx context.Context,
+	botID, sessionID, channelIdentityID, currentPlatform, persistedUserMessageID string,
+	sdkMessages []sdk.Message,
+	modelID string,
+	cursor *messagepkg.DiscussCursorUpdate,
+) error {
+	_, err := r.storeDiscussRoundResult(ctx, botID, sessionID, channelIdentityID, currentPlatform, persistedUserMessageID, sdkMessages, modelID, cursor)
+	return err
+}
+
+func (r *Resolver) storeDiscussRoundResult(
+	ctx context.Context,
+	botID, sessionID, channelIdentityID, currentPlatform, persistedUserMessageID string,
+	sdkMessages []sdk.Message,
+	modelID string,
+	cursor *messagepkg.DiscussCursorUpdate,
+) ([]messagepkg.Message, error) {
+	persistedUserMessageID = strings.TrimSpace(persistedUserMessageID)
+	if persistedUserMessageID == "" {
+		return nil, errors.New("persisted user message id is required")
+	}
 	modelMessages := sdkMessagesToModelMessages(sdkMessages)
 	req := conversation.ChatRequest{
 		BotID:                   botID,
@@ -106,16 +181,22 @@ func (r *Resolver) StoreRound(ctx context.Context, botID, sessionID, channelIden
 		SourceChannelIdentityID: channelIdentityID,
 		CurrentChannel:          currentPlatform,
 		UserMessagePersisted:    true,
+		PersistedUserMessageID:  persistedUserMessageID,
 	}
-	return r.storeRound(ctx, req, modelMessages, modelID)
+	return r.storeRoundWithOptionsResult(ctx, req, modelMessages, modelID, storeRoundOptions{DiscussCursor: cursor})
 }
 
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) []messagepkg.Message {
+func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.Message, error) {
 	if r.messageService == nil {
-		return nil
+		return nil, errors.New("message service is not configured")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return nil
+		return nil, errors.New("bot id is required to persist messages")
+	}
+	deliveryClaims := make([]messagepkg.DeliveryClaim, 0, 1)
+	deliveryClaimTokens := make(map[string]string)
+	if err := appendDeliveryClaim(&deliveryClaims, deliveryClaimTokens, "request", req.EventID, req.EventDeliveryClaim); err != nil {
+		return nil, err
 	}
 
 	// Check bot setting for full tool result persistence.
@@ -147,6 +228,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
 		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
 	}
+	activeExternalMessageID := strings.TrimSpace(req.ExternalMessageID)
 	persistInputs := make([]messagepkg.PersistInput, 0, len(messages))
 	for i, msg := range messages {
 		msg = normalizeUserMessageContent(msg)
@@ -161,8 +243,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 
 		content, err := json.Marshal(msg)
 		if err != nil {
-			r.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))
-			continue
+			return nil, fmt.Errorf("marshal message %d: %w", i, err)
 		}
 		messageSenderChannelIdentityID := ""
 		messageSenderUserID := ""
@@ -172,54 +253,57 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		displayText := ""
 		assets := []messagepkg.AssetRef(nil)
 		persistMeta := meta
+		continueHistoryTurn := false
 		if msg.Role == "user" {
-			messageSenderChannelIdentityID = senderChannelIdentityID
-			messageSenderUserID = senderUserID
-
-			// Only the user message whose text matches req.Query is the
-			// "real" turn-leading query from the user. Other user-role
-			// messages in this round are synthetic — typically:
-			//   1. Mid-turn IM platform injects (the user typed again
-			//      while the bot was working).
-			//   2. The image-only user message that the read-media tool
-			//      decoration appends after a successful image read so
-			//      that the next LLM step can see the image.
-			// For (2) the message has no text content; for both (1) and
-			// (2), splatting req.RawQuery / req.ExternalMessageID /
-			// req.EventID across them was wrong: it forced the UI to
-			// display the original query text on a synthetic image-only
-			// turn (the read-tool case), and falsely linked unrelated
-			// messages to the same inbound IM event.
-			ownText := strings.TrimSpace(msg.TextContent())
-			isOriginalSkillActivation := req.UserMessageKind == conversation.UserMessageKindSkillActivation &&
-				strings.TrimSpace(req.Query) == "" &&
-				ownText == "" &&
-				i == 0
-			isOriginalQuery := (ownText != "" && ownText == strings.TrimSpace(req.Query)) || isOriginalSkillActivation
-
-			if isOriginalQuery {
-				externalMessageID = req.ExternalMessageID
-				sourceReplyToMessageID = req.SourceReplyToMessageID
-				messageEventID = req.EventID
-				switch {
-				case strings.TrimSpace(req.UserVisibleText) != "" || req.UserMessageKind == conversation.UserMessageKindSkillActivation:
-					displayText = strings.TrimSpace(req.UserVisibleText)
-				case req.RawQuery != "":
-					displayText = req.RawQuery
-				default:
-					displayText = strings.TrimSpace(req.Query)
+			if msg.Injected != nil {
+				injected := msg.Injected
+				messageSenderChannelIdentityID = strings.TrimSpace(injected.Source.SenderChannelIdentityID)
+				messageSenderUserID = strings.TrimSpace(injected.Source.SenderUserID)
+				externalMessageID = strings.TrimSpace(injected.Source.ExternalMessageID)
+				sourceReplyToMessageID = strings.TrimSpace(injected.Source.SourceReplyToMessageID)
+				messageEventID = strings.TrimSpace(injected.Source.EventID)
+				displayText = strings.TrimSpace(injected.Text)
+				assets = chatAttachmentsToAssetRefs(injected.Attachments)
+				persistMeta = mergeMetadata(persistMeta, buildInjectedRouteMetadata(injected.Source))
+				persistMeta = mergeMetadata(persistMeta, buildInjectedInteractionMetadata(*injected))
+				if err := appendDeliveryClaim(&deliveryClaims, deliveryClaimTokens, "injected message", messageEventID, injected.Source.DeliveryClaim); err != nil {
+					return nil, err
 				}
-				assets = chatAttachmentsToAssetRefs(req.Attachments)
-				persistMeta = mergeMetadata(meta, buildInteractionMetadata(req))
 			} else {
-				// Use the message's own text as display text. For the
-				// read-media image-only injection this is empty, so
-				// DisplayContent stays empty and ConvertMessagesToUITurns
-				// drops the turn entirely (no text + no assets).
-				displayText = ownText
+				messageSenderChannelIdentityID = senderChannelIdentityID
+				messageSenderUserID = senderUserID
+
+				// Only the user message whose text matches req.Query is the
+				// original turn-leading query. Remaining unbound user messages
+				// are internal model decorations such as read-media images.
+				ownText := strings.TrimSpace(msg.TextContent())
+				isOriginalSkillActivation := req.UserMessageKind == conversation.UserMessageKindSkillActivation &&
+					strings.TrimSpace(req.Query) == "" &&
+					ownText == "" &&
+					i == 0
+				isOriginalQuery := (ownText != "" && ownText == strings.TrimSpace(req.Query)) || isOriginalSkillActivation
+
+				if isOriginalQuery {
+					externalMessageID = req.ExternalMessageID
+					sourceReplyToMessageID = req.SourceReplyToMessageID
+					messageEventID = req.EventID
+					switch {
+					case strings.TrimSpace(req.UserVisibleText) != "" || req.UserMessageKind == conversation.UserMessageKindSkillActivation:
+						displayText = strings.TrimSpace(req.UserVisibleText)
+					case req.RawQuery != "":
+						displayText = req.RawQuery
+					default:
+						displayText = strings.TrimSpace(req.Query)
+					}
+					assets = chatAttachmentsToAssetRefs(req.Attachments)
+					persistMeta = mergeMetadata(meta, buildInteractionMetadata(req))
+				} else {
+					displayText = ownText
+					continueHistoryTurn = !req.SkipHistoryTurn
+				}
 			}
-		} else if strings.TrimSpace(req.ExternalMessageID) != "" {
-			sourceReplyToMessageID = req.ExternalMessageID
+		} else if activeExternalMessageID != "" {
+			sourceReplyToMessageID = activeExternalMessageID
 		}
 		if i == lastAssistantIdx && len(outboundAssets) > 0 {
 			assets = append(assets, outboundAssets...)
@@ -245,19 +329,100 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			SessionMode:             sessionMode,
 			RuntimeType:             runtimeType,
 			TurnRequestMessageID:    turnRequestMessageID,
+			ContinueHistoryTurn:     continueHistoryTurn,
 			SkipHistoryTurn:         req.SkipHistoryTurn,
 		})
+		if msg.Injected != nil && externalMessageID != "" {
+			activeExternalMessageID = externalMessageID
+		}
+	}
+	if replacement := req.TurnReplacement; replacement != nil {
+		if len(deliveryClaims) > 0 {
+			return nil, errors.New("delivery claims cannot be combined with turn replacement")
+		}
+		persister, ok := r.messageService.(replacementRoundPersister)
+		if !ok {
+			return nil, errors.New("message service does not support atomic replacement round persistence")
+		}
+		persisted, err := persister.PersistReplacementRound(ctx, messagepkg.ReplacementRoundRequest{
+			Messages:                 persistInputs,
+			OldTurnID:                replacement.OldTurnID,
+			ExistingRequestMessageID: replacement.ExistingRequestMessageID,
+			Reason:                   replacement.Reason,
+		})
+		if err != nil {
+			r.logger.Warn("persist replacement round failed", slog.Any("error", err))
+			return nil, fmt.Errorf("persist replacement round: %w", err)
+		}
+		return persisted, nil
+	}
+	if opts.DiscussCursor != nil && len(deliveryClaims) > 0 {
+		return nil, errors.New("request delivery claims cannot be combined with discuss cursor persistence")
+	}
+	if len(deliveryClaims) > 0 {
+		batcher, ok := r.messageService.(messagepkg.AtomicRoundPersister)
+		if !ok {
+			return nil, errors.New("message service does not support claim-fenced round persistence")
+		}
+		persisted, handled, err := batcher.PersistRound(ctx, persistInputs, messagepkg.RoundPersistenceOptions{
+			DeliveryClaims: deliveryClaims,
+		})
+		if err != nil {
+			r.logger.Warn("persist claim-fenced round failed", slog.Any("error", err))
+			return nil, fmt.Errorf("persist claim-fenced round: %w", err)
+		}
+		if !handled {
+			return nil, errors.New("message service did not handle claim-fenced round persistence")
+		}
+		return persisted, nil
+	}
+	if !req.SkipHistoryTurn && turnRequestMessageID != "" && len(persistInputs) > 1 && !persistInputsContainUser(persistInputs) {
+		if opts.DiscussCursor != nil {
+			return r.persistTurnResponseWithCursor(ctx, persistInputs, *opts.DiscussCursor)
+		}
+		batcher, ok := r.messageService.(messagepkg.TurnResponseTailPersister)
+		if !ok {
+			return nil, errors.New("message service does not support atomic turn response tail persistence")
+		}
+		persisted, err := batcher.PersistTurnResponseTail(ctx, persistInputs)
+		if err != nil {
+			r.logger.Warn("persist turn response tail failed", slog.Any("error", err))
+			return nil, fmt.Errorf("persist turn response tail: %w", err)
+		}
+		return persisted, nil
+	}
+	if opts.DiscussCursor != nil {
+		return r.persistTurnResponseWithCursor(ctx, persistInputs, *opts.DiscussCursor)
 	}
 	if batcher, ok := r.messageService.(messagepkg.ToolTailRoundPersister); ok {
 		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
 			if err != nil {
 				r.logger.Warn("persist tool tail round failed", slog.Any("error", err))
-				return nil
+				return nil, fmt.Errorf("persist tool tail round: %w", err)
 			}
-			return persisted
+			return persisted, nil
 		}
 	}
+	if len(persistInputs) > 1 {
+		batcher, ok := r.messageService.(messagepkg.AtomicRoundPersister)
+		if !ok {
+			return nil, errors.New("message service does not support atomic round persistence")
+		}
+		persisted, handled, err := batcher.PersistRound(ctx, persistInputs, messagepkg.RoundPersistenceOptions{})
+		if err != nil {
+			r.logger.Warn("persist round failed", slog.Any("error", err))
+			return nil, fmt.Errorf("persist round: %w", err)
+		}
+		if !handled {
+			return nil, errors.New("message service did not handle atomic round persistence")
+		}
+		return persisted, nil
+	}
 	return r.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+}
+
+type replacementRoundPersister interface {
+	PersistReplacementRound(context.Context, messagepkg.ReplacementRoundRequest) ([]messagepkg.Message, error)
 }
 
 func workspaceTargetMetadata(target *conversation.WorkspaceTarget) map[string]any {
@@ -298,7 +463,67 @@ func (r *Resolver) persistSessionWorkspaceTarget(ctx context.Context, req conver
 	return err
 }
 
-func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg.PersistInput, initialTurnRequestMessageID string) []messagepkg.Message {
+func (r *Resolver) persistTurnResponseWithCursor(
+	ctx context.Context,
+	inputs []messagepkg.PersistInput,
+	cursor messagepkg.DiscussCursorUpdate,
+) ([]messagepkg.Message, error) {
+	persister, ok := r.messageService.(messagepkg.TurnResponseCursorPersister)
+	if !ok {
+		return nil, errors.New("message service does not support atomic discuss response persistence")
+	}
+	persisted, err := persister.PersistTurnResponseWithCursor(ctx, inputs, cursor)
+	if err != nil {
+		r.logger.Warn("persist discuss response with cursor failed", slog.Any("error", err))
+		return nil, fmt.Errorf("persist discuss response with cursor: %w", err)
+	}
+	return persisted, nil
+}
+
+func persistInputsContainUser(inputs []messagepkg.PersistInput) bool {
+	for _, input := range inputs {
+		if strings.EqualFold(strings.TrimSpace(input.Role), "user") {
+			return true
+		}
+	}
+	return false
+}
+
+func appendDeliveryClaim(
+	claims *[]messagepkg.DeliveryClaim,
+	seen map[string]string,
+	source string,
+	eventID string,
+	claim *conversation.DeliveryClaim,
+) error {
+	if claim == nil {
+		return nil
+	}
+	eventID = strings.TrimSpace(eventID)
+	claimEventID := strings.TrimSpace(claim.EventID)
+	if eventID == "" || claimEventID == "" || !strings.EqualFold(eventID, claimEventID) {
+		return fmt.Errorf("%s delivery claim does not match its event", source)
+	}
+	claimToken := strings.TrimSpace(claim.ClaimToken)
+	if claimToken == "" {
+		return fmt.Errorf("%s delivery claim token is empty", source)
+	}
+	key := strings.ToLower(claimEventID)
+	if existing, ok := seen[key]; ok {
+		if !strings.EqualFold(existing, claimToken) {
+			return fmt.Errorf("%s has conflicting delivery claims", source)
+		}
+		return nil
+	}
+	seen[key] = claimToken
+	*claims = append(*claims, messagepkg.DeliveryClaim{
+		EventID:    claimEventID,
+		ClaimToken: claimToken,
+	})
+	return nil
+}
+
+func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg.PersistInput, initialTurnRequestMessageID string) ([]messagepkg.Message, error) {
 	persisted := make([]messagepkg.Message, 0, len(inputs))
 	turnRequestMessageID := strings.TrimSpace(initialTurnRequestMessageID)
 	for _, input := range inputs {
@@ -308,14 +533,14 @@ func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg
 		persistedMessage, err := r.messageService.Persist(ctx, input)
 		if err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))
-			continue
+			return persisted, fmt.Errorf("persist message %d: %w", len(persisted), err)
 		}
-		if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn {
+		if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn && !input.ContinueHistoryTurn {
 			turnRequestMessageID = persistedMessage.ID
 		}
 		persisted = append(persisted, persistedMessage)
 	}
-	return persisted
+	return persisted, nil
 }
 
 func (r *Resolver) persistSessionRuntimeSnapshot(ctx context.Context, req conversation.ChatRequest) (string, string) {

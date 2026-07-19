@@ -76,6 +76,7 @@ func UserFacingSessionTypes() []string {
 }
 
 var (
+	ErrNotFound               = errors.New("session not found")
 	ErrACPAgentIDRequired     = errors.New("acp_agent_id is required for acp_agent sessions")
 	ErrACPProjectPathMissing  = errors.New("project_path is required for acp_agent sessions")
 	ErrACPUnknownAgent        = errors.New("unknown ACP agent")
@@ -501,6 +502,9 @@ func (s *Service) Get(ctx context.Context, sessionID string) (Session, error) {
 	}
 	row, err := s.queries.GetSessionByID(ctx, pgID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Session{}, ErrNotFound
+		}
 		return Session{}, err
 	}
 	return toSession(row), nil

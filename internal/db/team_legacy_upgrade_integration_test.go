@@ -17,12 +17,9 @@ func TestMigrateLegacyInstallPreservesRows(t *testing.T) {
 	ctx := context.Background()
 	dsn := teamMigrationDSN(t)
 	pool := resetToEmpty(t)
-
-	teamSteps := countMigrationsFromTeamCore(t)
-
 	// Apply the chain up to (but not including) the team migrations — the
 	// "legacy install" state.
-	stepUpToPreTeam(t, dsn, teamSteps)
+	stepUpToPreTeam(t, dsn)
 
 	// teams must not exist yet (pre-team baseline).
 	var teamsExists bool
@@ -54,7 +51,7 @@ func TestMigrateLegacyInstallPreservesRows(t *testing.T) {
 	}
 
 	// Apply the team migrations (the upgrade).
-	stepUp(t, dsn, teamSteps)
+	migrateAll(t, dsn)
 
 	// Rows preserved.
 	assertCount := func(table string, want int) {
@@ -112,8 +109,8 @@ func TestMigrateDownFailClosedForMultiTeam(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO teams (id, slug) VALUES ($1, 'other')`, t2); err != nil {
 		t.Fatalf("insert non-default team: %v", err)
 	}
-	// Stepping the team migrations down must fail closed.
-	if downErr := tryStepDown(t, dsn, countMigrationsFromTeamCore(t)); downErr == nil {
+	migrateToVersion(t, dsn, teamMigrationVersion)
+	if downErr := tryStepDown(t, dsn, 1); downErr == nil {
 		t.Fatal("stepping team migrations down must fail closed with a non-default team present")
 	}
 }
@@ -125,8 +122,8 @@ func TestMigrateDownSingletonSafe(t *testing.T) {
 	dsn := teamMigrationDSN(t)
 	pool := freshMigratedDB(t)
 
-	steps := countMigrationsFromTeamCore(t)
-	stepDown(t, dsn, steps)
+	migrateToVersion(t, dsn, teamMigrationVersion)
+	stepDown(t, dsn, 1)
 	var teamsExists bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM information_schema.tables
@@ -136,15 +133,14 @@ func TestMigrateDownSingletonSafe(t *testing.T) {
 	if teamsExists {
 		t.Error("clean singleton must be able to drop the team schema on down")
 	}
-	stepUp(t, dsn, steps)
+	migrateAll(t, dsn)
 }
 
 func TestTeamMigrationsLeaveUserTablesUntouched(t *testing.T) {
 	ctx := context.Background()
 	dsn := teamMigrationDSN(t)
 	pool := resetToEmpty(t)
-	teamSteps := countMigrationsFromTeamCore(t)
-	stepUpToPreTeam(t, dsn, teamSteps)
+	stepUpToPreTeam(t, dsn)
 
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE public.user_extension_data (
@@ -157,7 +153,7 @@ func TestTeamMigrationsLeaveUserTablesUntouched(t *testing.T) {
 		t.Fatalf("create user table: %v", err)
 	}
 
-	stepUp(t, dsn, teamSteps)
+	migrateAll(t, dsn)
 
 	var rls, forced bool
 	if err := pool.QueryRow(ctx, `

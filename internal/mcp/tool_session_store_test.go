@@ -71,7 +71,7 @@ func TestToolSessionContextStoreCloseSessionClearsContextAndSinks(t *testing.T) 
 	store := NewToolSessionContextStore()
 	session := ToolSessionContext{BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1"}
 	store.Put(ToolSessionContext{BotID: "bot-1", SessionID: "session-1", CurrentPlatform: "web"})
-	store.RegisterToolEventSink(session, func(ToolStreamEvent) {})
+	store.RegisterToolEventSink(session, func(ToolStreamEvent) bool { return true })
 
 	store.CloseSession("session-1")
 
@@ -92,8 +92,9 @@ func TestToolSessionContextStoreRegisteredSinkReceivesToolEvents(t *testing.T) {
 	store := NewToolSessionContextStore()
 	session := ToolSessionContext{BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1"}
 	var delivered []ToolStreamEvent
-	unregister := store.RegisterToolEventSink(session, func(event ToolStreamEvent) {
+	unregister := store.RegisterToolEventSink(session, func(event ToolStreamEvent) bool {
 		delivered = append(delivered, event)
+		return true
 	})
 	defer unregister()
 
@@ -114,11 +115,13 @@ func TestToolSessionContextStoreOldCleanupDoesNotRemoveNewerSink(t *testing.T) {
 	store := NewToolSessionContextStore()
 	session := ToolSessionContext{BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1"}
 	var first, second int
-	unregisterFirst := store.RegisterToolEventSink(session, func(ToolStreamEvent) {
+	unregisterFirst := store.RegisterToolEventSink(session, func(ToolStreamEvent) bool {
 		first++
+		return true
 	})
-	unregisterSecond := store.RegisterToolEventSink(session, func(ToolStreamEvent) {
+	unregisterSecond := store.RegisterToolEventSink(session, func(ToolStreamEvent) bool {
 		second++
+		return true
 	})
 	defer unregisterSecond()
 
@@ -146,5 +149,25 @@ func TestToolSessionContextStoreDropsToolEventsWithoutSink(t *testing.T) {
 	})
 	if delivered {
 		t.Fatal("AppendToolEvent delivered=true without a registered sink")
+	}
+}
+
+func TestToolSessionContextStoreReturnsRegisteredSinkAcknowledgement(t *testing.T) {
+	store := NewToolSessionContextStore()
+	session := ToolSessionContext{BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1"}
+	calls := 0
+	unregister := store.RegisterToolEventSink(session, func(ToolStreamEvent) bool {
+		calls++
+		return false
+	})
+	defer unregister()
+
+	delivered := store.AppendToolEvent(session, ToolStreamEvent{
+		Type:       "tool_call_start",
+		ToolCallID: "call-1",
+		ToolName:   "schedule_list",
+	})
+	if delivered || calls != 1 {
+		t.Fatalf("AppendToolEvent delivered/calls = %t/%d, want false/1", delivered, calls)
 	}
 }

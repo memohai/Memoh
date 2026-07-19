@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"sort"
 	"sync"
 )
 
@@ -46,8 +47,12 @@ func (p *Pipeline) ReplaySession(sessionID string, events []CanonicalEvent) Rend
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	ordered := append([]CanonicalEvent(nil), events...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return replayEventOrder(ordered[i]) < replayEventOrder(ordered[j])
+	})
 	ic := NewEmptyIC(sessionID)
-	for _, event := range events {
+	for _, event := range ordered {
 		ic = Reduce(ic, event)
 	}
 	p.sessions[sessionID] = ic
@@ -55,6 +60,13 @@ func (p *Pipeline) ReplaySession(sessionID string, events []CanonicalEvent) Rend
 	rc := Render(ic, p.renderParams)
 	p.rendered[sessionID] = rc
 	return rc
+}
+
+func replayEventOrder(event CanonicalEvent) int64 {
+	if cursor := event.GetEventCursor(); cursor > 0 {
+		return cursor
+	}
+	return event.GetReceivedAtMs()
 }
 
 // GetRC returns the current RenderedContext for a session, or nil if not loaded.

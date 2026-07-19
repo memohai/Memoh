@@ -37,6 +37,11 @@ var (
 	teamTestDBs   sync.Map
 )
 
+const (
+	preTeamMigrationVersion = 111
+	teamMigrationVersion    = 112
+)
+
 // teamMigrationDSN creates a database dedicated to the current test. Team
 // migration tests drop schemas and step migrations backward, so they must not
 // share TEST_POSTGRES_DSN with other integration packages.
@@ -243,6 +248,8 @@ func stepDown(t *testing.T, dsn string, n int) {
 }
 
 // stepUp applies exactly n migration steps using the golang-migrate library.
+// Kept base-compatible: callers on main (provider template catalog tests)
+// still step by count.
 func stepUp(t *testing.T, dsn string, n int) {
 	t.Helper()
 	src, err := iofs.New(postgresMigrationsFS(t), ".")
@@ -256,6 +263,38 @@ func stepUp(t *testing.T, dsn string, n int) {
 	defer func() { _, _ = m.Close() }()
 	if err := m.Steps(n); err != nil {
 		t.Fatalf("step up %d: %v", n, err)
+	}
+}
+
+func migrateToVersion(t *testing.T, dsn string, version uint) {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Migrate(version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate to version %d: %v", version, err)
+	}
+}
+
+func migrateAll(t *testing.T, dsn string) {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate up: %v", err)
 	}
 }
 
@@ -291,39 +330,9 @@ func resetToEmpty(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// stepUpToPreTeam applies the migration chain up to (but not including) the
-// teamSteps team migrations — i.e. the "legacy install" pre-team state.
-func stepUpToPreTeam(t *testing.T, dsn string, teamSteps int) {
+func stepUpToPreTeam(t *testing.T, dsn string) {
 	t.Helper()
-	src, err := iofs.New(postgresMigrationsFS(t), ".")
-	if err != nil {
-		t.Fatalf("iofs: %v", err)
-	}
-	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
-	if err != nil {
-		t.Fatalf("migrate init: %v", err)
-	}
-	defer func() { _, _ = m.Close() }()
-	total := countAllMigrations(t)
-	if err := m.Steps(total - teamSteps); err != nil {
-		t.Fatalf("step up to pre-team (%d steps): %v", total-teamSteps, err)
-	}
-}
-
-// countAllMigrations returns the number of up migrations in the embedded FS.
-func countAllMigrations(t *testing.T) int {
-	t.Helper()
-	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
-	if err != nil {
-		t.Fatalf("read migrations dir: %v", err)
-	}
-	n := 0
-	for _, e := range entries {
-		if len(e.Name()) > 7 && e.Name()[len(e.Name())-7:] == ".up.sql" {
-			n++
-		}
-	}
-	return n
+	migrateToVersion(t, dsn, preTeamMigrationVersion)
 }
 
 // TestTeamChainReversible verifies the full team migration chain
@@ -335,12 +344,9 @@ func TestTeamChainReversible(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 	dsn := teamMigrationDSN(t)
-
-	// The team core is intentionally one consolidated migration.
-	teamSteps := countMigrationsFromTeamCore(t)
-
 	// Step the team migration down; teams + the public helper must be gone.
-	stepDown(t, dsn, teamSteps)
+	migrateToVersion(t, dsn, teamMigrationVersion)
+	stepDown(t, dsn, 1)
 	var teamsExists, helperExists bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM information_schema.tables
@@ -360,7 +366,7 @@ func TestTeamChainReversible(t *testing.T) {
 
 	// Re-apply and confirm SET NULL actions target only the original reference
 	// column rather than the non-null team_id column.
-	stepUp(t, dsn, teamSteps)
+	migrateAll(t, dsn)
 	var unsafeSetNull int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM pg_constraint con
@@ -392,43 +398,8 @@ func TestTeamsRootDownSafetyGate(t *testing.T) {
 		t.Fatalf("insert non-default team: %v", err)
 	}
 
-	// Stepping the team migration down must fail closed.
-	src, err := iofs.New(postgresMigrationsFS(t), ".")
-	if err != nil {
-		t.Fatalf("iofs: %v", err)
-	}
-	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
-	if err != nil {
-		t.Fatalf("migrate init: %v", err)
-	}
-	defer func() { _, _ = m.Close() }()
-	if err := m.Steps(-countMigrationsFromTeamCore(t)); err == nil {
+	migrateToVersion(t, dsn, teamMigrationVersion)
+	if err := tryStepDown(t, dsn, 1); err == nil {
 		t.Fatal("stepping team migrations down must fail closed with a non-default team present")
 	}
-}
-
-// countMigrationsFromTeamCore returns the number of migrations from the
-// consolidated team migration through the current chain tip. Team migration
-// tests must cross that whole boundary even when later migrations are added.
-func countMigrationsFromTeamCore(t *testing.T) int {
-	t.Helper()
-	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
-	if err != nil {
-		t.Fatalf("read migrations dir: %v", err)
-	}
-	const teamMigration = "0112_team_core.up.sql"
-	found := false
-	count := 0
-	for _, e := range entries {
-		if e.Name() == teamMigration {
-			found = true
-		}
-		if found && len(e.Name()) > 7 && e.Name()[len(e.Name())-7:] == ".up.sql" {
-			count++
-		}
-	}
-	if !found {
-		t.Fatalf("missing consolidated team migration %s", teamMigration)
-	}
-	return count
 }

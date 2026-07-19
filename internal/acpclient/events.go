@@ -17,15 +17,16 @@ const (
 )
 
 type EventSink interface {
-	EmitStreamEvent(event.StreamEvent)
+	EmitStreamEvent(event.StreamEvent) bool
 }
 
-type EventSinkFunc func(event.StreamEvent)
+type EventSinkFunc func(event.StreamEvent) bool
 
-func (f EventSinkFunc) EmitStreamEvent(ev event.StreamEvent) {
+func (f EventSinkFunc) EmitStreamEvent(ev event.StreamEvent) bool {
 	if f != nil {
-		f(ev)
+		return f(ev)
 	}
+	return false
 }
 
 type toolEventEmitter struct {
@@ -46,9 +47,9 @@ func (e *toolEventEmitter) setPromptState(collector *eventCollector, sink EventS
 	e.mu.Unlock()
 }
 
-func (e *toolEventEmitter) emit(ev event.StreamEvent) {
+func (e *toolEventEmitter) emit(ev event.StreamEvent) bool {
 	if e == nil {
-		return
+		return false
 	}
 	e.mu.RLock()
 	collector := e.collector
@@ -60,8 +61,9 @@ func (e *toolEventEmitter) emit(ev event.StreamEvent) {
 		collector.record(ev)
 	}
 	if sink != nil {
-		sink.EmitStreamEvent(ev)
+		return sink.EmitStreamEvent(ev)
 	}
+	return false
 }
 
 type eventCollector struct {

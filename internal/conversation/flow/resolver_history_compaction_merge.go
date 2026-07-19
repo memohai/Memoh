@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -44,23 +45,34 @@ func mergeMissingCompactionSummaries(messages []historyfrag.HistoryRecord, summa
 	if len(missing) == 0 {
 		return messages
 	}
+	return mergeCompactionSummariesAtAnchors(messages, missing)
+}
+
+func mergeCompactionSummariesAtAnchors(messages []historyfrag.HistoryRecord, summaries []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	if len(summaries) == 0 {
+		return messages
+	}
+	ordered := append([]historyfrag.HistoryRecord(nil), summaries...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].CreatedAt.Before(ordered[j].CreatedAt)
+	})
 	// Merge each aged-out summary at its anchor position instead of batching
 	// the whole set at the front, mirroring the pipeline path's anchor-ordered
 	// composition. A summary never lands directly before a tool-result record:
 	// results follow their call contiguously, so flushing there would split
 	// the exchange.
-	out := make([]historyfrag.HistoryRecord, 0, len(missing)+len(messages))
+	out := make([]historyfrag.HistoryRecord, 0, len(ordered)+len(messages))
 	next := 0
 	for i, record := range messages {
 		if !strings.EqualFold(strings.TrimSpace(record.ModelMessage.Role), "tool") {
-			for next < len(missing) && !missing[next].CreatedAt.After(record.CreatedAt) {
-				out = append(out, missing[next])
+			for next < len(ordered) && !ordered[next].CreatedAt.After(record.CreatedAt) {
+				out = append(out, ordered[next])
 				next++
 			}
 		}
 		out = append(out, messages[i])
 	}
-	out = append(out, missing[next:]...)
+	out = append(out, ordered[next:]...)
 	return out
 }
 
@@ -140,6 +152,18 @@ func replaceCompactedHistoryRecordsWithResolver(
 	}
 
 	result := make([]historyfrag.HistoryRecord, 0, len(messages))
+	summaries := make([]historyfrag.HistoryRecord, 0, len(groups))
+	needsDurableAnchor := func(group *artifactGroup) bool {
+		artifact := group.artifact
+		if artifact.AnchorStartMs <= 0 || len(group.indices) == 0 {
+			return false
+		}
+		if len(artifact.Coverage) > len(group.indices) {
+			return true
+		}
+		firstLoaded := messages[group.indices[0]].CreatedAt
+		return firstLoaded.IsZero() || artifact.AnchorStartMs < firstLoaded.UnixMilli()
+	}
 	emitted := make(map[string]struct{}, len(groups))
 	for i, record := range messages {
 		assignment := assignments[i]
@@ -158,11 +182,16 @@ func replaceCompactedHistoryRecordsWithResolver(
 					artifact.Coverage = append(artifact.Coverage, compaction.CoveredSource{Ref: messages[index].Ref})
 				}
 			}
-			result = append(result, artifact.HistoryRecord(scope))
+			summary := artifact.HistoryRecord(scope)
+			if needsDurableAnchor(group) {
+				summaries = append(summaries, summary)
+			} else {
+				result = append(result, summary)
+			}
 		}
 		if _, required := requiredGroups[assignment.source]; required {
 			result = append(result, record)
 		}
 	}
-	return result
+	return mergeCompactionSummariesAtAnchors(result, summaries)
 }

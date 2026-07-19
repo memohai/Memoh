@@ -41,25 +41,57 @@ func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int
 	return providerInputTokens
 }
 
-func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
+func (r *Resolver) ScheduleCompaction(
+	ctx context.Context,
+	botID string,
+	sessionID string,
+	userID string,
+	inputTokens int,
+	contextTokenBudget int,
+) {
+	botID = strings.TrimSpace(botID)
+	sessionID = strings.TrimSpace(sessionID)
+	if inputTokens <= 0 || botID == "" || sessionID == "" {
+		return
+	}
+	r.asyncCompactionOnce.Do(func() {
+		r.asyncCompactions = newCompactionScheduler(func(request scheduledCompaction) bool {
+			return r.maybeCompact(request.ctx, conversation.ChatRequest{
+				BotID:     request.botID,
+				SessionID: request.sessionID,
+				UserID:    request.userID,
+			}, resolvedContext{contextTokenBudget: request.contextTokenBudget}, request.inputTokens)
+		})
+	})
+	r.asyncCompactions.Schedule(sessionTurnKey(botID, sessionID), scheduledCompaction{
+		ctx:                context.WithoutCancel(ctx),
+		botID:              botID,
+		sessionID:          sessionID,
+		userID:             userID,
+		inputTokens:        inputTokens,
+		contextTokenBudget: contextTokenBudget,
+	})
+}
+
+func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) bool {
 	done := r.enterSessionCompaction(req.BotID, req.SessionID)
 	defer done()
 	inputTokens = asyncCompactionInputTokens(rc, inputTokens)
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Info("compaction: skipped, service or settings nil")
-		return
+		return false
 	}
 	botSettings, err := r.settingsService.GetBot(ctx, req.BotID)
 	if err != nil {
 		r.logger.Warn("compaction: failed to load settings", slog.Any("error", err))
-		return
+		return false
 	}
 	if !botSettings.CompactionEnabled || botSettings.CompactionThreshold <= 0 {
 		r.logger.Info("compaction: skipped, disabled or no threshold",
 			slog.Bool("enabled", botSettings.CompactionEnabled),
 			slog.Int("threshold", botSettings.CompactionThreshold),
 		)
-		return
+		return false
 	}
 	threshold := effectiveCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
 	if !compaction.ShouldCompact(inputTokens, threshold) {
@@ -67,7 +99,7 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 			slog.Int("input_tokens", inputTokens),
 			slog.Int("threshold", threshold),
 		)
-		return
+		return false
 	}
 
 	r.logger.Info("compaction: triggering",
@@ -81,17 +113,20 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 	cfg, err := r.buildCompactionConfig(ctx, req, botSettings, inputTokens)
 	if err != nil {
 		r.logger.Warn("compaction: failed to build config", slog.Any("error", err))
-		return
+		return false
 	}
 	if cfg.ModelID == "" {
 		// buildCompactionConfig returns an empty cfg when no compaction model
 		// is configured or the configured one is disabled. Skip the trigger
 		// so the compaction service doesn't run hooks + fail on empty UUIDs.
-		return
+		return false
 	}
-	if err := r.compactionService.RunCompaction(ctx, cfg); err != nil {
+	res, err := r.compactionService.RunCompactionResult(ctx, cfg)
+	if err != nil {
 		r.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
+		return false
 	}
+	return res.Status == compaction.StatusOK
 }
 
 // runCompactionSync runs compaction synchronously when context reaches

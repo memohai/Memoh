@@ -602,6 +602,7 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	toolSink := newPromptToolEventSink(input.Sink, input.ToolOutputLimit)
 	unregisterToolSink := p.registerToolEventSink(input, toolSink)
 	defer unregisterToolSink()
+	defer toolSink.CloseAndWait()
 
 	resources := promptResources(input)
 	options := acpclient.PromptOptions{
@@ -614,6 +615,11 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		options.Images = nil
 		result, err = sess.PromptWithToolContextOptions(ctx, input.Prompt, resources, toolCtx, options, toolSink)
 	}
+	if err != nil {
+		canceled := p.cancelPendingDecisions(ctx, h.botID, input.SessionID, "decision cancelled: ACP prompt ended before a response arrived")
+		toolSink.EmitCanceledDecisions(canceled)
+	}
+	toolSink.CloseAndWait()
 	toolSink.ApplyToResult(&result)
 	if err != nil {
 		if errors.Is(err, acpclient.ErrImagePromptUnsupported) ||
@@ -1003,6 +1009,7 @@ func (p *SessionPool) closeHandle(h *runtimeHandle) error {
 	bound := h.boundSession
 	activeSession := ""
 	fence := h.persistenceFence
+	hadActivePrompt := h.active != nil
 	if h.active != nil {
 		activeSession = strings.TrimSpace(h.active.SessionID)
 		if h.active.RuntimeFence.Valid() {
@@ -1019,7 +1026,9 @@ func (p *SessionPool) closeHandle(h *runtimeHandle) error {
 	if sessionID == "" {
 		sessionID = activeSession
 	}
-	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	if !hadActivePrompt {
+		p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	}
 	var closeErr error
 	if sess != nil {
 		closeErr = sess.Close()
@@ -1075,6 +1084,7 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	bound := h.boundSession
 	activeSession := ""
 	fence := h.persistenceFence
+	hadActivePrompt := h.active != nil
 	if h.active != nil {
 		activeSession = strings.TrimSpace(h.active.SessionID)
 		if h.active.RuntimeFence.Valid() {
@@ -1087,7 +1097,9 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	if sessionID == "" {
 		sessionID = activeSession
 	}
-	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	if !hadActivePrompt {
+		p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	}
 
 	if cancel != nil {
 		cancel()
@@ -1096,7 +1108,9 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	if sess != nil {
 		closeErr = sess.Close()
 	}
-	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupFinal, "decision cancelled: ACP runtime closed before a response arrived")
+	if !hadActivePrompt {
+		p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupFinal, "decision cancelled: ACP runtime closed before a response arrived")
+	}
 
 	p.mu.Lock()
 	delete(p.runtimes, h.id)
@@ -1152,12 +1166,18 @@ func (p *SessionPool) cancelHandlePendingDecisions(h *runtimeHandle, sessionID s
 	})
 }
 
+type canceledPromptDecisions struct {
+	approvals  []toolapproval.Request
+	userInputs []userinput.Request
+}
+
 //nolint:contextcheck // lifecycle cleanup is detached from the closed prompt but retains its fence value.
-func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sessionID, reason string) {
+func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sessionID, reason string) canceledPromptDecisions {
+	var canceled canceledPromptDecisions
 	botID = strings.TrimSpace(botID)
 	sessionID = strings.TrimSpace(sessionID)
 	if p == nil || botID == "" || sessionID == "" {
-		return
+		return canceled
 	}
 	if parent == nil {
 		parent = context.Background()
@@ -1171,11 +1191,14 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 			defer cleanup.Done()
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 			defer cancel()
-			if _, err := approval.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
+			requests, err := approval.CancelPendingForSession(ctx, botID, sessionID, reason)
+			if err != nil && !errors.Is(err, runtimefence.ErrStale) {
 				p.logger.Warn("cancel pending ACP approvals failed",
 					slog.Any("error", err),
 					slog.String("bot_id", botID),
 					slog.String("session_id", sessionID))
+			} else if err == nil {
+				canceled.approvals = requests
 			}
 		}()
 	}
@@ -1185,15 +1208,19 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 			defer cleanup.Done()
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 			defer cancel()
-			if _, err := p.userInput.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
+			requests, err := p.userInput.CancelPendingForSession(ctx, botID, sessionID, reason)
+			if err != nil && !errors.Is(err, runtimefence.ErrStale) {
 				p.logger.Warn("cancel pending ACP user inputs failed",
 					slog.Any("error", err),
 					slog.String("bot_id", botID),
 					slog.String("session_id", sessionID))
+			} else if err == nil {
+				canceled.userInputs = requests
 			}
 		}()
 	}
 	cleanup.Wait()
+	return canceled
 }
 
 func (p *SessionPool) CloseAll() {
@@ -1614,6 +1641,9 @@ func runtimeOwnerMissingError() *acpfeedback.Error {
 
 type promptToolEventSink struct {
 	mu         sync.Mutex
+	cond       *sync.Cond
+	closed     bool
+	inFlight   int
 	next       acpclient.EventSink
 	events     []event.StreamEvent
 	transcript *acpclient.TranscriptRecorder
@@ -1625,17 +1655,20 @@ func newPromptToolEventSink(next acpclient.EventSink, limits ...acpclient.ToolOu
 	if len(limits) > 0 {
 		limit = limits[0]
 	}
-	return &promptToolEventSink{
+	sink := &promptToolEventSink{
 		next:       next,
 		transcript: acpclient.NewTranscriptRecorder(limit),
 		limit:      limit,
 	}
+	sink.cond = sync.NewCond(&sink.mu)
+	return sink
 }
 
-func (s *promptToolEventSink) EmitStreamEvent(ev event.StreamEvent) {
-	if s == nil {
-		return
+func (s *promptToolEventSink) EmitStreamEvent(ev event.StreamEvent) bool {
+	if !s.beginEvent() {
+		return false
 	}
+	defer s.finishEvent()
 	ev = acpclient.LimitStreamEvent(ev, s.limit)
 	s.mu.Lock()
 	s.events = appendBoundedPromptEvents(s.events, ev)
@@ -1644,16 +1677,84 @@ func (s *promptToolEventSink) EmitStreamEvent(ev event.StreamEvent) {
 	}
 	s.mu.Unlock()
 	if s.next != nil {
-		s.next.EmitStreamEvent(ev)
+		return s.next.EmitStreamEvent(ev)
 	}
+	return false
 }
 
-func (s *promptToolEventSink) EmitToolStreamEvent(toolEvent mcp.ToolStreamEvent) {
+func (s *promptToolEventSink) beginEvent() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.inFlight++
+	return true
+}
+
+func (s *promptToolEventSink) finishEvent() {
+	s.mu.Lock()
+	s.inFlight--
+	if s.inFlight == 0 {
+		s.cond.Broadcast()
+	}
+	s.mu.Unlock()
+}
+
+func (s *promptToolEventSink) CloseAndWait() {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	s.closed = true
+	for s.inFlight > 0 {
+		s.cond.Wait()
+	}
+	s.mu.Unlock()
+}
+
+func (s *promptToolEventSink) EmitToolStreamEvent(toolEvent mcp.ToolStreamEvent) bool {
+	if s == nil {
+		return false
+	}
 	if ev, ok := toolEvent.ToAgentStreamEvent(); ok {
-		s.EmitStreamEvent(ev)
+		return s.EmitStreamEvent(ev)
+	}
+	return false
+}
+
+func (s *promptToolEventSink) EmitCanceledDecisions(canceled canceledPromptDecisions) {
+	if s == nil {
+		return
+	}
+	for _, req := range canceled.approvals {
+		_ = s.EmitToolStreamEvent(mcp.ToolStreamEvent{
+			Type:       string(event.ToolApprovalRequest),
+			ToolCallID: req.ToolCallID,
+			ToolName:   req.ToolName,
+			Input:      req.ToolInput,
+			ApprovalID: req.ID,
+			ShortID:    req.ShortID,
+			Status:     toolapproval.NormalizedStatus(req.Status),
+			Metadata: map[string]any{
+				"approval": toolapproval.RequestMetadata(req),
+			},
+		})
+	}
+	for _, req := range canceled.userInputs {
+		_ = s.EmitToolStreamEvent(mcp.ToolStreamEvent{
+			Type:        string(event.UserInputRequest),
+			ToolCallID:  req.ToolCallID,
+			ToolName:    req.ToolName,
+			Input:       req.Input,
+			UserInputID: req.ID,
+			ShortID:     req.ShortID,
+			Status:      req.Status,
+			Metadata:    userinput.DeferredMetadata(req),
+		})
 	}
 }
 

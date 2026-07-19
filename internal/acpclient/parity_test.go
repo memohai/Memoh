@@ -147,7 +147,7 @@ func parityCallbacks(approval ToolApprovalService, streamID string, nativeTools 
 		callbacks.toolGateway = testACPToolGateway(nativeTools...)
 	}
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	callbacks.setPromptState(collector, EventSinkFunc(func(event.StreamEvent) bool { return true }), callbacks.baseSession)
 	return callbacks, collector
 }
 
@@ -312,6 +312,35 @@ func TestParityGatedWriteProducesEquivalentApprovalCard(t *testing.T) {
 		if nativeInput[key] != acpInput[key] {
 			t.Fatalf("approval input[%q] parity broken: native=%v acp=%v", key, nativeInput[key], acpInput[key])
 		}
+	}
+}
+
+func TestDirectACPApprovalRejectsUnacknowledgedPendingDelivery(t *testing.T) {
+	t.Parallel()
+
+	approval := &parityApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved, DecidedByUser: true}}
+	callbacks, collector := parityCallbacks(approval, "stream-1")
+	callbacks.setPromptState(collector, EventSinkFunc(func(event.StreamEvent) bool { return false }), callbacks.baseSession)
+	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("call-1"),
+			Title:      acp.Ptr("Write notes.txt"),
+			Kind:       acp.Ptr(acp.ToolKindEdit),
+			RawInput:   map[string]any{"file_path": "notes.txt", "content": "hello"},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission() error = %v", err)
+	}
+	if resp.Outcome.Cancelled == nil || approval.waiters != 0 || len(approval.rejects) != 1 {
+		t.Fatalf("response/waiters/rejects = %#v/%d/%v, want canceled/0/one rejection", resp, approval.waiters, approval.rejects)
+	}
+	events := collector.result().Events
+	if len(events) != 2 || events[0].Status != toolapproval.StatusPending || events[1].Status != toolapproval.StatusRejected {
+		t.Fatalf("recorded events = %#v, want pending attempt then rejected cleanup", events)
 	}
 }
 

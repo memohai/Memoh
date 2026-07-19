@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/models"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/workspace"
@@ -22,6 +20,8 @@ import (
 // fakes.
 type userInputService interface {
 	CreatePending(ctx context.Context, input userinput.CreatePendingInput) (userinput.Request, error)
+	Get(ctx context.Context, requestID string) (userinput.Request, error)
+	MarkPromptDelivered(ctx context.Context, requestID string) (userinput.Request, error)
 	ResolveTarget(ctx context.Context, input userinput.ResolveInput) (userinput.Request, error)
 	AdvanceText(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error)
 	Submit(ctx context.Context, input userinput.SubmitInput) (userinput.Request, error)
@@ -34,6 +34,30 @@ func (r *Resolver) AdvancePlainTextUserInput(ctx context.Context, input userinpu
 		return userinput.AdvanceTextResult{}, errors.New("user input service not configured")
 	}
 	return r.userInput.AdvanceText(ctx, input)
+}
+
+func (r *Resolver) ResolvePendingUserInput(ctx context.Context, botID, sessionID, requestID string) (userinput.Request, error) {
+	if r.userInput == nil {
+		return userinput.Request{}, errors.New("user input service not configured")
+	}
+	req, err := r.userInput.Get(ctx, requestID)
+	if err != nil {
+		return userinput.Request{}, fmt.Errorf("load durable user input request %s: %w", requestID, err)
+	}
+	if req.ID != requestID || req.BotID != botID || req.SessionID != sessionID {
+		return userinput.Request{}, errors.New("durable user input request does not match its delivery scope")
+	}
+	if req.Status != userinput.StatusPending || !r.userInput.CanRespond(req) {
+		return userinput.Request{}, userinput.ErrNotFound
+	}
+	return req, nil
+}
+
+func (r *Resolver) MarkUserInputPromptDelivered(ctx context.Context, requestID string) (userinput.Request, error) {
+	if r.userInput == nil {
+		return userinput.Request{}, errors.New("user input service not configured")
+	}
+	return r.userInput.MarkPromptDelivered(ctx, requestID)
 }
 
 type UserInputResponseInput struct {
@@ -333,35 +357,7 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	stream := r.agent.Stream(ctx, cfg)
-	stored := false
-	for event := range stream {
-		data, err := json.Marshal(event)
-		if err != nil {
-			continue
-		}
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if snap, ok := extractTerminalSnapshot(data); ok {
-				if storeErr := r.persistTerminalSnapshot(
-					context.WithoutCancel(ctx),
-					chatReq,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
-					snap,
-				); storeErr != nil {
-					return storeErr
-				}
-				stored = true
-			}
-		}
-		if eventCh != nil {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-	return nil
+	return r.streamContinuation(ctx, cfg, chatReq, resolved.ModelID, eventCh)
 }
 
 func withLocalWebUserInputReplyTarget(req userinput.Request) userinput.Request {

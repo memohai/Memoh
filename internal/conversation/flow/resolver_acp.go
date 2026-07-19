@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/acpfeedback"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/memohai/memoh/internal/agent/sessionmode"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
@@ -27,6 +29,8 @@ import (
 type acpPrompter interface {
 	Prompt(ctx context.Context, input acpagent.PromptInput) (acpclient.PromptResult, error)
 }
+
+const acpDecisionProjectionTimeout = 5 * time.Second
 
 type acpPreparedAttachments struct {
 	Images                   []acpclient.PromptImage
@@ -142,11 +146,23 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	req.Query = strings.TrimSpace(req.Query)
-	req = r.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
+	req, err = r.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
+	if err != nil {
+		return err
+	}
 	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	canDeliverDecisions := eventCh != nil &&
+		sessionmode.IsInteractive(sess.Type) &&
+		req.TurnReplacement == nil &&
+		len(req.DiscussDeliveryClaims) == 0
+	canRequestUserInput := canDeliverDecisions && r.userInput != nil
+	promptStreamID := strings.TrimSpace(req.StreamID)
+	if !canDeliverDecisions {
+		promptStreamID = ""
+	}
 	activePrompt := r.registerACPActivePrompt(req.BotID, req.SessionID)
 	defer r.unregisterACPActivePrompt(req.BotID, req.SessionID, activePrompt)
 	go func() {
@@ -158,9 +174,33 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	}()
 
 	var (
-		projectedMu       sync.Mutex
-		projectedStatuses = map[string]string{}
+		projectedMu               sync.Mutex
+		durableProjectionStatuses = acpTranscriptCoveredStatuses{}
+		transcriptCoveredStatuses = acpTranscriptCoveredStatuses{}
+		suppressedPending         = map[string]struct{}{}
+		observedTerminal          = map[string]struct{}{}
+		emitErrMu                 sync.Mutex
+		emitErr                   error
 	)
+	setEmitError := func(err error) {
+		if err == nil {
+			return
+		}
+		emitErrMu.Lock()
+		first := emitErr == nil
+		if first {
+			emitErr = err
+		}
+		emitErrMu.Unlock()
+		if first {
+			cancel()
+		}
+	}
+	getEmitError := func() error {
+		emitErrMu.Lock()
+		defer emitErrMu.Unlock()
+		return emitErr
+	}
 	recordProjectionStatus := func(ev agentpkg.StreamEvent) bool {
 		toolCallID := strings.TrimSpace(ev.ToolCallID)
 		if toolCallID == "" {
@@ -169,50 +209,81 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		status := acpDecisionProjectionStatus(ev)
 		projectedMu.Lock()
 		defer projectedMu.Unlock()
-		if projectedStatuses[toolCallID] == status {
+		if status == "pending" {
+			transcriptCoveredStatuses.add(toolCallID, status)
+			if _, terminal := observedTerminal[toolCallID]; terminal {
+				return false
+			}
+			if _, suppressed := suppressedPending[toolCallID]; suppressed {
+				return false
+			}
+		} else {
+			observedTerminal[toolCallID] = struct{}{}
+		}
+		if durableProjectionStatuses.has(toolCallID, status) {
+			return true
+		}
+		projectionCtx, projectionCancel := context.WithTimeout(context.WithoutCancel(ctx), acpDecisionProjectionTimeout)
+		persisted := r.persistACPDecisionProjection(projectionCtx, req, ev)
+		projectionCancel()
+		if persisted {
+			transcriptCoveredStatuses.add(toolCallID, status)
+		}
+		if !persisted {
+			if status == "pending" {
+				suppressedPending[toolCallID] = struct{}{}
+			}
 			return false
 		}
-		projectedStatuses[toolCallID] = status
+		durableProjectionStatuses.add(toolCallID, status)
 		return true
 	}
-	releaseProjection := func(toolCallID string) {
-		toolCallID = strings.TrimSpace(toolCallID)
-		if toolCallID == "" {
-			return
-		}
-		projectedMu.Lock()
-		delete(projectedStatuses, toolCallID)
-		projectedMu.Unlock()
-	}
-	projectedSnapshot := func() map[string]struct{} {
+	projectedSnapshot := func() acpTranscriptCoveredStatuses {
 		projectedMu.Lock()
 		defer projectedMu.Unlock()
-		if len(projectedStatuses) == 0 {
-			return nil
-		}
-		out := make(map[string]struct{}, len(projectedStatuses))
-		for id := range projectedStatuses {
-			out[id] = struct{}{}
-		}
-		return out
+		return transcriptCoveredStatuses.clone()
 	}
 
-	emit := func(ev agentpkg.StreamEvent) {
-		if isACPDecisionProjectionEvent(ev) && recordProjectionStatus(ev) {
-			if !r.persistACPDecisionProjection(context.WithoutCancel(ctx), req, ev) {
-				releaseProjection(ev.ToolCallID)
+	emit := func(ev agentpkg.StreamEvent) bool {
+		select {
+		case <-streamCtx.Done():
+			return false
+		default:
+		}
+		if getEmitError() != nil {
+			return false
+		}
+		projectionAcknowledged := true
+		if isACPDecisionProjectionEvent(ev) {
+			if strings.TrimSpace(ev.ToolCallID) == "" {
+				setEmitError(fmt.Errorf("ACP prompt emitted decision event %s without a tool call id", ev.Type))
+				return false
 			}
+			canDeliver := canDeliverDecisions
+			if ev.Type == agentpkg.EventUserInputRequest {
+				canDeliver = canRequestUserInput
+			}
+			if !canDeliver {
+				setEmitError(fmt.Errorf("ACP prompt cannot accept decision event %s", ev.Type))
+				return false
+			}
+			projectionAcknowledged = recordProjectionStatus(ev)
+			if !projectionAcknowledged && acpDecisionProjectionStatus(ev) == "pending" {
+				return false
+			}
+		}
+		data, err := json.Marshal(ev)
+		if err != nil {
+			return false
 		}
 		if activePrompt != nil {
 			activePrompt.emit(ev)
 		}
-		data, err := json.Marshal(ev)
-		if err != nil {
-			return
-		}
 		select {
 		case eventCh <- json.RawMessage(data):
+			return projectionAcknowledged
 		case <-streamCtx.Done():
+			return false
 		}
 	}
 
@@ -226,7 +297,8 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		BotID:                    req.BotID,
 		ChatID:                   req.ChatID,
 		SessionID:                req.SessionID,
-		StreamID:                 req.StreamID,
+		StreamID:                 promptStreamID,
+		SessionType:              sess.Type,
 		RouteID:                  req.RouteID,
 		AgentID:                  agentID,
 		ProjectPath:              projectPath,
@@ -239,7 +311,7 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		CurrentPlatform:          req.CurrentChannel,
 		ReplyTarget:              req.ReplyTarget,
 		ConversationType:         req.ConversationType,
-		CanRequestUserInput:      r.canDeliverUserInputWS(eventCh),
+		CanRequestUserInput:      canRequestUserInput,
 		// This flag controls image bytes returned later by the read-media MCP
 		// tool. Initial user images use ACP ImageBlock transport above.
 		SupportsImageInput:    false,
@@ -251,6 +323,10 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		ForceFreshRuntime:     req.ForceFreshRuntime,
 		Sink:                  acpclient.EventSinkFunc(emit),
 	})
+	if emitErr := getEmitError(); emitErr != nil {
+		r.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the prompt cannot accept decisions")
+		return emitErr
+	}
 	if err != nil {
 		r.logger.Error("ACP prompt failed",
 			slog.String("bot_id", req.BotID),
@@ -272,9 +348,15 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		if failureDelta != "" {
 			emit(agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: failureDelta})
 		}
-		_ = r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err)
+		cursorCommitted, persistErr := r.persistACPRoundResult(acpRoundPersistContext(ctx, req), req, agentID, projectPath, failedResult, err)
+		if persistErr != nil {
+			r.logger.Error("ACP failed round persist failed", slog.Any("error", persistErr), slog.String("session_id", req.SessionID))
+		}
 		emit(agentpkg.StreamEvent{Type: agentpkg.EventTextEnd})
-		emit(acpTerminalStreamEvent(agentpkg.EventAbort, failedResult))
+		emit(acpTerminalStreamEventWithCursor(agentpkg.EventAbort, failedResult, req, cursorCommitted))
+		if persistErr != nil {
+			return fmt.Errorf("persist failed ACP round: %w", persistErr)
+		}
 		return nil
 	}
 
@@ -282,10 +364,14 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	projected := projectedSnapshot()
 	result = ensureACPPromptOutput(result)
 	result.Output = filterACPProjectedOutput(result.Output, projected)
-	if err := r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil); err != nil {
-		r.logger.Error("ACP persist failed", slog.Any("error", err), slog.String("session_id", req.SessionID))
+	cursorCommitted, persistErr := r.persistACPRoundResult(acpRoundPersistContext(ctx, req), req, agentID, projectPath, result, nil)
+	if persistErr != nil {
+		r.logger.Error("ACP persist failed", slog.Any("error", persistErr), slog.String("session_id", req.SessionID))
 	}
-	emit(acpTerminalStreamEvent(agentpkg.EventEnd, result))
+	emit(acpTerminalStreamEventWithCursor(agentpkg.EventEnd, result, req, cursorCommitted))
+	if persistErr != nil {
+		return fmt.Errorf("persist ACP round: %w", persistErr)
+	}
 	return nil
 }
 
@@ -410,6 +496,13 @@ func ensureACPPromptOutput(result acpclient.PromptResult) acpclient.PromptResult
 	return result
 }
 
+func acpRoundPersistContext(ctx context.Context, req conversation.ChatRequest) context.Context {
+	if req.DiscussConsumedEventCursor > 0 {
+		return ctx
+	}
+	return context.WithoutCancel(ctx)
+}
+
 func acpTerminalStreamEvent(eventType agentpkg.StreamEventType, result acpclient.PromptResult) agentpkg.StreamEvent {
 	result = ensureACPPromptOutput(result)
 	ev := agentpkg.StreamEvent{Type: eventType}
@@ -420,6 +513,19 @@ func acpTerminalStreamEvent(eventType agentpkg.StreamEventType, result acpclient
 		if data, err := json.Marshal(result.Usage); err == nil {
 			ev.Usage = data
 		}
+	}
+	return ev
+}
+
+func acpTerminalStreamEventWithCursor(
+	eventType agentpkg.StreamEventType,
+	result acpclient.PromptResult,
+	req conversation.ChatRequest,
+	cursorCommitted bool,
+) agentpkg.StreamEvent {
+	ev := acpTerminalStreamEvent(eventType, result)
+	if req.DiscussConsumedEventCursor > 0 {
+		ev.Metadata = map[string]any{agentpkg.MetadataKeyDiscussCursorCommitted: cursorCommitted}
 	}
 	return ev
 }
@@ -518,7 +624,7 @@ func (r *Resolver) streamACPAgentChunks(ctx context.Context, req conversation.Ch
 func isACPDecisionProjectionEvent(ev agentpkg.StreamEvent) bool {
 	switch ev.Type {
 	case agentpkg.EventUserInputRequest, agentpkg.EventToolApprovalRequest:
-		return strings.TrimSpace(ev.ToolCallID) != ""
+		return true
 	default:
 		return false
 	}
@@ -532,16 +638,37 @@ func acpDecisionProjectionStatus(ev agentpkg.StreamEvent) string {
 	return status
 }
 
-func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req conversation.ChatRequest) conversation.ChatRequest {
-	if req.UserMessagePersisted || r == nil || r.messageService == nil || strings.TrimSpace(req.BotID) == "" {
-		return req
+func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req conversation.ChatRequest) (conversation.ChatRequest, error) {
+	if req.TurnReplacement != nil {
+		existingRequestMessageID := strings.TrimSpace(req.TurnReplacement.ExistingRequestMessageID)
+		if existingRequestMessageID != "" {
+			persistedUserMessageID := strings.TrimSpace(req.PersistedUserMessageID)
+			if persistedUserMessageID != "" && persistedUserMessageID != existingRequestMessageID {
+				return req, errors.New("replacement request id does not match persisted ACP user message")
+			}
+			req.UserMessagePersisted = true
+			req.PersistedUserMessageID = existingRequestMessageID
+		}
+		return req, nil
+	}
+	if len(req.DiscussDeliveryClaims) > 0 && !req.UserMessagePersisted {
+		return req, errors.New("exact ACP delivery has no durable request message")
+	}
+	if req.UserMessagePersisted {
+		if strings.TrimSpace(req.PersistedUserMessageID) == "" {
+			return req, errors.New("persisted ACP user message has no durable request id")
+		}
+		return req, nil
+	}
+	if r == nil || r.messageService == nil || strings.TrimSpace(req.BotID) == "" {
+		return req, nil
 	}
 	displayText := strings.TrimSpace(req.RawQuery)
 	if displayText == "" {
 		displayText = strings.TrimSpace(req.Query)
 	}
 	if displayText == "" && len(req.Attachments) == 0 {
-		return req
+		return req, nil
 	}
 	contentText := strings.TrimSpace(req.Query)
 	if contentText == "" {
@@ -552,8 +679,7 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		Content: conversation.NewTextContent(contentText),
 	})
 	if err != nil {
-		r.logger.Warn("persist ACP leading user message: marshal failed", slog.Any("error", err))
-		return req
+		return req, fmt.Errorf("marshal ACP leading user message: %w", err)
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
 	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
@@ -574,19 +700,18 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		RuntimeType:             runtimeType,
 	})
 	if err != nil {
-		r.logger.Warn("persist ACP leading user message failed",
-			slog.String("bot_id", req.BotID),
-			slog.String("session_id", req.SessionID),
-			slog.Any("error", err))
-		return req
+		return req, fmt.Errorf("persist ACP leading user message: %w", err)
 	}
 	req.UserMessagePersisted = true
 	req.PersistedUserMessageID = persisted.ID
-	return req
+	return req, nil
 }
 
 func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req conversation.ChatRequest, ev agentpkg.StreamEvent) bool {
-	if r == nil || r.messageService == nil || strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.SessionID) == "" {
+	if req.TurnReplacement != nil || len(req.DiscussDeliveryClaims) > 0 {
+		return false
+	}
+	if r == nil || r.messageService == nil || strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.SessionID) == "" || strings.TrimSpace(req.PersistedUserMessageID) == "" {
 		return false
 	}
 	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents([]event.StreamEvent{ev}, ""))
@@ -602,7 +727,7 @@ func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req convers
 				slog.Any("error", err))
 			return false
 		}
-		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+		input := messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
 			SenderChannelIdentityID: "",
@@ -611,12 +736,36 @@ func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req convers
 			Metadata:                buildRouteMetadata(req),
 			SessionMode:             sessionMode,
 			RuntimeType:             runtimeType,
-		}); err != nil {
+			TurnRequestMessageID:    req.PersistedUserMessageID,
+		}
+		var persistErr error
+		if req.EventDeliveryClaim != nil {
+			claims := make([]messagepkg.DeliveryClaim, 0, 1)
+			persistErr = appendDeliveryClaim(&claims, make(map[string]string), "request", req.EventID, req.EventDeliveryClaim)
+			if persistErr == nil {
+				batcher, ok := r.messageService.(messagepkg.AtomicRoundPersister)
+				if !ok {
+					persistErr = errors.New("message service does not support claim-fenced projection persistence")
+				} else {
+					var persisted []messagepkg.Message
+					var handled bool
+					persisted, handled, persistErr = batcher.PersistRound(ctx, []messagepkg.PersistInput{input}, messagepkg.RoundPersistenceOptions{
+						DeliveryClaims: claims,
+					})
+					if persistErr == nil && (!handled || len(persisted) != 1) {
+						persistErr = errors.New("message service did not persist claim-fenced projection")
+					}
+				}
+			}
+		} else {
+			_, persistErr = r.messageService.Persist(ctx, input)
+		}
+		if persistErr != nil {
 			r.logger.Warn("persist ACP decision projection failed",
 				slog.String("bot_id", req.BotID),
 				slog.String("session_id", req.SessionID),
 				slog.String("tool_call_id", ev.ToolCallID),
-				slog.Any("error", err))
+				slog.Any("error", persistErr))
 			return false
 		}
 		return true
@@ -624,8 +773,38 @@ func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req convers
 	return false
 }
 
-func filterACPProjectedOutput(messages []sdk.Message, projected map[string]struct{}) []sdk.Message {
-	if len(messages) == 0 || len(projected) == 0 {
+type acpTranscriptCoveredStatuses map[string]map[string]struct{}
+
+func (s acpTranscriptCoveredStatuses) add(toolCallID, status string) {
+	statuses := s[toolCallID]
+	if statuses == nil {
+		statuses = map[string]struct{}{}
+		s[toolCallID] = statuses
+	}
+	statuses[status] = struct{}{}
+}
+
+func (s acpTranscriptCoveredStatuses) has(toolCallID, status string) bool {
+	_, ok := s[toolCallID][status]
+	return ok
+}
+
+func (s acpTranscriptCoveredStatuses) clone() acpTranscriptCoveredStatuses {
+	if len(s) == 0 {
+		return nil
+	}
+	cloned := make(acpTranscriptCoveredStatuses, len(s))
+	for toolCallID, statuses := range s {
+		cloned[toolCallID] = make(map[string]struct{}, len(statuses))
+		for status := range statuses {
+			cloned[toolCallID][status] = struct{}{}
+		}
+	}
+	return cloned
+}
+
+func filterACPProjectedOutput(messages []sdk.Message, covered acpTranscriptCoveredStatuses) []sdk.Message {
+	if len(messages) == 0 || len(covered) == 0 {
 		return messages
 	}
 	out := make([]sdk.Message, 0, len(messages))
@@ -642,7 +821,8 @@ func filterACPProjectedOutput(messages []sdk.Message, projected map[string]struc
 				content = append(content, part)
 				continue
 			}
-			if _, skip := projected[strings.TrimSpace(call.ToolCallID)]; skip {
+			toolCallID := strings.TrimSpace(call.ToolCallID)
+			if covered.has(toolCallID, acpDecisionToolCallStatus(call)) {
 				changed = true
 				continue
 			}
@@ -657,6 +837,20 @@ func filterACPProjectedOutput(messages []sdk.Message, projected map[string]struc
 		out = append(out, msg)
 	}
 	return out
+}
+
+func acpDecisionToolCallStatus(call sdk.ToolCallPart) string {
+	for _, key := range []string{"approval", "user_input"} {
+		metadata, ok := call.ProviderMetadata[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		status, _ := metadata["status"].(string)
+		if status = strings.ToLower(strings.TrimSpace(status)); status != "" {
+			return status
+		}
+	}
+	return ""
 }
 
 // cancelPendingACPApprovals closes the residual approval window when a turn
@@ -684,6 +878,11 @@ func (r *Resolver) cancelPendingACPApprovals(ctx context.Context, req conversati
 }
 
 func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatRequest, agentID, projectPath string, result acpclient.PromptResult, promptErr error) error {
+	_, err := r.persistACPRoundResult(ctx, req, agentID, projectPath, result, promptErr)
+	return err
+}
+
+func (r *Resolver) persistACPRoundResult(ctx context.Context, req conversation.ChatRequest, agentID, projectPath string, result acpclient.PromptResult, promptErr error) (bool, error) {
 	meta := map[string]any{
 		"acp_agent_id": agentID,
 		"project_path": projectPath,
@@ -730,15 +929,38 @@ func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatReq
 		}
 	}
 	skipMemory := promptErr != nil || req.UserMessagePersisted || req.SkipMemoryExtraction
-	err := r.storeRoundWithOptions(ctx, req, round, "", storeRoundOptions{
+	persisted, err := r.storeRoundWithOptionsResult(ctx, req, round, "", storeRoundOptions{
 		SkipMemory:              skipMemory,
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex:  metadataByIndex,
+		DiscussCursor:           discussCursorUpdateFromRequest(req),
 	})
 	if err == nil && promptErr == nil && req.UserMessagePersisted && !req.SkipMemoryExtraction {
 		go r.storeMemory(context.WithoutCancel(ctx), req, round)
 	}
-	return err
+	return err == nil && len(persisted) > 0, err
+}
+
+func discussCursorUpdateFromRequest(req conversation.ChatRequest) *messagepkg.DiscussCursorUpdate {
+	if req.DiscussConsumedEventCursor <= 0 {
+		return nil
+	}
+	claims := make([]messagepkg.DeliveryClaim, len(req.DiscussDeliveryClaims))
+	for i, claim := range req.DiscussDeliveryClaims {
+		claims[i] = messagepkg.DeliveryClaim{
+			EventID:    claim.EventID,
+			ClaimToken: claim.ClaimToken,
+		}
+	}
+	return &messagepkg.DiscussCursorUpdate{
+		SessionID:           req.SessionID,
+		ScopeKey:            req.DiscussCursorScope,
+		RouteID:             req.RouteID,
+		Source:              req.CurrentChannel,
+		ConsumedCursor:      req.DiscussConsumedCursor,
+		ConsumedEventCursor: req.DiscussConsumedEventCursor,
+		DeliveryClaims:      claims,
+	}
 }
 
 // acpFailureResult appends a short, sanitized failure marker to the partial

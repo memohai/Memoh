@@ -130,10 +130,21 @@ func RunFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult
 	}
 	releaseWaiter := func() {}
 	if flow.RegisterWaiter != nil {
-		releaseWaiter = flow.RegisterWaiter(req.ID)
+		release := flow.RegisterWaiter(req.ID)
+		released := false
+		releaseWaiter = func() {
+			if released {
+				return
+			}
+			released = true
+			if release != nil {
+				release()
+			}
+		}
 	}
 	defer releaseWaiter()
 	if !emit(req) {
+		releaseWaiter()
 		reason := strings.TrimSpace(flow.UndeliveredReason)
 		if reason == "" {
 			reason = "tool approval request was not delivered to the interactive stream"
@@ -143,14 +154,12 @@ func RunFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult
 		rejected, rejectErr := svc.Reject(rejectCtx, req.ID, "", reason)
 		if rejectErr != nil {
 			if recovered, ok := recoverTerminalDecision(rejectCtx, svc, req.ID, rejectErr); ok {
-				return resultFromDecision(req, recovered, emit), nil
+				_ = resultFromDecision(req, recovered, emit)
+				return FlowResult{Status: StatusRejected, DecisionReason: reason}, nil
 			}
 			return FlowResult{}, rejectErr
 		}
-		if recorded := strings.TrimSpace(rejected.DecisionReason); recorded != "" {
-			reason = recorded
-		}
-		return FlowResult{Status: StatusRejected, DecisionReason: reason}, nil
+		return resultFromDecision(req, rejected, emit), nil
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, waitTimeout)

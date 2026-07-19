@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -10,6 +11,8 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
 )
+
+var errInjectedMessageNotConsumed = errors.New("injected message was not consumed by the active stream")
 
 // InjectMessage is an alias for conversation.InjectMessage, re-exported so
 // callers within this package do not need to import the conversation package
@@ -33,15 +36,51 @@ const (
 	ModeQueue
 )
 
+// InjectResult describes whether an injection entered the active stream.
+type InjectResult int
+
+const (
+	InjectUnavailable InjectResult = iota
+	InjectAccepted
+	InjectDuplicate
+	InjectSessionMismatch
+)
+
 // QueuedTask holds everything needed to start an agent stream for a queued message.
 type QueuedTask struct {
-	Ctx         context.Context
-	Cfg         channel.ChannelConfig
-	Msg         channel.InboundMessage
-	Sender      channel.StreamReplySender
-	Ident       InboundIdentity
-	Text        string
-	Attachments []conversation.ChatAttachment
+	Ctx                    context.Context
+	Cfg                    channel.ChannelConfig
+	Msg                    channel.InboundMessage
+	Sender                 channel.StreamReplySender
+	Ident                  InboundIdentity
+	Text                   string
+	Attachments            []conversation.ChatAttachment
+	PersistedUserMessageID string
+	EventID                string
+	SessionID              string
+}
+
+type queuedReplayContextKey struct{}
+
+type queuedReplayState struct {
+	persistedUserMessageID string
+	eventID                string
+	sessionID              string
+	ownsRoute              bool
+}
+
+func withQueuedReplayState(ctx context.Context, task QueuedTask) context.Context {
+	return context.WithValue(ctx, queuedReplayContextKey{}, queuedReplayState{
+		persistedUserMessageID: strings.TrimSpace(task.PersistedUserMessageID),
+		eventID:                strings.TrimSpace(task.EventID),
+		sessionID:              strings.TrimSpace(task.SessionID),
+		ownsRoute:              true,
+	})
+}
+
+func queuedReplayStateFromContext(ctx context.Context) (queuedReplayState, bool) {
+	state, ok := ctx.Value(queuedReplayContextKey{}).(queuedReplayState)
+	return state, ok && state.persistedUserMessageID != ""
 }
 
 // PersistFunc is a deferred persistence closure called after the active stream
@@ -50,12 +89,14 @@ type PersistFunc func(ctx context.Context)
 
 // routeState tracks in-flight agent activity for a single route.
 type routeState struct {
-	mu              sync.Mutex
-	activeOwners    int
-	injectCh        chan InjectMessage
-	queue           []QueuedTask
-	pendingPersists []PersistFunc
-	lastUsed        time.Time
+	mu               sync.Mutex
+	activeOwners     int
+	activeSessionID  string
+	injectCh         chan InjectMessage
+	injectedMessages map[string]InjectMessage
+	queue            []QueuedTask
+	pendingPersists  []PersistFunc
+	lastUsed         time.Time
 }
 
 // RouteDispatcher manages per-route concurrency for inbound message processing.
@@ -112,6 +153,14 @@ func (d *RouteDispatcher) IsActive(routeID string) bool {
 	return rs.activeOwners > 0
 }
 
+func (d *RouteDispatcher) TryAcquireActive(routeID string) (<-chan InjectMessage, bool) {
+	return d.tryAcquireActive(routeID, "")
+}
+
+func (d *RouteDispatcher) ActiveInjectChannel(routeID string) <-chan InjectMessage {
+	return d.activeInjectChannel(routeID, "")
+}
+
 // MarkActive acquires active ownership for a route and returns the shared
 // inject channel that the agent should drain via PrepareStep.
 func (d *RouteDispatcher) MarkActive(routeID string) <-chan InjectMessage {
@@ -129,13 +178,22 @@ func (d *RouteDispatcher) MarkActive(routeID string) <-chan InjectMessage {
 
 // MarkDoneResult holds the data returned when a route transitions from active to idle.
 type MarkDoneResult struct {
-	PendingPersists []PersistFunc
-	QueuedTasks     []QueuedTask
+	PendingPersists  []PersistFunc
+	InjectedMessages []InjectMessage
+	QueuedTasks      []QueuedTask
 }
 
 // MarkDone releases active ownership for a route. It returns pending persist
 // functions and queued tasks only when the last active owner exits.
 func (d *RouteDispatcher) MarkDone(routeID string) MarkDoneResult {
+	return d.finishActive(routeID, false)
+}
+
+func (d *RouteDispatcher) FinishActive(routeID string) MarkDoneResult {
+	return d.finishActive(routeID, true)
+}
+
+func (d *RouteDispatcher) finishActive(routeID string, reserveNext bool) MarkDoneResult {
 	routeID = strings.TrimSpace(routeID)
 	if routeID == "" {
 		return MarkDoneResult{}
@@ -150,8 +208,17 @@ func (d *RouteDispatcher) MarkDone(routeID string) MarkDoneResult {
 	if rs.activeOwners > 0 {
 		return MarkDoneResult{}
 	}
+	rs.activeSessionID = ""
 
 	drainInjectCh(rs.injectCh)
+	var injectedMessages []InjectMessage
+	if len(rs.injectedMessages) > 0 {
+		injectedMessages = make([]InjectMessage, 0, len(rs.injectedMessages))
+		for _, message := range rs.injectedMessages {
+			injectedMessages = append(injectedMessages, message)
+		}
+	}
+	rs.injectedMessages = nil
 
 	var persists []PersistFunc
 	if len(rs.pendingPersists) > 0 {
@@ -161,11 +228,18 @@ func (d *RouteDispatcher) MarkDone(routeID string) MarkDoneResult {
 
 	var tasks []QueuedTask
 	if len(rs.queue) > 0 {
-		tasks = rs.queue
-		rs.queue = nil
+		if reserveNext {
+			tasks = []QueuedTask{rs.queue[0]}
+			rs.queue = rs.queue[1:]
+			rs.activeOwners = 1
+			rs.activeSessionID = strings.TrimSpace(tasks[0].SessionID)
+		} else {
+			tasks = rs.queue
+			rs.queue = nil
+		}
 	}
 
-	return MarkDoneResult{PendingPersists: persists, QueuedTasks: tasks}
+	return MarkDoneResult{PendingPersists: persists, InjectedMessages: injectedMessages, QueuedTasks: tasks}
 }
 
 // AddPendingPersist records a deferred persist closure to be executed after the
@@ -183,34 +257,8 @@ func (d *RouteDispatcher) AddPendingPersist(routeID string, fn PersistFunc) {
 }
 
 // Inject sends a message to the inject channel of an active route.
-// Returns true if the message was accepted (route is active and channel not full).
-func (d *RouteDispatcher) Inject(routeID string, msg InjectMessage) bool {
-	routeID = strings.TrimSpace(routeID)
-	if routeID == "" {
-		return false
-	}
-	rs := d.getOrCreate(routeID)
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	if rs.activeOwners == 0 {
-		return false
-	}
-	select {
-	case rs.injectCh <- msg:
-		if d.logger != nil {
-			d.logger.Info("message injected into active stream",
-				slog.String("route_id", routeID),
-			)
-		}
-		return true
-	default:
-		if d.logger != nil {
-			d.logger.Warn("inject channel full, message dropped",
-				slog.String("route_id", routeID),
-			)
-		}
-		return false
-	}
+func (d *RouteDispatcher) Inject(routeID string, msg InjectMessage) InjectResult {
+	return d.inject(routeID, "", msg)
 }
 
 // Enqueue adds a task to the route's queue for later processing.
@@ -222,6 +270,33 @@ func (d *RouteDispatcher) Enqueue(routeID string, task QueuedTask) {
 	rs := d.getOrCreate(routeID)
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
+	d.enqueueLocked(routeID, rs, task)
+}
+
+func (d *RouteDispatcher) TryEnqueueIfActive(routeID string, task QueuedTask) bool {
+	routeID = strings.TrimSpace(routeID)
+	if routeID == "" {
+		return false
+	}
+	rs := d.getOrCreate(routeID)
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.activeOwners == 0 {
+		return false
+	}
+	d.enqueueLocked(routeID, rs, task)
+	return true
+}
+
+func (d *RouteDispatcher) enqueueLocked(routeID string, rs *routeState, task QueuedTask) {
+	eventID := strings.TrimSpace(task.EventID)
+	if eventID != "" {
+		for _, queued := range rs.queue {
+			if strings.TrimSpace(queued.EventID) == eventID {
+				return
+			}
+		}
+	}
 	rs.queue = append(rs.queue, task)
 	rs.lastUsed = time.Now()
 	if d.logger != nil {
@@ -250,7 +325,10 @@ func (d *RouteDispatcher) Cleanup(maxAge time.Duration) {
 func drainInjectCh(ch chan InjectMessage) {
 	for {
 		select {
-		case <-ch:
+		case message := <-ch:
+			if message.OnPersisted != nil {
+				message.OnPersisted(errInjectedMessageNotConsumed)
+			}
 		default:
 			return
 		}

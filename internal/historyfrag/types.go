@@ -46,6 +46,7 @@ type HistoryRecord struct {
 	DBMessageID       string
 	ExternalMessageID string
 	EventID           string
+	EventCursor       int64
 	SessionID         string
 	SessionIDKnown    bool
 	BotID             string

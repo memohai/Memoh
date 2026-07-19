@@ -10,6 +10,22 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
+func TestTurnResponseEntryDoesNotSerializeRuntimeHistoryPosition(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(TurnResponseEntry{
+		Role:            "assistant",
+		Content:         "answer",
+		HistoryPosition: HistoryPosition{TurnPosition: 2, MessageSequence: 1},
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if strings.Contains(string(raw), "history_position") || strings.Contains(string(raw), "turn_position") {
+		t.Fatalf("runtime history position leaked into JSON: %s", raw)
+	}
+}
+
 func TestDecodeTurnResponseEntryUsesVisibleText(t *testing.T) {
 	t.Parallel()
 
@@ -45,6 +61,38 @@ func TestDecodeTurnResponseEntryUsesVisibleText(t *testing.T) {
 		t.Fatalf("reasoning leaked into TR: %q", entry.Content)
 	}
 	assertRawPart(t, entry.RawContent, "text", "任务完成", "")
+}
+
+func TestDecodeTurnResponseEntryPreservesInternalUserImageContent(t *testing.T) {
+	t.Parallel()
+
+	content := json.RawMessage(`[{"type":"image","image":"data:image/png;base64,aW1hZ2U=","mediaType":"image/png"}]`)
+	modelMessage, err := json.Marshal(conversation.ModelMessage{
+		Role:    "user",
+		Content: content,
+	})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+
+	entry, ok := DecodeTurnResponseEntry(messagepkg.Message{
+		ID:        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		Role:      "user",
+		Content:   modelMessage,
+		CreatedAt: time.Unix(1710000000, 0).UTC(),
+	})
+	if !ok {
+		t.Fatal("expected internal user image to be preserved as a turn entry")
+	}
+	if entry.Role != "user" || entry.SourceMessageID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+		t.Fatalf("entry identity = %#v", entry)
+	}
+	if string(entry.RawContent) != string(content) {
+		t.Fatalf("raw content = %s, want %s", entry.RawContent, content)
+	}
+	if entry.Content != "" {
+		t.Fatalf("image-only debug content = %q, want empty", entry.Content)
+	}
 }
 
 func TestDecodeTurnResponseEntryPreservesToolCallOnlyPayload(t *testing.T) {

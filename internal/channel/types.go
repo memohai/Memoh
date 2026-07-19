@@ -77,6 +77,7 @@ type InboundMessage struct {
 	ReceivedAt   time.Time
 	Source       string
 	Metadata     map[string]any
+	IsSelfSent   bool
 }
 
 // RoutingKey returns a stable identifier used for reply routing.

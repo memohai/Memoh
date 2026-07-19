@@ -22,6 +22,8 @@ const testACPUserInputOwnerID = "owner-user"
 type fakeUserInputService struct {
 	target   userinput.Request
 	resolved userinput.Request
+	getErr   error
+	createFn func(userinput.CreatePendingInput) (userinput.Request, error)
 
 	submitCalls   int
 	cancelCalls   int
@@ -39,9 +41,32 @@ func (*fakeUserInputService) AdvanceText(context.Context, userinput.AdvanceTextI
 	return userinput.AdvanceTextResult{}, errors.New("unexpected AdvanceText")
 }
 
-func (f *fakeUserInputService) CreatePending(context.Context, userinput.CreatePendingInput) (userinput.Request, error) {
+func (f *fakeUserInputService) CreatePending(_ context.Context, input userinput.CreatePendingInput) (userinput.Request, error) {
 	f.createCalls++
+	if f.createFn != nil {
+		return f.createFn(input)
+	}
 	return userinput.Request{}, errors.New("unexpected CreatePending")
+}
+
+func (f *fakeUserInputService) Get(context.Context, string) (userinput.Request, error) {
+	return f.target, f.getErr
+}
+
+func TestResolvePendingUserInputPreservesNotFound(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Resolver{userInput: &fakeUserInputService{getErr: userinput.ErrNotFound}}
+	_, err := resolver.ResolvePendingUserInput(context.Background(), "bot-1", "session-1", "input-1")
+	if !errors.Is(err, userinput.ErrNotFound) {
+		t.Fatalf("ResolvePendingUserInput() error = %v, want ErrNotFound", err)
+	}
+}
+
+func (f *fakeUserInputService) MarkPromptDelivered(context.Context, string) (userinput.Request, error) {
+	now := time.Now()
+	f.target.PromptDeliveredAt = &now
+	return f.target, nil
 }
 
 func (f *fakeUserInputService) ResolveTarget(context.Context, userinput.ResolveInput) (userinput.Request, error) {
@@ -92,6 +117,46 @@ func chatResolvedRequest() userinput.Request {
 				map[string]any{"question_id": "q1", "selected": []any{map[string]any{"id": "q1.o1", "label": "Plan A"}}},
 			},
 		},
+	}
+}
+
+func TestResolvePendingUserInputRequiresRespondableTarget(t *testing.T) {
+	pending := userinput.Request{
+		ID: "input-1", BotID: "bot-1", SessionID: "session-1", Status: userinput.StatusPending,
+	}
+	for _, tt := range []struct {
+		name       string
+		canRespond bool
+		wantFound  bool
+		botID      string
+	}{
+		{name: "respondable", canRespond: true, wantFound: true, botID: pending.BotID},
+		{name: "orphaned", canRespond: false, wantFound: false, botID: pending.BotID},
+		{name: "wrong scope", canRespond: true, botID: "other-bot"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &fakeUserInputService{
+				target: pending, canRespond: tt.canRespond, canRespondSet: true,
+			}
+			resolver := &Resolver{userInput: service}
+
+			got, err := resolver.ResolvePendingUserInput(context.Background(), tt.botID, pending.SessionID, pending.ID)
+			if tt.wantFound {
+				if err != nil || got.ID != pending.ID {
+					t.Fatalf("ResolvePendingUserInput() = %#v, %v", got, err)
+				}
+				return
+			}
+			if tt.name == "wrong scope" {
+				if err == nil || errors.Is(err, userinput.ErrNotFound) {
+					t.Fatalf("ResolvePendingUserInput() error = %v, want binding failure", err)
+				}
+				return
+			}
+			if !errors.Is(err, userinput.ErrNotFound) {
+				t.Fatalf("ResolvePendingUserInput() error = %v, want ErrNotFound", err)
+			}
+		})
 	}
 }
 

@@ -123,7 +123,10 @@ type Resolver struct {
 	sessionTurnLocks    map[string]*sync.Mutex
 	sessionCompactionMu sync.Mutex
 	sessionCompactions  map[string]*sessionCompactionGate
+	asyncCompactionOnce sync.Once
+	asyncCompactions    *compactionScheduler
 	timeout             time.Duration
+	idleTimeoutOptions  *idleTimeoutOptions
 	memorySearchTimeout time.Duration
 	clockLocation       *time.Location
 	logger              *slog.Logger
@@ -339,6 +342,48 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		)
 		return resolvedContext{}, err
 	}
+	displayName := r.resolveDisplayName(ctx, req)
+	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
+
+	tz := runCfg.Identity.TimezoneLocation
+	if tz == nil {
+		tz = time.UTC
+	}
+	forwardedFrom := strings.TrimSpace(req.ForwardSender)
+	if forwardedFrom == "" && strings.TrimSpace(req.ForwardFromUserID) != "" {
+		forwardedFrom = "user:" + strings.TrimSpace(req.ForwardFromUserID)
+	}
+	if forwardedFrom == "" && strings.TrimSpace(req.ForwardFromConversationID) != "" {
+		forwardedFrom = "conversation:" + strings.TrimSpace(req.ForwardFromConversationID)
+	}
+	if forwardedFrom == "" && (strings.TrimSpace(req.ForwardMessageID) != "" || req.ForwardDate > 0) {
+		forwardedFrom = "unknown"
+	}
+	headerInput := UserMessageHeaderInput{
+		MessageID:          strings.TrimSpace(req.ExternalMessageID),
+		ChannelIdentityID:  strings.TrimSpace(req.SourceChannelIdentityID),
+		DisplayName:        displayName,
+		Channel:            req.CurrentChannel,
+		ConversationType:   strings.TrimSpace(req.ConversationType),
+		ConversationName:   strings.TrimSpace(req.ConversationName),
+		Target:             strings.TrimSpace(req.ReplyTarget),
+		AttachmentPaths:    extractAttachmentPaths(mergedAttachments),
+		Time:               time.Now().In(tz),
+		Timezone:           runCfg.Identity.Timezone,
+		ReplyToMessageID:   req.SourceReplyToMessageID,
+		ReplySender:        req.ReplySender,
+		ReplyPreview:       req.ReplyPreview,
+		ForwardedFrom:      forwardedFrom,
+		ForwardedMessageID: req.ForwardMessageID,
+	}
+	headerifiedQuery := ""
+	if userQueryNeedsHeader(req, len(mergedAttachments)) {
+		headerifiedQuery = FormatUserHeader(headerInput, req.Query)
+	}
+	headerifiedModelQuery := headerifiedQuery
+	if strings.TrimSpace(modelQuery) != strings.TrimSpace(req.Query) {
+		headerifiedModelQuery = FormatUserHeader(headerInput, modelQuery)
+	}
 	memoryMsg := r.loadMemoryContextMessage(ctx, req)
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
 	if memoryMsg != nil {
@@ -360,10 +405,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
-	contextTokenBudget := 0
-	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
-		contextTokenBudget = *chatModel.Config.ContextWindow
-	}
+	contextTokenBudget := modelContextTokenBudget(chatModel)
 
 	var messages []conversation.ModelMessage
 	var historyRecords []historyfrag.HistoryRecord
@@ -371,7 +413,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	var compactableTokens int
 	var compactableTokensKnown bool
 	if usePipeline {
-		messages = r.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+		built, buildErr := r.buildPipelineContext(ctx, req, contextTokenBudget, headerifiedModelQuery)
+		if buildErr != nil {
+			return resolvedContext{}, buildErr
+		}
+		messages = built.Messages
+		historyRecords = built.HistoryRecords
+		estimatedTokens = built.EstimatedTokens
 	} else if r.conversationSvc != nil {
 		historyFallback := historyScopeFallbackFromChatRequest(req)
 		prepared, loadErr := r.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
@@ -453,33 +501,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 	messages = repairToolCallClosures(messages, syntheticToolClosureError)
 
-	displayName := r.resolveDisplayName(ctx, req)
-	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
-
-	tz := runCfg.Identity.TimezoneLocation
-	if tz == nil {
-		tz = time.UTC
-	}
-	headerInput := UserMessageHeaderInput{
-		MessageID:         strings.TrimSpace(req.ExternalMessageID),
-		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
-		DisplayName:       displayName,
-		Channel:           req.CurrentChannel,
-		ConversationType:  strings.TrimSpace(req.ConversationType),
-		ConversationName:  strings.TrimSpace(req.ConversationName),
-		Target:            strings.TrimSpace(req.ReplyTarget),
-		AttachmentPaths:   extractAttachmentPaths(mergedAttachments),
-		Time:              time.Now().In(tz),
-		Timezone:          runCfg.Identity.Timezone,
-	}
-	headerifiedQuery := ""
-	if userQueryNeedsHeader(req, len(mergedAttachments)) {
-		headerifiedQuery = FormatUserHeader(headerInput, req.Query)
-	}
-	headerifiedModelQuery := headerifiedQuery
-	if strings.TrimSpace(modelQuery) != strings.TrimSpace(req.Query) {
-		headerifiedModelQuery = FormatUserHeader(headerInput, modelQuery)
-	}
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	// When using the pipeline the user message is already in the RC;
@@ -494,35 +515,12 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 
 	var injectedRecords *[]conversation.InjectedMessageRecord
 	if req.InjectCh != nil {
-		agentInjectCh := make(chan agentpkg.InjectMessage, cap(req.InjectCh))
-		go func() {
-			for msg := range req.InjectCh {
-				agentMsg := agentpkg.InjectMessage{
-					Text:            msg.Text,
-					HeaderifiedText: msg.HeaderifiedText,
-				}
-				// Inline any image attachments from the injected message so the
-				// model receives them as vision input alongside the text.
-				if runCfg.SupportsImageInput && len(msg.Attachments) > 0 {
-					agentMsg.ImageParts = r.inlineInjectAttachments(ctx, req.BotID, msg.Attachments)
-				}
-				agentInjectCh <- agentMsg
-			}
-			close(agentInjectCh)
-		}()
-		runCfg.InjectCh = agentInjectCh
-
-		records := make([]conversation.InjectedMessageRecord, 0)
-		injectedRecords = &records
-		var recMu sync.Mutex
-		runCfg.InjectedRecorder = func(headerifiedText string, insertAfter int) {
-			recMu.Lock()
-			*injectedRecords = append(*injectedRecords, conversation.InjectedMessageRecord{
-				HeaderifiedText: headerifiedText,
-				InsertAfter:     insertAfter,
-			})
-			recMu.Unlock()
-		}
+		runCfg.InjectCh, injectedRecords, runCfg.InjectedRecorder = r.prepareInjectedMessageRun(
+			ctx,
+			req.BotID,
+			req.InjectCh,
+			runCfg.SupportsImageInput,
+		)
 	}
 
 	return resolvedContext{
@@ -537,6 +535,21 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		compactableTokensKnown:      compactableTokensKnown,
 		contextTokenBudget:          contextTokenBudget,
 	}, nil
+}
+
+func agentInjectMessageHasContent(msg agentpkg.InjectMessage, supportsImageInput bool) bool {
+	if strings.TrimSpace(msg.HeaderifiedText) != "" || strings.TrimSpace(msg.Text) != "" {
+		return true
+	}
+	if !supportsImageInput {
+		return false
+	}
+	for _, image := range msg.ImageParts {
+		if strings.TrimSpace(image.Image) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Chat sends a synchronous chat request and stores the result.
@@ -1197,10 +1210,18 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 
 	cfg = r.prepareRunConfig(ctx, cfg)
 	return pipelinepkg.ResolveRunConfigResult{
-		RunConfig:   cfg,
-		ModelID:     chatModel.ID,
-		RuntimeType: runtimeType,
+		RunConfig:          cfg,
+		ModelID:            chatModel.ID,
+		RuntimeType:        runtimeType,
+		ContextTokenBudget: modelContextTokenBudget(chatModel),
 	}, nil
+}
+
+func modelContextTokenBudget(model models.GetResponse) int {
+	if model.Config.ContextWindow != nil && *model.Config.ContextWindow > 0 {
+		return *model.Config.ContextWindow
+	}
+	return 0
 }
 
 // prepareRunConfig generates the system prompt and appends the user message.

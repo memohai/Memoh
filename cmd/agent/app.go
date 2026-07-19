@@ -380,14 +380,11 @@ func provideEventStore(log *slog.Logger, queries dbstore.Queries) *pipelinepkg.E
 	return pipelinepkg.NewEventStore(log, queries)
 }
 
-func provideDiscussDriver(log *slog.Logger, pipeline *pipelinepkg.Pipeline, eventStore *pipelinepkg.EventStore, agent *agentpkg.Agent, msgService *message.DBService) *pipelinepkg.DiscussDriver {
+func provideDiscussDriver(log *slog.Logger, eventStore *pipelinepkg.EventStore, agent *agentpkg.Agent) *pipelinepkg.DiscussDriver {
 	return pipelinepkg.NewDiscussDriver(pipelinepkg.DiscussDriverDeps{
-		Pipeline:       pipeline,
-		EventStore:     eventStore,
-		Agent:          agent,
-		MessageService: msgService,
-		CursorStore:    eventStore,
-		Logger:         log,
+		Agent:       agent,
+		CursorStore: eventStore,
+		Logger:      log,
 	})
 }
 
@@ -621,6 +618,7 @@ func (p *publicMediaBaseProvider) SignPublicMediaPath(path string) (string, bool
 }
 
 func provideChannelRouter(
+	lc fx.Lifecycle,
 	log *slog.Logger,
 	registry *channel.Registry,
 	hub *local.RouteHub,
@@ -672,6 +670,12 @@ func provideChannelRouter(
 	processor.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
 	processor.SetCommandHandler(cmdHandler)
 	processor.SetRequestedSkillResolver(containerdHandler)
+	lc.Append(fx.Hook{
+		OnStop: func(context.Context) error {
+			processor.Close()
+			return nil
+		},
+	})
 	return processor
 }
 
@@ -1041,6 +1045,14 @@ func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, 
 
 func (a *sessionEnsurerAdapter) GetActiveSession(ctx context.Context, routeID string) (inbound.SessionResult, error) {
 	sess, err := a.svc.GetActiveForRoute(ctx, routeID)
+	if err != nil {
+		return inbound.SessionResult{}, err
+	}
+	return inboundSessionResult(sess), nil
+}
+
+func (a *sessionEnsurerAdapter) GetSession(ctx context.Context, sessionID string) (inbound.SessionResult, error) {
+	sess, err := a.svc.Get(ctx, sessionID)
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}

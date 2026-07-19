@@ -1143,6 +1143,32 @@ func (s *Service) restoreEmailBindings(ctx context.Context, botID string, state 
 	return nil
 }
 
+const maxRestoredSessionEventCursor int64 = 1<<53 - 1
+
+type restoredSessionEventCursorAllocator interface {
+	NextSessionEventCursor(context.Context) (int64, error)
+}
+
+type restoredSessionEventCompletionWriter interface {
+	RestoreSessionEventDeliveryCompletion(
+		context.Context,
+		sqlc.RestoreSessionEventDeliveryCompletionParams,
+	) (int64, error)
+}
+
+type restoredSessionEvent struct {
+	item              sqlc.BotSessionEvent
+	sessionID         pgtype.UUID
+	sourceCursor      int64
+	sourceCursorValid bool
+	archiveOrder      int
+}
+
+type restoredEventCursorMapping struct {
+	source int64
+	target int64
+}
+
 // restoreHistory recreates sessions, messages and (optionally) assets in a
 // single transaction so a failure leaves no partial history. When replace is
 // set, existing conversation state is cleared first so the import is a real
@@ -1259,6 +1285,85 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		pendingSessions = next
 	}
 
+	eventMap := map[string]pgtype.UUID{}
+	restoredEventCursors := map[string][]restoredEventCursorMapping{}
+	if hasEntry(state.entries, "history/session_events.json") {
+		events, err := readEntry[[]sqlc.BotSessionEvent](state, "history/session_events.json")
+		if err != nil {
+			return err
+		}
+		restoredEvents := make([]restoredSessionEvent, 0, len(events))
+		for i, item := range events {
+			sessionID := mappedPGUUID(sessionMap, item.SessionID)
+			if sessionID.Valid {
+				sourceCursor, sourceCursorValid := archivedEventCursor(item.EventData)
+				restoredEvents = append(restoredEvents, restoredSessionEvent{
+					item:              item,
+					sessionID:         sessionID,
+					sourceCursor:      sourceCursor,
+					sourceCursorValid: sourceCursorValid,
+					archiveOrder:      i,
+				})
+			}
+		}
+		sort.SliceStable(restoredEvents, func(i, j int) bool {
+			return restoredSessionEventPrecedes(restoredEvents[i], restoredEvents[j])
+		})
+		allocator, ok := q.(restoredSessionEventCursorAllocator)
+		if len(restoredEvents) > 0 && !ok {
+			return errors.New("session event cursor allocator is not configured")
+		}
+		for _, restored := range restoredEvents {
+			targetCursor, err := allocator.NextSessionEventCursor(ctx)
+			if err != nil {
+				return fmt.Errorf("allocate restored session event cursor: %w", err)
+			}
+			eventData, err := replaceArchivedEventCursor(restored.item.EventData, targetCursor)
+			if err != nil {
+				return fmt.Errorf("restore session event cursor: %w", err)
+			}
+			created, err := q.CreateSessionEvent(ctx, sqlc.CreateSessionEventParams{
+				BotID:                   pgBotID,
+				SessionID:               restored.sessionID,
+				EventKind:               restored.item.EventKind,
+				EventData:               eventData,
+				ExternalMessageID:       restored.item.ExternalMessageID,
+				SenderChannelIdentityID: pgtype.UUID{},
+				ReceivedAtMs:            restored.item.ReceivedAtMs,
+			})
+			if err != nil {
+				return fmt.Errorf("session event: %w", err)
+			}
+			if restored.item.DeliveryCompletedAt.Valid {
+				completionWriter, ok := q.(restoredSessionEventCompletionWriter)
+				if !ok {
+					return errors.New("session event completion restorer is not configured")
+				}
+				rows, completionErr := completionWriter.RestoreSessionEventDeliveryCompletion(
+					ctx,
+					sqlc.RestoreSessionEventDeliveryCompletionParams{
+						DeliveryCompletedAt: restored.item.DeliveryCompletedAt,
+						EventID:             created,
+					},
+				)
+				if completionErr != nil {
+					return fmt.Errorf("restore session event completion: %w", completionErr)
+				}
+				if rows != 1 {
+					return fmt.Errorf("restore session event completion: updated %d rows, want 1", rows)
+				}
+			}
+			eventMap[restored.item.ID.String()] = created
+			if restored.sourceCursorValid {
+				sourceSessionID := restored.item.SessionID.String()
+				restoredEventCursors[sourceSessionID] = append(restoredEventCursors[sourceSessionID], restoredEventCursorMapping{
+					source: restored.sourceCursor,
+					target: targetCursor,
+				})
+			}
+		}
+	}
+
 	if hasEntry(state.entries, "history/discuss_cursors.json") {
 		cursors, err := readEntry[[]sqlc.BotSessionDiscussCursor](state, "history/discuss_cursors.json")
 		if err != nil {
@@ -1275,39 +1380,13 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 				RouteID:        pgtype.UUID{},
 				Source:         cursor.Source,
 				ConsumedCursor: cursor.ConsumedCursor,
+				ConsumedEventCursor: remapRestoredDiscussCursor(
+					restoredEventCursors[cursor.SessionID.String()],
+					cursor.ConsumedEventCursor,
+				),
 			}); err != nil {
 				return fmt.Errorf("discuss cursor: %w", err)
 			}
-		}
-	}
-
-	eventMap := map[string]pgtype.UUID{}
-	if hasEntry(state.entries, "history/session_events.json") {
-		events, err := readEntry[[]sqlc.BotSessionEvent](state, "history/session_events.json")
-		if err != nil {
-			return err
-		}
-		for _, item := range events {
-			sessionID := pgtype.UUID{}
-			if item.SessionID.Valid {
-				sessionID = sessionMap[item.SessionID.String()]
-			}
-			if !sessionID.Valid {
-				continue
-			}
-			created, err := q.CreateSessionEvent(ctx, sqlc.CreateSessionEventParams{
-				BotID:                   pgBotID,
-				SessionID:               sessionID,
-				EventKind:               item.EventKind,
-				EventData:               defaultJSONMap(item.EventData),
-				ExternalMessageID:       item.ExternalMessageID,
-				SenderChannelIdentityID: pgtype.UUID{},
-				ReceivedAtMs:            item.ReceivedAtMs,
-			})
-			if err != nil {
-				return fmt.Errorf("session event: %w", err)
-			}
-			eventMap[item.ID.String()] = created
 		}
 	}
 
@@ -1315,9 +1394,10 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 	if err != nil {
 		return err
 	}
+	eventLinkWinners := restoredHistoryEventLinkWinners(messages, eventMap)
 	messageMap := map[string]pgtype.UUID{}
 	restoredMessages := make([]restoredHistoryMessage, 0, len(messages))
-	for _, item := range messages {
+	for i, item := range messages {
 		sessionID := pgtype.UUID{}
 		var descriptor restoredHistoryDescriptor
 		if item.SessionID.Valid {
@@ -1339,8 +1419,12 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			runtimeType = sessionpkg.RuntimeModel
 		}
 		eventID := pgtype.UUID{}
-		if item.EventID.Valid {
+		if eventLinkWinners[i] {
 			eventID = eventMap[item.EventID.String()]
+		}
+		metadata, err := stripRestoredHistoryEventDedupMarker(item)
+		if err != nil {
+			return fmt.Errorf("message metadata: %w", err)
 		}
 		created, err := q.CreateMessage(ctx, sqlc.CreateMessageParams{
 			BotID:                  pgBotID,
@@ -1349,7 +1433,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			SourceReplyToMessageID: item.SourceReplyToMessageID,
 			Role:                   item.Role,
 			Content:                item.Content,
-			Metadata:               item.Metadata,
+			Metadata:               metadata,
 			Usage:                  item.Usage,
 			SessionMode:            sessionMode,
 			RuntimeType:            runtimeType,
@@ -1406,6 +1490,82 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		}
 	}
 	return nil
+}
+
+func restoredSessionEventPrecedes(left, right restoredSessionEvent) bool {
+	leftReplayKey := left.item.ReceivedAtMs
+	if left.sourceCursorValid {
+		leftReplayKey = left.sourceCursor
+	}
+	rightReplayKey := right.item.ReceivedAtMs
+	if right.sourceCursorValid {
+		rightReplayKey = right.sourceCursor
+	}
+	if leftReplayKey != rightReplayKey {
+		return leftReplayKey < rightReplayKey
+	}
+	if left.item.ReceivedAtMs != right.item.ReceivedAtMs {
+		return left.item.ReceivedAtMs < right.item.ReceivedAtMs
+	}
+	if left.item.CreatedAt.Valid != right.item.CreatedAt.Valid {
+		return left.item.CreatedAt.Valid
+	}
+	if left.item.CreatedAt.Valid && !left.item.CreatedAt.Time.Equal(right.item.CreatedAt.Time) {
+		return left.item.CreatedAt.Time.Before(right.item.CreatedAt.Time)
+	}
+	if left.item.ID.Valid != right.item.ID.Valid {
+		return left.item.ID.Valid
+	}
+	if idOrder := bytes.Compare(left.item.ID.Bytes[:], right.item.ID.Bytes[:]); idOrder != 0 {
+		return idOrder < 0
+	}
+	return left.archiveOrder < right.archiveOrder
+}
+
+func archivedEventCursor(raw []byte) (int64, bool) {
+	var event struct {
+		Cursor json.RawMessage `json:"event_cursor"`
+	}
+	if err := json.Unmarshal(defaultJSONMap(raw), &event); err != nil || len(event.Cursor) == 0 {
+		return 0, false
+	}
+	var cursor int64
+	if err := json.Unmarshal(event.Cursor, &cursor); err != nil || cursor <= 0 || cursor > maxRestoredSessionEventCursor {
+		return 0, false
+	}
+	return cursor, true
+}
+
+func replaceArchivedEventCursor(raw []byte, cursor int64) ([]byte, error) {
+	if cursor <= 0 || cursor > maxRestoredSessionEventCursor {
+		return nil, fmt.Errorf("event cursor %d is outside the JSON-safe range", cursor)
+	}
+	var event map[string]json.RawMessage
+	if err := json.Unmarshal(defaultJSONMap(raw), &event); err != nil {
+		return nil, err
+	}
+	if event == nil {
+		event = map[string]json.RawMessage{}
+	}
+	encodedCursor, err := json.Marshal(cursor)
+	if err != nil {
+		return nil, err
+	}
+	event["event_cursor"] = encodedCursor
+	return json.Marshal(event)
+}
+
+func remapRestoredDiscussCursor(mappings []restoredEventCursorMapping, sourceBoundary int64) int64 {
+	if sourceBoundary <= 0 || sourceBoundary > maxRestoredSessionEventCursor {
+		return 0
+	}
+	var targetBoundary int64
+	for _, mapping := range mappings {
+		if mapping.source <= sourceBoundary && mapping.target > targetBoundary {
+			targetBoundary = mapping.target
+		}
+	}
+	return targetBoundary
 }
 
 type restoredHistoryMessage struct {

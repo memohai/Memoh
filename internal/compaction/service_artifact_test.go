@@ -48,6 +48,7 @@ func TestDoCompactionPersistsDurableCoverageAndAnchor(t *testing.T) {
 	}
 	for i := range rows {
 		rows[i].CreatedAt = pgtype.Timestamptz{Time: time.UnixMilli(int64(i+1) * 1000), Valid: true}
+		rows[i].EventCursor = int64(i+1) * 10
 	}
 	q := &fakeQueries{uncompacted: rows}
 	stub := &stubModel{summary: "SUMMARY"}
@@ -65,6 +66,9 @@ func TestDoCompactionPersistsDurableCoverageAndAnchor(t *testing.T) {
 	}
 	if coverage[0].Ref.ContentHash == "" || coverage[1].Ref.ContentHash == "" {
 		t.Fatalf("coverage must preserve source hashes: %#v", coverage)
+	}
+	if coverage[0].EventCursor != 10 || coverage[1].EventCursor != 20 {
+		t.Fatalf("coverage event cursors = %d, %d; want 10, 20", coverage[0].EventCursor, coverage[1].EventCursor)
 	}
 	if q.completed.AnchorStartMs != 1000 || q.completed.AnchorEndMs != 2000 {
 		t.Fatalf("anchor = %d..%d, want 1000..2000", q.completed.AnchorStartMs, q.completed.AnchorEndMs)

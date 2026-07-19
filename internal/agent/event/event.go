@@ -32,6 +32,8 @@ const (
 	Error               StreamEventType = "error"
 )
 
+const MetadataKeyDiscussCursorCommitted = "discuss_cursor_committed"
+
 // StreamEvent is emitted by an agent runtime during streaming. The JSON
 // shape is the wire format WebSocket clients consume; do not change tags.
 type StreamEvent struct {

@@ -68,12 +68,12 @@ func TestSplitByRatioDoesNotOrphanToolResult(t *testing.T) {
 		mkRow(t, "assistant", `"done"`, 100),
 	}
 	items, _ := itemsFromRows(rows)
-	// total=500, ratio=50 -> keepTokens=250 -> unadjusted cutoff would keep the
-	// tool result at the head of the keep side.
-	toCompact := splitByRatio(items, 500, 50)
+	// candidate total=400, ratio=40 -> keepTokens=240. The tool call takes the
+	// kept tail to 300, so the complete call/result exchange remains together.
+	toCompact := splitByRatio(items, 40)
 	firstKeptIsNotOrphanTool(t, items, toCompact)
-	if len(toCompact) != 3 {
-		t.Fatalf("compact count = %d, want 3", len(toCompact))
+	if len(toCompact) != 1 {
+		t.Fatalf("compact count = %d, want 1", len(toCompact))
 	}
 }
 
@@ -128,7 +128,7 @@ func TestSplitByRatioNoOpsWhenToolBoundaryWouldConsumeRecentTail(t *testing.T) {
 		toolResultRow(t, 100),
 	}
 	items, _ := itemsFromRows(rows)
-	toCompact := splitByRatio(items, 200, 100)
+	toCompact := splitByRatio(items, 100)
 	if len(toCompact) != 0 {
 		t.Fatalf("compaction should no-op rather than consume the recent tool tail, got %d items", len(toCompact))
 	}
@@ -144,7 +144,7 @@ func TestSplitByRatioPreservesNewestUserTurnSuffix(t *testing.T) {
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
 	items, _ := itemsFromRows(rows)
-	toCompact := splitByRatio(items, 400, 100)
+	toCompact := splitByRatio(items, 100)
 	if len(toCompact) != 2 {
 		t.Fatalf("compact count = %d, want 2 (keep newest user turn suffix)", len(toCompact))
 	}
@@ -163,7 +163,7 @@ func TestSplitByRatioCompactsCurrentTurnMiddleWhenUserIsFirst(t *testing.T) {
 		mkRow(t, "assistant", `"latest tail"`, 100),
 	}
 	items, _ := itemsFromRows(rows)
-	toCompact := splitByRatio(items, 400, 100)
+	toCompact := splitByRatio(items, 100)
 	if len(toCompact) != 2 {
 		t.Fatalf("compact count = %d, want 2 middle current-turn messages", len(toCompact))
 	}
@@ -182,7 +182,7 @@ func TestSplitByRatioPreservesCurrentTurnTailToolClosure(t *testing.T) {
 		toolResultRow(t, 100),
 	}
 	items, _ := itemsFromRows(rows)
-	toCompact := splitByRatio(items, 400, 100)
+	toCompact := splitByRatio(items, 100)
 	if len(toCompact) != 1 {
 		t.Fatalf("compact count = %d, want only pre-tool middle message", len(toCompact))
 	}

@@ -223,15 +223,22 @@ func estimateBytesAsTokens(value string) int {
 
 // splitByRatio splits items so that roughly the first ratio% (by token weight)
 // are returned for compaction, and the rest are kept as-is.
-func splitByRatio(items []CompactionCandidate, totalInputTokens, ratio int) []CompactionCandidate {
-	if ratio <= 0 || totalInputTokens <= 0 || len(items) == 0 {
+func splitByRatio(items []CompactionCandidate, ratio int) []CompactionCandidate {
+	if ratio <= 0 || len(items) == 0 {
 		return nil
 	}
 	if ratio >= 100 {
 		return guardedCompactionItems(items, len(items))
 	}
 
-	keepTokens := totalInputTokens * (100 - ratio) / 100
+	totalCandidateTokens := 0
+	for _, item := range items {
+		totalCandidateTokens += estimateItemTokens(item)
+	}
+	if totalCandidateTokens <= 0 {
+		return nil
+	}
+	keepTokens := totalCandidateTokens * (100 - ratio) / 100
 	if keepTokens <= 0 {
 		return guardedCompactionItems(items, len(items))
 	}
@@ -241,7 +248,7 @@ func splitByRatio(items []CompactionCandidate, totalInputTokens, ratio int) []Co
 	for i := len(items) - 1; i >= 0; i-- {
 		accumulated += estimateItemTokens(items[i])
 		if accumulated >= keepTokens {
-			cutoff = i + 1
+			cutoff = i
 			break
 		}
 	}

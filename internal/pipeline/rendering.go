@@ -23,13 +23,19 @@ type ImageAttachmentRef struct {
 
 // RenderedSegment is a single segment of rendered context, one per IC node.
 type RenderedSegment struct {
-	ReceivedAtMs int64                  `json:"received_at_ms"`
-	Content      []RenderedContentPiece `json:"content"`
-	IsMyself     bool                   `json:"is_myself,omitempty"`
-	IsSelfSent   bool                   `json:"is_self_sent,omitempty"`
-	MentionsMe   bool                   `json:"mentions_me,omitempty"`
-	RepliesToMe  bool                   `json:"replies_to_me,omitempty"`
-	ImageRefs    []ImageAttachmentRef   `json:"image_refs,omitempty"`
+	MessageID               string                 `json:"message_id,omitempty"`
+	ReceivedAtMs            int64                  `json:"received_at_ms"`
+	EventCursor             int64                  `json:"event_cursor,omitempty"`
+	LastEventAtMs           int64                  `json:"last_event_at_ms,omitempty"`
+	LastEventCursor         int64                  `json:"last_event_cursor,omitempty"`
+	Content                 []RenderedContentPiece `json:"content"`
+	IsMyself                bool                   `json:"is_myself,omitempty"`
+	IsSelfSent              bool                   `json:"is_self_sent,omitempty"`
+	MentionsMe              bool                   `json:"mentions_me,omitempty"`
+	RepliesToMe             bool                   `json:"replies_to_me,omitempty"`
+	ImageRefs               []ImageAttachmentRef   `json:"image_refs,omitempty"`
+	CurrentTrigger          bool                   `json:"-"`
+	CurrentTriggerEvaluated bool                   `json:"-"`
 }
 
 // RenderedContext is the output of the Rendering layer — a slice of segments.
@@ -115,12 +121,16 @@ func renderMessage(msg *ICMessage, params RenderParams) RenderedSegment {
 	if msg.Deleted {
 		text := fmt.Sprintf("<message %s/>", strings.Join(attrs, " "))
 		return RenderedSegment{
-			ReceivedAtMs: msg.ReceivedAtMs,
-			Content:      []RenderedContentPiece{{Type: "text", Text: text}},
-			IsMyself:     isMyself,
-			IsSelfSent:   msg.IsSelfSent,
-			MentionsMe:   mentionsMe,
-			RepliesToMe:  repliesToMe,
+			MessageID:       msg.MessageID,
+			ReceivedAtMs:    msg.ReceivedAtMs,
+			EventCursor:     msg.EventCursor,
+			LastEventAtMs:   lastEventAtMs(msg),
+			LastEventCursor: msg.LastEventCursor,
+			Content:         []RenderedContentPiece{{Type: "text", Text: text}},
+			IsMyself:        isMyself,
+			IsSelfSent:      msg.IsSelfSent,
+			MentionsMe:      mentionsMe,
+			RepliesToMe:     repliesToMe,
 		}
 	}
 
@@ -162,21 +172,37 @@ func renderMessage(msg *ICMessage, params RenderParams) RenderedSegment {
 	}
 
 	return RenderedSegment{
-		ReceivedAtMs: msg.ReceivedAtMs,
-		Content:      pieces,
-		IsMyself:     isMyself,
-		IsSelfSent:   msg.IsSelfSent,
-		MentionsMe:   mentionsMe,
-		RepliesToMe:  repliesToMe,
-		ImageRefs:    imageRefs,
+		MessageID:       msg.MessageID,
+		ReceivedAtMs:    msg.ReceivedAtMs,
+		EventCursor:     msg.EventCursor,
+		LastEventAtMs:   lastEventAtMs(msg),
+		LastEventCursor: msg.LastEventCursor,
+		Content:         pieces,
+		IsMyself:        isMyself,
+		IsSelfSent:      msg.IsSelfSent,
+		MentionsMe:      mentionsMe,
+		RepliesToMe:     repliesToMe,
+		ImageRefs:       imageRefs,
 	}
+}
+
+func lastEventAtMs(msg *ICMessage) int64 {
+	if msg == nil {
+		return 0
+	}
+	if msg.LastEventAtMs > 0 {
+		return msg.LastEventAtMs
+	}
+	return msg.ReceivedAtMs
 }
 
 func renderSystemEvent(event *ICSystemEvent, params RenderParams) RenderedSegment {
 	text := renderSystemEventXML(event, params.ContactNames)
 	return RenderedSegment{
 		ReceivedAtMs: event.ReceivedAtMs,
+		EventCursor:  event.EventCursor,
 		Content:      []RenderedContentPiece{{Type: "text", Text: text}},
+		IsSelfSent:   event.IsSelfSent,
 	}
 }
 

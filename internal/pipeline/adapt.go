@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,6 +69,7 @@ func adaptMessage(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 		ReplyToPreview:   replyToPreview,
 		ForwardInfo:      forwardInfo,
 		Attachments:      attachments,
+		IsSelfSent:       msg.IsSelfSent,
 		MentionsMe:       metadataBool(msg.Metadata, "is_mentioned"),
 		RepliesToMe:      metadataBool(msg.Metadata, "is_reply_to_bot"),
 		Conversation: ConversationMeta{
@@ -274,14 +276,19 @@ func adaptEdit(msg channel.InboundMessage, sessionID, channelIdentityID, display
 
 	_, offset := now.Zone()
 	return EditEvent{
-		SessionID:    sessionID,
-		MessageID:    strings.TrimSpace(msg.Message.ID),
-		Sender:       sender,
-		ReceivedAtMs: now.UnixMilli(),
-		TimestampSec: now.Unix(),
-		UTCOffsetMin: offset / 60,
-		Content:      adaptBody(msg.Message),
-		Attachments:  adaptAttachments(msg.Message.Attachments),
+		SessionID:       sessionID,
+		EventID:         metadataEventID(msg.Metadata),
+		MessageID:       strings.TrimSpace(msg.Message.ID),
+		Sender:          sender,
+		ReceivedAtMs:    now.UnixMilli(),
+		TimestampSec:    now.Unix(),
+		UTCOffsetMin:    offset / 60,
+		Content:         adaptBody(msg.Message),
+		Attachments:     adaptAttachments(msg.Message.Attachments),
+		IsSelfSent:      msg.IsSelfSent,
+		AddressingKnown: true,
+		MentionsMe:      metadataBool(msg.Metadata, "is_mentioned"),
+		RepliesToMe:     metadataBool(msg.Metadata, "is_reply_to_bot"),
 	}
 }
 
@@ -304,11 +311,13 @@ func adaptService(msg channel.InboundMessage, sessionID string) ServiceEvent {
 	_, offset := now.Zone()
 	event := ServiceEvent{
 		SessionID:    sessionID,
+		EventID:      metadataEventID(msg.Metadata),
 		Action:       ServiceAction(action),
 		Actor:        actor,
 		ReceivedAtMs: now.UnixMilli(),
 		TimestampSec: now.Unix(),
 		UTCOffsetMin: offset / 60,
+		IsSelfSent:   msg.IsSelfSent,
 	}
 	if title, ok := msg.Metadata["new_title"].(string); ok {
 		event.NewTitle = title
@@ -317,6 +326,39 @@ func adaptService(msg channel.InboundMessage, sessionID string) ServiceEvent {
 		event.OldTitle = title
 	}
 	return event
+}
+
+func metadataEventID(meta map[string]any) string {
+	for _, key := range []string{"event_id", "update_id", "callback_query_id", "webhook_event_id"} {
+		value := metadataIDValue(meta[key])
+		if value != "" {
+			return key + ":" + value
+		}
+	}
+	return ""
+}
+
+func metadataIDValue(value any) string {
+	switch value := value.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case int:
+		return strconv.Itoa(value)
+	case int32:
+		return strconv.FormatInt(int64(value), 10)
+	case int64:
+		return strconv.FormatInt(value, 10)
+	case uint:
+		return strconv.FormatUint(uint64(value), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(value), 10)
+	case uint64:
+		return strconv.FormatUint(value, 10)
+	case float64:
+		return strconv.FormatFloat(value, 'g', -1, 64)
+	default:
+		return ""
+	}
 }
 
 func metadataBool(meta map[string]any, key string) bool {

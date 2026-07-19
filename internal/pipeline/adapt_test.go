@@ -85,6 +85,114 @@ func TestAdaptInbound_PreservesAddressingMetadata(t *testing.T) {
 	}
 }
 
+func TestAdaptInbound_EditPreservesEventIdentityAndAddressing(t *testing.T) {
+	t.Parallel()
+
+	event := AdaptInbound(channel.InboundMessage{
+		Message:    channel.Message{ID: "message", Text: "edited @bot"},
+		IsSelfSent: true,
+		Metadata: map[string]any{
+			"event_type":      "edit",
+			"event_id":        "edit-delivery-1",
+			"is_mentioned":    true,
+			"is_reply_to_bot": false,
+		},
+	}, "sess", "sender", "Alice").(EditEvent)
+
+	if event.EventID != "event_id:edit-delivery-1" {
+		t.Fatalf("event id = %q, want stable metadata identity", event.EventID)
+	}
+	if !event.AddressingKnown || !event.MentionsMe || event.RepliesToMe {
+		t.Fatalf("edit addressing = known:%t mention:%t reply:%t", event.AddressingKnown, event.MentionsMe, event.RepliesToMe)
+	}
+	if !event.IsSelfSent {
+		t.Fatal("edit lost self-sent marker")
+	}
+}
+
+func TestReduceEditRefreshesAddressingMetadata(t *testing.T) {
+	t.Parallel()
+
+	ic := Reduce(NewEmptyIC("sess"), MessageEvent{
+		SessionID:   "sess",
+		MessageID:   "message",
+		EventCursor: 10,
+		MentionsMe:  true,
+		RepliesToMe: true,
+		IsSelfSent:  false,
+	})
+	ic = Reduce(ic, EditEvent{
+		SessionID:       "sess",
+		MessageID:       "message",
+		EventCursor:     20,
+		AddressingKnown: true,
+		MentionsMe:      false,
+		RepliesToMe:     false,
+	})
+
+	rendered := Render(ic, RenderParams{})
+	if rendered[0].MentionsMe || rendered[0].RepliesToMe {
+		t.Fatalf("edited addressing remained mention:%t reply:%t", rendered[0].MentionsMe, rendered[0].RepliesToMe)
+	}
+}
+
+func TestAdaptInbound_PreservesSelfSentMarker(t *testing.T) {
+	t.Parallel()
+
+	msg := channel.InboundMessage{
+		Message:    channel.Message{ID: "echo", Text: "sent by this bot"},
+		IsSelfSent: true,
+	}
+
+	event := AdaptInbound(msg, "sess", "bot-channel-identity", "Bot").(MessageEvent)
+	if !event.IsSelfSent {
+		t.Fatal("expected inbound self marker to set MessageEvent.IsSelfSent")
+	}
+	rendered := Render(Reduce(NewEmptyIC("sess"), event), RenderParams{})
+	if got := LatestExternalEventCursor(rendered, 0); got != 0 {
+		t.Fatalf("self-sent event activated external trigger at %d", got)
+	}
+}
+
+func TestSelfSentRenameDoesNotActivateExternalTrigger(t *testing.T) {
+	t.Parallel()
+
+	ic := Reduce(NewEmptyIC("sess"), MessageEvent{
+		SessionID:   "sess",
+		MessageID:   "external",
+		Sender:      &CanonicalUser{ID: "bot", DisplayName: "Old Bot"},
+		EventCursor: 10,
+	})
+	ic = Reduce(ic, MessageEvent{
+		SessionID:   "sess",
+		MessageID:   "echo",
+		Sender:      &CanonicalUser{ID: "bot", DisplayName: "New Bot"},
+		EventCursor: 20,
+		IsSelfSent:  true,
+	})
+
+	if got := LatestExternalEventCursor(Render(ic, RenderParams{}), 10); got != 0 {
+		t.Fatalf("self-sent rename activated external trigger at %d", got)
+	}
+}
+
+func TestAdaptInbound_PreservesSelfSentServiceMarker(t *testing.T) {
+	t.Parallel()
+
+	event := AdaptInbound(channel.InboundMessage{
+		IsSelfSent: true,
+		Metadata: map[string]any{
+			"event_type":     "service",
+			"service_action": string(ServiceChatRenamed),
+			"new_title":      "new title",
+		},
+	}, "sess", "", "")
+
+	if got := LatestExternalEventCursor(Render(Reduce(NewEmptyIC("sess"), event), RenderParams{}), 0); got != 0 {
+		t.Fatalf("self-sent service event activated external trigger at %d", got)
+	}
+}
+
 func TestAdaptInbound_PreservesLink_FromParts(t *testing.T) {
 	msg := channel.InboundMessage{
 		Message: channel.Message{

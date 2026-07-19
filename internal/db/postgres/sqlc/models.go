@@ -276,13 +276,14 @@ type BotSession struct {
 }
 
 type BotSessionDiscussCursor struct {
-	SessionID      pgtype.UUID        `json:"session_id"`
-	ScopeKey       string             `json:"scope_key"`
-	RouteID        pgtype.UUID        `json:"route_id"`
-	Source         string             `json:"source"`
-	ConsumedCursor int64              `json:"consumed_cursor"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	TeamID         pgtype.UUID        `json:"team_id"`
+	SessionID           pgtype.UUID        `json:"session_id"`
+	ScopeKey            string             `json:"scope_key"`
+	RouteID             pgtype.UUID        `json:"route_id"`
+	Source              string             `json:"source"`
+	ConsumedCursor      int64              `json:"consumed_cursor"`
+	ConsumedEventCursor int64              `json:"consumed_event_cursor"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
 }
 
 type BotSessionEvent struct {
@@ -294,6 +295,9 @@ type BotSessionEvent struct {
 	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	ReceivedAtMs            int64              `json:"received_at_ms"`
+	DeliveryClaimToken      pgtype.UUID        `json:"delivery_claim_token"`
+	DeliveryClaimedUntil    pgtype.Timestamptz `json:"delivery_claimed_until"`
+	DeliveryCompletedAt     pgtype.Timestamptz `json:"delivery_completed_at"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	TeamID                  pgtype.UUID        `json:"team_id"`
 }
@@ -857,6 +861,7 @@ type UserInputRequest struct {
 	ToolResultMessageID          pgtype.UUID        `json:"tool_result_message_id"`
 	PromptMessageID              pgtype.UUID        `json:"prompt_message_id"`
 	PromptExternalMessageID      string             `json:"prompt_external_message_id"`
+	PromptDeliveredAt            pgtype.Timestamptz `json:"prompt_delivered_at"`
 	SourcePlatform               string             `json:"source_platform"`
 	ReplyTarget                  string             `json:"reply_target"`
 	ConversationType             string             `json:"conversation_type"`

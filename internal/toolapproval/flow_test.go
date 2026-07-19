@@ -324,8 +324,42 @@ func TestRunFlowUndeliveredPendingRejectsWithoutWaiting(t *testing.T) {
 	if len(svc.rejectCalls) != 1 {
 		t.Fatalf("reject calls = %v, want 1", svc.rejectCalls)
 	}
-	if len(emitted) != 1 || emitted[0].Status != StatusPending {
-		t.Fatalf("emitted = %+v, want only pending delivery attempt", emitted)
+	if len(emitted) != 2 || emitted[0].Status != StatusPending || emitted[1].Status != StatusRejected {
+		t.Fatalf("emitted = %+v, want pending then rejected", emitted)
+	}
+}
+
+func TestRunFlowUndeliveredConcurrentApprovalNeverExecutes(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeFlowService{
+		evaluation: Evaluation{Decision: DecisionNeedsApproval},
+		rejectErr:  ErrAlreadyDecided,
+		getResult: Request{
+			ID:            "approval-1",
+			Status:        StatusApproved,
+			DecidedByUser: true,
+		},
+	}
+	emitted := 0
+	flow := flowInputFor(svc)
+	flow.Emit = func(Request) bool {
+		emitted++
+		return false
+	}
+
+	result, err := RunFlow(context.Background(), svc, flow)
+	if err != nil {
+		t.Fatalf("RunFlow() error = %v", err)
+	}
+	if result.Approved || result.DecidedByUser || result.Status != StatusRejected {
+		t.Fatalf("RunFlow() = %+v, want fail-closed undelivered rejection", result)
+	}
+	if result.DecisionReason != "tool approval request was not delivered to the interactive stream" {
+		t.Fatalf("decision reason = %q, want undelivered reason", result.DecisionReason)
+	}
+	if svc.waitCalls != 0 || svc.waiters != 0 || emitted != 2 {
+		t.Fatalf("wait calls/waiters/emits = %d/%d/%d, want 0/0/2", svc.waitCalls, svc.waiters, emitted)
 	}
 }
 

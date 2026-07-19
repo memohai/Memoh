@@ -38,6 +38,7 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]Compactio
 			})
 			continue
 		}
+		record.EventCursor = row.EventCursor
 		items = append(items, CompactionCandidate{
 			ID:           row.ID,
 			RawContent:   row.Content,
@@ -75,6 +76,7 @@ func candidatesWithAssets(items []CompactionCandidate, rows []sqlc.ListUncompact
 		if err != nil {
 			return nil, fmt.Errorf("rebuild compaction candidate %s with assets: %w", formatUUID(out[i].ID), err)
 		}
+		record.EventCursor = row.EventCursor
 		out[i].Record = record
 	}
 	return out, nil

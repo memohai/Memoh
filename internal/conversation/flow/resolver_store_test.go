@@ -2,12 +2,261 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
+
+func TestStoreRoundBindsDiscussOutputToPersistedUserMessage(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.StoreRound(
+		context.Background(),
+		storeRoundBotID,
+		"33333333-3333-3333-3333-333333333333",
+		"44444444-4444-4444-4444-444444444444",
+		"telegram",
+		"55555555-5555-5555-5555-555555555555",
+		[]sdk.Message{sdk.AssistantMessage("reply")},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("StoreRound() error = %v", err)
+	}
+	if len(messages.persisted) != 1 {
+		t.Fatalf("persisted messages = %d, want 1", len(messages.persisted))
+	}
+	if got := messages.persisted[0].TurnRequestMessageID; got != "55555555-5555-5555-5555-555555555555" {
+		t.Fatalf("turn request message id = %q, want triggering user message", got)
+	}
+}
+
+func TestStoreMessagesDoesNotContinueHistoryTurnWhenHistoryIsSkipped(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	_, err := resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:           storeRoundBotID,
+		SessionID:       "33333333-3333-3333-3333-333333333333",
+		SkipHistoryTurn: true,
+	}, []conversation.ModelMessage{{
+		Role:    "user",
+		Content: json.RawMessage(`[{"type":"image","url":"data:image/png;base64,aW1hZ2U="}]`),
+	}}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("storeMessages() error = %v", err)
+	}
+	if len(messages.persisted) != 1 {
+		t.Fatalf("persisted messages = %d, want 1", len(messages.persisted))
+	}
+	if !messages.persisted[0].SkipHistoryTurn || messages.persisted[0].ContinueHistoryTurn {
+		t.Fatalf("history flags = skip:%t continue:%t, want true/false", messages.persisted[0].SkipHistoryTurn, messages.persisted[0].ContinueHistoryTurn)
+	}
+}
+
+func TestStoreRoundRejectsMissingPersistedUserMessage(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.StoreRound(
+		context.Background(),
+		storeRoundBotID,
+		"33333333-3333-3333-3333-333333333333",
+		"44444444-4444-4444-4444-444444444444",
+		"telegram",
+		"",
+		[]sdk.Message{sdk.AssistantMessage("reply")},
+		"",
+	)
+	if err == nil {
+		t.Fatal("StoreRound() error = nil, want missing trigger message error")
+	}
+	if len(messages.persisted) != 0 {
+		t.Fatalf("persisted messages = %d, want 0 without an explicit turn binding", len(messages.persisted))
+	}
+}
+
+func TestStoreRoundReturnsMessagePersistenceFailure(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("persist failed")
+	messages := &recordingMessageService{persistErr: wantErr}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.StoreRound(
+		context.Background(),
+		storeRoundBotID,
+		"33333333-3333-3333-3333-333333333333",
+		"44444444-4444-4444-4444-444444444444",
+		"telegram",
+		"55555555-5555-5555-5555-555555555555",
+		[]sdk.Message{sdk.AssistantMessage("reply")},
+		"",
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("StoreRound() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestStoreRoundDoesNotPartiallyPersistExistingUserTail(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("persist second tail message")
+	messages := &failingTurnResponseTailService{persistErr: wantErr, failAt: 2}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.StoreRound(
+		context.Background(),
+		storeRoundBotID,
+		"33333333-3333-3333-3333-333333333333",
+		"44444444-4444-4444-4444-444444444444",
+		"telegram",
+		"55555555-5555-5555-5555-555555555555",
+		[]sdk.Message{
+			{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{
+					sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "exec"},
+				},
+			},
+			sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "exec", Result: "ok"}),
+			sdk.AssistantMessage("done"),
+		},
+		"",
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("StoreRound() error = %v, want %v", err, wantErr)
+	}
+	if messages.tailCalls != 1 {
+		t.Fatalf("atomic tail calls = %d, want 1", messages.tailCalls)
+	}
+	if len(messages.durable) != 0 {
+		t.Fatalf("durable tail messages = %d, want 0 after rollback", len(messages.durable))
+	}
+}
+
+func TestStoreMessagesRoutesSkippedExistingUserTailThroughRound(t *testing.T) {
+	t.Parallel()
+
+	messages := &failingTurnResponseTailService{persistErr: errors.New("unexpected turn response tail")}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	persisted, err := resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:                     storeRoundBotID,
+		SessionID:                 "33333333-3333-3333-3333-333333333333",
+		ReusePersistedUserMessage: true,
+		PersistedUserMessageID:    "55555555-5555-5555-5555-555555555555",
+		SkipHistoryTurn:           true,
+	}, []conversation.ModelMessage{
+		{Role: "assistant", Content: conversation.NewTextContent("call tool")},
+		{Role: "tool", Content: conversation.NewTextContent("tool result")},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("storeMessages() error = %v", err)
+	}
+	if messages.tailCalls != 0 {
+		t.Fatalf("atomic tail calls = %d, want 0 for skipped history", messages.tailCalls)
+	}
+	if len(messages.persisted) != 3 || len(persisted) != 3 {
+		t.Fatalf("persisted messages = %d/%d, want 3/3", len(messages.persisted), len(persisted))
+	}
+	for i, input := range messages.persisted {
+		if !input.SkipHistoryTurn {
+			t.Fatalf("persisted message %d did not preserve skipped history", i)
+		}
+	}
+}
+
+func TestStoreMessagesRejectsNonAtomicMixedRound(t *testing.T) {
+	t.Parallel()
+
+	messages := &nonAtomicMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	_, err := resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:     storeRoundBotID,
+		SessionID: "33333333-3333-3333-3333-333333333333",
+		Query:     "first",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("first")},
+		{Role: "assistant", Content: conversation.NewTextContent("first answer")},
+		{Role: "user", Content: conversation.NewTextContent("injected")},
+		{Role: "assistant", Content: conversation.NewTextContent("final")},
+	}, "", storeRoundOptions{})
+	if err == nil {
+		t.Fatal("storeMessages() error = nil, want missing atomic round capability")
+	}
+	if messages.persistCalls != 0 {
+		t.Fatalf("fallback Persist calls = %d, want 0", messages.persistCalls)
+	}
+}
+
+type nonAtomicMessageService struct {
+	messagepkg.Service
+	persistCalls int
+}
+
+func (s *nonAtomicMessageService) Persist(context.Context, messagepkg.PersistInput) (messagepkg.Message, error) {
+	s.persistCalls++
+	return messagepkg.Message{}, nil
+}
+
+type failingTurnResponseTailService struct {
+	recordingMessageService
+	persistErr   error
+	failAt       int
+	persistCalls int
+	tailCalls    int
+	durable      []messagepkg.PersistInput
+}
+
+func (s *failingTurnResponseTailService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	s.persistCalls++
+	if s.persistCalls == s.failAt {
+		return messagepkg.Message{}, s.persistErr
+	}
+	s.durable = append(s.durable, input)
+	return messagepkg.Message{ID: "message-id", Role: input.Role}, nil
+}
+
+func (s *failingTurnResponseTailService) PersistTurnResponseTail(
+	_ context.Context,
+	_ []messagepkg.PersistInput,
+) ([]messagepkg.Message, error) {
+	s.tailCalls++
+	return nil, s.persistErr
+}
 
 func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {
 	t.Parallel()
@@ -164,7 +413,7 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 		logger:         slog.New(slog.DiscardHandler),
 	}
 
-	persisted := resolver.storeMessages(context.Background(), conversation.ChatRequest{
+	persisted, err := resolver.storeMessages(context.Background(), conversation.ChatRequest{
 		BotID:       storeRoundBotID,
 		SessionID:   "33333333-3333-3333-3333-333333333333",
 		Query:       "hello",
@@ -176,6 +425,9 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 		{Role: "tool", Content: conversation.NewTextContent("tool result")},
 		{Role: "assistant", Content: conversation.NewTextContent("done")},
 	}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("storeMessages() error = %v", err)
+	}
 
 	if len(messages.batchInputs) != 4 {
 		t.Fatalf("batch inputs = %d, want 4", len(messages.batchInputs))

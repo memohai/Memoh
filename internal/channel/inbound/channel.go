@@ -45,6 +45,7 @@ const (
 	silentReplyToken        = "NO_REPLY"
 	minDuplicateTextLength  = 10
 	processingStatusTimeout = 60 * time.Second
+	pipelineDeliveryPending = "pending"
 )
 
 var whitespacePattern = regexp.MustCompile(`\s+`)
@@ -96,6 +97,7 @@ type transcriptionModelResolver interface {
 type SessionEnsurer interface {
 	EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (SessionResult, error)
 	GetActiveSession(ctx context.Context, routeID string) (SessionResult, error)
+	GetSession(ctx context.Context, sessionID string) (SessionResult, error)
 	// CreateNewSession always creates a fresh session and sets it as the
 	// active session for the given route, replacing any previous one.
 	// Spec.Type defaults to "chat" if empty.
@@ -165,6 +167,10 @@ type NewSessionSpec struct {
 	RuntimeOwnerAccountID string
 }
 
+type discussNotifier interface {
+	NotifyRC(ctx context.Context, sessionID string, rc pipelinepkg.RenderedContext, config pipelinepkg.DiscussSessionConfig)
+}
+
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
 	runner              flow.Runner
@@ -189,7 +195,7 @@ type ChannelInboundProcessor struct {
 	sessionEnsurer      SessionEnsurer
 	pipeline            *pipelinepkg.Pipeline
 	eventStore          *pipelinepkg.EventStore
-	discussDriver       *pipelinepkg.DiscussDriver
+	discussDriver       discussNotifier
 	imDisplayOptions    IMDisplayOptionsReader
 	defaultChatRuntime  DefaultChatRuntimeReader
 	acpAgentSetup       ACPAgentSetupReader
@@ -199,7 +205,18 @@ type ChannelInboundProcessor struct {
 	// activeStreams maps "botID:routeID" to a context.CancelFunc for the
 	// currently running agent stream. Used by /stop to abort generation
 	// on external channels (Telegram, Discord, etc.).
-	activeStreams sync.Map
+	activeStreams         sync.Map
+	pipelineSessionLocks  pipelineSessionLockSet
+	inflightEventDelivery sync.Map
+	queueRetryMu          sync.Mutex
+	queueRetryContext     context.Context
+	queueRetryCancel      context.CancelFunc
+	queueRetryWG          sync.WaitGroup
+	queueRetryDelay       func(int) time.Duration
+}
+
+type pendingDeliveryCompleter interface {
+	CompletePendingDelivery(ctx context.Context, messageID string) error
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -221,16 +238,20 @@ func NewChannelInboundProcessor(
 		tokenTTL = 5 * time.Minute
 	}
 	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, policyService, "")
+	queueRetryContext, queueRetryCancel := context.WithCancel(context.Background())
 	return &ChannelInboundProcessor{
-		runner:        runner,
-		routeResolver: routeResolver,
-		message:       messageWriter,
-		registry:      registry,
-		logger:        log.With(slog.String("component", "channel_router")),
-		jwtSecret:     strings.TrimSpace(jwtSecret),
-		tokenTTL:      tokenTTL,
-		identity:      identityResolver,
-		policy:        policyService,
+		runner:            runner,
+		routeResolver:     routeResolver,
+		message:           messageWriter,
+		registry:          registry,
+		logger:            log.With(slog.String("component", "channel_router")),
+		jwtSecret:         strings.TrimSpace(jwtSecret),
+		tokenTTL:          tokenTTL,
+		identity:          identityResolver,
+		policy:            policyService,
+		queueRetryContext: queueRetryContext,
+		queueRetryCancel:  queueRetryCancel,
+		queueRetryDelay:   defaultQueuedRetryDelay,
 	}
 }
 
@@ -400,6 +421,71 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 	if sender == nil {
 		return errors.New("reply sender not configured")
+	}
+	msg = pipelineInboundMessage(cfg, msg)
+	queuedReplay, isQueuedReplay := queuedReplayStateFromContext(ctx)
+	claimedEventDeliveryID := ""
+	var eventDeliveryLease *pipelinepkg.EventDeliveryLease
+	var eventDeliveryClaim *conversation.DeliveryClaim
+	var claimedEventState *pipelinepkg.PersistEventResult
+	var cancelEventDeliveryContext context.CancelFunc
+	retainEventDeliveryClaim := false
+	defer func() {
+		if retErr != nil && isQueuedReplay && queuedReplay.ownsRoute {
+			retainEventDeliveryClaim = true
+		}
+		if cancelEventDeliveryContext != nil {
+			cancelEventDeliveryContext()
+		}
+		if claimedEventDeliveryID != "" && eventDeliveryLease != nil && !retainEventDeliveryClaim {
+			if retErr == nil {
+				retErr = p.completeEventDeliveryClaim(ctx, claimedEventDeliveryID, eventDeliveryLease)
+			} else if releaseErr := p.releaseEventDeliveryClaim(ctx, claimedEventDeliveryID, eventDeliveryLease); releaseErr != nil {
+				retErr = errors.Join(retErr, releaseErr)
+			}
+		}
+	}()
+	if isQueuedReplay && queuedReplay.eventID != "" {
+		var claimErr error
+		eventDeliveryLease, claimErr = p.claimEventDelivery(ctx, queuedReplay.eventID, true)
+		if claimErr != nil {
+			if errors.Is(claimErr, ErrEventDeliveryInFlight) {
+				completed, completionErr := p.eventStore.IsEventDeliveryCompleted(ctx, queuedReplay.eventID)
+				if completionErr != nil {
+					return completionErr
+				}
+				if completed {
+					sessionID := strings.TrimSpace(queuedReplay.sessionID)
+					if sessionID == "" {
+						return errors.New("completed queued replay is missing durable session id")
+					}
+					if p.pipeline == nil {
+						return errors.New("completed queued replay pipeline is not configured")
+					}
+					unlockQueuedPipelineSession := p.lockPipelineSession(sessionID)
+					replayErr := p.replayPipelineSession(ctx, sessionID)
+					unlockQueuedPipelineSession()
+					return replayErr
+				}
+				return claimErr
+			} else {
+				return claimErr
+			}
+		}
+		if eventDeliveryLease == nil {
+			return nil
+		}
+		claimedEventDeliveryID = queuedReplay.eventID
+		eventDeliveryClaim, claimErr = currentEventDeliveryClaim(claimedEventDeliveryID, eventDeliveryLease)
+		if claimErr != nil {
+			return claimErr
+		}
+		ctx, cancelEventDeliveryContext = eventDeliveryLease.Context(ctx)
+		freshState, loadErr := p.eventStore.LoadEventDeliveryState(ctx, claimedEventDeliveryID)
+		if loadErr != nil {
+			return loadErr
+		}
+		claimedEventState = &freshState
 	}
 	text := strings.TrimSpace(msg.Message.PlainText())
 	if p.logger != nil {
@@ -620,7 +706,32 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	sessionType := ""
 	sessionRuntime := ""
 	sessionRuntimeOwner := ""
-	if p.sessionEnsurer != nil {
+	if isQueuedReplay {
+		queuedSessionID := strings.TrimSpace(queuedReplay.sessionID)
+		if queuedSessionID == "" {
+			return errors.New("queued replay is missing durable session id")
+		}
+		if p.sessionEnsurer == nil {
+			return errors.New("queued replay session resolver is not configured")
+		}
+		sess, sessErr := p.sessionEnsurer.GetSession(ctx, queuedSessionID)
+		if sessErr != nil {
+			if errors.Is(sessErr, sessionpkg.ErrNotFound) {
+				if p.logger != nil {
+					p.logger.Info("discarding queued replay for deleted session", slog.String("session_id", queuedSessionID))
+				}
+				return p.completeQueuedReplayWithoutResponse(ctx, queuedReplay)
+			}
+			return fmt.Errorf("resolve queued replay session: %w", sessErr)
+		}
+		if strings.TrimSpace(sess.ID) != queuedSessionID {
+			return errors.New("queued replay session resolver returned a different session")
+		}
+		sessionID = queuedSessionID
+		sessionType = sess.Type
+		sessionRuntime = sess.Runtime
+		sessionRuntimeOwner = sess.RuntimeOwnerAccountID
+	} else if p.sessionEnsurer != nil {
 		sess, sessErr := p.sessionEnsurer.GetActiveSession(ctx, resolved.RouteID)
 		if sessErr == nil {
 			sessionID = sess.ID
@@ -662,7 +773,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			return nil
 		}
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
+		if !isQueuedReplay {
+			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
+		}
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound denied by acl — event not ingested",
@@ -690,6 +803,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}); sendErr != nil && p.logger != nil {
 				p.logger.Warn("send acl-denied hint failed", slog.Any("error", sendErr))
 			}
+		}
+		if isQueuedReplay {
+			return p.completeQueuedReplayWithoutResponse(ctx, queuedReplay)
 		}
 		return nil
 	}
@@ -764,7 +880,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		msg.Metadata["raw_text"] = userVisibleText
 	}
 
-	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply || pendingSkillIntent != nil
+	shouldTrigger := !msg.IsSelfSent && (shouldTriggerAssistantResponse(msg) || identity.ForceReply || pendingSkillIntent != nil)
 	if sessionID == "" && p.sessionEnsurer != nil {
 		spec := defaultSpec
 		shouldCreate := defaultSpecShouldCreate
@@ -809,6 +925,18 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			err = p.requireACPRuntimeActor(ctx, identity, ownerPrincipal)
 		}
 		if err != nil {
+			if isQueuedReplay {
+				feedbackPending := claimedEventState == nil || claimedEventState.HistoryDeliveryPending
+				if completeErr := p.completeQueuedReplayWithoutResponse(ctx, queuedReplay); completeErr != nil {
+					return completeErr
+				}
+				if feedbackPending && (shouldTrigger || isDirectedAtBot(msg)) {
+					if sendErr := p.sendACPFeedbackError(ctx, sender, msg, identity, err); sendErr != nil && p.logger != nil {
+						p.logger.Warn("send queued ACP access-denied feedback failed", slog.Any("error", sendErr))
+					}
+				}
+				return nil
+			}
 			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 			if shouldTrigger || isDirectedAtBot(msg) {
 				return p.sendACPFeedbackError(ctx, sender, msg, identity, err)
@@ -816,52 +944,194 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return nil
 		}
 	}
+	inboundTranscriptionPrepared := false
+	if (sessionType == sessionpkg.TypeDiscuss || shouldTrigger) && pendingSkillIntent == nil {
+		p.prepareInboundTranscription(ctx, identity.BotID, &msg, resolvedAttachments, hadVoiceAttachment)
+		text = strings.TrimSpace(msg.Message.PlainText())
+		modelText = text
+		inboundTranscriptionPrepared = true
+	}
 
 	// Push event into the DCP pipeline (persist + in-memory projection).
-	// On first access for a session, replay persisted events to warm the pipeline.
 	var latestRC pipelinepkg.RenderedContext
-	var eventID string
-	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil {
-		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
-			p.replayPipelineSession(ctx, sessionID)
+	eventID := queuedReplay.eventID
+	persistedUserMessageID := queuedReplay.persistedUserMessageID
+	userMessagePersisted := isQueuedReplay
+	pendingEventDelivery := isQueuedReplay
+	persistedResponseCovered := false
+	persistedResponseRequired := false
+	var persistedFinalMessages []conversation.ModelMessage
+	replayPersistedResponse := false
+	if claimedEventState != nil {
+		if claimedEventState.HistoryMessageID != "" {
+			persistedUserMessageID = claimedEventState.HistoryMessageID
+			userMessagePersisted = true
+			pendingEventDelivery = claimedEventState.HistoryDeliveryPending
 		}
+		persistedResponseCovered = claimedEventState.ResponsePersisted
+		persistedResponseRequired = claimedEventState.ReplayResponsePersisted
+	}
+	var eventToProject pipelinepkg.CanonicalEvent
+	var durableSessionEvents []pipelinepkg.CanonicalEvent
+	var eventCursor int64
+	var eventReceivedAtMs int64
+	var unlockPipelineSession func()
+	releasePipelineSession := func() {
+		if unlockPipelineSession == nil {
+			return
+		}
+		unlockPipelineSession()
+		unlockPipelineSession = nil
+	}
+	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil && !isQueuedReplay {
+		unlockPipelineSession = p.lockPipelineSession(sessionID)
 		pipelineMsg := msg
 		pipelineMsg.Message = msg.Message
 		pipelineMsg.Message.Attachments = resolvedAttachments
 		event := pipelinepkg.AdaptInbound(pipelineMsg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
+		persistedEvent := pipelinepkg.PersistEventResult{Event: event}
 		if p.eventStore != nil {
-			eid, persistErr := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event)
+			var persistErr error
+			persistedEvent, persistErr = p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event)
 			if persistErr != nil {
-				if p.logger != nil {
-					p.logger.Warn("persist pipeline event failed", slog.Any("error", persistErr))
+				releasePipelineSession()
+				return fmt.Errorf("persist pipeline event: %w", persistErr)
+			}
+			eventID = persistedEvent.ID
+			if persistedEvent.DeliveryCompleted {
+				durableSessionEvents, persistErr = p.loadPipelineSessionEvents(ctx, sessionID)
+				if persistErr != nil {
+					releasePipelineSession()
+					return persistErr
 				}
-			} else {
-				eventID = eid
+				p.pipeline.ReplaySession(sessionID, durableSessionEvents)
+				releasePipelineSession()
+				return nil
+			}
+			if persistedEvent.HistoryMessageID != "" {
+				persistedUserMessageID = persistedEvent.HistoryMessageID
+				userMessagePersisted = true
+				pendingEventDelivery = persistedEvent.HistoryDeliveryPending
+			}
+			eventDeliveryLease, persistErr = p.claimEventDelivery(ctx, persistedEvent.ID, false)
+			if persistErr != nil {
+				releasePipelineSession()
+				return fmt.Errorf("claim pipeline event delivery: %w", persistErr)
+			}
+			if eventDeliveryLease == nil {
+				releasePipelineSession()
+				return nil
+			}
+			claimedEventDeliveryID = persistedEvent.ID
+			eventDeliveryClaim, persistErr = currentEventDeliveryClaim(claimedEventDeliveryID, eventDeliveryLease)
+			if persistErr != nil {
+				releasePipelineSession()
+				return persistErr
+			}
+			ctx, cancelEventDeliveryContext = eventDeliveryLease.Context(ctx)
+			persistedEvent, persistErr = p.eventStore.LoadEventDeliveryState(ctx, claimedEventDeliveryID)
+			if persistErr != nil {
+				releasePipelineSession()
+				return persistErr
+			}
+			if persistedEvent.HistoryMessageID != "" {
+				persistedUserMessageID = persistedEvent.HistoryMessageID
+				userMessagePersisted = true
+				pendingEventDelivery = persistedEvent.HistoryDeliveryPending
+			}
+			persistedResponseCovered = persistedEvent.ResponsePersisted && sessionType != sessionpkg.TypeDiscuss
+			persistedResponseRequired = persistedEvent.ReplayResponsePersisted && sessionType != sessionpkg.TypeDiscuss
+			durableSessionEvents, persistErr = p.loadPipelineSessionEvents(ctx, sessionID)
+			if persistErr != nil {
+				releasePipelineSession()
+				return persistErr
+			}
+			if persistedEvent.Event == nil {
+				releasePipelineSession()
+				return errors.New("persisted pipeline event is missing canonical data")
+			}
+			durableSessionEvents, persistErr = appendPipelineSessionEvent(durableSessionEvents, persistedEvent.Event)
+			if persistErr != nil {
+				releasePipelineSession()
+				return persistErr
 			}
 		}
-		latestRC = p.pipeline.PushEvent(sessionID, event)
+		if persistedEvent.Event == nil {
+			releasePipelineSession()
+			return errors.New("persisted pipeline event is missing canonical data")
+		}
+		eventToProject = persistedEvent.Event
+		eventCursor = eventToProject.GetEventCursor()
+		eventReceivedAtMs = eventToProject.GetReceivedAtMs()
+		if sessionType != sessionpkg.TypeDiscuss || p.discussDriver == nil {
+			if p.eventStore != nil {
+				p.pipeline.ReplaySession(sessionID, durableSessionEvents)
+			} else {
+				p.pipeline.PushEvent(sessionID, eventToProject)
+			}
+		}
 	}
 
 	// Discuss mode: dispatch to the discuss driver and return.
 	// The discuss driver autonomously decides whether to call the LLM.
-	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
+	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && eventToProject != nil {
+		if persistedUserMessageID == "" {
+			var persistErr error
+			persistedUserMessageID, persistErr = p.persistPassiveMessageResult(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID, "")
+			if persistErr != nil {
+				releasePipelineSession()
+				return fmt.Errorf("persist discuss history: %w", persistErr)
+			}
+		}
+		if persistedUserMessageID == "" {
+			releasePipelineSession()
+			return nil
+		}
+		if p.eventStore != nil {
+			latestRC = p.pipeline.ReplaySession(sessionID, durableSessionEvents)
+		} else {
+			latestRC = p.pipeline.PushEvent(sessionID, eventToProject)
+		}
+		if latestRC == nil {
+			releasePipelineSession()
+			return errors.New("discuss pipeline projection is unavailable")
+		}
 		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 		sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
+		var discussEventDelivery *pipelinepkg.DiscussEventDelivery
+		if claimedEventDeliveryID != "" && eventDeliveryLease != nil {
+			retainEventDeliveryClaim = true
+			discussEventDelivery = &pipelinepkg.DiscussEventDelivery{
+				EventID:     claimedEventDeliveryID,
+				EventCursor: eventCursor,
+				Lease:       eventDeliveryLease,
+			}
+		}
 		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, pipelinepkg.DiscussSessionConfig{
-			BotID:             identity.BotID,
-			SessionID:         sessionID,
-			RouteID:           resolved.RouteID,
-			ChannelIdentityID: identity.ChannelIdentityID,
-			ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
-			CurrentPlatform:   msg.Channel.String(),
-			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
-			ConversationName:  strings.TrimSpace(msg.Conversation.Name),
-			SessionToken:      sessionToken,
-			ChatToken:         chatToken,
-			ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
+			BotID:                  identity.BotID,
+			SessionID:              sessionID,
+			RouteID:                resolved.RouteID,
+			UserID:                 identity.UserID,
+			ChannelIdentityID:      identity.ChannelIdentityID,
+			ReplyTarget:            strings.TrimSpace(msg.ReplyTarget),
+			CurrentPlatform:        msg.Channel.String(),
+			ConversationType:       strings.TrimSpace(msg.Conversation.Type),
+			ConversationName:       strings.TrimSpace(msg.Conversation.Name),
+			SessionToken:           sessionToken,
+			ChatToken:              chatToken,
+			ToolHTTPURL:            acpMCPToolsURLFromEnv(identity.BotID),
+			PersistedUserMessageID: persistedUserMessageID,
+			EventDelivery:          discussEventDelivery,
 		})
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
+		releasePipelineSession()
 		return nil
+	}
+	releasePipelineSession()
+	if persistedResponseRequired && persistedUserMessageID == "" {
+		return errors.New("replayable pipeline event response has no durable request message")
+	}
+	if persistedResponseCovered && !persistedResponseRequired {
+		return p.completePendingEventHistory(ctx, pendingEventDelivery, persistedUserMessageID)
 	}
 
 	// Bot-centric history container:
@@ -871,21 +1141,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		activeChatID = strings.TrimSpace(resolved.ChatID)
 	}
 
-	if sessionType == sessionpkg.TypeDiscuss || shouldTrigger {
-		if transcript := p.transcribeInboundAttachments(ctx, strings.TrimSpace(identity.BotID), resolvedAttachments); transcript != "" {
-			labeledTranscript := formatInboundTranscript(transcript)
-			if msg.Message.Metadata == nil {
-				msg.Message.Metadata = make(map[string]any)
-			}
-			msg.Message.Metadata["transcript"] = transcript
-			if plain := strings.TrimSpace(msg.Message.PlainText()); plain == "" {
-				msg.Message.Text = labeledTranscript
-			} else if !strings.Contains(plain, transcript) {
-				msg.Message.Text = plain + "\n\n" + labeledTranscript
-			}
-		} else if hadVoiceAttachment && strings.TrimSpace(msg.Message.PlainText()) == "" {
-			msg.Message.Text = formatVoiceTranscriptionUnavailableNotice(resolvedAttachments)
-		}
+	if (sessionType == sessionpkg.TypeDiscuss || shouldTrigger) && !inboundTranscriptionPrepared {
+		p.prepareInboundTranscription(ctx, identity.BotID, &msg, resolvedAttachments, hadVoiceAttachment)
 		if pendingSkillIntent != nil {
 			text = strings.TrimSpace(userVisibleText)
 			modelText = strings.TrimSpace(conversation.SkillActivationModelQuery(skillActivation))
@@ -914,12 +1171,46 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	routeID := strings.TrimSpace(resolved.RouteID)
+	if userMessagePersisted && persistedUserMessageID != "" {
+		persistedFinalMessages, replayPersistedResponse, err = p.loadPersistedTurnResponse(
+			ctx,
+			sessionID,
+			persistedUserMessageID,
+			persistedResponseRequired,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	dispatcherEnabled := p.dispatcher != nil &&
+		!isLocalChannelType(msg.Channel) &&
+		inboundMode != ModeParallel &&
+		!replayPersistedResponse
+	var injectCh <-chan conversation.InjectMessage
+	routeOwner := false
+	queuePumpOwner := dispatcherEnabled && isQueuedReplay && queuedReplay.ownsRoute
+	defer func() {
+		if routeOwner && !queuePumpOwner {
+			p.drainQueueAfterStream(context.WithoutCancel(ctx), routeID, retErr)
+		}
+	}()
+	if dispatcherEnabled {
+		if queuePumpOwner {
+			injectCh = p.dispatcher.ActiveInjectChannelForSession(routeID, sessionID)
+			routeOwner = injectCh != nil
+			if !routeOwner {
+				return errors.New("queued route ownership was lost before replay")
+			}
+		} else {
+			injectCh, routeOwner = p.dispatcher.TryAcquireActiveForSession(routeID, sessionID)
+		}
+	}
 
 	// --- Dispatcher-based mode handling (inject / queue) ---
 	// For non-parallel modes, when a route already has an active agent stream,
 	// short-circuit here instead of starting a new stream.
-	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
-		if p.dispatcher.IsActive(routeID) {
+	if dispatcherEnabled {
+		if !routeOwner {
 			if pendingSkillIntent != nil {
 				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
 			}
@@ -935,46 +1226,128 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				Time:              time.Now().UTC(),
 			}, text)
 
-			switch inboundMode {
-			case ModeInject:
+			queueMessage := inboundMode == ModeQueue
+			if inboundMode == ModeInject {
 				// Don't persist here — the injected message will be interleaved
 				// at the correct position within the round by
 				// interleaveInjectedMessages in storeRound.
-				injected := p.dispatcher.Inject(routeID, InjectMessage{
+				injectedMessage := InjectMessage{
 					Text:            text,
 					Attachments:     attachments,
 					HeaderifiedText: headerifiedText,
-				})
-				if injected {
-					p.sendModeConfirmation(ctx, sender, msg, identity, "inject")
-				} else {
-					if p.logger != nil {
-						p.logger.Warn("inject failed (channel full), falling through to new stream",
-							slog.String("route_id", routeID))
-					}
-					goto startStream
+					Source: conversation.InjectedMessageSource{
+						ExternalMessageID:         strings.TrimSpace(msg.Message.ID),
+						EventID:                   eventID,
+						DeliveryClaim:             eventDeliveryClaim,
+						EventCursor:               eventCursor,
+						ReceivedAtMs:              eventReceivedAtMs,
+						SenderChannelIdentityID:   strings.TrimSpace(identity.ChannelIdentityID),
+						SenderUserID:              strings.TrimSpace(identity.UserID),
+						SenderDisplayName:         strings.TrimSpace(identity.DisplayName),
+						RouteID:                   routeID,
+						Platform:                  msg.Channel.String(),
+						ReplyTarget:               strings.TrimSpace(msg.ReplyTarget),
+						ConversationType:          strings.TrimSpace(msg.Conversation.Type),
+						ConversationName:          strings.TrimSpace(msg.Conversation.Name),
+						SourceReplyToMessageID:    inboundReplyMessageID(msg.Message.Reply),
+						ReplySender:               inboundReplySender(msg.Message.Reply),
+						ReplyPreview:              inboundReplyPreview(msg.Message.Reply),
+						ReplyAttachments:          replyAttachments,
+						ForwardMessageID:          inboundForwardMessageID(msg.Message.Forward),
+						ForwardFromUserID:         inboundForwardFromUserID(msg.Message.Forward),
+						ForwardFromConversationID: inboundForwardFromConversationID(msg.Message.Forward),
+						ForwardSender:             inboundForwardSender(msg.Message.Forward),
+						ForwardDate:               inboundForwardDate(msg.Message.Forward),
+					},
 				}
-				return nil
-
-			case ModeQueue:
-				p.persistPassiveMessage(ctx, identity, msg, text, attachments, routeID, sessionID, eventID)
-				p.dispatcher.Enqueue(routeID, QueuedTask{
-					Ctx:         ctx,
-					Cfg:         cfg,
-					Msg:         msg,
-					Sender:      sender,
-					Ident:       identity,
-					Text:        text,
-					Attachments: attachments,
-				})
-				p.sendModeConfirmation(ctx, sender, msg, identity, "queue")
-				return nil
+				var injectedDeliverySignals *injectedEventDeliverySignals
+				if claimedEventDeliveryID != "" && eventDeliveryLease != nil {
+					injectedDeliverySignals = newInjectedEventDeliverySignals()
+					injectedMessage.OnPersisted = injectedDeliverySignals.reportPersisted
+					injectedMessage.OnStreamFinished = injectedDeliverySignals.reportStreamFinished
+				}
+				injectResult := p.dispatcher.InjectForSession(routeID, sessionID, injectedMessage)
+				switch injectResult {
+				case InjectAccepted:
+					retainEventDeliveryClaim = claimedEventDeliveryID != "" && claimedEventDeliveryID == eventID
+					if retainEventDeliveryClaim && injectedDeliverySignals != nil {
+						go p.finalizeInjectedEventDelivery(
+							context.WithoutCancel(ctx),
+							identity.BotID,
+							routeID,
+							claimedEventDeliveryID,
+							eventDeliveryLease,
+							injectedDeliverySignals,
+						)
+					}
+					p.sendModeConfirmation(ctx, sender, msg, identity, "inject")
+					return nil
+				case InjectDuplicate:
+					return ErrEventDeliveryInFlight
+				case InjectSessionMismatch:
+					queueMessage = true
+				default:
+					if acquiredCh, acquired := p.dispatcher.TryAcquireActiveForSession(routeID, sessionID); acquired {
+						injectCh = acquiredCh
+						routeOwner = true
+						goto startStream
+					}
+					return errors.New("active route injection is unavailable")
+				}
+			}
+			if queueMessage {
+				if persistedUserMessageID == "" {
+					var persistErr error
+					persistedUserMessageID, persistErr = p.persistPassiveMessageResult(ctx, identity, msg, text, attachments, routeID, sessionID, eventID, pipelineDeliveryPending)
+					if persistErr != nil {
+						if errors.Is(persistErr, messagepkg.ErrEventAlreadyPersisted) {
+							return nil
+						}
+						return fmt.Errorf("persist queued message: %w", persistErr)
+					}
+				}
+				pendingEventDelivery = true
+				if persistedUserMessageID == "" {
+					return errors.New("persist queued message returned empty id")
+				}
+				userMessagePersisted = true
+				queuedTask := QueuedTask{
+					Ctx:                    ctx,
+					Cfg:                    cfg,
+					Msg:                    msg,
+					Sender:                 sender,
+					Ident:                  identity,
+					Text:                   text,
+					Attachments:            attachments,
+					PersistedUserMessageID: persistedUserMessageID,
+					EventID:                eventID,
+					SessionID:              sessionID,
+				}
+				for {
+					if p.dispatcher.TryEnqueueIfActive(routeID, queuedTask) {
+						retainEventDeliveryClaim = claimedEventDeliveryID != "" && claimedEventDeliveryID == eventID
+						p.sendModeConfirmation(ctx, sender, msg, identity, "queue")
+						return nil
+					}
+					if acquiredCh, acquired := p.dispatcher.TryAcquireActiveForSession(routeID, sessionID); acquired {
+						injectCh = acquiredCh
+						routeOwner = true
+						goto startStream
+					}
+				}
 			}
 		}
 	}
 
 startStream:
-
+	if isQueuedReplay && p.pipeline != nil && p.eventStore != nil && sessionID != "" {
+		unlockQueuedPipelineSession := p.lockPipelineSession(sessionID)
+		replayErr := p.replayPipelineSession(ctx, sessionID)
+		unlockQueuedPipelineSession()
+		if replayErr != nil {
+			return replayErr
+		}
+	}
 	// Issue chat token for reply routing.
 	chatToken := ""
 	if p.jwtSecret != "" && strings.TrimSpace(msg.ReplyTarget) != "" {
@@ -1125,18 +1498,6 @@ startStream:
 		return result
 	}
 
-	// Mark this route as active in the dispatcher so subsequent messages
-	// can be injected or queued. Produces the inject channel for this stream.
-	// Parallel mode (/now) skips the dispatcher entirely — it must not
-	// interfere with the active flag or drain the queue of another stream.
-	var injectCh <-chan conversation.InjectMessage
-	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
-		injectCh = p.dispatcher.MarkActive(routeID)
-		defer func() {
-			p.drainQueue(context.WithoutCancel(ctx), routeID)
-		}()
-	}
-
 	chatReq := conversation.ChatRequest{
 		BotID:                     identity.BotID,
 		ChatID:                    activeChatID,
@@ -1171,11 +1532,13 @@ startStream:
 		SkipTitleGeneration:       pendingSkillIntent != nil && userVisibleText == "",
 		CurrentChannel:            msg.Channel.String(),
 		Channels:                  []string{msg.Channel.String()},
-		UserMessagePersisted:      false,
+		UserMessagePersisted:      userMessagePersisted,
+		PersistedUserMessageID:    persistedUserMessageID,
 		Attachments:               attachments,
 		RequestedSkills:           requestedSkillContexts,
 		OutboundAssetCollector:    assetCollector,
 		EventID:                   eventID,
+		EventDeliveryClaim:        eventDeliveryClaim,
 	}
 	if injectCh != nil {
 		chatReq.InjectCh = injectCh
@@ -1189,78 +1552,91 @@ startStream:
 	if targetID, _ := msg.Metadata["workspace_target_id"].(string); strings.TrimSpace(targetID) != "" {
 		chatReq.WorkspaceTargetID = strings.TrimSpace(targetID)
 	}
-	// Create a cancellable context so /stop can abort the stream.
-	streamCtx, streamCancel := context.WithCancel(ctx)
-	defer streamCancel()
-
-	streamKey := strings.TrimSpace(identity.BotID) + ":" + strings.TrimSpace(resolved.RouteID)
-	p.activeStreams.Store(streamKey, streamCancel)
-	defer p.activeStreams.Delete(streamKey)
-
-	chunkCh, streamErrCh := p.runner.StreamChat(streamCtx, chatReq)
-
 	var (
-		finalMessages []conversation.ModelMessage
+		finalMessages = persistedFinalMessages
 		streamErr     error
 	)
-	for chunkCh != nil || streamErrCh != nil {
-		select {
-		case chunk, ok := <-chunkCh:
-			if !ok {
-				chunkCh = nil
-				continue
-			}
-			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
-			if parseErr != nil {
-				if p.logger != nil {
-					p.logger.Warn(
-						"stream chunk parse failed",
-						slog.String("channel", msg.Channel.String()),
-						slog.String("channel_identity_id", identity.ChannelIdentityID),
-						slog.String("user_id", identity.UserID),
-						slog.Any("error", parseErr),
-					)
-				}
-				continue
-			}
-			for i, event := range events {
-				if isUserInputEvent(&events[i]) {
-					events[i].ToolCall.Locale = p.localizer(ctx, identity.BotID).Locale()
-				}
-				if event.Type == channel.StreamEventAttachment && len(event.Attachments) > 0 {
-					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Attachments)
-					events[i].Attachments = ingested
-					assetMu.Lock()
-					outboundAssetRefs = append(outboundAssetRefs, buildAssetRefs(ingested, len(outboundAssetRefs))...)
-					assetMu.Unlock()
-				}
-				if event.Type == channel.StreamEventReaction && len(event.Reactions) > 0 {
-					p.dispatchReactions(ctx, identity.BotID, msg.Channel, target, sourceMessageID, event.Reactions)
+	if !replayPersistedResponse {
+		// Create a cancellable context so /stop can abort the stream.
+		streamCtx, streamCancel := context.WithCancel(ctx)
+		defer streamCancel()
+
+		streamKey := strings.TrimSpace(identity.BotID) + ":" + strings.TrimSpace(resolved.RouteID)
+		p.activeStreams.Store(streamKey, streamCancel)
+		defer p.activeStreams.Delete(streamKey)
+
+		chunkCh, streamErrCh := p.runner.StreamChat(streamCtx, chatReq)
+		for chunkCh != nil || streamErrCh != nil {
+			select {
+			case chunk, ok := <-chunkCh:
+				if !ok {
+					chunkCh = nil
 					continue
 				}
-				if event.Type == channel.StreamEventSpeech && len(event.Speeches) > 0 {
-					p.synthesizeAndPushVoice(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Speeches, stream, &outboundAssetRefs, &assetMu)
+				events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
+				if parseErr != nil {
+					if p.logger != nil {
+						p.logger.Warn(
+							"stream chunk parse failed",
+							slog.String("channel", msg.Channel.String()),
+							slog.String("channel_identity_id", identity.ChannelIdentityID),
+							slog.String("user_id", identity.UserID),
+							slog.Any("error", parseErr),
+						)
+					}
 					continue
 				}
-				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
-					streamErr = pushErr
-					break
+				for i, event := range events {
+					if isUserInputEvent(&events[i]) {
+						events[i].ToolCall.Locale = p.localizer(ctx, identity.BotID).Locale()
+					}
+					if event.Type == channel.StreamEventAttachment && len(event.Attachments) > 0 {
+						ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Attachments)
+						events[i].Attachments = ingested
+						assetMu.Lock()
+						outboundAssetRefs = append(outboundAssetRefs, buildAssetRefs(ingested, len(outboundAssetRefs))...)
+						assetMu.Unlock()
+					}
+					if event.Type == channel.StreamEventReaction && len(event.Reactions) > 0 {
+						p.dispatchReactions(ctx, identity.BotID, msg.Channel, target, sourceMessageID, event.Reactions)
+						continue
+					}
+					if event.Type == channel.StreamEventSpeech && len(event.Speeches) > 0 {
+						p.synthesizeAndPushVoice(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Speeches, stream, &outboundAssetRefs, &assetMu)
+						continue
+					}
+					if pushErr := p.pushStreamEvent(ctx, identity.BotID, sessionID, stream, events[i]); pushErr != nil {
+						streamErr = pushErr
+						break
+					}
+				}
+				if len(messages) > 0 {
+					finalMessages = messages
+				}
+			case err, ok := <-streamErrCh:
+				if !ok {
+					streamErrCh = nil
+					continue
+				}
+				if err != nil {
+					streamErr = err
 				}
 			}
-			if len(messages) > 0 {
-				finalMessages = messages
-			}
-		case err, ok := <-streamErrCh:
-			if !ok {
-				streamErrCh = nil
-				continue
-			}
-			if err != nil {
-				streamErr = err
+			if streamErr != nil {
+				break
 			}
 		}
-		if streamErr != nil {
-			break
+	}
+	if replayPersistedResponse {
+		replayEvents, replayErr := p.persistedUserInputEvents(ctx, identity.BotID, sessionID, finalMessages)
+		if replayErr != nil {
+			streamErr = replayErr
+		}
+		for i := range replayEvents {
+			if pushErr := p.pushStreamEvent(ctx, identity.BotID, sessionID, stream, replayEvents[i]); pushErr != nil {
+				streamErr = pushErr
+				break
+			}
 		}
 	}
 
@@ -1298,7 +1674,6 @@ startStream:
 		}
 		return streamErr
 	}
-
 	sentTexts, suppressReplies := collectMessageToolContext(p.registry, finalMessages, msg.Channel, target)
 	if suppressReplies {
 		if err := stream.Push(ctx, channel.StreamEvent{
@@ -1313,6 +1688,9 @@ startStream:
 					p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
 				}
 			}
+			return err
+		}
+		if err := p.completePendingEventHistory(ctx, pendingEventDelivery, persistedUserMessageID); err != nil {
 			return err
 		}
 		if statusNotifier != nil {
@@ -1365,12 +1743,41 @@ startStream:
 		}
 		return err
 	}
+	if err := p.completePendingEventHistory(ctx, pendingEventDelivery, persistedUserMessageID); err != nil {
+		return err
+	}
 	if statusNotifier != nil {
 		if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
 			p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
 		}
 	}
 	return nil
+}
+
+func (p *ChannelInboundProcessor) prepareInboundTranscription(
+	ctx context.Context,
+	botID string,
+	msg *channel.InboundMessage,
+	attachments []channel.Attachment,
+	hadVoiceAttachment bool,
+) {
+	if msg == nil {
+		return
+	}
+	if transcript := p.transcribeInboundAttachments(ctx, strings.TrimSpace(botID), attachments); transcript != "" {
+		labeledTranscript := formatInboundTranscript(transcript)
+		if msg.Message.Metadata == nil {
+			msg.Message.Metadata = make(map[string]any)
+		}
+		msg.Message.Metadata["transcript"] = transcript
+		if plain := strings.TrimSpace(msg.Message.PlainText()); plain == "" {
+			msg.Message.Text = labeledTranscript
+		} else if !strings.Contains(plain, transcript) {
+			msg.Message.Text = plain + "\n\n" + labeledTranscript
+		}
+	} else if hadVoiceAttachment && strings.TrimSpace(msg.Message.PlainText()) == "" {
+		msg.Message.Text = formatVoiceTranscriptionUnavailableNotice(attachments)
+	}
 }
 
 // sendModeConfirmation sends a lightweight acknowledgement to the user when
@@ -1420,31 +1827,19 @@ func (p *ChannelInboundProcessor) accessDeniedRole(ctx context.Context, identity
 
 // drainQueue marks the route as done and processes any queued tasks.
 func (p *ChannelInboundProcessor) drainQueue(ctx context.Context, routeID string) {
+	p.drainQueueAfterStream(ctx, routeID, nil)
+}
+
+func (p *ChannelInboundProcessor) drainQueueAfterStream(ctx context.Context, routeID string, streamErr error) {
 	if p.dispatcher == nil {
 		return
 	}
-	result := p.dispatcher.MarkDone(routeID)
-
-	for _, fn := range result.PendingPersists {
-		fn(ctx)
+	result := p.dispatcher.FinishActive(routeID)
+	finalizeQueueTransition(ctx, result, streamErr)
+	if len(result.QueuedTasks) == 0 {
+		return
 	}
-
-	for _, task := range result.QueuedTasks {
-		if p.logger != nil {
-			p.logger.Info("processing queued task",
-				slog.String("route_id", routeID),
-				slog.String("query", strings.TrimSpace(task.Text)),
-			)
-		}
-		if err := p.HandleInbound(ctx, task.Cfg, task.Msg, task.Sender); err != nil { //nolint:contextcheck // ctx is already WithoutCancel from the defer caller
-			if p.logger != nil {
-				p.logger.Error("queued task processing failed",
-					slog.String("route_id", routeID),
-					slog.Any("error", err),
-				)
-			}
-		}
-	}
+	p.runQueuedTaskChain(ctx, routeID, result.QueuedTasks[0], false, 0)
 }
 
 func collectAttachmentPaths(attachments []conversation.ChatAttachment) []string {
@@ -1461,6 +1856,9 @@ func collectAttachmentPaths(attachments []conversation.ChatAttachment) []string 
 }
 
 func shouldTriggerAssistantResponse(msg channel.InboundMessage) bool {
+	if msg.IsSelfSent {
+		return false
+	}
 	if isDirectConversationType(msg.Conversation.Type) {
 		return true
 	}
@@ -1477,6 +1875,9 @@ func shouldTriggerAssistantResponse(msg channel.InboundMessage) bool {
 // either because it's a direct conversation, the bot is @mentioned, or it's a reply
 // to this bot's message.
 func isDirectedAtBot(msg channel.InboundMessage) bool {
+	if msg.IsSelfSent {
+		return false
+	}
 	if isDirectConversationType(msg.Conversation.Type) {
 		return true
 	}
@@ -1859,17 +2260,32 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	text string,
 	attachments []conversation.ChatAttachment,
 	routeID, sessionID, eventID string,
-) {
+) string {
+	persistedID, err := p.persistPassiveMessageResult(ctx, ident, msg, text, attachments, routeID, sessionID, eventID, "")
+	if err != nil && p.logger != nil {
+		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", strings.TrimSpace(ident.BotID)))
+	}
+	return persistedID
+}
+
+func (p *ChannelInboundProcessor) persistPassiveMessageResult(
+	ctx context.Context,
+	ident InboundIdentity,
+	msg channel.InboundMessage,
+	text string,
+	attachments []conversation.ChatAttachment,
+	routeID, sessionID, eventID, deliveryState string,
+) (string, error) {
 	if p.message == nil {
-		return
+		return "", nil
 	}
 	botID := strings.TrimSpace(ident.BotID)
 	if botID == "" {
-		return
+		return "", nil
 	}
 	trimmedText := strings.TrimSpace(text)
 	if trimmedText == "" && len(attachments) == 0 {
-		return
+		return "", nil
 	}
 
 	var attachmentPaths []string
@@ -1894,15 +2310,15 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	modelMsg := conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(headerifiedText)}
 	serialized, err := json.Marshal(modelMsg)
 	if err != nil {
-		if p.logger != nil {
-			p.logger.Warn("marshal passive message failed", slog.Any("error", err))
-		}
-		return
+		return "", fmt.Errorf("marshal passive message: %w", err)
 	}
 
 	meta := map[string]any{
 		"route_id": strings.TrimSpace(routeID),
 		"platform": msg.Channel.String(),
+	}
+	if deliveryState != "" {
+		meta["pipeline_delivery_state"] = deliveryState
 	}
 	if reply := messageReplyMetadata(msg.Message.Reply); reply != nil {
 		meta["reply"] = reply
@@ -1934,7 +2350,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		assets = append(assets, ref)
 	}
 
-	if _, err := p.message.Persist(ctx, messagepkg.PersistInput{
+	persisted, err := p.message.Persist(ctx, messagepkg.PersistInput{
 		BotID:                   botID,
 		SessionID:               sessionID,
 		SenderChannelIdentityID: strings.TrimSpace(ident.ChannelIdentityID),
@@ -1947,9 +2363,11 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		Assets:                  assets,
 		EventID:                 eventID,
 		DisplayText:             trimmedText,
-	}); err != nil && p.logger != nil {
-		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
+	})
+	if err != nil {
+		return "", err
 	}
+	return strings.TrimSpace(persisted.ID), nil
 }
 
 func buildChannelMessage(output conversation.AssistantOutput, capabilities channel.ChannelCapabilities) channel.Message {
@@ -2153,25 +2571,14 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 			userInputID = strings.TrimSpace(envelope.ApprovalID)
 		}
 		payload := canonicalUserInputPayload(envelope.Metadata, envelope.Input)
-		input := map[string]any{
-			"user_input_id": userInputID,
-			"short_id":      envelope.ShortID,
-			"status":        strings.TrimSpace(envelope.Status),
-			"payload":       parseRawJSON(payload),
-		}
-		actions := userInputActions(userInputID)
-		return []channel.StreamEvent{
-			{
-				Type: channel.StreamEventToolCallStart,
-				ToolCall: &channel.StreamToolCall{
-					Name:    strings.TrimSpace(envelope.ToolName),
-					CallID:  strings.TrimSpace(envelope.ToolCallID),
-					Input:   input,
-					ShortID: envelope.ShortID,
-					Actions: actions,
-				},
-			},
-		}, finalMessages, nil
+		return []channel.StreamEvent{buildUserInputStreamEvent(
+			envelope.ToolName,
+			envelope.ToolCallID,
+			userInputID,
+			envelope.ShortID,
+			envelope.Status,
+			parseRawJSON(payload),
+		)}, finalMessages, nil
 	case "reasoning_start":
 		return []channel.StreamEvent{
 			{Type: channel.StreamEventPhaseStart, Phase: channel.StreamPhaseReasoning},
@@ -2278,6 +2685,25 @@ func canonicalUserInputPayload(metadata, fallback json.RawMessage) json.RawMessa
 		return deferred.UIPayload
 	}
 	return fallback
+}
+
+func buildUserInputStreamEvent(toolName, toolCallID, userInputID string, shortID int, status string, payload any) channel.StreamEvent {
+	userInputID = strings.TrimSpace(userInputID)
+	return channel.StreamEvent{
+		Type: channel.StreamEventToolCallStart,
+		ToolCall: &channel.StreamToolCall{
+			Name:   strings.TrimSpace(toolName),
+			CallID: strings.TrimSpace(toolCallID),
+			Input: map[string]any{
+				"user_input_id": userInputID,
+				"short_id":      shortID,
+				"status":        strings.TrimSpace(status),
+				"payload":       payload,
+			},
+			ShortID: shortID,
+			Actions: userInputActions(userInputID),
+		},
+	}
 }
 
 // userInputActions emits the single marker action for a pending ask_user
@@ -2966,24 +3392,47 @@ func isLocalChannelType(ct channel.ChannelType) bool {
 }
 
 // replayPipelineSession loads persisted events from the DB and replays them
-// into the pipeline. Called lazily on first access per session after cold start.
-func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, sessionID string) {
+// into the pipeline.
+func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, sessionID string) error {
+	events, err := p.loadPipelineSessionEvents(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	p.pipeline.ReplaySession(sessionID, events)
+	if len(events) > 0 {
+		if p.logger != nil {
+			p.logger.Info("pipeline session replayed",
+				slog.String("session_id", sessionID),
+				slog.Int("events", len(events)))
+		}
+	}
+	return nil
+}
+
+func (p *ChannelInboundProcessor) loadPipelineSessionEvents(ctx context.Context, sessionID string) ([]pipelinepkg.CanonicalEvent, error) {
 	if p.eventStore == nil || p.pipeline == nil {
-		return
+		return nil, nil
 	}
 	events, err := p.eventStore.LoadEvents(ctx, sessionID)
 	if err != nil {
-		if p.logger != nil {
-			p.logger.Warn("pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		}
-		return
+		return nil, fmt.Errorf("load pipeline session events: %w", err)
 	}
-	if len(events) > 0 {
-		p.pipeline.ReplaySession(sessionID, events)
-		if p.logger != nil {
-			p.logger.Info("pipeline session replayed", slog.String("session_id", sessionID), slog.Int("events", len(events)))
+	return events, nil
+}
+
+func appendPipelineSessionEvent(
+	events []pipelinepkg.CanonicalEvent,
+	current pipelinepkg.CanonicalEvent,
+) ([]pipelinepkg.CanonicalEvent, error) {
+	if current == nil || current.GetEventCursor() <= 0 {
+		return nil, errors.New("current pipeline event is missing durable cursor")
+	}
+	for _, event := range events {
+		if event != nil && event.GetEventCursor() == current.GetEventCursor() {
+			return events, nil
 		}
 	}
+	return append(events, current), nil
 }
 
 // broadcastInboundMessage notifies the observer about the user's inbound
@@ -3621,20 +4070,20 @@ func splitFirstCommandField(text string) (head, tail string) {
 }
 
 func (p *ChannelInboundProcessor) streamToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, approvalRunner ToolApprovalRunner, input flow.ToolApprovalResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, input.SessionID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
 		return approvalRunner.RespondToolApproval(runCtx, input, eventCh)
 	})
 }
 
 func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, userInputRunner UserInputRunner, input flow.UserInputResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, input.SessionID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
 		return userInputRunner.RespondUserInput(runCtx, input, eventCh)
 	})
 }
 
 type streamContinuationFunc func(context.Context, chan<- flow.WSStreamEvent) error
 
-func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, run streamContinuationFunc) error {
+func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID string, run streamContinuationFunc) error {
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		return errors.New("reply target missing")
@@ -3717,7 +4166,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 					p.dispatchReactions(ctx, identity.BotID, msg.Channel, target, sourceMessageID, event.Reactions)
 					continue
 				}
-				if err := stream.Push(ctx, event); err != nil {
+				if err := p.pushStreamEvent(ctx, identity.BotID, sessionID, stream, event); err != nil {
 					return err
 				}
 			}

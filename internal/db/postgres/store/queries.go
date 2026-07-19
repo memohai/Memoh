@@ -47,13 +47,13 @@ func (q *Queries) InTx(ctx context.Context, fn func(dbstore.Queries) error) erro
 	}
 	tx, err := q.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return dbstore.MarkPersistenceRetrySafe(err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
 	if err := fn(q.WithTx(tx)); err != nil {
-		return err
+		return dbstore.MarkPersistenceRetrySafe(err)
 	}
 	return tx.Commit(ctx)
 }

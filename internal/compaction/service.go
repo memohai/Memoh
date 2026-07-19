@@ -127,8 +127,15 @@ func ShouldCompact(inputTokens, threshold int) bool {
 // owner. The caller owns the goroutine lifetime so surrounding coordination
 // remains active until selection and persistence finish.
 func (s *Service) RunCompaction(ctx context.Context, cfg TriggerConfig) error {
-	_, _, err := s.runCompaction(context.WithoutCancel(ctx), cfg)
+	_, err := s.RunCompactionResult(ctx, cfg)
 	return err
+}
+
+// RunCompactionResult runs one automatic attempt and reports whether it
+// compacted history. A concurrent owner still yields a noop without waiting.
+func (s *Service) RunCompactionResult(ctx context.Context, cfg TriggerConfig) (Result, error) {
+	res, _, err := s.runCompaction(context.WithoutCancel(ctx), cfg)
+	return res, err
 }
 
 // RunCompactionSync runs compaction synchronously and reports this session's

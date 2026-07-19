@@ -42,7 +42,15 @@ type Message struct {
 	CompactID               string          `json:"compact_id,omitempty"`
 	EventID                 string          `json:"event_id,omitempty"`
 	DisplayContent          string          `json:"display_content,omitempty"`
+	TurnPosition            int64           `json:"-"`
+	TurnMessageSequence     int64           `json:"-"`
 	CreatedAt               time.Time       `json:"created_at"`
+}
+
+type ExternalMessagePosition struct {
+	ExternalMessageID   string
+	TurnPosition        int64
+	TurnMessageSequence int64
 }
 
 type HistoryTurn struct {
@@ -91,6 +99,7 @@ type PersistInput struct {
 	EventID                 string
 	DisplayText             string
 	TurnRequestMessageID    string
+	ContinueHistoryTurn     bool
 	SkipHistoryTurn         bool
 }
 
@@ -102,6 +111,26 @@ type LocateResult struct {
 // Writer defines write behavior needed by the inbound router.
 type Writer interface {
 	Persist(ctx context.Context, input PersistInput) (Message, error)
+}
+
+// TurnResponseCursorReader exposes the latest durable assistant/tool response
+// without materializing session history.
+type TurnResponseCursorReader interface {
+	LatestTurnResponseAtBySession(ctx context.Context, sessionID string) (time.Time, error)
+}
+
+// TurnResponseHistoryReader exposes the narrow non-leading turn read model used
+// to pair rendered external messages with durable in-turn messages.
+type TurnResponseHistoryReader interface {
+	ListUncoveredTurnResponsesBySession(ctx context.Context, sessionID string, since time.Time, coveredMessageIDs []string) ([]Message, error)
+}
+
+type TurnResponseReplayReader interface {
+	ListVisibleTurnResponsesByRequest(ctx context.Context, sessionID, requestMessageID string) ([]Message, error)
+}
+
+type ExternalMessagePositionReader interface {
+	ListExternalMessagePositionsBySession(ctx context.Context, sessionID string, externalMessageIDs []string) ([]ExternalMessagePosition, error)
 }
 
 // ToolTailRoundPersister optionally persists a complete
@@ -118,7 +147,8 @@ type TurnReplacement struct {
 }
 
 type RoundPersistenceOptions struct {
-	Replacement *TurnReplacement
+	Replacement    *TurnReplacement
+	DeliveryClaims []DeliveryClaim
 }
 
 // AtomicRoundPersister writes a complete round in one transaction.
@@ -126,6 +156,31 @@ type RoundPersistenceOptions struct {
 // supporting unfenced local replacement transactions.
 type AtomicRoundPersister interface {
 	PersistRound(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions) ([]Message, bool, error)
+}
+
+// TurnResponseTailPersister persists multiple assistant/tool messages that
+// belong to an already-persisted user request as one atomic write.
+type TurnResponseTailPersister interface {
+	PersistTurnResponseTail(ctx context.Context, inputs []PersistInput) ([]Message, error)
+}
+
+type DiscussCursorUpdate struct {
+	SessionID           string
+	ScopeKey            string
+	RouteID             string
+	Source              string
+	ConsumedCursor      int64
+	ConsumedEventCursor int64
+	DeliveryClaims      []DeliveryClaim
+}
+
+type DeliveryClaim struct {
+	EventID    string
+	ClaimToken string
+}
+
+type TurnResponseCursorPersister interface {
+	PersistTurnResponseWithCursor(ctx context.Context, inputs []PersistInput, cursor DiscussCursorUpdate) ([]Message, error)
 }
 
 // Service defines message read/write behavior.

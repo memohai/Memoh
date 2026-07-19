@@ -42,7 +42,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		// (newest messages) and compact everything older.
 		toCompact = splitByTarget(messages, cfg.TargetTokens)
 	} else {
-		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
+		toCompact = splitByRatio(messages, cfg.Ratio)
 	}
 	if len(toCompact) == 0 {
 		return Result{Status: StatusNoop}, nil

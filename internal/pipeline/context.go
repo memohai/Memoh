@@ -5,24 +5,35 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/memohai/memoh/internal/contextfrag"
 )
 
 const charsPerToken = 2
 
-// TurnResponseEntry represents an assistant or tool message from bot_history_messages,
-// used as the "TR" stream in context composition.
+// TurnResponseEntry represents a durable non-leading turn message used as the
+// "TR" stream in context composition. In addition to assistant/tool messages,
+// this includes internal user decorations such as read_media image content.
 type TurnResponseEntry struct {
-	RequestedAtMs int64           `json:"requested_at_ms"`
-	Role          string          `json:"role"`
-	Content       string          `json:"content"`
-	RawContent    json.RawMessage `json:"raw_content,omitempty"`
+	RequestedAtMs   int64           `json:"requested_at_ms"`
+	Role            string          `json:"role"`
+	Content         string          `json:"content"`
+	RawContent      json.RawMessage `json:"raw_content,omitempty"`
+	SourceMessageID string          `json:"source_message_id,omitempty"`
+	HistoryPosition HistoryPosition `json:"-"`
 }
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.
 type ContextMessage struct {
-	Role       string          `json:"role"`
-	Content    string          `json:"content"`
-	RawContent json.RawMessage `json:"raw_content,omitempty"`
+	Role                      string          `json:"role"`
+	Content                   string          `json:"content"`
+	RawContent                json.RawMessage `json:"raw_content,omitempty"`
+	CompactionArtifactID      string          `json:"compaction_artifact_id,omitempty"`
+	RenderedMessageIDs        []string        `json:"rendered_message_ids,omitempty"`
+	ExternalEventCursors      []int64         `json:"external_event_cursors,omitempty"`
+	LatestExternalEventCursor int64           `json:"latest_external_event_cursor,omitempty"`
+	CurrentTrigger            bool            `json:"-"`
+	CurrentTriggerEvaluated   bool            `json:"-"`
 }
 
 // ComposeContextResult holds the output of ComposeContext.
@@ -31,14 +42,47 @@ type ComposeContextResult struct {
 	EstimatedTokens int
 }
 
-// LatestExternalEventMs returns the receivedAtMs of the latest non-self segment
-// after afterMs, or 0 if none found.
-func LatestExternalEventMs(rc RenderedContext, afterMs int64) int64 {
+// CompactionSource identifies one durable history source covered by an active
+// compaction artifact. ExternalMessageID projects that source onto the DCP
+// rendered stream; HistoryMessageID projects it onto persisted turn responses.
+type CompactionSource struct {
+	Ref               contextfrag.ContextRef `json:"ref"`
+	HistoryMessageID  string                 `json:"history_message_id,omitempty"`
+	ExternalMessageID string                 `json:"external_message_id,omitempty"`
+	CreatedAtMs       int64                  `json:"created_at_ms,omitempty"`
+	EventCursor       int64                  `json:"event_cursor,omitempty"`
+}
+
+// CompactionArtifact is the pipeline-facing projection of one active durable
+// artifact. Callers preserve frontier order; composition keeps each artifact
+// separate so later restacks can supersede only the ranges they actually cover.
+type CompactionArtifact struct {
+	ID            string             `json:"id"`
+	Summary       string             `json:"summary"`
+	AnchorStartMs int64              `json:"anchor_start_ms,omitempty"`
+	Sources       []CompactionSource `json:"sources,omitempty"`
+}
+
+// ContextHistoryProjection is the storage-independent history input consumed
+// by pipeline orchestration.
+type ContextHistoryProjection struct {
+	TurnResponses            []TurnResponseEntry
+	CompactionArtifacts      []CompactionArtifact
+	HistoryMessagePositions  map[string]HistoryPosition
+	ExternalMessagePositions map[string]HistoryPosition
+	LatestTurnResponseAtMs   int64
+	WindowStartAtMs          int64
+}
+
+// LatestExternalEventCursor returns the latest external event cursor after
+// afterCursor, or 0 if none found.
+func LatestExternalEventCursor(rc RenderedContext, afterCursor int64) int64 {
 	var latest int64
 	for _, seg := range rc {
-		if seg.ReceivedAtMs > afterMs && !seg.IsMyself {
-			if seg.ReceivedAtMs > latest {
-				latest = seg.ReceivedAtMs
+		cursor := seg.eventCursor()
+		if cursor > afterCursor && !seg.IsMyself && !seg.IsSelfSent {
+			if cursor > latest {
+				latest = cursor
 			}
 		}
 	}
@@ -46,11 +90,18 @@ func LatestExternalEventMs(rc RenderedContext, afterMs int64) int64 {
 }
 
 type mergeEntry struct {
-	kind string // "rc" or "tr"
+	kind string // "rc", "summary", or "tr"
 	time int64
-	step int
+	step int64
 	// For RC entries
-	rcContent []RenderedContentPiece
+	rcContent                 []RenderedContentPiece
+	rcMessageID               string
+	rcExternalCursor          int64
+	rcCurrentTrigger          bool
+	rcCurrentTriggerEvaluated bool
+	// For summary entries
+	summaryContent    string
+	summaryArtifactID string
 	// For TR entries
 	trRole       string
 	trContent    string
@@ -58,54 +109,116 @@ type mergeEntry struct {
 }
 
 // MergeContext interleaves RC segments and TR entries by timestamp.
-// RC entries use receivedAtMs; TR entries use requestedAtMs.
+// RC entries keep their original conversation position; TR entries use requestedAtMs.
 // Tiebreaker: RC before TR on equal timestamp.
 // Consecutive RC entries between TR entries are merged into one user message.
 func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage {
 	entries := make([]mergeEntry, 0, len(rc)+len(trs))
+	entries = appendRenderedContextEntries(entries, rc)
+	entries = appendTurnResponseEntries(entries, trs)
+	return mergeEntries(entries)
+}
 
+func appendRenderedContextEntries(entries []mergeEntry, rc RenderedContext) []mergeEntry {
 	for _, seg := range rc {
+		externalCursor := seg.eventCursor()
+		if seg.IsMyself || seg.IsSelfSent {
+			externalCursor = 0
+		}
 		entries = append(entries, mergeEntry{
-			kind:      "rc",
-			time:      seg.ReceivedAtMs,
-			step:      -1,
-			rcContent: seg.Content,
+			kind:                      "rc",
+			time:                      seg.conversationAtMs(),
+			step:                      seg.orderCursor(),
+			rcContent:                 seg.Content,
+			rcMessageID:               strings.TrimSpace(seg.MessageID),
+			rcExternalCursor:          externalCursor,
+			rcCurrentTrigger:          seg.CurrentTrigger,
+			rcCurrentTriggerEvaluated: seg.CurrentTriggerEvaluated,
 		})
 	}
+	return entries
+}
 
+func appendTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEntry) []mergeEntry {
 	for i, tr := range trs {
 		entries = append(entries, mergeEntry{
 			kind:         "tr",
 			time:         tr.RequestedAtMs,
-			step:         i,
+			step:         int64(i),
 			trRole:       tr.Role,
 			trContent:    tr.Content,
 			trRawContent: tr.RawContent,
 		})
 	}
+	return entries
+}
 
+func mergeEntries(entries []mergeEntry) []ContextMessage {
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].time != entries[j].time {
 			return entries[i].time < entries[j].time
 		}
 		if entries[i].kind != entries[j].kind {
-			return entries[i].kind == "rc"
+			return mergeKindOrder(entries[i].kind) < mergeKindOrder(entries[j].kind)
 		}
 		return entries[i].step < entries[j].step
 	})
+	return materializeMergeEntries(entries)
+}
 
+func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 	var messages []ContextMessage
 	var pendingText strings.Builder
+	var pendingMessageIDs []string
+	var pendingExternalCursors []int64
+	var pendingLatestExternalCursor int64
+	var pendingCurrentTrigger bool
+	var pendingCurrentTriggerEvaluated bool
+	var pendingRC bool
 
 	flushRC := func() {
 		if pendingText.Len() > 0 {
-			messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String()})
-			pendingText.Reset()
+			messages = append(messages, ContextMessage{
+				Role:                      "user",
+				Content:                   pendingText.String(),
+				RenderedMessageIDs:        append([]string(nil), pendingMessageIDs...),
+				ExternalEventCursors:      append([]int64(nil), pendingExternalCursors...),
+				LatestExternalEventCursor: pendingLatestExternalCursor,
+				CurrentTrigger:            pendingCurrentTrigger,
+				CurrentTriggerEvaluated:   pendingCurrentTriggerEvaluated,
+			})
 		}
+		pendingText.Reset()
+		pendingMessageIDs = pendingMessageIDs[:0]
+		pendingExternalCursors = pendingExternalCursors[:0]
+		pendingLatestExternalCursor = 0
+		pendingCurrentTrigger = false
+		pendingCurrentTriggerEvaluated = false
+		pendingRC = false
 	}
 
 	for _, entry := range entries {
-		if entry.kind == "rc" {
+		switch entry.kind {
+		case "rc":
+			if pendingRC &&
+				(entry.rcCurrentTrigger != pendingCurrentTrigger ||
+					entry.rcCurrentTriggerEvaluated != pendingCurrentTriggerEvaluated) {
+				flushRC()
+			}
+			if !pendingRC {
+				pendingCurrentTrigger = entry.rcCurrentTrigger
+				pendingCurrentTriggerEvaluated = entry.rcCurrentTriggerEvaluated
+				pendingRC = true
+			}
+			if entry.rcExternalCursor > 0 {
+				pendingExternalCursors = append(pendingExternalCursors, entry.rcExternalCursor)
+			}
+			if entry.rcExternalCursor > pendingLatestExternalCursor {
+				pendingLatestExternalCursor = entry.rcExternalCursor
+			}
+			if entry.rcMessageID != "" {
+				pendingMessageIDs = append(pendingMessageIDs, entry.rcMessageID)
+			}
 			for _, piece := range entry.rcContent {
 				if piece.Type == "text" {
 					if pendingText.Len() > 0 {
@@ -114,7 +227,14 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 					pendingText.WriteString(piece.Text)
 				}
 			}
-		} else {
+		case "summary", "summary_before_rc":
+			flushRC()
+			messages = append(messages, ContextMessage{
+				Role:                 "user",
+				Content:              entry.summaryContent,
+				CompactionArtifactID: entry.summaryArtifactID,
+			})
+		case "tr":
 			flushRC()
 			messages = append(messages, ContextMessage{
 				Role:       entry.trRole,
@@ -128,22 +248,250 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 	return messages
 }
 
-// ComposeContext merges RC and TRs, optionally prepends a compaction summary.
-func ComposeContext(rc RenderedContext, trs []TurnResponseEntry, compactSummary string) *ComposeContextResult {
-	allMessages := MergeContext(rc, trs)
-	if len(allMessages) == 0 && compactSummary == "" {
-		return nil
+func mergeKindOrder(kind string) int {
+	switch kind {
+	case "summary_before_rc":
+		return 0
+	case "rc":
+		return 1
+	case "summary":
+		return 2
+	case "tr":
+		return 3
+	default:
+		return 4
 	}
+}
 
-	if compactSummary != "" {
-		summary := ContextMessage{Role: "user", Content: "[Conversation summary]\n" + compactSummary}
-		allMessages = append([]ContextMessage{summary}, allMessages...)
+// ComposeContext merges un-compacted RC and TR streams.
+func ComposeContext(rc RenderedContext, trs []TurnResponseEntry) *ComposeContextResult {
+	return ComposeContextWithArtifacts(rc, trs, nil)
+}
+
+// ComposeContextWithArtifacts replaces covered RC/TR sources with each active
+// artifact at the covered rendered slot when available, or its durable anchor.
+func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact) *ComposeContextResult {
+	coveredMessages := coveredExternalMessages(artifacts)
+	activeRC := filterCoveredRenderedContextWithCoverage(rc, coveredMessages)
+	activeTRs := filterCoveredTurnResponses(trs, artifacts)
+	entries := make([]mergeEntry, 0, len(activeRC)+len(activeTRs)+len(artifacts))
+	entries = appendRenderedContextEntries(entries, activeRC)
+	for i, artifact := range artifacts {
+		if !artifact.usable() {
+			continue
+		}
+		kind := "summary"
+		summaryAtMs, precedesRenderedContext := artifactSummaryPlacement(artifact, rc, coveredMessages)
+		if precedesRenderedContext {
+			kind = "summary_before_rc"
+		}
+		entries = append(entries, mergeEntry{
+			kind:              kind,
+			time:              summaryAtMs,
+			step:              int64(i),
+			summaryContent:    "<summary>\n" + strings.TrimSpace(artifact.Summary) + "\n</summary>",
+			summaryArtifactID: artifact.ID,
+		})
+	}
+	entries = appendTurnResponseEntries(entries, activeTRs)
+	allMessages := mergeEntries(entries)
+	if len(allMessages) == 0 {
+		return nil
 	}
 
 	return &ComposeContextResult{
 		Messages:        allMessages,
 		EstimatedTokens: estimateMessagesTokens(allMessages),
 	}
+}
+
+func artifactSummaryPlacement(
+	artifact CompactionArtifact,
+	rc RenderedContext,
+	coveredMessages map[string]externalMessageCoverage,
+) (int64, bool) {
+	for _, source := range artifact.Sources {
+		if source.CreatedAtMs <= 0 {
+			continue
+		}
+		id := strings.TrimSpace(source.ExternalMessageID)
+		if id == "" {
+			break
+		}
+		coverage, covered := coveredMessages[id]
+		if !covered {
+			break
+		}
+		for _, segment := range rc {
+			if strings.TrimSpace(segment.MessageID) == id {
+				preserveCurrentTrigger := segment.CurrentTriggerEvaluated && segment.CurrentTrigger
+				return segment.conversationAtMs(), preserveCurrentTrigger || !renderedSegmentCovered(segment, coverage)
+			}
+		}
+		break
+	}
+	return artifactSummaryAnchor(artifact), false
+}
+
+const earliestMergeTime int64 = -1 << 63
+
+func filterCoveredRenderedContext(rc RenderedContext, artifacts []CompactionArtifact) RenderedContext {
+	return filterCoveredRenderedContextWithCoverage(rc, coveredExternalMessages(artifacts))
+}
+
+func filterCoveredRenderedContextWithCoverage(
+	rc RenderedContext,
+	coveredMessages map[string]externalMessageCoverage,
+) RenderedContext {
+	if len(coveredMessages) == 0 {
+		return rc
+	}
+	filtered := make(RenderedContext, 0, len(rc))
+	for _, segment := range rc {
+		coverage, covered := coveredMessages[strings.TrimSpace(segment.MessageID)]
+		preserveCurrentTrigger := segment.CurrentTriggerEvaluated && segment.CurrentTrigger
+		if covered && renderedSegmentCovered(segment, coverage) && !preserveCurrentTrigger {
+			continue
+		}
+		filtered = append(filtered, segment)
+	}
+	return filtered
+}
+
+// ActiveRenderedContext removes only sources covered by usable artifacts.
+func ActiveRenderedContext(rc RenderedContext, artifacts []CompactionArtifact) RenderedContext {
+	return filterCoveredRenderedContext(rc, artifacts)
+}
+
+// RecentRenderedContext keeps events visible within the same bounded window
+// used for uncompacted turn responses.
+func RecentRenderedContext(rc RenderedContext, windowStartAtMs int64) RenderedContext {
+	if windowStartAtMs <= 0 {
+		return rc
+	}
+	recent := make(RenderedContext, 0, len(rc))
+	for _, segment := range rc {
+		if segment.eventAtMs() >= windowStartAtMs {
+			recent = append(recent, segment)
+		}
+	}
+	return recent
+}
+
+func filterCoveredTurnResponses(trs []TurnResponseEntry, artifacts []CompactionArtifact) []TurnResponseEntry {
+	covered := make(map[string]struct{})
+	for _, artifact := range artifacts {
+		if !artifact.usable() {
+			continue
+		}
+		for _, source := range artifact.Sources {
+			if id := strings.TrimSpace(source.HistoryMessageID); id != "" {
+				covered[id] = struct{}{}
+			}
+		}
+	}
+	if len(covered) == 0 {
+		return trs
+	}
+	filtered := make([]TurnResponseEntry, 0, len(trs))
+	for _, tr := range trs {
+		if _, ok := covered[strings.TrimSpace(tr.SourceMessageID)]; ok {
+			continue
+		}
+		filtered = append(filtered, tr)
+	}
+	return filtered
+}
+
+type externalMessageCoverage struct {
+	eventCursors map[int64]struct{}
+}
+
+func coveredExternalMessages(artifacts []CompactionArtifact) map[string]externalMessageCoverage {
+	covered := make(map[string]externalMessageCoverage)
+	for _, artifact := range artifacts {
+		if !artifact.usable() {
+			continue
+		}
+		for _, source := range artifact.Sources {
+			id := strings.TrimSpace(source.ExternalMessageID)
+			if id != "" && source.CreatedAtMs > 0 {
+				coverage := covered[id]
+				if source.EventCursor > 0 {
+					if coverage.eventCursors == nil {
+						coverage.eventCursors = make(map[int64]struct{})
+					}
+					coverage.eventCursors[source.EventCursor] = struct{}{}
+				}
+				covered[id] = coverage
+			}
+		}
+	}
+	return covered
+}
+
+func renderedSegmentCovered(segment RenderedSegment, coverage externalMessageCoverage) bool {
+	if !segment.hasMutation() {
+		return true
+	}
+	cursor := segment.LastEventCursor
+	if cursor <= 0 {
+		return false
+	}
+	_, covered := coverage.eventCursors[cursor]
+	return covered
+}
+
+func (artifact CompactionArtifact) usable() bool {
+	return strings.TrimSpace(artifact.ID) != "" && strings.TrimSpace(artifact.Summary) != ""
+}
+
+func artifactSummaryAnchor(artifact CompactionArtifact) int64 {
+	if artifact.AnchorStartMs <= 0 {
+		return earliestMergeTime
+	}
+	return artifact.AnchorStartMs
+}
+
+func (seg RenderedSegment) eventAtMs() int64 {
+	if seg.LastEventAtMs > 0 {
+		return seg.LastEventAtMs
+	}
+	return seg.ReceivedAtMs
+}
+
+func (seg RenderedSegment) hasMutation() bool {
+	if seg.LastEventCursor > 0 {
+		return seg.EventCursor <= 0 || seg.LastEventCursor != seg.EventCursor
+	}
+	if seg.EventCursor > 0 {
+		return false
+	}
+	return seg.LastEventAtMs > 0 && seg.LastEventAtMs != seg.ReceivedAtMs
+}
+
+func (seg RenderedSegment) eventCursor() int64 {
+	if seg.LastEventCursor > 0 {
+		return seg.LastEventCursor
+	}
+	if seg.EventCursor > 0 {
+		return seg.EventCursor
+	}
+	return seg.eventAtMs()
+}
+
+func (seg RenderedSegment) orderCursor() int64 {
+	if seg.EventCursor > 0 {
+		return seg.EventCursor
+	}
+	return seg.ReceivedAtMs
+}
+
+func (seg RenderedSegment) conversationAtMs() int64 {
+	if seg.ReceivedAtMs > 0 {
+		return seg.ReceivedAtMs
+	}
+	return seg.eventAtMs()
 }
 
 func estimateMessagesTokens(messages []ContextMessage) int {

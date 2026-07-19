@@ -267,8 +267,9 @@ func TestHandleMCPToolsCallRoutesPublicEventHeadersWithoutTrustingIdentity(t *te
 		BotID:     "bot-1",
 		SessionID: "session-1",
 		StreamID:  "stream-1",
-	}, func(event mcpgw.ToolStreamEvent) {
+	}, func(event mcpgw.ToolStreamEvent) bool {
 		delivered = append(delivered, event)
+		return true
 	})
 	defer unregister()
 	handler := &ContainerdHandler{
