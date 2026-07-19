@@ -28,6 +28,7 @@ import (
 	"github.com/memohai/memoh/internal/oauthclients"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
+	"github.com/memohai/memoh/internal/providertemplates"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
@@ -85,6 +86,7 @@ func options() fx.Option {
 			userinput.NewService,
 			provideHooksService,
 			provideProvidersService,
+			providertemplates.NewService,
 			fetchproviders.NewService,
 			searchproviders.NewService,
 			policy.NewService,
@@ -152,6 +154,7 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewACPRuntimeHandler),
 			provideServerHandler(handlers.NewSwaggerHandler),
 			provideServerHandler(handlers.NewProvidersHandler),
+			provideServerHandler(handlers.NewProviderTemplatesHandler),
 			provideServerHandler(provideProviderOAuthHandler),
 			provideServerHandler(provideACPCodexOAuthServerHandler),
 			provideServerHandler(provideACPClaudeCodeOAuthServerHandler),
@@ -195,12 +198,8 @@ func options() fx.Option {
 		fx.Invoke(
 			injectToolProviders,
 			injectACPToolProviders,
-			startRegistrySync,
-			startAudioProviderBootstrap,
-			startVideoProviderBootstrap,
-			startMemoryProviderBootstrap,
-			startFetchProviderBootstrap,
-			startSearchProviderBootstrap,
+			configureMemoryProviderRegistry,
+			startProviderTemplateSync,
 			startScheduleService,
 			startHeartbeatService,
 			startChannelManager,

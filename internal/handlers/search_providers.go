@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/searchproviders"
 )
 
@@ -66,6 +67,9 @@ func (h *SearchProvidersHandler) Create(c echo.Context) error {
 	}
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
+		if apperror.CodeOf(err) != "" {
+			return err
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusCreated, resp)
@@ -135,6 +139,9 @@ func (h *SearchProvidersHandler) Update(c echo.Context) error {
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
+		if apperror.CodeOf(err) != "" {
+			return err
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)

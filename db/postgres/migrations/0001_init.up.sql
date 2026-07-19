@@ -1,5 +1,62 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- Global provider catalog. These rows describe reusable product templates and
+-- intentionally have no team_id or tenant RLS policy.
+CREATE SCHEMA IF NOT EXISTS template;
+
+CREATE TABLE IF NOT EXISTS template.provider_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key TEXT NOT NULL,
+  domain TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  icon TEXT,
+  driver TEXT NOT NULL,
+  config_schema JSONB NOT NULL DEFAULT '{}'::jsonb,
+  default_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT provider_templates_domain_key_unique UNIQUE (domain, key),
+  CONSTRAINT provider_templates_domain_check CHECK (
+    domain IN ('llm', 'speech', 'transcription', 'video')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_templates_domain_active_order
+  ON template.provider_templates (domain, active, sort_order, name);
+
+CREATE TABLE IF NOT EXISTS template.provider_template_models (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_template_id UUID NOT NULL REFERENCES template.provider_templates(id) ON DELETE CASCADE,
+  model_id TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL DEFAULT 'chat',
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT provider_template_models_identity_unique UNIQUE (provider_template_id, type, model_id),
+  CONSTRAINT provider_template_models_type_check CHECK (
+    type IN ('chat', 'embedding', 'speech', 'transcription', 'video')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_template_models_template_active_order
+  ON template.provider_template_models (provider_template_id, active, sort_order, model_id);
+
+GRANT USAGE ON SCHEMA template TO CURRENT_USER;
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  template.provider_templates,
+  template.provider_template_models
+TO CURRENT_USER;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
@@ -59,6 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_user_channel_bindings_user_id ON user_channel_bin
 
 CREATE TABLE IF NOT EXISTS providers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_template_id UUID,
   name TEXT NOT NULL,
   client_type TEXT NOT NULL DEFAULT 'openai-completions',
   icon TEXT,
@@ -67,6 +125,10 @@ CREATE TABLE IF NOT EXISTS providers (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT providers_provider_template_id_fkey
+    FOREIGN KEY (provider_template_id)
+    REFERENCES template.provider_templates(id)
+    ON DELETE SET NULL (provider_template_id),
   CONSTRAINT providers_name_unique UNIQUE (name),
   CONSTRAINT providers_client_type_check CHECK (client_type IN (
     'openai-responses',
@@ -104,7 +166,8 @@ CREATE TABLE IF NOT EXISTS search_providers (
   enable BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT search_providers_name_unique UNIQUE (name)
+  CONSTRAINT search_providers_name_unique UNIQUE (name),
+  CONSTRAINT search_providers_provider_unique UNIQUE (provider)
 );
 
 CREATE TABLE IF NOT EXISTS fetch_providers (
@@ -941,6 +1004,7 @@ CREATE TABLE IF NOT EXISTS email_providers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_email_providers_user_id ON email_providers(user_id);
+CREATE INDEX IF NOT EXISTS idx_providers_provider_template_id ON providers(provider_template_id);
 
 -- email_oauth_tokens: stored OAuth2 tokens for Gmail email providers
 CREATE TABLE IF NOT EXISTS email_oauth_tokens (

@@ -17,13 +17,8 @@ import (
 
 // Service provides account (credential) management for users.
 type Service struct {
-	store             dbstore.AccountStore
-	logger            *slog.Logger
-	emailBootstrapper EmailProviderBootstrapper
-}
-
-type EmailProviderBootstrapper interface {
-	EnsureDefaultGmailProvider(ctx context.Context, userID string) error
+	store  dbstore.AccountStore
+	logger *slog.Logger
 }
 
 var (
@@ -41,10 +36,6 @@ func NewService(log *slog.Logger, store dbstore.AccountStore) *Service {
 		store:  store,
 		logger: log.With(slog.String("service", "accounts")),
 	}
-}
-
-func (s *Service) SetEmailProviderBootstrapper(bootstrapper EmailProviderBootstrapper) {
-	s.emailBootstrapper = bootstrapper
 }
 
 // Get returns an account by user id.
@@ -190,9 +181,6 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 		return Account{}, err
 	}
 	account := toAccount(row)
-	if err := s.ensureDefaultEmailProvider(ctx, account.ID); err != nil {
-		return Account{}, err
-	}
 	return account, nil
 }
 
@@ -218,16 +206,6 @@ func (s *Service) CreateHuman(ctx context.Context, userID string, req CreateAcco
 		userID = userRow.ID
 	}
 	return s.Create(ctx, userID, req)
-}
-
-func (s *Service) ensureDefaultEmailProvider(ctx context.Context, userID string) error {
-	if s.emailBootstrapper == nil {
-		return nil
-	}
-	if err := s.emailBootstrapper.EnsureDefaultGmailProvider(ctx, userID); err != nil {
-		return fmt.Errorf("ensure default gmail provider: %w", err)
-	}
-	return nil
 }
 
 // UpdateAdmin updates account fields as admin.

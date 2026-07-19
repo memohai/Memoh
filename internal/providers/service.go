@@ -13,10 +13,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providertemplates"
 	"github.com/memohai/memoh/internal/registry"
 )
 
@@ -88,6 +90,52 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		return GetResponse{}, fmt.Errorf("create provider: %w", err)
 	}
 
+	return s.toGetResponse(provider), nil
+}
+
+func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplateRequest) (GetResponse, error) {
+	expectedDomain := providertemplates.Domain(strings.TrimSpace(req.Domain))
+	if expectedDomain != "" && !providertemplates.IsValidDomain(expectedDomain) {
+		return GetResponse{}, apperror.New(apperror.CodeProviderTemplateDomainInvalid, nil)
+	}
+	template, err := providertemplates.Resolve(ctx, s.queries, req.TemplateID, expectedDomain)
+	if err != nil {
+		return GetResponse{}, err
+	}
+	switch providertemplates.Domain(template.Domain) {
+	case providertemplates.DomainLLM, providertemplates.DomainSpeech, providertemplates.DomainTranscription, providertemplates.DomainVideo:
+	default:
+		return GetResponse{}, apperror.New(apperror.CodeProviderTemplateDomainMismatch, nil)
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = template.Name
+	}
+	config := providertemplates.MergeConfig(providertemplates.DecodeConfig(template.DefaultConfig), req.Config)
+	configJSON, err := providertemplates.Marshal(normalizeProviderConfig(template.Driver, config))
+	if err != nil {
+		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, err, nil)
+	}
+	metadataJSON, err := providertemplates.Marshal(providertemplates.MergeMetadata(template, req.Metadata))
+	if err != nil {
+		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, err, nil)
+	}
+	provider, err := s.queries.CreateProviderFromTemplate(ctx, sqlc.CreateProviderFromTemplateParams{
+		ProviderTemplateID: template.ID,
+		Name:               name,
+		ClientType:         template.Driver,
+		Icon:               template.Icon,
+		Enable:             true,
+		Config:             configJSON,
+		Metadata:           metadataJSON,
+	})
+	if err != nil {
+		if isProviderNameConflict(err) {
+			return GetResponse{}, apperror.Wrap(apperror.CodeProviderNameTaken, err, nil)
+		}
+		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, fmt.Errorf("create provider from template: %w", err), nil)
+	}
 	return s.toGetResponse(provider), nil
 }
 
@@ -340,7 +388,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return s.fetchGitHubCopilotModels(ctx, provider)
 	}
 
-	if models, ok := s.fetchTemplateModels(provider); ok {
+	if models, ok := s.fetchTemplateModels(ctx, provider); ok {
 		return models, nil
 	}
 
@@ -352,7 +400,16 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	return remoteModels, nil
 }
 
-func (s *Service) fetchTemplateModels(provider sqlc.Provider) ([]RemoteModel, bool) {
+func (s *Service) fetchTemplateModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, bool) {
+	if provider.ProviderTemplateID.Valid {
+		models, err := s.queries.ListProviderTemplateModels(ctx, provider.ProviderTemplateID)
+		if err == nil {
+			return remoteModelsFromCatalog(models), true
+		}
+		if s.logger != nil {
+			s.logger.Warn("failed to load provider template model catalog", slog.Any("error", err))
+		}
+	}
 	source := metadataSectionSource(providerMetadata(provider.Metadata), "preset")
 	if source == "" {
 		return nil, false
@@ -375,6 +432,25 @@ func (s *Service) fetchTemplateModels(provider sqlc.Provider) ([]RemoteModel, bo
 		}
 	}
 	return nil, false
+}
+
+func remoteModelsFromCatalog(items []sqlc.TemplateProviderTemplateModel) []RemoteModel {
+	out := make([]RemoteModel, 0, len(items))
+	for _, model := range items {
+		cfg := providerConfig(model.Config)
+		out = append(out, RemoteModel{
+			ID:               model.ModelID,
+			Name:             model.Name,
+			Description:      configStringPtr(cfg, "description"),
+			Type:             model.Type,
+			Compatibilities:  configStringSlice(cfg, "compatibilities"),
+			ReasoningEfforts: configStringSlice(cfg, "reasoning_efforts"),
+			ThinkingMode:     configString(cfg, "thinking_mode"),
+			ContextWindow:    configIntPtr(cfg, "context_window"),
+			Dimensions:       configIntPtr(cfg, "dimensions"),
+		})
+	}
+	return out
 }
 
 func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
@@ -478,17 +554,22 @@ func (s *Service) toGetResponse(provider sqlc.Provider) GetResponse {
 	if provider.Icon.Valid {
 		icon = provider.Icon.String
 	}
+	var templateID string
+	if provider.ProviderTemplateID.Valid {
+		templateID = provider.ProviderTemplateID.String()
+	}
 
 	return GetResponse{
-		ID:         provider.ID.String(),
-		Name:       provider.Name,
-		ClientType: provider.ClientType,
-		Icon:       icon,
-		Enable:     provider.Enable,
-		Config:     maskedCfg,
-		Metadata:   metadata,
-		CreatedAt:  provider.CreatedAt.Time,
-		UpdatedAt:  provider.UpdatedAt.Time,
+		ID:                 provider.ID.String(),
+		ProviderTemplateID: templateID,
+		Name:               provider.Name,
+		ClientType:         provider.ClientType,
+		Icon:               icon,
+		Enable:             provider.Enable,
+		Config:             maskedCfg,
+		Metadata:           metadata,
+		CreatedAt:          provider.CreatedAt.Time,
+		UpdatedAt:          provider.UpdatedAt.Time,
 	}
 }
 

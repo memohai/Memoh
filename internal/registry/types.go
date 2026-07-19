@@ -2,6 +2,7 @@ package registry
 
 // ProviderDefinition describes a built-in provider loaded from a YAML file.
 type ProviderDefinition struct {
+	ID         string            `yaml:"id,omitempty"`
 	Name       string            `yaml:"name"`
 	ClientType string            `yaml:"client_type"`
 	Icon       string            `yaml:"icon,omitempty"`

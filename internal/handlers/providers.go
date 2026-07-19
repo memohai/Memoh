@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthctx"
@@ -34,6 +35,7 @@ func NewProvidersHandler(log *slog.Logger, service *providers.Service, modelsSer
 func (h *ProvidersHandler) Register(e *echo.Echo) {
 	group := e.Group("/providers")
 	group.POST("", h.Create)
+	group.POST("/from-template", h.CreateFromTemplate)
 	group.GET("", h.List)
 	group.GET("/:id", h.Get)
 	group.GET("/:id/models", h.ListModelsByProvider)
@@ -43,6 +45,31 @@ func (h *ProvidersHandler) Register(e *echo.Echo) {
 	group.GET("/count", h.Count)
 	group.POST("/:id/test", h.Test)
 	group.POST("/:id/import-models", h.ImportModels)
+}
+
+// CreateFromTemplate godoc
+// @Summary Create a provider from a global template
+// @Description Materialize a tenant-owned provider only when the user saves a template configuration
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param request body providers.CreateFromTemplateRequest true "Provider template configuration"
+// @Success 201 {object} providers.GetResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Router /providers/from-template [post].
+func (h *ProvidersHandler) CreateFromTemplate(c echo.Context) error {
+	var req providers.CreateFromTemplateRequest
+	if err := c.Bind(&req); err != nil {
+		return apperror.Wrap(apperror.CodeProviderTemplateRequestInvalid, err, nil)
+	}
+	resp, err := h.service.CreateFromTemplate(c.Request().Context(), req)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusCreated, resp)
 }
 
 // Create godoc

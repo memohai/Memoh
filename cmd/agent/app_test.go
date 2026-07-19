@@ -7,7 +7,7 @@ import (
 	"github.com/memohai/memoh/internal/registry"
 )
 
-func TestProviderBootstrapDefinitionsKeepsAllProviderFiles(t *testing.T) {
+func TestRegistryProviderTemplatesKeepAllProviderFiles(t *testing.T) {
 	defs := []registry.ProviderDefinition{
 		{
 			Name:       "DeepSeek",
@@ -27,7 +27,7 @@ func TestProviderBootstrapDefinitionsKeepsAllProviderFiles(t *testing.T) {
 		},
 	}
 
-	got := providerBootstrapDefinitions(defs)
+	got := registry.ProviderTemplateDefinitions(defs)
 	if len(got) != len(defs) {
 		t.Fatalf("definition count = %d, want %d", len(got), len(defs))
 	}

@@ -72,7 +72,10 @@
       </p>
     </div>
 
-    <div class="flex shrink-0 items-center gap-0.5">
+    <div
+      v-if="!preview"
+      class="flex shrink-0 items-center gap-0.5"
+    >
       <Switch
         class="mr-1"
         :model-value="enabled"
@@ -147,9 +150,11 @@ const props = withDefaults(defineProps<{
   deleteLoading: boolean
   searchAligned?: boolean
   managed?: boolean
+  preview?: boolean
 }>(), {
   searchAligned: false,
   managed: false,
+  preview: false,
 })
 
 defineEmits<{

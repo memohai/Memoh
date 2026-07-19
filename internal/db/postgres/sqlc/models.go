@@ -600,16 +600,17 @@ type ModelVariant struct {
 }
 
 type Provider struct {
-	ID         pgtype.UUID        `json:"id"`
-	Name       string             `json:"name"`
-	ClientType string             `json:"client_type"`
-	Icon       pgtype.Text        `json:"icon"`
-	Enable     bool               `json:"enable"`
-	Config     []byte             `json:"config"`
-	Metadata   []byte             `json:"metadata"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	TeamID     pgtype.UUID        `json:"team_id"`
+	ID                 pgtype.UUID        `json:"id"`
+	ProviderTemplateID pgtype.UUID        `json:"provider_template_id"`
+	Name               string             `json:"name"`
+	ClientType         string             `json:"client_type"`
+	Icon               pgtype.Text        `json:"icon"`
+	Enable             bool               `json:"enable"`
+	Config             []byte             `json:"config"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	TeamID             pgtype.UUID        `json:"team_id"`
 }
 
 type ProviderOauthToken struct {
@@ -710,6 +711,39 @@ type Team struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	Metadata  []byte             `json:"metadata"`
+}
+
+type TemplateProviderTemplate struct {
+	ID            pgtype.UUID        `json:"id"`
+	Key           string             `json:"key"`
+	Domain        string             `json:"domain"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	Icon          pgtype.Text        `json:"icon"`
+	Driver        string             `json:"driver"`
+	ConfigSchema  []byte             `json:"config_schema"`
+	DefaultConfig []byte             `json:"default_config"`
+	Metadata      []byte             `json:"metadata"`
+	Source        string             `json:"source"`
+	ContentHash   string             `json:"content_hash"`
+	SortOrder     int32              `json:"sort_order"`
+	Active        bool               `json:"active"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TemplateProviderTemplateModel struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ProviderTemplateID pgtype.UUID        `json:"provider_template_id"`
+	ModelID            string             `json:"model_id"`
+	Name               string             `json:"name"`
+	Type               string             `json:"type"`
+	Config             []byte             `json:"config"`
+	Metadata           []byte             `json:"metadata"`
+	SortOrder          int32              `json:"sort_order"`
+	Active             bool               `json:"active"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ToolApprovalRequest struct {

@@ -17,7 +17,7 @@
         </div>
         <div class="ml-auto flex items-center gap-2">
           <ConfirmPopover
-            v-if="!isNative"
+            v-if="!isNative && curProvider?.id"
             :message="$t('webSearch.deleteFetchConfirm')"
             :loading="deleteLoading"
             variant="destructive"
@@ -37,7 +37,7 @@
           </ConfirmPopover>
           <Switch
             :model-value="curProvider?.enable ?? false"
-            :disabled="isNative || !curProvider?.id || enableLoading"
+            :disabled="isNative || enableLoading"
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"
           />
@@ -135,19 +135,43 @@ import { computed, inject, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
-import { useMutation, useQueryCache } from '@pinia/colada'
-import { putFetchProvidersById, deleteFetchProvidersById } from '@memohai/sdk'
-import type { FetchprovidersGetResponse, FetchprovidersUpdateRequest } from '@memohai/sdk'
+import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
+import { deleteFetchProvidersById, getFetchProvidersMeta, postFetchProviders, putFetchProvidersById } from '@memohai/sdk'
+import type {
+  FetchprovidersCreateRequest,
+  FetchprovidersGetResponse,
+  FetchprovidersProviderMeta,
+  FetchprovidersUpdateRequest,
+} from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
+import { normalizeProviderConfigFields } from '@/utils/provider-template'
 
 const { t } = useI18n()
 const curProvider = inject('curFetchProvider', ref<FetchprovidersGetResponse>())
+const emit = defineEmits<{
+  materialized: [provider: FetchprovidersGetResponse]
+}>()
 const curProviderId = computed(() => curProvider.value?.id)
 const isNative = computed(() => curProvider.value?.provider === 'native')
 const enableLoading = ref(false)
 
 const queryCache = useQueryCache()
+let materializePromise: Promise<FetchprovidersGetResponse> | null = null
+
+const { data: metaData } = useQuery({
+  key: () => ['fetch-providers-meta'],
+  query: async () => {
+    const { data } = await getFetchProvidersMeta({ throwOnError: true })
+    return data
+  },
+})
+
+const configFields = computed(() => {
+  const meta = (metaData.value as FetchprovidersProviderMeta[] | undefined)
+    ?.find(item => item.provider === curProvider.value?.provider)
+  return normalizeProviderConfigFields(meta?.config_schema)
+})
 
 const providerSchema = toTypedSchema(z.object({
   name: z.string().min(1, t('webSearch.nameRequired')),
@@ -178,13 +202,21 @@ watch(curProvider, (newVal) => {
 }, { immediate: true })
 
 async function handleToggleEnable(value: boolean) {
-  if (!curProviderId.value || !curProvider.value || isNative.value) return
+  if (!curProvider.value || isNative.value) return
 
   const prev = curProvider.value.enable ?? false
   curProvider.value = { ...curProvider.value, enable: value }
 
   enableLoading.value = true
   try {
+    if (!curProviderId.value) {
+      await materializeProvider({
+        name: form.values.name,
+        provider: form.values.provider as FetchprovidersCreateRequest['provider'],
+        config: configData.value,
+      }, value)
+      return
+    }
     await putFetchProvidersById({
       path: { id: curProviderId.value },
       body: { enable: value },
@@ -201,7 +233,9 @@ async function handleToggleEnable(value: boolean) {
 
 const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
   mutation: async (data: FetchprovidersUpdateRequest) => {
-    if (!curProviderId.value) return
+    if (!curProviderId.value) {
+      return materializeProvider(data as FetchprovidersCreateRequest)
+    }
     const { data: result } = await putFetchProvidersById({
       path: { id: curProviderId.value },
       body: data,
@@ -212,6 +246,43 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
   onSettled: () => queryCache.invalidateQueries({ key: ['fetch-providers'] }),
 })
 
+async function materializeProvider(data: FetchprovidersCreateRequest, enable = false) {
+  if (curProvider.value?.id) return curProvider.value
+  if (materializePromise) return materializePromise
+
+  materializePromise = (async () => {
+    const { data: created } = await postFetchProviders({
+      body: {
+        name: data.name?.trim() || curProvider.value?.name || '',
+        provider: data.provider ?? curProvider.value?.provider as FetchprovidersCreateRequest['provider'],
+        config: data.config ?? configData.value,
+      },
+      throwOnError: true,
+    })
+    if (!created?.id) throw new Error('fetch provider creation returned no id')
+
+    let result = created
+    if (enable) {
+      const response = await putFetchProvidersById({
+        path: { id: created.id },
+        body: { enable: true },
+        throwOnError: true,
+      })
+      result = response.data ?? { ...created, enable: true }
+    }
+
+    curProvider.value = result
+    emit('materialized', result)
+    return result
+  })()
+
+  try {
+    return await materializePromise
+  } finally {
+    materializePromise = null
+  }
+}
+
 const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
     if (!curProviderId.value || isNative.value) return
@@ -221,6 +292,16 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
 })
 
 const editProvider = form.handleSubmit(async (values) => {
+  const missing = configFields.value.find((field) => {
+    if (!field.required) return false
+    const value = configData.value[field.key]
+    if (field.type === 'bool' || field.type === 'boolean') return value === undefined || value === null
+    return !String(value ?? '').trim()
+  })
+  if (missing) {
+    toast.error(t('provider.requiredField', { field: missing.title }))
+    return
+  }
   submitUpdate({
     name: values.name,
     provider: values.provider as FetchprovidersUpdateRequest['provider'],
