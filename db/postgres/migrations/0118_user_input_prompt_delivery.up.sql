@@ -1,4 +1,4 @@
--- 0117_user_input_prompt_delivery
+-- 0118_user_input_prompt_delivery
 -- Record successful ask_user prompt delivery independently from reply binding.
 
 ALTER TABLE user_input_requests

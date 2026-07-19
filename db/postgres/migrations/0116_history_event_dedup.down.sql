@@ -1,4 +1,4 @@
--- 0115_history_event_dedup
+-- 0116_history_event_dedup
 -- Remove the event-to-history uniqueness boundary.
 
 DROP INDEX IF EXISTS idx_bot_history_messages_event_id_unique;
@@ -19,13 +19,13 @@ BEGIN
       SELECT 1
       FROM bot_history_messages
       WHERE team_id = migration_team_id
-        AND metadata ? '_migration_0115_history_event_dedup'
+        AND metadata ? '_migration_0116_history_event_dedup'
         AND NOT (
           event_id IS NULL
-          AND jsonb_typeof(metadata->'_migration_0115_history_event_dedup') = 'object'
-          AND metadata->'_migration_0115_history_event_dedup'->>'version' = '1'
-          AND metadata->'_migration_0115_history_event_dedup'->>'message_id' = id::text
-          AND metadata->'_migration_0115_history_event_dedup'->>'event_id'
+          AND jsonb_typeof(metadata->'_migration_0116_history_event_dedup') = 'object'
+          AND metadata->'_migration_0116_history_event_dedup'->>'version' = '1'
+          AND metadata->'_migration_0116_history_event_dedup'->>'message_id' = id::text
+          AND metadata->'_migration_0116_history_event_dedup'->>'event_id'
             ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         )
     ) THEN
@@ -34,10 +34,10 @@ BEGIN
 
     UPDATE bot_history_messages
     SET
-      event_id = (metadata->'_migration_0115_history_event_dedup'->>'event_id')::uuid,
-      metadata = metadata - '_migration_0115_history_event_dedup'
+      event_id = (metadata->'_migration_0116_history_event_dedup'->>'event_id')::uuid,
+      metadata = metadata - '_migration_0116_history_event_dedup'
     WHERE team_id = migration_team_id
-      AND metadata ? '_migration_0115_history_event_dedup';
+      AND metadata ? '_migration_0116_history_event_dedup';
   END LOOP;
 
   PERFORM set_config('memoh.team_id', COALESCE(previous_team_id, ''), true);

@@ -76,7 +76,7 @@ func TestRestoreHistoryDeduplicatesLegacyMessageEventLinksByMigrationOrder(t *te
 			baseTime.Add(2*time.Second),
 		),
 	}
-	messages[5].Metadata = []byte(`{"label":"post-migration-loser","_migration_0115_history_event_dedup":{"version":1,"message_id":"00000000-0000-0000-0000-000000000007","event_id":"00000000-0000-0000-0000-000000000008"}}`)
+	messages[5].Metadata = []byte(`{"label":"post-migration-loser","_migration_0116_history_event_dedup":{"version":1,"message_id":"00000000-0000-0000-0000-000000000007","event_id":"00000000-0000-0000-0000-000000000008"}}`)
 	queries := &recordingLegacyEventRestoreQueries{
 		targetSessionID: targetSessionID,
 		targetEventID:   targetEventID,
@@ -135,8 +135,8 @@ func TestRestoreHistoryDeduplicatesLegacyMessageEventLinksByMigrationOrder(t *te
 		if err := json.Unmarshal(created.Metadata, &metadata); err != nil {
 			t.Fatalf("decode created message %d metadata: %v", i, err)
 		}
-		if _, exists := metadata["_migration_0115_history_event_dedup"]; exists {
-			t.Fatalf("created message %d retained 0115 migration marker: %s", i, created.Metadata)
+		if _, exists := metadata["_migration_0116_history_event_dedup"]; exists {
+			t.Fatalf("created message %d retained 0116 migration marker: %s", i, created.Metadata)
 		}
 		var label string
 		if err := json.Unmarshal(metadata["label"], &label); err != nil || label != archived.DisplayText.String {
@@ -156,20 +156,20 @@ func TestRestoreHistoryRejectsInvalidHistoryEventDedupMarkers(t *testing.T) {
 	}{
 		{
 			name:     "user string marker",
-			metadata: `{"_migration_0115_history_event_dedup":"user data"}`,
+			metadata: `{"_migration_0116_history_event_dedup":"user data"}`,
 		},
 		{
 			name:     "wrong message id",
-			metadata: `{"_migration_0115_history_event_dedup":{"version":1,"message_id":"00000000-0000-0000-0000-000000000024","event_id":"` + validMarkerEventID + `"}}`,
+			metadata: `{"_migration_0116_history_event_dedup":{"version":1,"message_id":"00000000-0000-0000-0000-000000000024","event_id":"` + validMarkerEventID + `"}}`,
 		},
 		{
 			name:     "invalid event id",
-			metadata: `{"_migration_0115_history_event_dedup":{"version":1,"message_id":"` + messageID.String() + `","event_id":"not-a-uuid"}}`,
+			metadata: `{"_migration_0116_history_event_dedup":{"version":1,"message_id":"` + messageID.String() + `","event_id":"not-a-uuid"}}`,
 		},
 		{
 			name:     "message still linked to event",
 			eventID:  linkedEventID,
-			metadata: `{"_migration_0115_history_event_dedup":{"version":1,"message_id":"` + messageID.String() + `","event_id":"` + validMarkerEventID + `"}}`,
+			metadata: `{"_migration_0116_history_event_dedup":{"version":1,"message_id":"` + messageID.String() + `","event_id":"` + validMarkerEventID + `"}}`,
 		},
 	}
 
@@ -211,7 +211,7 @@ func TestRestoreHistoryRejectsInvalidHistoryEventDedupMarkers(t *testing.T) {
 				false,
 				false,
 			)
-			if err == nil || !strings.Contains(err.Error(), "reserved 0115 history event dedup metadata marker") {
+			if err == nil || !strings.Contains(err.Error(), "reserved 0116 history event dedup metadata marker") {
 				t.Fatalf("restoreHistory() error = %v, want reserved marker error", err)
 			}
 			if len(queries.createdMessages) != 0 {

@@ -1,4 +1,4 @@
--- 0114_discuss_event_cursor
+-- 0115_discuss_event_cursor
 -- Track event-cursor progress separately from the legacy source-time cursor.
 
 ALTER TABLE bot_session_discuss_cursors

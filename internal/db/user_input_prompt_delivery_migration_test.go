@@ -8,16 +8,16 @@ import (
 
 func TestUserInputPromptDeliveryMigration(t *testing.T) {
 	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
-	up := readEmbeddedMigration(t, "postgres/migrations/0117_user_input_prompt_delivery.up.sql")
-	down := readEmbeddedMigration(t, "postgres/migrations/0117_user_input_prompt_delivery.down.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0118_user_input_prompt_delivery.up.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0118_user_input_prompt_delivery.down.sql")
 
-	for name, sql := range map[string]string{"baseline": baseline, "0117 up": up} {
+	for name, sql := range map[string]string{"baseline": baseline, "0118 up": up} {
 		if !strings.Contains(sql, "prompt_delivered_at TIMESTAMPTZ") {
 			t.Fatalf("%s is missing prompt_delivered_at", name)
 		}
 	}
 	if !strings.Contains(down, "DROP COLUMN IF EXISTS prompt_delivered_at") {
-		t.Fatal("0117 down is missing prompt_delivered_at rollback")
+		t.Fatal("0118 down is missing prompt_delivered_at rollback")
 	}
 
 	queries, err := os.ReadFile("../../db/postgres/queries/user_input.sql")

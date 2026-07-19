@@ -148,7 +148,7 @@ VALUES
 		if err := admin.QueryRow(ctx, `
 SELECT
   COUNT(*) FILTER (WHERE event_id = $2),
-  COUNT(*) FILTER (WHERE metadata ? '_migration_0115_history_event_dedup')
+  COUNT(*) FILTER (WHERE metadata ? '_migration_0116_history_event_dedup')
 FROM bot_history_messages
 WHERE team_id = $1
 `, f.teamID, f.eventID).Scan(&linked, &marked); err != nil {
@@ -184,7 +184,7 @@ WHERE polrelid = 'public.teams'::regclass AND polname = 'teams_self_select'
 		if err := admin.QueryRow(ctx, `
 SELECT
   COUNT(*) FILTER (WHERE event_id = $2),
-  COUNT(*) FILTER (WHERE metadata ? '_migration_0115_history_event_dedup')
+  COUNT(*) FILTER (WHERE metadata ? '_migration_0116_history_event_dedup')
 FROM bot_history_messages
 WHERE team_id = $1
 `, f.teamID, f.eventID).Scan(&linked, &marked); err != nil {
@@ -207,6 +207,6 @@ SELECT EXISTS (
 		t.Fatalf("check discuss cursor rollback: %v", err)
 	}
 	if cursorColumnExists {
-		t.Error("0114 down left consumed_event_cursor behind")
+		t.Error("0115 down left consumed_event_cursor behind")
 	}
 }

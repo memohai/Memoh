@@ -1,4 +1,4 @@
--- 0115_history_event_dedup
+-- 0116_history_event_dedup
 -- Enforce one durable history linkage per event for replay deduplication.
 
 ALTER POLICY teams_self_select ON public.teams USING (true);
@@ -17,13 +17,13 @@ BEGIN
       SELECT 1
       FROM bot_history_messages
       WHERE team_id = migration_team_id
-        AND metadata ? '_migration_0115_history_event_dedup'
+        AND metadata ? '_migration_0116_history_event_dedup'
         AND NOT (
           event_id IS NULL
-          AND jsonb_typeof(metadata->'_migration_0115_history_event_dedup') = 'object'
-          AND metadata->'_migration_0115_history_event_dedup'->>'version' = '1'
-          AND metadata->'_migration_0115_history_event_dedup'->>'message_id' = id::text
-          AND metadata->'_migration_0115_history_event_dedup'->>'event_id'
+          AND jsonb_typeof(metadata->'_migration_0116_history_event_dedup') = 'object'
+          AND metadata->'_migration_0116_history_event_dedup'->>'version' = '1'
+          AND metadata->'_migration_0116_history_event_dedup'->>'message_id' = id::text
+          AND metadata->'_migration_0116_history_event_dedup'->>'event_id'
             ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         )
     ) THEN
@@ -46,7 +46,7 @@ BEGIN
     SET
       metadata = jsonb_set(
         message.metadata,
-        '{_migration_0115_history_event_dedup}',
+        '{_migration_0116_history_event_dedup}',
         jsonb_build_object(
           'version', 1,
           'message_id', message.id::text,

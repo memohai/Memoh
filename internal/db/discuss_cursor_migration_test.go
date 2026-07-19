@@ -17,8 +17,8 @@ func TestDiscussCursorMigrationSeparatesEventAndLegacySourceCursors(t *testing.T
 	t.Parallel()
 
 	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
-	up := readEmbeddedMigration(t, "postgres/migrations/0114_discuss_event_cursor.up.sql")
-	down := readEmbeddedMigration(t, "postgres/migrations/0114_discuss_event_cursor.down.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0115_discuss_event_cursor.up.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0115_discuss_event_cursor.down.sql")
 
 	if !strings.Contains(baseline, "consumed_event_cursor BIGINT NOT NULL DEFAULT 0") {
 		t.Fatal("canonical schema is missing the durable discuss event cursor")
@@ -30,14 +30,14 @@ func TestDiscussCursorMigrationSeparatesEventAndLegacySourceCursors(t *testing.T
 		"e.received_at_ms <= c.consumed_cursor",
 	} {
 		if !strings.Contains(up, required) {
-			t.Fatalf("0114 up migration is missing %q", required)
+			t.Fatalf("0115 up migration is missing %q", required)
 		}
 	}
 	if !strings.Contains(down, "DROP COLUMN IF EXISTS consumed_event_cursor") {
-		t.Fatal("0114 down migration does not remove the event cursor")
+		t.Fatal("0115 down migration does not remove the event cursor")
 	}
 	if strings.Contains(down, "DROP COLUMN IF EXISTS consumed_cursor") {
-		t.Fatal("0114 down migration removes the legacy source cursor needed by the old binary")
+		t.Fatal("0115 down migration removes the legacy source cursor needed by the old binary")
 	}
 }
 
@@ -115,9 +115,9 @@ VALUES ($1, 9000)
 		t.Fatalf("insert legacy discuss cursor: %v", err)
 	}
 
-	up := readEmbeddedMigration(t, "postgres/migrations/0114_discuss_event_cursor.up.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0115_discuss_event_cursor.up.sql")
 	if _, err := tx.Exec(ctx, up); err != nil {
-		t.Fatalf("apply 0114 up: %v", err)
+		t.Fatalf("apply 0115 up: %v", err)
 	}
 	var sourceCursor, eventCursor int64
 	if err := tx.QueryRow(ctx, `
@@ -148,9 +148,9 @@ WHERE session_id = $1 AND scope_key = 'default'
 	if row.ConsumedCursor != 12000 || row.ConsumedEventCursor != 40 {
 		t.Fatalf("upserted cursors = source:%d event:%d, want source:12000 event:40", row.ConsumedCursor, row.ConsumedEventCursor)
 	}
-	down := readEmbeddedMigration(t, "postgres/migrations/0114_discuss_event_cursor.down.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0115_discuss_event_cursor.down.sql")
 	if _, err := tx.Exec(ctx, down); err != nil {
-		t.Fatalf("apply 0114 down: %v", err)
+		t.Fatalf("apply 0115 down: %v", err)
 	}
 	if err := tx.QueryRow(ctx, `
 SELECT consumed_cursor

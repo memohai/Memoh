@@ -21,8 +21,8 @@ func TestSessionEventIngestMigrationAddsDurableCursorAndLeaseContracts(t *testin
 
 	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
 	baselineDown := readEmbeddedMigration(t, "postgres/migrations/0001_init.down.sql")
-	up := readEmbeddedMigration(t, "postgres/migrations/0116_session_event_ingest.up.sql")
-	down := readEmbeddedMigration(t, "postgres/migrations/0116_session_event_ingest.down.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0117_session_event_ingest.up.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0117_session_event_ingest.down.sql")
 	queries, err := os.ReadFile("../../db/postgres/queries/session_events.sql")
 	if err != nil {
 		t.Fatalf("read session event queries: %v", err)
@@ -30,7 +30,7 @@ func TestSessionEventIngestMigrationAddsDurableCursorAndLeaseContracts(t *testin
 
 	for name, source := range map[string]string{
 		"canonical schema": baseline,
-		"0116 migration":   up,
+		"0117 migration":   up,
 	} {
 		for _, required := range []string{
 			"bot_session_event_cursor_seq",
@@ -51,7 +51,7 @@ func TestSessionEventIngestMigrationAddsDurableCursorAndLeaseContracts(t *testin
 		"setval('bot_session_event_cursor_seq'",
 	} {
 		if !strings.Contains(up, required) {
-			t.Fatalf("0116 migration is missing cursor seed contract %q", required)
+			t.Fatalf("0117 migration is missing cursor seed contract %q", required)
 		}
 	}
 	if !strings.Contains(baselineDown, "DROP SEQUENCE IF EXISTS bot_session_event_cursor_seq") {
@@ -64,7 +64,7 @@ func TestSessionEventIngestMigrationAddsDurableCursorAndLeaseContracts(t *testin
 		"DROP SEQUENCE IF EXISTS bot_session_event_cursor_seq",
 	} {
 		if !strings.Contains(down, required) {
-			t.Fatalf("0116 down migration is missing %q", required)
+			t.Fatalf("0117 down migration is missing %q", required)
 		}
 	}
 
@@ -163,9 +163,9 @@ VALUES ($1, $2, 'message', jsonb_build_object('event_cursor', $3::bigint), $3)
 		t.Fatalf("insert legacy event: %v", err)
 	}
 
-	up := readEmbeddedMigration(t, "postgres/migrations/0116_session_event_ingest.up.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0117_session_event_ingest.up.sql")
 	if _, err := tx.Exec(ctx, up); err != nil {
-		t.Fatalf("apply 0116 up: %v", err)
+		t.Fatalf("apply 0117 up: %v", err)
 	}
 	queries := sqlc.New(tx)
 	firstCursor, err := queries.NextSessionEventCursor(ctx)

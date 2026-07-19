@@ -1,4 +1,4 @@
--- 0116_session_event_ingest
+-- 0117_session_event_ingest
 -- Remove event-delivery lease columns and the durable event cursor sequence.
 
 ALTER TABLE bot_session_events

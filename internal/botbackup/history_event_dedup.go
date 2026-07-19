@@ -13,7 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
-const historyEventDedupMigrationMarker = "_migration_0115_history_event_dedup"
+const historyEventDedupMigrationMarker = "_migration_0116_history_event_dedup"
 
 func restoredHistoryEventLinkWinners(messages []sqlc.ListAllMessagesForBackupRow, eventMap map[string]pgtype.UUID) []bool {
 	winnerByEvent := make(map[string]int)
@@ -63,7 +63,7 @@ func stripRestoredHistoryEventDedupMarker(item sqlc.ListAllMessagesForBackupRow)
 	}
 	if err := validateRestoredHistoryEventDedupMarker(item, marker); err != nil {
 		return nil, fmt.Errorf(
-			"reserved 0115 history event dedup metadata marker is invalid for message %s: %w",
+			"reserved 0116 history event dedup metadata marker is invalid for message %s: %w",
 			item.ID.String(),
 			err,
 		)

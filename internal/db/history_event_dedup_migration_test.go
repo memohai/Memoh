@@ -14,10 +14,10 @@ import (
 func TestHistoryEventDedupMigrationContract(t *testing.T) {
 	t.Parallel()
 
-	const rollbackMarker = "_migration_0115_history_event_dedup"
+	const rollbackMarker = "_migration_0116_history_event_dedup"
 	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
-	up := readEmbeddedMigration(t, "postgres/migrations/0115_history_event_dedup.up.sql")
-	down := readEmbeddedMigration(t, "postgres/migrations/0115_history_event_dedup.down.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0116_history_event_dedup.up.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0116_history_event_dedup.down.sql")
 
 	for name, sql := range map[string]string{"baseline": baseline, "0115 up": up} {
 		for _, required := range []string{
@@ -104,7 +104,7 @@ INSERT INTO bot_history_messages (id, event_id, metadata, created_at) VALUES
 		t.Fatalf("insert legacy duplicates: %v", err)
 	}
 
-	up := readEmbeddedMigration(t, "postgres/migrations/0115_history_event_dedup.up.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0116_history_event_dedup.up.sql")
 	if _, err := tx.Exec(ctx, up); err != nil {
 		t.Fatalf("apply 0115 up: %v", err)
 	}
@@ -123,8 +123,8 @@ INSERT INTO bot_history_messages (id, event_id, metadata, created_at) VALUES
 	if err := tx.QueryRow(ctx, `
 SELECT
   event_id IS NULL,
-  metadata->'_migration_0115_history_event_dedup'->>'event_id',
-  metadata->'_migration_0115_history_event_dedup'->>'message_id',
+  metadata->'_migration_0116_history_event_dedup'->>'event_id',
+  metadata->'_migration_0116_history_event_dedup'->>'message_id',
   metadata->>'keep'
 FROM bot_history_messages
 WHERE id = $1
@@ -150,7 +150,7 @@ WHERE id = $1
 		t.Fatalf("restore after duplicate check: %v", err)
 	}
 
-	down := readEmbeddedMigration(t, "postgres/migrations/0115_history_event_dedup.down.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0116_history_event_dedup.down.sql")
 	if _, err := tx.Exec(ctx, down); err != nil {
 		t.Fatalf("apply 0115 down: %v", err)
 	}
@@ -166,7 +166,7 @@ WHERE id = $1
 	}
 	var rollbackMarkerPresent bool
 	if err := tx.QueryRow(ctx, `
-SELECT metadata ? '_migration_0115_history_event_dedup'
+SELECT metadata ? '_migration_0116_history_event_dedup'
 FROM bot_history_messages
 WHERE id = $1
 `, secondID).Scan(&rollbackMarkerPresent); err != nil {
