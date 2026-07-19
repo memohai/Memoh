@@ -639,4 +639,3 @@ func TestComposeContextKeepsFrontierOrderWhenOneArtifactCoversSharedMutation(t *
 		}
 	}
 }
-
