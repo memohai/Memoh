@@ -18,6 +18,7 @@
         </div>
         <div class="ml-auto flex items-center gap-2">
           <ConfirmPopover
+            v-if="curProvider?.id"
             :message="$t('webSearch.deleteConfirm')"
             :loading="deleteLoading"
             variant="destructive"
@@ -37,7 +38,7 @@
           </ConfirmPopover>
           <Switch
             :model-value="curProvider?.enable ?? true"
-            :disabled="!curProvider?.id || enableLoading"
+            :disabled="enableLoading"
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"
           />
@@ -157,18 +158,42 @@ import { computed, inject, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
-import { useMutation, useQueryCache } from '@pinia/colada'
-import { putSearchProvidersById, deleteSearchProvidersById } from '@memohai/sdk'
-import type { SearchprovidersGetResponse, SearchprovidersUpdateRequest } from '@memohai/sdk'
+import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
+import { deleteSearchProvidersById, getSearchProvidersMeta, postSearchProviders, putSearchProvidersById } from '@memohai/sdk'
+import type {
+  SearchprovidersCreateRequest,
+  SearchprovidersGetResponse,
+  SearchprovidersProviderMeta,
+  SearchprovidersUpdateRequest,
+} from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
+import { normalizeProviderConfigFields } from '@/utils/provider-template'
 
 const { t } = useI18n()
 const curProvider = inject('curSearchProvider', ref<SearchprovidersGetResponse>())
+const emit = defineEmits<{
+  materialized: [provider: SearchprovidersGetResponse]
+}>()
 const curProviderId = computed(() => curProvider.value?.id)
 const enableLoading = ref(false)
 
 const queryCache = useQueryCache()
+let materializePromise: Promise<SearchprovidersGetResponse> | null = null
+
+const { data: metaData } = useQuery({
+  key: () => ['search-providers-meta'],
+  query: async () => {
+    const { data } = await getSearchProvidersMeta({ throwOnError: true })
+    return data
+  },
+})
+
+const configFields = computed(() => {
+  const meta = (metaData.value as SearchprovidersProviderMeta[] | undefined)
+    ?.find(item => item.provider === curProvider.value?.provider)
+  return normalizeProviderConfigFields(meta?.config_schema)
+})
 
 // ---- form ----
 const providerSchema = toTypedSchema(z.object({
@@ -201,13 +226,21 @@ watch(curProvider, (newVal) => {
 }, { immediate: true })
 
 async function handleToggleEnable(value: boolean) {
-  if (!curProviderId.value || !curProvider.value) return
+  if (!curProvider.value) return
 
   const prev = curProvider.value.enable ?? true
   curProvider.value = { ...curProvider.value, enable: value }
 
   enableLoading.value = true
   try {
+    if (!curProviderId.value) {
+      await materializeProvider({
+        name: form.values.name,
+        provider: form.values.provider as SearchprovidersCreateRequest['provider'],
+        config: configData.value,
+      }, value)
+      return
+    }
     await putSearchProvidersById({
       path: { id: curProviderId.value },
       body: { enable: value },
@@ -225,7 +258,9 @@ async function handleToggleEnable(value: boolean) {
 // ---- mutations ----
 const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
   mutation: async (data: SearchprovidersUpdateRequest) => {
-    if (!curProviderId.value) return
+    if (!curProviderId.value) {
+      return materializeProvider(data as SearchprovidersCreateRequest)
+    }
     const { data: result } = await putSearchProvidersById({
       path: { id: curProviderId.value },
       body: data,
@@ -236,6 +271,43 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
   onSettled: () => queryCache.invalidateQueries({ key: ['search-providers'] }),
 })
 
+async function materializeProvider(data: SearchprovidersCreateRequest, enable = false) {
+  if (curProvider.value?.id) return curProvider.value
+  if (materializePromise) return materializePromise
+
+  materializePromise = (async () => {
+    const { data: created } = await postSearchProviders({
+      body: {
+        name: data.name?.trim() || curProvider.value?.name || '',
+        provider: data.provider ?? curProvider.value?.provider as SearchprovidersCreateRequest['provider'],
+        config: data.config ?? configData.value,
+      },
+      throwOnError: true,
+    })
+    if (!created?.id) throw new Error('search provider creation returned no id')
+
+    let result = created
+    if (enable) {
+      const response = await putSearchProvidersById({
+        path: { id: created.id },
+        body: { enable: true },
+        throwOnError: true,
+      })
+      result = response.data ?? { ...created, enable: true }
+    }
+
+    curProvider.value = result
+    emit('materialized', result)
+    return result
+  })()
+
+  try {
+    return await materializePromise
+  } finally {
+    materializePromise = null
+  }
+}
+
 const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
     if (!curProviderId.value) return
@@ -245,6 +317,16 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
 })
 
 const editProvider = form.handleSubmit(async (values) => {
+  const missing = configFields.value.find((field) => {
+    if (!field.required) return false
+    const value = configData.value[field.key]
+    if (field.type === 'bool' || field.type === 'boolean') return value === undefined || value === null
+    return !String(value ?? '').trim()
+  })
+  if (missing) {
+    toast.error(t('provider.requiredField', { field: missing.title }))
+    return
+  }
   submitUpdate({
     name: values.name,
     provider: values.provider as SearchprovidersUpdateRequest['provider'],

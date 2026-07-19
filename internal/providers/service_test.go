@@ -74,7 +74,7 @@ models:
 	}
 
 	svc := NewService(nil, nil, "", dir)
-	models, ok := svc.fetchTemplateModels(sqlc.Provider{
+	models, ok := svc.fetchTemplateModels(context.Background(), sqlc.Provider{
 		Metadata: []byte(`{"preset":{"source":"zai.yaml"}}`),
 	})
 	if !ok {

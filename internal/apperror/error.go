@@ -11,9 +11,16 @@ import (
 type Code string
 
 const (
-	CodeBotNameTaken                  Code = "bot.name_taken"
-	CodeWorkspaceUnreachable          Code = "workspace.unreachable"
-	CodeWorkspaceDisplayPrepareFailed Code = "workspace.display_prepare_failed"
+	CodeBotNameTaken                    Code = "bot.name_taken"
+	CodeWorkspaceUnreachable            Code = "workspace.unreachable"
+	CodeWorkspaceDisplayPrepareFailed   Code = "workspace.display_prepare_failed"
+	CodeProviderTemplateNotFound        Code = "provider_template.not_found"
+	CodeProviderTemplateDomainInvalid   Code = "provider_template.domain_invalid"
+	CodeProviderTemplateDomainMismatch  Code = "provider_template.domain_mismatch"
+	CodeProviderTemplateOperationFailed Code = "provider_template.operation_failed"
+	CodeProviderNameTaken               Code = "provider.name_taken"
+	CodeProviderTemplateRequestInvalid  Code = "provider_template.request_invalid"
+	CodeSearchProviderTypeConflict      Code = "search_provider.type_conflict"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -42,6 +49,34 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceDisplayPrepareFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "Display preparation failed.",
+	},
+	CodeProviderTemplateNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The provider template was not found.",
+	},
+	CodeProviderTemplateDomainInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The provider template domain is invalid.",
+	},
+	CodeProviderTemplateDomainMismatch: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The provider template cannot be used for this provider type.",
+	},
+	CodeProviderTemplateOperationFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The provider template operation failed.",
+	},
+	CodeProviderNameTaken: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This provider name is already taken.",
+	},
+	CodeProviderTemplateRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The provider template request is invalid.",
+	},
+	CodeSearchProviderTypeConflict: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This web search provider is already configured.",
 	},
 }
 

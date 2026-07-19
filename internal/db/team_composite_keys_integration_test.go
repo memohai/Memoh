@@ -60,7 +60,10 @@ func TestTeamCompositeKeys(t *testing.T) {
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 		 WHERE con.contype = 'f' AND con.confdeltype = 'n'
 		   AND n.nspname = 'public'
-		   AND (con.confdelsetcols IS NULL OR EXISTS (
+		   AND ((con.confdelsetcols IS NULL AND EXISTS (
+		       SELECT 1 FROM pg_attribute a
+		        WHERE a.attrelid=con.conrelid AND a.attnum=ANY(con.conkey)
+		          AND a.attname='team_id')) OR EXISTS (
 		       SELECT 1 FROM pg_attribute a
 		        WHERE a.attrelid=con.conrelid AND a.attnum=ANY(con.confdelsetcols)
 		          AND a.attname='team_id'))`).Scan(&unsafeSetNull); err != nil {
@@ -196,7 +199,9 @@ func assertBusinessFKsCarryTeamID(ctx context.Context, t *testing.T, pool *pgxpo
 		  JOIN pg_class c ON c.oid = con.conrelid
 		  JOIN pg_class rt ON rt.oid = con.confrelid
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
+		  JOIN pg_namespace rn ON rn.oid = rt.relnamespace
 		 WHERE con.contype = 'f' AND n.nspname = 'public'
+		   AND rn.nspname = 'public'
 		   AND rt.relname NOT IN ('teams', 'users')
 		   AND NOT EXISTS (
 		       SELECT 1 FROM pg_attribute a

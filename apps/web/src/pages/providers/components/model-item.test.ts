@@ -14,7 +14,7 @@ const SlotComponent = (name: string) => defineComponent({
 const EmptyComponent = (name: string) => defineComponent({
   name,
   setup() {
-    return () => h('span')
+    return () => h('span', { 'data-component': name })
   },
 })
 
@@ -65,7 +65,7 @@ describe('Provider model item', () => {
     root = undefined
   })
 
-  async function mount(description?: string) {
+  async function mount(description?: string, preview = false) {
     const ModelItem = (await import('./model-item.vue')).default
     root = document.createElement('div')
     document.body.append(root)
@@ -80,6 +80,7 @@ describe('Provider model item', () => {
         config: description === undefined ? {} : { description },
       },
       deleteLoading: false,
+      preview,
     })
     app.config.globalProperties.$t = (key: string) => key
     app.mount(root)
@@ -101,5 +102,15 @@ describe('Provider model item', () => {
     const el = await mount()
 
     expect(el.querySelector('[data-model-description]')).toBeNull()
+  })
+
+  it('hides tenant model actions while showing a template preview', async () => {
+    const el = await mount(undefined, true)
+
+    expect(el.textContent).toContain('GPT-5.4')
+    expect(el.querySelector('[data-component="Switch"]')).toBeNull()
+    expect(el.querySelector('[data-component="Zap"]')).toBeNull()
+    expect(el.querySelector('[data-component="Settings"]')).toBeNull()
+    expect(el.querySelector('[data-component="Trash2"]')).toBeNull()
   })
 })

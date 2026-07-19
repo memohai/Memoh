@@ -89,7 +89,7 @@ func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 		t.Fatalf("inspect membership table after down: %v", err)
 	}
 	if membershipTableExists {
-		t.Fatal("team_members still exists after rolling back 0114")
+		t.Fatal("team_members still exists after rolling back 0115")
 	}
 
 	stepUp(t, dsn, 1)
@@ -544,7 +544,7 @@ func TestTeamMembershipDownFailsWithMultipleMemberships(t *testing.T) {
 		t.Fatalf("seed multiple memberships: %v", err)
 	}
 	if err := tryStepDown(t, dsn, 1); err == nil {
-		t.Fatal("0114 down must fail closed when a user has multiple memberships")
+		t.Fatal("0115 down must fail closed when a user has multiple memberships")
 	}
 }
 

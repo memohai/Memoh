@@ -3,10 +3,14 @@ package searchproviders
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -409,7 +413,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		Enable:   false,
 	})
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("create search provider: %w", err)
+		return GetResponse{}, mapSearchProviderWriteError(err, "create search provider")
 	}
 	return s.toGetResponse(row), nil
 }
@@ -495,9 +499,20 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		Enable:   enable,
 	})
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("update search provider: %w", err)
+		return GetResponse{}, mapSearchProviderWriteError(err, "update search provider")
 	}
 	return s.toGetResponse(updated), nil
+}
+
+func mapSearchProviderWriteError(err error, operation string) error {
+	if !db.IsUniqueViolation(err) {
+		return fmt.Errorf("%s: %w", operation, err)
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && strings.HasSuffix(pgErr.ConstraintName, "provider_unique") {
+		return apperror.Wrap(apperror.CodeSearchProviderTypeConflict, err, nil)
+	}
+	return apperror.Wrap(apperror.CodeProviderNameTaken, err, nil)
 }
 
 func (s *Service) Delete(ctx context.Context, id string) error {

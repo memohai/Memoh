@@ -97,6 +97,7 @@ import (
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
+	"github.com/memohai/memoh/internal/providertemplates"
 	"github.com/memohai/memoh/internal/registry"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
@@ -247,10 +248,8 @@ func provideUserRuntimePipe() userruntime.Pipe {
 	return userruntime.NewDirectPipe()
 }
 
-func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service) *accounts.Service {
-	svc := accounts.NewService(log, accountStore)
-	svc.SetEmailProviderBootstrapper(emailService)
-	return svc
+func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore) *accounts.Service {
+	return accounts.NewService(log, accountStore)
 }
 
 // provideWikiStore wires the PostgreSQL memory wiki store. Returns a pointer
@@ -1290,91 +1289,36 @@ func provideServer(params serverParams) *server.Server {
 	)
 }
 
-func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, queries dbstore.Queries) {
+func startProviderTemplateSync(
+	lc fx.Lifecycle,
+	log *slog.Logger,
+	cfg config.Config,
+	queries dbstore.Queries,
+) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			defs, err := registry.Load(log, cfg.Registry.ProvidersPath())
 			if err != nil {
 				log.Warn("registry: failed to load provider definitions", slog.Any("error", err))
+				defs = nil
+			}
+			templates := registry.ProviderTemplateDefinitions(defs)
+			if len(templates) == 0 {
 				return nil
 			}
-			if len(defs) == 0 {
-				return nil
-			}
-			defs = providerBootstrapDefinitions(defs)
-			if len(defs) == 0 {
-				return nil
-			}
-			return registry.Sync(ctx, log, queries, defs)
+			return providertemplates.Sync(ctx, log, queries, templates)
 		},
 	})
 }
 
-func providerBootstrapDefinitions(defs []registry.ProviderDefinition) []registry.ProviderDefinition {
-	return defs
-}
-
-func startAudioProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbstore.Queries, registry *audiopkg.Registry) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			if err := audiopkg.SyncRegistry(ctx, log, queries, registry); err != nil {
-				log.Warn("audio registry bootstrap failed", slog.Any("error", err))
-			}
-			return nil
-		},
-	})
-}
-
-func startVideoProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbstore.Queries, registry *videopkg.Registry) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			if err := videopkg.SyncRegistry(ctx, log, queries, registry); err != nil {
-				log.Warn("video registry bootstrap failed", slog.Any("error", err))
-			}
-			return nil
-		},
-	})
-}
-
-func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *memprovider.Service, registry *memprovider.Registry) {
+func configureMemoryProviderRegistry(mpService *memprovider.Service, registry *memprovider.Registry) {
 	mpService.SetRegistry(registry)
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			resp, err := mpService.EnsureDefault(ctx)
-			if err != nil {
-				log.Warn("failed to ensure default memory provider", slog.Any("error", err))
-				return nil
-			}
-			count, regErr := mpService.InstantiateAll(ctx)
-			if regErr != nil {
-				log.Warn("failed to instantiate memory providers", slog.Any("error", regErr))
-			} else {
-				log.Info("memory providers ready", slog.Int("count", count), slog.String("default_id", resp.ID), slog.String("default_provider", resp.Provider))
-			}
-			return nil
-		},
-	})
-}
-
-func startSearchProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, spService *searchproviders.Service) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			if err := spService.EnsureDefaults(ctx); err != nil {
-				log.Warn("failed to ensure default search providers", slog.Any("error", err))
-			}
-			return nil
-		},
-	})
-}
-
-func startFetchProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, fpService *fetchproviders.Service) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			if err := fpService.EnsureDefaults(ctx); err != nil {
-				log.Warn("failed to ensure default fetch providers", slog.Any("error", err))
-			}
-			return nil
-		},
+	registry.SetConfigLoader(func(ctx context.Context, id string) (string, map[string]any, error) {
+		provider, err := mpService.Get(ctx, id)
+		if err != nil {
+			return "", nil, err
+		}
+		return provider.Provider, provider.Config, nil
 	})
 }
 
@@ -1417,12 +1361,12 @@ func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _
 	})
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, emailService *emailpkg.Service, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			if err := ensureAdminUser(ctx, logger, accountStore, emailService, cfg); err != nil {
+			if err := ensureAdminUser(ctx, logger, accountStore, cfg); err != nil {
 				return err
 			}
 			botService.SetContainerLifecycle(manager)
@@ -1457,7 +1401,7 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 	})
 }
 
-func ensureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service, cfg config.Config) error {
+func ensureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore.AccountStore, cfg config.Config) error {
 	if accountStore == nil {
 		return errors.New("account store not configured")
 	}
@@ -1504,11 +1448,6 @@ func ensureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 	})
 	if err != nil {
 		return err
-	}
-	if emailService != nil {
-		if err := emailService.EnsureDefaultGmailProvider(ctx, user.ID); err != nil {
-			return fmt.Errorf("ensure admin gmail provider: %w", err)
-		}
 	}
 	log.Info("Admin user created", slog.String("username", username))
 	return nil

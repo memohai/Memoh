@@ -20,6 +20,24 @@ type testAccountStore struct {
 	passwordErr  error
 }
 
+func TestCreatePersistsAccountWithoutProvisioningProviderInstances(t *testing.T) {
+	t.Parallel()
+
+	store := &testAccountStore{}
+	service := NewService(nil, store)
+	account, err := service.Create(context.Background(), "user-1", CreateAccountRequest{
+		Username: "alice",
+		Password: "secret",
+		Role:     "member",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if account.ID != "user-1" || store.created.UserID != "user-1" || store.created.Username != "alice" {
+		t.Fatalf("created account = %#v, input = %#v", account, store.created)
+	}
+}
+
 func (*testAccountStore) CountAccounts(context.Context) (int64, error) { return 0, nil }
 func (s *testAccountStore) GetByUserID(context.Context, string) (dbstore.AccountRecord, error) {
 	return s.record, s.getErr
@@ -73,54 +91,6 @@ func (s *testAccountStore) UpdatePassword(_ context.Context, input dbstore.Updat
 
 func (*testAccountStore) RemoveMember(context.Context, string) error {
 	return errors.New("not implemented")
-}
-
-type testEmailBootstrapper struct {
-	userID string
-	err    error
-}
-
-func (b *testEmailBootstrapper) EnsureDefaultGmailProvider(_ context.Context, userID string) error {
-	b.userID = userID
-	return b.err
-}
-
-func TestCreateEnsuresDefaultGmailProvider(t *testing.T) {
-	store := &testAccountStore{}
-	bootstrapper := &testEmailBootstrapper{}
-	svc := NewService(nil, store)
-	svc.SetEmailProviderBootstrapper(bootstrapper)
-
-	account, err := svc.Create(context.Background(), "user-1", CreateAccountRequest{
-		Username: "alice",
-		Password: "secret",
-	})
-	if err != nil {
-		t.Fatalf("Create returned error: %v", err)
-	}
-	if account.ID != "user-1" {
-		t.Fatalf("expected created account id user-1, got %q", account.ID)
-	}
-	if bootstrapper.userID != "user-1" {
-		t.Fatalf("expected default gmail bootstrap for user-1, got %q", bootstrapper.userID)
-	}
-}
-
-func TestCreateReturnsBootstrapperError(t *testing.T) {
-	bootstrapper := &testEmailBootstrapper{err: errors.New("boom")}
-	svc := NewService(nil, &testAccountStore{})
-	svc.SetEmailProviderBootstrapper(bootstrapper)
-
-	_, err := svc.Create(context.Background(), "user-1", CreateAccountRequest{
-		Username: "alice",
-		Password: "secret",
-	})
-	if err == nil {
-		t.Fatal("Create should return bootstrapper error")
-	}
-	if !errors.Is(err, bootstrapper.err) {
-		t.Fatalf("expected bootstrapper error, got %v", err)
-	}
 }
 
 func TestValidateSessionAndIsAdminRequireActiveAccount(t *testing.T) {
