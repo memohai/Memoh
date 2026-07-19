@@ -247,6 +247,25 @@ func stepDown(t *testing.T, dsn string, n int) {
 	}
 }
 
+// stepUp applies exactly n migration steps using the golang-migrate library.
+// Kept base-compatible: callers on main (provider template catalog tests)
+// still step by count.
+func stepUp(t *testing.T, dsn string, n int) {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Steps(n); err != nil {
+		t.Fatalf("step up %d: %v", n, err)
+	}
+}
+
 func migrateToVersion(t *testing.T, dsn string, version uint) {
 	t.Helper()
 	src, err := iofs.New(postgresMigrationsFS(t), ".")
