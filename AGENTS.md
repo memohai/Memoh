@@ -245,7 +245,7 @@ Key local developer guides:
 - For Japanese copy, use natural Japanese phrasing while preserving product and technical terms that Japanese users commonly read in English, such as Agent, Bot, Workspace, MCP, Browser Use, Computer Use, SaaS, Desktop, and Web UI.
 
 Bot persona templates (not developer guides):
-- `cmd/bridge/template/AGENTS.md`
+- `templates/workspace/AGENTS.md`
 - `internal/workspace/templates/AGENTS.md`
 
 ### Prerequisites

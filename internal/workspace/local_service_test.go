@@ -93,7 +93,7 @@ func TestBridgeTemplateSetsMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded templates: %v", err)
 	}
-	disk, err := diskTemplateNameSet(filepath.Join("..", "..", "cmd", "bridge", "template"))
+	disk, err := diskTemplateNameSet(filepath.Join("..", "..", "templates", "workspace"))
 	if err != nil {
 		t.Fatalf("read bridge templates: %v", err)
 	}
@@ -102,18 +102,18 @@ func TestBridgeTemplateSetsMatch(t *testing.T) {
 	}
 	for name := range embedded {
 		if !disk[name] {
-			t.Fatalf("template %q exists in embedded templates but not cmd/bridge/template", name)
+			t.Fatalf("template %q exists in embedded templates but not templates/workspace", name)
 		}
 		embeddedContent, err := bridgeTemplates.ReadFile("templates/" + name)
 		if err != nil {
 			t.Fatalf("read embedded template %q: %v", name, err)
 		}
-		diskContent, err := os.ReadFile(filepath.Join("..", "..", "cmd", "bridge", "template", name)) //nolint:gosec // test compares a fixed repo path.
+		diskContent, err := os.ReadFile(filepath.Join("..", "..", "templates", "workspace", name)) //nolint:gosec // test compares a fixed repo path.
 		if err != nil {
 			t.Fatalf("read bridge template %q: %v", name, err)
 		}
 		if string(embeddedContent) != string(diskContent) {
-			t.Fatalf("template %q content differs between embedded and cmd/bridge/template", name)
+			t.Fatalf("template %q content differs between embedded and templates/workspace", name)
 		}
 	}
 }
