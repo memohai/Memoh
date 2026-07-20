@@ -374,9 +374,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
 	}
 
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
-	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	setSSEHeaders(c)
 	c.Response().WriteHeader(http.StatusOK)
 	writer := c.Response().Writer
 
