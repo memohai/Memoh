@@ -31,6 +31,19 @@ const log = {
 const dryRun = process.argv.includes('--dry-run') || process.env.PUBLISH_PACKAGES_DRY_RUN === '1'
 const publishScope = process.env.NPM_PUBLISH_SCOPE?.trim() || null
 
+// Auth model: two modes.
+// - Token mode (local/manual): NODE_AUTH_TOKEN is set and used directly.
+// - OIDC mode (CI trusted publishing): no token; pnpm exchanges the GitHub
+//   Actions OIDC token (ACTIONS_ID_TOKEN_REQUEST_TOKEN, available when the job
+//   has id-token: write) for a short-lived npm credential at publish time.
+//   Every published package must have memohai/Memoh + release.yml registered
+//   as its trusted publisher on npmjs.com, or the exchange is rejected.
+// OIDC mode changes two behaviors below: the token preflight is impossible
+// (npm whoami needs a token), so it is skipped; and --provenance is added,
+// which both requires OIDC and records the build provenance on npm.
+const hasToken = Boolean(process.env.NODE_AUTH_TOKEN?.trim())
+const oidcMode = !hasToken && Boolean(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN)
+
 function prereleaseTag(version) {
   const override = process.env.NPM_PUBLISH_TAG?.trim()
   if (override) {
@@ -48,6 +61,9 @@ function prereleaseTag(version) {
 
 function publishOptions(version) {
   const args = ['--access', 'public', '--no-git-checks']
+  if (oidcMode) {
+    args.push('--provenance')
+  }
   const tag = prereleaseTag(version)
   if (tag) {
     args.push('--tag', tag)
@@ -103,12 +119,9 @@ function scopeReachable(scope) {
 // Preflight: before publishing ANY package, verify the token can reach every
 // scope we are about to publish into. Fail closed — if we can't confirm a
 // scope, abort the whole run so npm never ends up with a partial release
-// (e.g. @memohai/* published but @felinic/ui rejected at 403). Skipped in
-// dry-run so local token-free runs keep working.
-//
-// Kept in sync with the publish loop below and the release token step in
-// .github/workflows/release.yml. @felinic/ui in particular is a first-publish
-// into a scope whose org must already exist with the token as a member.
+// (e.g. @memohai/* published but @felinic/ui rejected at 403). Token-mode
+// only: OIDC trusted publishing has no token to check, and dry-run skips it
+// so local token-free runs keep working. See the mode note at the top.
 function preflightScopes(plan) {
   const scopes = [...new Set(plan.map((p) => scopeOf(p.name)).filter(Boolean))]
   if (scopes.length === 0) {
@@ -197,12 +210,19 @@ for (const dir of CANDIDATE_DIRS) {
   plan.push({ dir, name, version })
 }
 
-// Preflight gate. On real runs a scope we can't reach aborts everything before
-// the first publish, so npm is never left with a partial release. Dry-run skips
-// it so token-free local/CI dry runs keep working.
-if (!dryRun && plan.length > 0 && !preflightScopes(plan)) {
-  console.log(`\nSummary: 0 published, ${skipped} skipped, ${plan.length} blocked by preflight`)
-  process.exit(1)
+// Preflight gate. On real token-mode runs a scope we can't reach aborts
+// everything before the first publish, so npm is never left with a partial
+// release. OIDC mode skips it: there is no token to check (whoami/access-list
+// would fail spuriously), and a missing trusted-publisher entry fails that
+// package's publish loudly instead. Dry-run skips it so token-free local/CI
+// dry runs keep working.
+if (!dryRun && plan.length > 0) {
+  if (oidcMode) {
+    log.info('OIDC trusted publishing (no NODE_AUTH_TOKEN): skipping token preflight; auth happens per-package at publish time')
+  } else if (!preflightScopes(plan)) {
+    console.log(`\nSummary: 0 published, ${skipped} skipped, ${plan.length} blocked by preflight`)
+    process.exit(1)
+  }
 }
 
 for (const { dir, name, version } of plan) {

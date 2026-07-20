@@ -1,6 +1,11 @@
 {
   "name": "@memohai/web",
   "version": "0.16.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/memohai/Memoh.git",
+    "directory": "apps/web"
+  },
   "type": "module",
   "exports": {
     ".": "./src/main.ts",
