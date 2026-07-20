@@ -4494,7 +4494,7 @@ export const getUsersMeQuery = defineQueryOptions<Options<GetUsersMeData>, GetUs
 /**
  * Update current user profile
  *
- * Update current user display name or avatar
+ * Update current user profile and preferences
  */
 export const putUsersMeMutation = (options?: Partial<Options<PutUsersMeData>>): UseMutationOptions<PutUsersMeResponse, Options<PutUsersMeData>, PutUsersMeError> => ({
     mutation: async (vars) => {

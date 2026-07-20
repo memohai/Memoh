@@ -25,6 +25,7 @@ var (
 	ErrInvalidPassword    = errors.New("invalid password")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInactiveAccount    = errors.New("account is inactive")
+	ErrInvalidTitleModel  = errors.New("invalid title model")
 )
 
 // NewService creates a new accounts service.
@@ -286,12 +287,26 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdatePr
 		tzName = "UTC"
 	}
 	metadata := s.mergeMetadata(existing.Metadata, req.Metadata)
+	titleModelID := strings.TrimSpace(existing.TitleModelID)
+	if req.TitleModelID != nil {
+		titleModelID = strings.TrimSpace(*req.TitleModelID)
+		if titleModelID != "" {
+			valid, err := s.store.IsValidTitleModel(ctx, titleModelID)
+			if err != nil {
+				return Account{}, err
+			}
+			if !valid {
+				return Account{}, ErrInvalidTitleModel
+			}
+		}
+	}
 	row, err := s.store.UpdateProfile(ctx, dbstore.UpdateAccountProfileInput{
-		UserID:      userID,
-		DisplayName: displayName,
-		AvatarURL:   avatarURL,
-		Timezone:    tzName,
-		Metadata:    metadata,
+		UserID:       userID,
+		DisplayName:  displayName,
+		AvatarURL:    avatarURL,
+		Timezone:     tzName,
+		Metadata:     metadata,
+		TitleModelID: titleModelID,
 	})
 	if err != nil {
 		return Account{}, err
@@ -398,6 +413,7 @@ func toAccount(row dbstore.AccountRecord) Account {
 		JoinedAt:            row.JoinedAt,
 		MembershipUpdatedAt: row.MembershipUpdatedAt,
 		LastLoginAt:         row.LastLoginAt,
+		TitleModelID:        strings.TrimSpace(row.TitleModelID),
 	}
 }
 

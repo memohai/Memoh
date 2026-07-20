@@ -84,6 +84,7 @@ type AccountRecord struct {
 	JoinedAt            time.Time
 	MembershipUpdatedAt time.Time
 	LastLoginAt         time.Time
+	TitleModelID        string
 }
 
 type CreateUserInput struct {
@@ -110,11 +111,12 @@ type UpdateAccountAdminInput struct {
 }
 
 type UpdateAccountProfileInput struct {
-	UserID      string
-	DisplayName string
-	AvatarURL   string
-	Timezone    string
-	Metadata    string
+	UserID       string
+	DisplayName  string
+	AvatarURL    string
+	Timezone     string
+	Metadata     string
+	TitleModelID string
 }
 
 type UpdateAccountPasswordInput struct {
@@ -133,6 +135,7 @@ type AccountStore interface {
 	UpdateLastLogin(ctx context.Context, accountID string) error
 	UpdateAdmin(ctx context.Context, input UpdateAccountAdminInput) (AccountRecord, error)
 	UpdateProfile(ctx context.Context, input UpdateAccountProfileInput) (AccountRecord, error)
+	IsValidTitleModel(ctx context.Context, modelID string) (bool, error)
 	UpdatePassword(ctx context.Context, input UpdateAccountPasswordInput) error
 	RemoveMember(ctx context.Context, userID string) error
 }
