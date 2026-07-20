@@ -424,11 +424,15 @@ func acpPromptConfigAppError(err error) error {
 	switch {
 	case errors.Is(err, acpclient.ErrModelSelectionUnsupported):
 		return apperror.New(apperror.CodeACPModelSelectionUnsupported, nil)
-	case errors.Is(err, acpclient.ErrModelUnavailable), errors.Is(err, acpclient.ErrModelIDRequired):
+	case errors.Is(err, acpclient.ErrModelIDRequired):
+		return apperror.New(apperror.CodeACPModelIDRequired, nil)
+	case errors.Is(err, acpclient.ErrModelUnavailable):
 		return apperror.New(apperror.CodeACPModelUnavailable, nil)
 	case errors.Is(err, acpclient.ErrReasoningSelectionUnsupported):
 		return apperror.New(apperror.CodeACPReasoningUnsupported, nil)
-	case errors.Is(err, acpclient.ErrReasoningEffortUnavailable), errors.Is(err, acpclient.ErrReasoningEffortRequired):
+	case errors.Is(err, acpclient.ErrReasoningEffortRequired):
+		return apperror.New(apperror.CodeACPReasoningEffortRequired, nil)
+	case errors.Is(err, acpclient.ErrReasoningEffortUnavailable):
 		return apperror.New(apperror.CodeACPReasoningUnavailable, nil)
 	case errors.Is(err, acpagent.ErrRuntimeConfigUpdateFailed):
 		return apperror.Wrap(apperror.CodeACPConfigUpdateFailed, err, nil)

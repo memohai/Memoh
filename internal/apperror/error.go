@@ -26,8 +26,10 @@ const (
 	CodeProfileUpdateFailed             Code = "profile.update_failed"
 	CodeACPRuntimeNotFound              Code = "acp.runtime_not_found"
 	CodeACPModelSelectionUnsupported    Code = "acp.model_selection_unsupported"
+	CodeACPModelIDRequired              Code = "acp.model_id_required"
 	CodeACPModelUnavailable             Code = "acp.model_unavailable"
 	CodeACPReasoningUnsupported         Code = "acp.reasoning_selection_unsupported"
+	CodeACPReasoningEffortRequired      Code = "acp.reasoning_effort_required"
 	CodeACPReasoningUnavailable         Code = "acp.reasoning_effort_unavailable"
 	CodeACPConfigUpdateFailed           Code = "acp.config_update_failed"
 )
@@ -107,6 +109,10 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "This external agent does not support model selection.",
 	},
+	CodeACPModelIDRequired: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "Choose a model and try again.",
+	},
 	CodeACPModelUnavailable: {
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "The selected model is no longer available for this external agent.",
@@ -114,6 +120,10 @@ var catalog = map[Code]Definition{
 	CodeACPReasoningUnsupported: {
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "This external agent does not support reasoning effort selection.",
+	},
+	CodeACPReasoningEffortRequired: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "Choose a reasoning effort and try again.",
 	},
 	CodeACPReasoningUnavailable: {
 		HTTPStatus: http.StatusBadRequest,

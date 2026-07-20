@@ -815,7 +815,7 @@ import {
   Server,
 } from 'lucide-vue-next'
 import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
-import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type ToolCallBlock } from '@/store/chat-list'
+import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult, type ToolCallBlock } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
@@ -847,7 +847,7 @@ import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useCom
 import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultQuickActionText, isCommandResultItemSelectable } from './slash-command-result'
-import { captureChatPaneSendContext, matchesChatPaneSendContext } from './chat-pane-send'
+import { captureChatPaneSendContext, matchesChatPaneSendContext, shouldRefreshACPComposerConfig } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
@@ -1845,6 +1845,21 @@ async function refreshACPComposerConfig(): Promise<void> {
   reconcileACPComposerConfig()
 }
 
+async function refreshACPComposerConfigAfterSelectionError(result: SendMessageResult): Promise<void> {
+  if (!shouldRefreshACPComposerConfig(result, activeUsesACPComposer.value)) return
+
+  const operationScope = acpOperationScope.value
+  acpConfigChangeScope.value = operationScope
+  try {
+    await refreshACPComposerConfig()
+  } catch {
+    // Preserve the original selection error. This refresh is best-effort
+    // recovery so a secondary failure must not replace the actionable cause.
+  } finally {
+    if (acpConfigChangeScope.value === operationScope) acpConfigChangeScope.value = ''
+  }
+}
+
 function pendingMatchesDefaultACP(input: ACPAgentSessionInput): boolean {
   const metadata = activeChatTarget.value.metadata
   return activeChatTarget.value.kind === 'draft-acp'
@@ -2364,6 +2379,7 @@ async function handleRetryMessage(messageId: string) {
     reasoningEffort: overrideReasoningEffort.value,
     workspaceTargetId: selectedWorkspaceTargetId.value,
   })
+  await refreshACPComposerConfigAfterSelectionError(result)
   if (!result.ok && result.error) {
     composerError.value = result.error
   }
@@ -2382,6 +2398,7 @@ async function handleEditMessage(messageId: string, text: string, done?: (starte
       reasoningEffort: overrideReasoningEffort.value,
       workspaceTargetId: selectedWorkspaceTargetId.value,
     })
+    await refreshACPComposerConfigAfterSelectionError(result)
     if (!result.ok && result.error) {
       composerError.value = result.error
     }
@@ -2483,6 +2500,7 @@ async function handleSend() {
     },
   })
   rollbackPin = null
+  await refreshACPComposerConfigAfterSelectionError(result)
   if (!result.ok && result.stage === 'startup') {
     const restoreInput = result.restoreInput ?? text
     if (!matchesChatPaneSendContext(

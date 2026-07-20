@@ -1,4 +1,4 @@
-import type { ChatViewTarget } from '@/store/chat-list'
+import type { ChatViewTarget, SendMessageResult } from '@/store/chat-list'
 
 export interface ChatPaneSendContext {
   readonly target: ChatViewTarget
@@ -24,4 +24,19 @@ export function matchesChatPaneSendContext(
     && context.target.sessionId === target.sessionId
     && context.target.viewId === target.viewId
     && context.composerScope === (composerScope || 'chat')
+}
+
+const ACP_STALE_CONFIG_CODES = new Set([
+  'acp.model_unavailable',
+  'acp.reasoning_effort_unavailable',
+])
+
+export function shouldRefreshACPComposerConfig(
+  result: SendMessageResult,
+  activeUsesACPComposer: boolean,
+): boolean {
+  return !result.ok
+    && activeUsesACPComposer
+    && typeof result.errorCode === 'string'
+    && ACP_STALE_CONFIG_CODES.has(result.errorCode)
 }

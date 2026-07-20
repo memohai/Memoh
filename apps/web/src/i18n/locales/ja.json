@@ -118,8 +118,10 @@
     "acp": {
       "runtime_not_found": "この Agent ランタイムは利用できなくなりました。再起動します。",
       "model_selection_unsupported": "この外部Agentはモデルの切り替えに対応していません。",
+      "model_id_required": "モデルを選択して、もう一度お試しください。",
       "model_unavailable": "選択したモデルはこの外部Agentで利用できなくなりました。",
       "reasoning_selection_unsupported": "この外部Agentは推論強度の選択に対応していません。",
+      "reasoning_effort_required": "推論強度を選択して、もう一度お試しください。",
       "reasoning_effort_unavailable": "選択した推論強度はこの外部Agentで利用できなくなりました。",
       "config_update_failed": "外部Agentに選択した設定を適用できませんでした。もう一度お試しください。"
     }

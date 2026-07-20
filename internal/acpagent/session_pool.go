@@ -536,12 +536,25 @@ func (p *SessionPool) updateConfigOnHandle(
 		h.setStatus(stateIdle)
 		return RuntimeStatus{}, err
 	}
+	if configUpdateCanceled(ctx, err) {
+		// Caller cancellation says nothing about the health of the Agent process.
+		// Public HTTP setters detach request cancellation before reaching this
+		// fallback, so keep the healthy process for any other direct caller.
+		h.setStatus(stateIdle)
+		return RuntimeStatus{}, err
+	}
 	// If the setter failed at the transport/protocol layer, the Agent may have
 	// accepted the value even though Memoh never received its new config
 	// snapshot. The cached state is no longer trustworthy, so rebuild rather
 	// than allowing the per-turn equality check to skip a required setter.
 	_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses background ctx.
 	return RuntimeStatus{}, fmt.Errorf("%w: %w", ErrRuntimeConfigUpdateFailed, err)
+}
+
+func configUpdateCanceled(ctx context.Context, err error) bool {
+	return ctx.Err() != nil ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
 }
 
 // CloseRuntime tears down an owned runtime, waiting out any in-flight

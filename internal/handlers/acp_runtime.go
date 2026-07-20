@@ -175,7 +175,7 @@ func (h *ACPRuntimeHandler) SetRuntimeModel(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	status, err := h.pool.SetRuntimeModel(c.Request().Context(), bot.ID, runtimeID, strings.TrimSpace(req.ModelID))
+	status, err := h.pool.SetRuntimeModel(context.WithoutCancel(c.Request().Context()), bot.ID, runtimeID, strings.TrimSpace(req.ModelID))
 	if err != nil {
 		return runtimePoolError(err)
 	}
@@ -207,7 +207,7 @@ func (h *ACPRuntimeHandler) SetRuntimeReasoning(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	status, err := h.pool.SetRuntimeReasoning(c.Request().Context(), bot.ID, runtimeID, strings.TrimSpace(req.ReasoningEffort))
+	status, err := h.pool.SetRuntimeReasoning(context.WithoutCancel(c.Request().Context()), bot.ID, runtimeID, strings.TrimSpace(req.ReasoningEffort))
 	if err != nil {
 		return runtimePoolError(err)
 	}
@@ -324,7 +324,7 @@ func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 	}
 	modelID := strings.TrimSpace(req.ModelID)
 	if modelID == "" {
-		return apperror.New(apperror.CodeACPModelUnavailable, nil)
+		return apperror.New(apperror.CodeACPModelIDRequired, nil)
 	}
 	acpMeta := acpRuntimeSessionMetadata(sess)
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
@@ -334,7 +334,7 @@ func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return err
 	}
-	status, err := h.pool.SetModel(c.Request().Context(), acpagent.PromptInput{
+	status, err := h.pool.SetModel(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
 		BotID:                 botID,
 		SessionID:             sessionID,
 		AgentID:               sessionMetadataString(acpMeta, "acp_agent_id"),
@@ -372,7 +372,7 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 	}
 	effort := strings.TrimSpace(req.ReasoningEffort)
 	if effort == "" {
-		return apperror.New(apperror.CodeACPReasoningUnavailable, nil)
+		return apperror.New(apperror.CodeACPReasoningEffortRequired, nil)
 	}
 	acpMeta := acpRuntimeSessionMetadata(sess)
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
@@ -382,7 +382,7 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return err
 	}
-	status, err := h.pool.SetReasoning(c.Request().Context(), acpagent.PromptInput{
+	status, err := h.pool.SetReasoning(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
 		BotID:                 botID,
 		SessionID:             sessionID,
 		AgentID:               sessionMetadataString(acpMeta, "acp_agent_id"),
@@ -420,11 +420,15 @@ func runtimePoolError(err error) error {
 		return apperror.Wrap(apperror.CodeACPConfigUpdateFailed, err, nil)
 	case errors.Is(err, acpclient.ErrModelSelectionUnsupported):
 		return apperror.New(apperror.CodeACPModelSelectionUnsupported, nil)
-	case errors.Is(err, acpclient.ErrModelUnavailable), errors.Is(err, acpclient.ErrModelIDRequired):
+	case errors.Is(err, acpclient.ErrModelIDRequired):
+		return apperror.New(apperror.CodeACPModelIDRequired, nil)
+	case errors.Is(err, acpclient.ErrModelUnavailable):
 		return apperror.New(apperror.CodeACPModelUnavailable, nil)
 	case errors.Is(err, acpclient.ErrReasoningSelectionUnsupported):
 		return apperror.New(apperror.CodeACPReasoningUnsupported, nil)
-	case errors.Is(err, acpclient.ErrReasoningEffortUnavailable), errors.Is(err, acpclient.ErrReasoningEffortRequired):
+	case errors.Is(err, acpclient.ErrReasoningEffortRequired):
+		return apperror.New(apperror.CodeACPReasoningEffortRequired, nil)
+	case errors.Is(err, acpclient.ErrReasoningEffortUnavailable):
 		return apperror.New(apperror.CodeACPReasoningUnavailable, nil)
 	case errors.Is(err, acpclient.ErrSessionNotInitialized),
 		errors.Is(err, acpclient.ErrSessionClosed):

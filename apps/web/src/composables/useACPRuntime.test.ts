@@ -232,4 +232,22 @@ describe('useACPRuntime', () => {
     expect(pane.currentReasoningEffort.value).toBe('low')
   })
 
+  it('clears preparation after a setter supersedes an in-flight ensure', async () => {
+    const { ensureACPRuntime, setACPRuntimeModel } = makeStore(runtime('model-a', 'high'))
+    const pendingEnsure = deferred<AcpagentRuntimeStatus | undefined>()
+    ensureACPRuntime.mockReturnValueOnce(pendingEnsure.promise)
+    setACPRuntimeModel.mockResolvedValueOnce(runtime('model-b', 'low'))
+    const pane = useSessionRuntime()
+
+    const preparing = pane.ensure(true)
+    expect(pane.isPreparing.value).toBe(true)
+    await pane.setModel('model-b')
+
+    pendingEnsure.resolve(runtime('model-a', 'high'))
+    await preparing
+
+    expect(pane.isPreparing.value).toBe(false)
+    expect(pane.currentModelId.value).toBe('model-b')
+  })
+
 })

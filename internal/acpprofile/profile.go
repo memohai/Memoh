@@ -199,7 +199,7 @@ func codexProfile() Profile {
 		Description:            "OpenAI Codex ACP adapter",
 		Command:                "codex-acp",
 		LocalCommand:           "npx",
-		DefaultReasoningEffort: "xhigh",
+		DefaultReasoningEffort: "medium",
 		LocalArgs: []string{
 			"-y",
 			"@agentclientprotocol/codex-acp@1.1.4",

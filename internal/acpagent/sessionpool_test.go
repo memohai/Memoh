@@ -954,6 +954,39 @@ func TestSessionPoolModelTransportFailureDropsUncertainRuntime(t *testing.T) {
 	}
 }
 
+func TestSessionPoolCanceledConfigUpdateKeepsRuntime(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	h := &runtimeHandle{
+		id:           newRuntimeID(),
+		botID:        "bot-1",
+		agentID:      acpprofile.AgentCodexID,
+		status:       stateIdle,
+		lastActive:   time.Now(),
+		boundSession: "session-1",
+		session:      &acpclient.Session{},
+	}
+	injectRuntime(pool, h)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := pool.updateConfigOnHandle(
+		ctx,
+		h,
+		func(*acpclient.Session) bool { return false },
+		func(ctx context.Context, _ *acpclient.Session) error { return ctx.Err() },
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("updateConfigOnHandle() error = %v, want context.Canceled", err)
+	}
+	status, err := pool.RuntimeStatusByID("bot-1", h.id)
+	if err != nil {
+		t.Fatalf("RuntimeStatusByID() error = %v, want reusable runtime", err)
+	}
+	if h.closed || h.session == nil || status.State != stateIdle {
+		t.Fatalf("canceled config update dropped runtime: handle=%#v status=%#v", h, status)
+	}
+}
+
 func nonEmptyLines(value string) []string {
 	var out []string
 	for _, line := range strings.Split(value, "\n") {

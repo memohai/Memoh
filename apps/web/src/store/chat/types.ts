@@ -147,6 +147,7 @@ export interface SendMessageResult {
   ok: boolean
   stage?: SendMessageStage
   error?: string
+  errorCode?: string
   restoreInput?: string
   restoreAttachments?: ChatAttachment[]
   restoreRequestedSkills?: RequestedSkillSelection[]

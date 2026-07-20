@@ -27,7 +27,7 @@ func TestListIncludesClaudeCode(t *testing.T) {
 		t.Fatalf("Claude Code local args = %#v", profile.LocalArgs)
 	}
 	codex, ok := Lookup(AgentCodexID)
-	if !ok || codex.DefaultReasoningEffort != "xhigh" || codex.ReasoningConfigID != "" {
+	if !ok || codex.DefaultReasoningEffort != "medium" || codex.ReasoningConfigID != "" {
 		t.Fatalf("Codex reasoning profile = %#v", codex)
 	}
 	if len(codex.LocalArgs) != 2 || codex.LocalArgs[1] != "@agentclientprotocol/codex-acp@1.1.4" {

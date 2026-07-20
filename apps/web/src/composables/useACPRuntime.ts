@@ -60,6 +60,7 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
   const runtime = shallowRef<AcpagentRuntimeStatus>()
   const isPreparing = ref(false)
   let requestVersion = 0
+  let preparingVersion = 0
   const isEnsuring = computed(() => {
     if (toValue(options.pending)) return pendingState.value?.ensuring ?? false
     return key.value ? !!acpRuntimePending.value[key.value] : false
@@ -122,7 +123,10 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
     if (!toValue(options.enabled)) return undefined
     const version = ++requestVersion
     const scope = requestScope()
-    if (markPreparing) isPreparing.value = true
+    if (markPreparing) {
+      preparingVersion = version
+      isPreparing.value = true
+    }
     try {
       // Capabilities are Agent-owned dynamic state. Ensure them when the ACP
       // composer becomes visible and refresh them when the picker opens.
@@ -139,7 +143,10 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
       if (!requestIsCurrent(version, scope)) return undefined
       throw error
     } finally {
-      if (markPreparing && version === requestVersion) isPreparing.value = false
+      if (markPreparing && version === preparingVersion) {
+        preparingVersion = 0
+        isPreparing.value = false
+      }
     }
   }
 
@@ -168,6 +175,7 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
   watch(requestScope, (scope, previousScope) => {
     if (scope === previousScope) return
     requestVersion += 1
+    preparingVersion = 0
     runtime.value = toValue(options.enabled) ? observedRuntime.value : undefined
     isPreparing.value = false
   }, { immediate: true })

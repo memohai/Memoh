@@ -38,8 +38,10 @@ type fakeACPRuntimePool struct {
 	ensureInput        acpagent.PromptInput
 	setModelInput      acpagent.PromptInput
 	setModelID         string
+	setModelContextErr error
 	setReasoningInput  acpagent.PromptInput
 	setReasoningEffort string
+	setReasoningCtxErr error
 	createInput        acpagent.CreateRuntimeInput
 	createErr          error
 	statusBotID        string
@@ -69,15 +71,17 @@ func (p *fakeACPRuntimePool) Ensure(_ context.Context, input acpagent.PromptInpu
 	return p.status, nil
 }
 
-func (p *fakeACPRuntimePool) SetModel(_ context.Context, input acpagent.PromptInput, modelID string) (acpagent.RuntimeStatus, error) {
+func (p *fakeACPRuntimePool) SetModel(ctx context.Context, input acpagent.PromptInput, modelID string) (acpagent.RuntimeStatus, error) {
 	p.setModelInput = input
 	p.setModelID = modelID
+	p.setModelContextErr = ctx.Err()
 	return p.status, nil
 }
 
-func (p *fakeACPRuntimePool) SetReasoning(_ context.Context, input acpagent.PromptInput, effort string) (acpagent.RuntimeStatus, error) {
+func (p *fakeACPRuntimePool) SetReasoning(ctx context.Context, input acpagent.PromptInput, effort string) (acpagent.RuntimeStatus, error) {
 	p.setReasoningInput = input
 	p.setReasoningEffort = effort
+	p.setReasoningCtxErr = ctx.Err()
 	return p.status, nil
 }
 
@@ -452,6 +456,9 @@ func TestACPRuntimeHandlerSetModel(t *testing.T) {
 	)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req.Header.Set("Authorization", "Bearer token-2")
+	requestCtx, cancelRequest := context.WithCancel(req.Context())
+	cancelRequest()
+	req = req.WithContext(requestCtx)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime/model")
@@ -472,6 +479,9 @@ func TestACPRuntimeHandlerSetModel(t *testing.T) {
 	}
 	if pool.setModelID != "gpt-5.1-codex-high" {
 		t.Fatalf("SetModel model id = %q", pool.setModelID)
+	}
+	if pool.setModelContextErr != nil {
+		t.Fatalf("SetModel context error = %v, want request cancellation detached", pool.setModelContextErr)
 	}
 	var got acpagent.RuntimeStatus
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -524,6 +534,9 @@ func TestACPRuntimeHandlerSetReasoning(t *testing.T) {
 		bytes.NewBufferString(`{"reasoning_effort":"low"}`),
 	)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	requestCtx, cancelRequest := context.WithCancel(req.Context())
+	cancelRequest()
+	req = req.WithContext(requestCtx)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime/reasoning")
@@ -541,6 +554,9 @@ func TestACPRuntimeHandlerSetReasoning(t *testing.T) {
 	}
 	if pool.setReasoningInput.ToolHTTPURL != "http://example.com/bots/"+botID+"/tools" {
 		t.Fatalf("SetReasoning tool context = %#v", pool.setReasoningInput)
+	}
+	if pool.setReasoningCtxErr != nil {
+		t.Fatalf("SetReasoning context error = %v, want request cancellation detached", pool.setReasoningCtxErr)
 	}
 }
 
@@ -966,7 +982,7 @@ func TestRuntimePoolSelectionErrorsUseApplicationErrors(t *testing.T) {
 		{
 			name: "missing",
 			err:  acpclient.ErrModelIDRequired,
-			code: apperror.CodeACPModelUnavailable,
+			code: apperror.CodeACPModelIDRequired,
 		},
 		{
 			name: "reasoning unsupported",
@@ -981,7 +997,7 @@ func TestRuntimePoolSelectionErrorsUseApplicationErrors(t *testing.T) {
 		{
 			name: "reasoning missing",
 			err:  acpclient.ErrReasoningEffortRequired,
-			code: apperror.CodeACPReasoningUnavailable,
+			code: apperror.CodeACPReasoningEffortRequired,
 		},
 	}
 	for _, tt := range tests {

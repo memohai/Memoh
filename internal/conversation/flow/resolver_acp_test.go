@@ -1387,6 +1387,11 @@ func TestACPPromptConfigErrorsUseApplicationErrors(t *testing.T) {
 			code: apperror.CodeACPModelUnavailable,
 		},
 		{
+			name: "model required",
+			err:  acpclient.ErrModelIDRequired,
+			code: apperror.CodeACPModelIDRequired,
+		},
+		{
 			name: "reasoning unsupported",
 			err:  acpclient.ErrReasoningSelectionUnsupported,
 			code: apperror.CodeACPReasoningUnsupported,
@@ -1395,6 +1400,11 @@ func TestACPPromptConfigErrorsUseApplicationErrors(t *testing.T) {
 			name: "reasoning unavailable",
 			err:  fmt.Errorf("%w: stale", acpclient.ErrReasoningEffortUnavailable),
 			code: apperror.CodeACPReasoningUnavailable,
+		},
+		{
+			name: "reasoning required",
+			err:  acpclient.ErrReasoningEffortRequired,
+			code: apperror.CodeACPReasoningEffortRequired,
 		},
 		{
 			name: "config transport failure",

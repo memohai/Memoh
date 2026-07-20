@@ -608,6 +608,7 @@ describe('chat-list store', () => {
       ok: false,
       stage: 'startup',
       error: 'The external agent could not apply the selected settings. Please retry.',
+      errorCode: 'acp.config_update_failed',
     })
     expect(store.messages).toHaveLength(0)
     expect(store.startupSendFailure).toMatchObject({

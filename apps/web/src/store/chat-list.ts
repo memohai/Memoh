@@ -6,7 +6,7 @@ import zhMessages from '@/i18n/locales/zh.json'
 import jaMessages from '@/i18n/locales/ja.json'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   normalizedRuntimeType,
   provisionalSessionTitle,
@@ -194,11 +194,13 @@ interface GuiToolUseRequest {
 
 class StreamFailureError extends Error {
   stage: SendMessageStage
+  feedback?: unknown
 
-  constructor(message: string, stage: SendMessageStage) {
+  constructor(message: string, stage: SendMessageStage, feedback?: unknown) {
     super(message)
     this.name = 'StreamFailureError'
     this.stage = stage
+    this.feedback = feedback
   }
 }
 
@@ -1282,7 +1284,7 @@ export const useChatStore = defineStore('chat', () => {
         const message = resolveApiErrorMessage(event, event.message || 'stream error')
         const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
         settleApprovalResponse(streamId, 'failed')
-        rejectAssistantStream(streamId, new StreamFailureError(message, stage))
+        rejectAssistantStream(streamId, new StreamFailureError(message, stage, event.feedback ?? event))
         loading.value = isActiveSessionStreaming()
         releaseHiddenSessionView(chatViews.getSession(session.botId, session.sessionId) ?? null)
         break
@@ -2585,6 +2587,7 @@ export const useChatStore = defineStore('chat', () => {
       const isAbort = err.name === 'AbortError'
       const isCommandError = err instanceof CommandStreamError
       const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
+      const errorCode = parseMemohError(error)?.code
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
@@ -2608,7 +2611,7 @@ export const useChatStore = defineStore('chat', () => {
         options.onTurnAppendAborted?.()
       }
 
-      if (isAbort) return { ok: false, stage: 'stream', error: reason }
+      if (isAbort) return { ok: false, stage: 'stream', error: reason, errorCode }
       if (stage === 'startup') {
         const currentBid = (currentBotId.value ?? '').trim()
         const currentSid = (sessionId.value ?? '').trim()
@@ -2623,9 +2626,9 @@ export const useChatStore = defineStore('chat', () => {
         if (stillCurrent && deferredDraftStillCurrent && (!isCommandError || commandErrorRestoredDraft)) {
           rememberStartupSendFailure({ botId: bid, sessionId: sid, composerScope, error: reason, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) })
         }
-        return { ok: false, stage, error: reason, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills), composerScope }
+        return { ok: false, stage, error: reason, errorCode, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills), composerScope }
       }
-      return { ok: false, stage, error: reason }
+      return { ok: false, stage, error: reason, errorCode }
     }
   }
 
@@ -2669,6 +2672,7 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) {
       const err = error instanceof Error ? error : new Error('Unknown error')
       const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
+      const errorCode = parseMemohError(error)?.code
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
@@ -2680,7 +2684,7 @@ export const useChatStore = defineStore('chat', () => {
         finalizeStreamFailure(assistantTurn, bid, sid, err)
       }
       refreshLoadingForSession(bid, sid)
-      return { ok: false, stage, error: reason }
+      return { ok: false, stage, error: reason, errorCode }
     }
   }
 
@@ -2729,6 +2733,7 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) {
       const err = error instanceof Error ? error : new Error('Unknown error')
       const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
+      const errorCode = parseMemohError(error)?.code
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
@@ -2740,7 +2745,7 @@ export const useChatStore = defineStore('chat', () => {
         finalizeStreamFailure(assistantTurn, bid, sid, err)
       }
       refreshLoadingForSession(bid, sid)
-      return { ok: false, stage, error: reason, restoreInput: text }
+      return { ok: false, stage, error: reason, errorCode, restoreInput: text }
     }
   }
 

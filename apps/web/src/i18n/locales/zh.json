@@ -121,8 +121,10 @@
     "acp": {
       "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。",
       "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
+      "model_id_required": "请选择模型后重试。",
       "model_unavailable": "所选模型已不再可用于这个外部 Agent。",
       "reasoning_selection_unsupported": "这个外部 Agent 不支持选择推理强度。",
+      "reasoning_effort_required": "请选择推理强度后重试。",
       "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent。",
       "config_update_failed": "外部 Agent 无法应用所选设置，请重试。"
     }
