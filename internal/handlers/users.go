@@ -515,9 +515,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		return createBotHTTPError(err, ownerFromToken)
 	}
 
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
-	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	setSSEHeaders(c)
 	c.Response().WriteHeader(http.StatusOK)
 	writer := c.Response().Writer
 

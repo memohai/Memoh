@@ -452,9 +452,7 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "route hub not configured")
 	}
 
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
-	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	setSSEHeaders(c)
 	c.Response().WriteHeader(http.StatusOK)
 
 	flusher, ok := c.Response().Writer.(http.Flusher)
