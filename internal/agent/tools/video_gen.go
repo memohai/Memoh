@@ -61,7 +61,7 @@ func NewVideoGenProvider(
 }
 
 func (p *VideoGenProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent || p.settings == nil || p.video == nil || p.bgManager == nil {
+	if p.settings == nil || p.video == nil || p.bgManager == nil {
 		return nil, nil
 	}
 	botID := strings.TrimSpace(session.BotID)

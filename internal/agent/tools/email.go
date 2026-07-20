@@ -28,9 +28,6 @@ func NewEmailProvider(log *slog.Logger, service *email.Service, manager *email.M
 }
 
 func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent {
-		return nil, nil
-	}
 	sess := session
 	return []sdk.Tool{
 		{

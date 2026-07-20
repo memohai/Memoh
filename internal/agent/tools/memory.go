@@ -47,9 +47,6 @@ func (*MemoryProvider) Usage(_ context.Context, _ SessionContext, available Avai
 }
 
 func (p *MemoryProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent {
-		return nil, nil
-	}
 	provider := p.resolveProvider(ctx, session.BotID)
 	if provider == nil {
 		return nil, nil

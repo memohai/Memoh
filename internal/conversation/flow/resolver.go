@@ -704,6 +704,9 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 
 	cfg := agentpkg.RunConfig{
 		Model:                 sdkModel,
+		CurrentModelUUID:      chatModel.ID,
+		CurrentModelID:        chatModel.ModelID,
+		CurrentModelProvider:  provider.Name,
 		ReasoningEffort:       reasoningEffort,
 		ReasoningActive:       reasoningConfig != nil && reasoningConfig.Active,
 		ReasoningDisabled:     reasoningConfig != nil && reasoningConfig.Disabled,
@@ -718,6 +721,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 			BotID:             p.BotID,
 			ChatID:            chatID,
 			SessionID:         p.SessionID,
+			UserID:            strings.TrimSpace(p.UserID),
 			ChannelIdentityID: strings.TrimSpace(p.ChannelIdentityID),
 			CurrentPlatform:   p.CurrentPlatform,
 			ReplyTarget:       strings.TrimSpace(p.ReplyTarget),
