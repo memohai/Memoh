@@ -1,4 +1,4 @@
-package appcore
+package core
 
 import (
 	"context"

@@ -1,7 +1,6 @@
-// Package appchannel is the Channel boundary composition root: channel
-// registry/manager/processor, discuss pipeline, email, and webhook
-// tunnel assembly (spec §7.1).
-package appchannel
+// Package channel assembles the shared command-side Channel module:
+// registry/manager/processor, discuss pipeline, email, and webhook tunnel.
+package channel
 
 import (
 	"context"

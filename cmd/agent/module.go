@@ -6,8 +6,8 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
-	appchannel "github.com/memohai/memoh/internal/app/channel"
-	appcore "github.com/memohai/memoh/internal/app/core"
+	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
+	coremodule "github.com/memohai/memoh/cmd/internal/core"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
 	"github.com/memohai/memoh/internal/handlers"
@@ -20,8 +20,8 @@ func runServe() {
 func options() fx.Option {
 	return fx.Options(
 		fx.Provide(provideConfig),
-		appcore.Module(),
-		appchannel.Module(),
+		coremodule.Module(),
+		channelmodule.Module(),
 		fx.Provide(
 			provideServerHandler(handlers.NewPingHandler),
 			provideServerHandler(handlers.NewWebhookTunnelHandler),

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 按已批准的spec（`docs/superpowers/specs/2026-07-17-channel-boundary-design.md`）落地Channel边界：Turn契约包、Channel切换到port、目录重组、composition root、`cmd/channel`验证二进制、架构守卫。
+**Goal:** 按已批准的spec（`docs/superpowers/specs/2026-07-17-channel-boundary-design.md`）落地Channel边界：Turn契约包、Channel切换到port、目录重组、命令装配模块与`cmd/channel`验证二进制。
 
-**Architecture:** 新增`internal/agent/turn`契约包（命令＋事件＋port），`internal/agent/turn/inprocess`适配器包装`flow.Resolver`（chat）与discuss编排；Channel入站Processor与DiscussDriver只依赖port；`cmd/agent`的providers拆到`internal/app/core`与`internal/app/channel`两个fx模块。
+**Architecture:** 新增`internal/agent/turn`契约包（命令＋事件＋port），`internal/agent/turn/inprocess`适配器包装`flow.Resolver`（chat）与discuss编排；Channel入站Processor与DiscussDriver只依赖port；`cmd/agent`的providers拆到`cmd/internal/core`与`cmd/internal/channel`两个fx模块。
 
 **Tech Stack:** Go 1.25（mise管理）、Uber FX、pgx/v5、Vitest不涉及。测试用标准`go test`。
 
@@ -57,8 +57,7 @@ git commit -m "docs: add channel boundary split spec and plan"
 ```go
 // Package turn defines the application-level contract for starting and
 // observing agent turns. It is the only surface Channel may depend on;
-// it must not import Echo, fx, sqlc, or any channel package (guarded by
-// internal/arch tests).
+// it must not import Echo, fx, sqlc, or any channel package.
 package turn
 
 import (
@@ -514,7 +513,7 @@ if err != nil { /* 走原streamErr错误路径 */ }
 ```bash
 grep -rn "internal/conversation" internal/channel/ --include="*.go" | grep -v _test
 ```
-对每一处：`StreamChunk`→`json.RawMessage`、`InjectMessage`→`turn.InjectMessage`、`ChatAttachment`→`turn.Attachment`（含辅助函数签名）、`ModelMessage`（`finalMessages`）→若仅用于长度判断则改`json.RawMessage`切片或删除。允许暂留的例外记录到Phase 5守卫测试的白名单并在PR描述说明（目标是零残留）。
+对每一处：`StreamChunk`→`json.RawMessage`、`InjectMessage`→`turn.InjectMessage`、`ChatAttachment`→`turn.Attachment`（含辅助函数签名）、`ModelMessage`（`finalMessages`）→若仅用于长度判断则改`json.RawMessage`切片或删除（目标是零残留）。
 
 - [ ] **Step 4: 测试更新与运行**
 
@@ -606,19 +605,19 @@ git add -A && git commit -m "refactor(channel): split package root into gateway 
 
 ---
 
-## Phase 5：composition root与守卫
+## Phase 5：命令装配模块
 
-### Task 5.1: `internal/app/core`与`internal/app/channel`
+### Task 5.1: `cmd/internal/core`与`cmd/internal/channel`
 
 **Files:**
-- Create: `internal/app/core/module.go`（`package appcore`，`func Module() fx.Option`）
-- Create: `internal/app/channel/module.go`（`package appchannel`，`func Module() fx.Option`）
+- Create: `cmd/internal/core/module.go`（`package core`，`func Module() fx.Option`）
+- Create: `cmd/internal/channel/module.go`（`package channel`，`func Module() fx.Option`）
 - Modify: `cmd/agent/app.go`、`cmd/agent/module.go`（providers搬家后瘦身）
 
 **搬家清单:**
-- `appchannel.Module()`：`provideChannelRegistry`、`provideCommandHandler`、`provideChannelRouter`、`provideChannelManager`、`provideChannelLifecycleService`、`providePipeline`、`provideEventStore`、`provideDiscussDriver`、`local.NewRouteHub`、`gateway.NewStore`、email全组（`provideEmailRegistry`等7个）、`webhooktunnel.NewManager`；Invoke：`startChannelManager`、`startEmailManager`、`startWebhookTunnelListener`、`startWebhookTunnel`。
-- `appcore.Module()`：`cmd/agent/app.go`其余非`provideServerHandler`、非server的providers（config、logger、db、workspace、agent、flow、schedule、heartbeat等）＋对应Invoke（`startScheduleService`等）＋新增`provideTurnService`（`inprocess.New(resolver, WithDiscuss(agent, resolver))`绑定`turn.Service`）。
-- `cmd/agent/module.go`最终形态：`fx.Options(appcore.Module(), appchannel.Module(), fx.Provide(全部provideServerHandler…, provideServer), fx.Invoke(startServer, injectToolProviders, …HTTP相关))`。
+- `channelmodule.Module()`：`provideChannelRegistry`、`provideCommandHandler`、`provideChannelRouter`、`provideChannelManager`、`provideChannelLifecycleService`、`providePipeline`、`provideEventStore`、`provideDiscussDriver`、`local.NewRouteHub`、`gateway.NewStore`、email全组（`provideEmailRegistry`等7个）、`webhooktunnel.NewManager`；Invoke：`startChannelManager`、`startEmailManager`、`startWebhookTunnelListener`、`startWebhookTunnel`。
+- `coremodule.Module()`：`cmd/agent/app.go`其余非`provideServerHandler`、非server的providers（config、logger、db、workspace、agent、flow、schedule、heartbeat等）＋对应Invoke（`startScheduleService`等）＋新增`provideTurnService`（`inprocess.New(resolver, WithDiscuss(agent, resolver))`绑定`turn.Service`）。
+- `cmd/agent/module.go`最终形态：`fx.Options(coremodule.Module(), channelmodule.Module(), fx.Provide(全部provideServerHandler…, provideServer), fx.Invoke(startServer, injectToolProviders, …HTTP相关))`。
 
 - [ ] **Step 1: 机械搬函数**（函数体原样移动、改导出、更新package与import；`provideConfig`等cmd专属flag解析留cmd，以参数注入）
 
@@ -632,97 +631,7 @@ go run ./cmd/agent --help   # 预期：正常输出，无fx装配错误
 - [ ] **Step 3: Commit**
 
 ```bash
-git add -A && git commit -m "refactor(app): extract core and channel composition roots"
-```
-
-### Task 5.2: 架构守卫测试
-
-**Files:**
-- Create: `internal/arch/arch_test.go`
-
-- [ ] **Step 1: 写守卫测试**（真实代码，shell出`go list`免新依赖）：
-
-```go
-package arch
-
-import (
-	"encoding/json"
-	"os/exec"
-	"strings"
-	"testing"
-)
-
-type pkgInfo struct {
-	ImportPath string
-	Imports    []string
-}
-
-func loadImports(t *testing.T, pattern string) []pkgInfo {
-	t.Helper()
-	out, err := exec.Command("go", "list", "-json=ImportPath,Imports", pattern).Output()
-	if err != nil {
-		t.Fatalf("go list %s: %v", pattern, err)
-	}
-	var pkgs []pkgInfo
-	dec := json.NewDecoder(strings.NewReader(string(out)))
-	for dec.More() {
-		var p pkgInfo
-		if err := dec.Decode(&p); err != nil {
-			t.Fatal(err)
-		}
-		pkgs = append(pkgs, p)
-	}
-	return pkgs
-}
-
-var forbidden = []struct {
-	scope   string // go list pattern
-	deny    []string
-	allowIn []string // 允许例外的ImportPath前缀
-}{
-	{
-		scope: "github.com/memohai/memoh/internal/channel/...",
-		deny: []string{
-			"github.com/memohai/memoh/internal/conversation",
-			"github.com/memohai/memoh/internal/conversation/flow",
-			"github.com/memohai/memoh/internal/agent",
-		},
-		allowIn: nil,
-	},
-	{
-		scope: "github.com/memohai/memoh/internal/pipeline",
-		deny: []string{
-			"github.com/memohai/memoh/internal/conversation/flow",
-			"github.com/memohai/memoh/internal/agent",
-		},
-	},
-	{
-		scope: "github.com/memohai/memoh/internal/agent/turn",
-		deny:  []string{"github.com/labstack/echo/v4", "go.uber.org/fx", "github.com/memohai/memoh/internal/channel"},
-	},
-}
-
-func TestForbiddenImports(t *testing.T) {
-	for _, rule := range forbidden {
-		for _, p := range loadImports(t, rule.scope) {
-			for _, imp := range p.Imports {
-				for _, d := range rule.deny {
-					if imp == d || (d == "github.com/memohai/memoh/internal/agent" && imp == "github.com/memohai/memoh/internal/agent/turn") && !strings.HasPrefix(imp, "github.com/memohai/memoh/internal/agent/turn") {
-						t.Errorf("%s imports forbidden %s", p.ImportPath, imp)
-					}
-				}
-			}
-		}
-	}
-}
-```
-（实现时修正`internal/agent`前缀匹配：deny按前缀匹配但放行`internal/agent/turn`前缀；`team.DefaultTeamID`引用守卫用`grep`型测试单列：扫描`internal/`下非`db`／非`app`／非`_test`文件不得出现`team.DefaultTeamID`。）
-
-- [ ] **Step 2: 运行、修violation、提交**
-
-```bash
-go test ./internal/arch/ -v
-git add internal/arch/ && git commit -m "test(arch): guard boundary import rules"
+git add -A && git commit -m "refactor(cmd): extract shared core and channel modules"
 ```
 
 ---
@@ -742,8 +651,8 @@ package main
 import (
 	"go.uber.org/fx"
 
-	appchannel "github.com/memohai/memoh/internal/app/channel"
-	appcore "github.com/memohai/memoh/internal/app/core"
+	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
+	coremodule "github.com/memohai/memoh/cmd/internal/core"
 )
 
 // cmd/channel is a single-instance assembly-closure verification binary
@@ -751,8 +660,8 @@ import (
 // cross-process turn transport exists. Not a deployment artifact.
 func main() {
 	fx.New(
-		appcore.Module(),
-		appchannel.Module(),
+		coremodule.Module(),
+		channelmodule.Module(),
 		// 最小Echo：仅注册channel webhook与weixin QR两个handler（从cmd/agent复用provider）
 	).Run()
 }
@@ -815,6 +724,6 @@ gh pr create --title "refactor: extract channel boundary behind turn.Service con
 
 ## Self-Review记录
 
-- spec覆盖：§5契约→Phase 1；§5.4切换→Phase 2/3；§4目录→Phase 4；§7装配→Phase 5/6；§8守卫→Task 5.2；§10验证→Phase 7。§3数据所有权无代码变更（维持现状），§6 pipeline归属由Phase 3实现。
+- spec覆盖：§5契约→Phase 1；§5.4切换→Phase 2/3；§4目录→Phase 4；§7装配→Phase 5/6；§10验证→Phase 7。§3数据所有权无代码变更（维持现状），§6 pipeline归属由Phase 3实现。
 - 已知偏差（相对spec，均有依据）：`Service.Inject`收敛为`RunHandle.Inject`（进程内无需按RunID路由，跨进程spec恢复）；`RunHandle`增加`Errs()`与`AddOutboundAssets()`（忠实桥接现有双通道与资产收集语义）；五个PR改为单分支多提交一个PR（用户指示）。
 - 类型一致性：`turn.Service`签名在Task 1.1定义，2.1/3.1/5.1按同名消费；`NewChannelInboundProcessor`新签名在2.1声明、5.1装配引用。

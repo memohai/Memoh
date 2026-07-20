@@ -1,6 +1,6 @@
-// Package appcore assembles the shared domain and agent runtime
-// providers used by every Memoh binary (all-in-one, channel).
-package appcore
+// Package core assembles the shared command-side domain and agent runtime
+// providers used by the Memoh binaries (all-in-one, channel).
+package core
 
 import (
 	"context"
@@ -664,7 +664,7 @@ func startBackgroundTaskCleanup(lc fx.Lifecycle, mgr *background.Manager) {
 	})
 }
 
-// inboundTranscriptionResult moved to appchannel.
+// inboundTranscriptionResult moved to the shared Channel module.
 
 func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *providers.Service {
 	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL(), cfg.Registry.ProvidersPath())
@@ -1026,7 +1026,7 @@ func provideTurnService(resolver *flow.Resolver, agent *agentpkg.Agent) turn.Ser
 	)
 }
 
-// resolverBotPermissionChecker duplicates appchannel's inbound permission
+// resolverBotPermissionChecker duplicates the Channel module's inbound permission
 // glue for the resolver side; both adapt bots/accounts onto the same
 // HasBotPermission shape.
 type resolverBotPermissionChecker struct {

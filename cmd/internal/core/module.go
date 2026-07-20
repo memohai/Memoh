@@ -1,4 +1,4 @@
-package appcore
+package core
 
 import (
 	"go.uber.org/fx"
@@ -30,7 +30,7 @@ import (
 )
 
 // Module assembles the shared domain and agent-runtime providers used by
-// every Memoh binary. It expects config.Config to be provided by the
+// the Memoh binaries. It expects config.Config to be provided by the
 // composing command.
 func Module() fx.Option {
 	return fx.Options(

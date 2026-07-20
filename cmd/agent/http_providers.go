@@ -10,10 +10,10 @@ import (
 
 	"go.uber.org/fx"
 
+	coremodule "github.com/memohai/memoh/cmd/internal/core"
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acpagent"
 	"github.com/memohai/memoh/internal/agent/background"
-	appcore "github.com/memohai/memoh/internal/app/core"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
@@ -146,7 +146,7 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			if err := appcore.EnsureAdminUser(ctx, logger, accountStore, emailService, cfg); err != nil {
+			if err := coremodule.EnsureAdminUser(ctx, logger, accountStore, emailService, cfg); err != nil {
 				return err
 			}
 			botService.SetContainerLifecycle(manager)
@@ -182,7 +182,7 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 }
 
 // webSpeechModelResolver adapts bot settings to the web chat speech model
-// lookup (same shape as appchannel's inbound resolver glue).
+// lookup (same shape as the shared Channel module's inbound resolver glue).
 type webSpeechModelResolver struct {
 	settings *settings.Service
 }

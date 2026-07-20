@@ -1,4 +1,4 @@
-package appchannel
+package channel
 
 import (
 	"testing"

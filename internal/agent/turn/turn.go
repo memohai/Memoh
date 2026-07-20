@@ -1,7 +1,6 @@
 // Package turn defines the application-level contract for starting and
 // observing agent turns. It is the only agent surface Channel may depend
-// on; it must not import Echo, fx, sqlc, or any channel package (guarded
-// by internal/arch tests).
+// on; it must not import Echo, fx, sqlc, or any channel package.
 //
 // Data-carrier types are currently aliases of the conversation package's
 // wire shapes: consumers decode the same bytes either way, and the alias

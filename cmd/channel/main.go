@@ -1,5 +1,5 @@
 // cmd/channel is the Channel boundary's single-instance verification
-// binary (spec §7.3): it assembles the channel composition root over the
+// binary (spec §7.3): it assembles the shared Channel module over the
 // in-process turn adapter, hosting only the platform webhook endpoints.
 // Until a cross-process turn transport exists it is functionally an
 // all-in-one without the REST API — its purpose is proving the channel
@@ -17,8 +17,8 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
-	appchannel "github.com/memohai/memoh/internal/app/channel"
-	appcore "github.com/memohai/memoh/internal/app/core"
+	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
+	coremodule "github.com/memohai/memoh/cmd/internal/core"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
@@ -84,8 +84,8 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 func options() fx.Option {
 	return fx.Options(
 		fx.Provide(provideConfig),
-		appcore.Module(),
-		appchannel.Module(),
+		coremodule.Module(),
+		channelmodule.Module(),
 		fx.Provide(
 			provideServerHandler(handlers.NewPingHandler),
 			provideServerHandler(channel.NewWebhookServerHandler),
