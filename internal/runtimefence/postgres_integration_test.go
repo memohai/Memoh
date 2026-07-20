@@ -303,7 +303,14 @@ func createRuntimeFenceFixtures(t *testing.T, ctx context.Context, pool *pgxpool
 	botID := uuid.New()
 	sessionID := uuid.New()
 	name := "rtf-" + uuid.NewString()[:12]
-	if _, err := pool.Exec(ctx, "INSERT INTO users (id, username, role, is_active) VALUES ($1, $2, 'admin', true)", userID, name); err != nil {
+	if _, err := pool.Exec(ctx, `
+		WITH created_user AS (
+			INSERT INTO users (id, username, is_active)
+			VALUES ($1, $2, true)
+			RETURNING id
+		)
+		INSERT INTO team_members (user_id, role)
+		SELECT id, 'admin' FROM created_user`, userID, name); err != nil {
 		t.Fatalf("create user fixture: %v", err)
 	}
 	if _, err := pool.Exec(ctx, "INSERT INTO bots (id, owner_user_id, name) VALUES ($1, $2, $3)", botID, userID, name); err != nil {

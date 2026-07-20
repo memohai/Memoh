@@ -154,7 +154,11 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_source_order
     AND turn_position IS NOT NULL
     AND turn_message_seq IS NOT NULL;
 
-CREATE OR REPLACE VIEW bot_visible_history_messages AS
+-- The canonical 0001 already exposes the final team_id projection. Replaying
+-- this historical shape must drop the view because CREATE OR REPLACE cannot
+-- remove or reorder existing columns; 0112 restores the team-safe shape.
+DROP VIEW IF EXISTS bot_visible_history_messages;
+CREATE VIEW bot_visible_history_messages AS
 SELECT
   m.turn_id,
   m.turn_position,

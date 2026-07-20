@@ -19,9 +19,13 @@ func TestTeamCompositeKeys(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
-	// (1) Every team table has a helper unique key leading with team_id.
+	// (1) Every team table has either a team-prefixed primary key or the
+	// helper unique key used to preserve an existing global primary key.
 	rows, err := pool.Query(ctx, `
-		SELECT c.relname, count(helper.oid)
+		SELECT c.relname,
+		       bool_or((SELECT a.attname FROM pg_attribute a
+		         WHERE a.attrelid=con.conrelid AND a.attnum=con.conkey[1])='team_id') AS team_primary,
+		       count(helper.oid)
 		  FROM pg_constraint con
 		  JOIN pg_class c ON c.oid = con.conrelid
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -37,12 +41,13 @@ func TestTeamCompositeKeys(t *testing.T) {
 	}
 	for rows.Next() {
 		var tbl string
+		var teamPrimary bool
 		var helperCount int
-		if err := rows.Scan(&tbl, &helperCount); err != nil {
+		if err := rows.Scan(&tbl, &teamPrimary, &helperCount); err != nil {
 			t.Fatalf("scan pk: %v", err)
 		}
-		if helperCount != 1 {
-			t.Errorf("%s must have one team-prefixed helper key, got %d", tbl, helperCount)
+		if !teamPrimary && helperCount != 1 {
+			t.Errorf("%s must have a team-prefixed PK or helper key, got pk=%v helpers=%d", tbl, teamPrimary, helperCount)
 		}
 	}
 	rows.Close()
@@ -152,7 +157,7 @@ func assertRootFKs(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		SELECT c.relname FROM pg_class c
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 		 WHERE c.relkind = 'r' AND n.nspname = 'public'
-		   AND c.relname NOT IN ('schema_migrations', 'teams')`)
+		   AND c.relname NOT IN ('schema_migrations', 'teams', 'users')`)
 	if err != nil {
 		t.Fatalf("enumerate tables: %v", err)
 	}
@@ -197,7 +202,7 @@ func assertBusinessFKsCarryTeamID(ctx context.Context, t *testing.T, pool *pgxpo
 		  JOIN pg_namespace rn ON rn.oid = rt.relnamespace
 		 WHERE con.contype = 'f' AND n.nspname = 'public'
 		   AND rn.nspname = 'public'
-		   AND rt.relname NOT IN ('teams')
+		   AND rt.relname NOT IN ('teams', 'users')
 		   AND NOT EXISTS (
 		       SELECT 1 FROM pg_attribute a
 		        WHERE a.attrelid = con.conrelid AND a.attnum = ANY(con.conkey)

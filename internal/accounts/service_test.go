@@ -10,7 +10,10 @@ import (
 )
 
 type testAccountStore struct {
-	created dbstore.CreateAccountInput
+	created      dbstore.CreateAccountInput
+	record       dbstore.AccountRecord
+	getErr       error
+	adminUpdated dbstore.UpdateAccountAdminInput
 }
 
 func TestCreatePersistsAccountWithoutProvisioningProviderInstances(t *testing.T) {
@@ -32,8 +35,8 @@ func TestCreatePersistsAccountWithoutProvisioningProviderInstances(t *testing.T)
 }
 
 func (*testAccountStore) CountAccounts(context.Context) (int64, error) { return 0, nil }
-func (*testAccountStore) GetByUserID(context.Context, string) (dbstore.AccountRecord, error) {
-	return dbstore.AccountRecord{}, errors.New("not implemented")
+func (s *testAccountStore) GetByUserID(context.Context, string) (dbstore.AccountRecord, error) {
+	return s.record, s.getErr
 }
 
 func (*testAccountStore) GetByIdentity(context.Context, string) (dbstore.AccountRecord, error) {
@@ -68,8 +71,9 @@ func (s *testAccountStore) CreateAccount(_ context.Context, input dbstore.Create
 	}, nil
 }
 func (*testAccountStore) UpdateLastLogin(context.Context, string) error { return nil }
-func (*testAccountStore) UpdateAdmin(context.Context, dbstore.UpdateAccountAdminInput) (dbstore.AccountRecord, error) {
-	return dbstore.AccountRecord{}, errors.New("not implemented")
+func (s *testAccountStore) UpdateAdmin(_ context.Context, input dbstore.UpdateAccountAdminInput) (dbstore.AccountRecord, error) {
+	s.adminUpdated = input
+	return s.record, nil
 }
 
 func (*testAccountStore) UpdateProfile(context.Context, dbstore.UpdateAccountProfileInput) (dbstore.AccountRecord, error) {
@@ -82,4 +86,42 @@ func (*testAccountStore) UpdatePassword(context.Context, dbstore.UpdateAccountPa
 
 func (*testAccountStore) RemoveMember(context.Context, string) error {
 	return errors.New("not implemented")
+}
+
+func TestValidateSessionAndIsAdminRequireActiveAccount(t *testing.T) {
+	store := &testAccountStore{record: dbstore.AccountRecord{ID: "user-1", Role: "admin", IsActive: false}}
+	svc := NewService(nil, store)
+
+	if err := svc.ValidateSession(context.Background(), "user-1"); !errors.Is(err, ErrInactiveAccount) {
+		t.Fatalf("ValidateSession() error = %v, want ErrInactiveAccount", err)
+	}
+	isAdmin, err := svc.IsAdmin(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("IsAdmin() error = %v", err)
+	}
+	if isAdmin {
+		t.Fatal("inactive account must not retain admin authority")
+	}
+
+	store.record.IsActive = true
+	if err := svc.ValidateSession(context.Background(), "user-1"); err != nil {
+		t.Fatalf("ValidateSession() active error = %v", err)
+	}
+	isAdmin, err = svc.IsAdmin(context.Background(), "user-1")
+	if err != nil || !isAdmin {
+		t.Fatalf("IsAdmin() active = %v, %v", isAdmin, err)
+	}
+}
+
+func TestUpdateAdminLeavesMembershipStateUnspecified(t *testing.T) {
+	store := &testAccountStore{record: dbstore.AccountRecord{ID: "user-1", Role: "member", IsActive: false}}
+	svc := NewService(nil, store)
+	role := "admin"
+
+	if _, err := svc.UpdateAdmin(context.Background(), "user-1", UpdateAccountRequest{Role: &role}); err != nil {
+		t.Fatalf("UpdateAdmin() error = %v", err)
+	}
+	if store.adminUpdated.IsActive != nil {
+		t.Fatalf("role-only update supplied membership state %v", *store.adminUpdated.IsActive)
+	}
 }

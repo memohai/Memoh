@@ -15,7 +15,7 @@ func TestTeamIDBackfilledOnFreshInstall(t *testing.T) {
 	rows, err := pool.Query(ctx, `
 		SELECT table_name FROM information_schema.tables
 		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-		  AND table_name NOT IN ('schema_migrations', 'teams')
+		  AND table_name NOT IN ('schema_migrations', 'teams', 'users')
 		ORDER BY table_name`)
 	if err != nil {
 		t.Fatalf("enumerate team tables: %v", err)

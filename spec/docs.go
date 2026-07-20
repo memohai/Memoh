@@ -13229,7 +13229,7 @@ const docTemplate = `{
                 }
             },
             "put": {
-                "description": "Update user profile and status",
+                "description": "Update the user's role or membership status in the current workspace",
                 "tags": [
                     "users"
                 ],
@@ -13277,6 +13277,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -13286,11 +13292,11 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Remove a workspace member by removing login credentials and disabling the account",
+                "description": "Deactivate the member in the current workspace without changing global credentials",
                 "tags": [
                     "users"
                 ],
-                "summary": "Remove member (admin only)",
+                "summary": "Deactivate member (admin only)",
                 "parameters": [
                     {
                         "type": "string",
@@ -13322,58 +13328,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/users/{id}/password": {
-            "put": {
-                "description": "Reset a user password",
-                "tags": [
-                    "users"
-                ],
-                "summary": "Reset user password (admin only)",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Password payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/accounts.ResetPasswordRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -13725,12 +13681,24 @@ const docTemplate = `{
                 "is_active": {
                     "type": "boolean"
                 },
+                "joined_at": {
+                    "type": "string"
+                },
                 "last_login_at": {
+                    "type": "string"
+                },
+                "membership_is_active": {
+                    "type": "boolean"
+                },
+                "membership_updated_at": {
                     "type": "string"
                 },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "principal_is_active": {
+                    "type": "boolean"
                 },
                 "role": {
                     "type": "string"
@@ -13783,23 +13751,9 @@ const docTemplate = `{
                 }
             }
         },
-        "accounts.ResetPasswordRequest": {
-            "type": "object",
-            "properties": {
-                "new_password": {
-                    "type": "string"
-                }
-            }
-        },
         "accounts.UpdateAccountRequest": {
             "type": "object",
             "properties": {
-                "avatar_url": {
-                    "type": "string"
-                },
-                "display_name": {
-                    "type": "string"
-                },
                 "is_active": {
                     "type": "boolean"
                 },

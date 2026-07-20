@@ -67,12 +67,13 @@ func TestMigrateLegacyInstallPreservesRows(t *testing.T) {
 		}
 	}
 	assertCount("users", 1)
+	assertCount("team_members", 1)
 	assertCount("bots", 1)
 	assertCount("bot_sessions", 1)
 
 	// Every seeded row is backfilled to the default team.
 	const defaultTeam = "00000000-0000-0000-0000-000000000001"
-	for _, table := range []string{"users", "bots", "bot_sessions"} {
+	for _, table := range []string{"bots", "bot_sessions"} {
 		var nonDefault int
 		if err := pool.QueryRow(ctx,
 			"SELECT count(*) FROM "+table+" WHERE team_id IS DISTINCT FROM $1", defaultTeam,
@@ -82,6 +83,15 @@ func TestMigrateLegacyInstallPreservesRows(t *testing.T) {
 		if nonDefault != 0 {
 			t.Errorf("%s has %d rows not backfilled to the default team", table, nonDefault)
 		}
+	}
+	var membershipTeam string
+	if err := pool.QueryRow(ctx,
+		`SELECT team_id::text FROM team_members WHERE user_id = $1`, userID,
+	).Scan(&membershipTeam); err != nil {
+		t.Fatalf("read backfilled membership: %v", err)
+	}
+	if membershipTeam != defaultTeam {
+		t.Errorf("membership team = %q, want %q", membershipTeam, defaultTeam)
 	}
 
 	// The final schema keeps the existing PK and adds a team-prefixed unique

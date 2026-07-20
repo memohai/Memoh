@@ -12,7 +12,10 @@ SELECT
   u.display_name AS user_display_name,
   u.avatar_url AS user_avatar_url
 FROM bot_user_grants g
-LEFT JOIN users u ON u.id = g.user_id AND u.team_id = public.memoh_current_team_id()
+LEFT JOIN team_members membership
+  ON membership.team_id = public.memoh_current_team_id()
+ AND membership.user_id = g.user_id
+LEFT JOIN users u ON u.id = membership.user_id
 WHERE g.team_id = public.memoh_current_team_id() AND g.bot_id = $1
 ORDER BY g.subject_type DESC, g.created_at ASC;
 

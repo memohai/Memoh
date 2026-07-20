@@ -93,7 +93,6 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	userGroup.GET("", h.ListUsers)
 	userGroup.GET("/:id", h.GetUser)
 	userGroup.PUT("/:id", h.UpdateUser)
-	userGroup.PUT("/:id/password", h.ResetUserPassword)
 	userGroup.POST("", h.CreateUser)
 	userGroup.DELETE("/:id", h.RemoveMember)
 
@@ -263,7 +262,7 @@ func (h *UsersHandler) GetUser(c echo.Context) error {
 
 // UpdateUser godoc
 // @Summary Update user (admin only)
-// @Description Update user profile and status
+// @Description Update the user's role or membership status in the current workspace
 // @Tags users
 // @Param id path string true "User ID"
 // @Param payload body accounts.UpdateAccountRequest true "User update payload"
@@ -271,6 +270,7 @@ func (h *UsersHandler) GetUser(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /users/{id} [put].
 func (h *UsersHandler) UpdateUser(c echo.Context) error {
@@ -302,53 +302,12 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 	}
 	resp, err := h.service.UpdateAdmin(c.Request().Context(), targetID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, resp)
-}
-
-// ResetUserPassword godoc
-// @Summary Reset user password (admin only)
-// @Description Reset a user password
-// @Tags users
-// @Param id path string true "User ID"
-// @Param payload body accounts.ResetPasswordRequest true "Password payload"
-// @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /users/{id}/password [put].
-func (h *UsersHandler) ResetUserPassword(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if !isAdmin {
-		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
-	}
-	targetID := strings.TrimSpace(c.Param("id"))
-	if targetID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user id is required")
-	}
-	if _, err := h.service.Get(c.Request().Context(), targetID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "user not found")
+		if errors.Is(err, db.ErrLastActiveAdmin) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	var req accounts.ResetPasswordRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if err := h.service.ResetPassword(c.Request().Context(), targetID, req.NewPassword); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.NoContent(http.StatusNoContent)
+	return c.JSON(http.StatusOK, resp)
 }
 
 // CreateUser godoc
@@ -386,14 +345,15 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 }
 
 // RemoveMember godoc
-// @Summary Remove member (admin only)
-// @Description Remove a workspace member by removing login credentials and disabling the account
+// @Summary Deactivate member (admin only)
+// @Description Deactivate the member in the current workspace without changing global credentials
 // @Tags users
 // @Param id path string true "User ID"
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /users/{id} [delete].
 func (h *UsersHandler) RemoveMember(c echo.Context) error {
@@ -422,6 +382,9 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if err := h.service.RemoveMember(c.Request().Context(), targetID); err != nil {
+		if errors.Is(err, db.ErrLastActiveAdmin) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "member not found")
 		}

@@ -65,3 +65,18 @@ func readEmbeddedMigration(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+// readEmbeddedPreTeamInit returns the canonical table definitions before the
+// Team finalizer. Tests that execute 0001 inside a temporary search_path use
+// this historical fixture because the Team schema intentionally targets the
+// real public schema.
+func readEmbeddedPreTeamInit(t *testing.T) string {
+	t.Helper()
+	const marker = "-- Canonical team and membership schema"
+	sql := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
+	before, _, ok := strings.Cut(sql, marker)
+	if !ok {
+		t.Fatalf("canonical 0001 is missing %q", marker)
+	}
+	return before
+}

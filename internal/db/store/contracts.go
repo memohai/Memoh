@@ -66,20 +66,24 @@ type BotRemoteRuntimeBindingStore interface {
 }
 
 type AccountRecord struct {
-	ID              string
-	Username        string
-	Email           string
-	Role            string
-	DisplayName     string
-	AvatarURL       string
-	Timezone        string
-	PasswordHash    string
-	HasPasswordHash bool
-	IsActive        bool
-	Metadata        string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	LastLoginAt     time.Time
+	ID                  string
+	Username            string
+	Email               string
+	Role                string
+	DisplayName         string
+	AvatarURL           string
+	Timezone            string
+	PasswordHash        string
+	HasPasswordHash     bool
+	IsActive            bool
+	PrincipalActive     bool
+	MembershipActive    bool
+	Metadata            string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	JoinedAt            time.Time
+	MembershipUpdatedAt time.Time
+	LastLoginAt         time.Time
 }
 
 type CreateUserInput struct {
@@ -100,11 +104,9 @@ type CreateAccountInput struct {
 }
 
 type UpdateAccountAdminInput struct {
-	UserID      string
-	Role        string
-	DisplayName string
-	AvatarURL   string
-	IsActive    bool
+	UserID   string
+	Role     string
+	IsActive *bool
 }
 
 type UpdateAccountProfileInput struct {
@@ -112,7 +114,6 @@ type UpdateAccountProfileInput struct {
 	DisplayName string
 	AvatarURL   string
 	Timezone    string
-	IsActive    bool
 	Metadata    string
 }
 

@@ -11,10 +11,14 @@ export type AccountsAccount = {
     email?: string;
     id?: string;
     is_active?: boolean;
+    joined_at?: string;
     last_login_at?: string;
+    membership_is_active?: boolean;
+    membership_updated_at?: string;
     metadata?: {
         [key: string]: unknown;
     };
+    principal_is_active?: boolean;
     role?: string;
     timezone?: string;
     updated_at?: string;
@@ -35,13 +39,7 @@ export type AccountsListAccountsResponse = {
     items?: Array<AccountsAccount>;
 };
 
-export type AccountsResetPasswordRequest = {
-    new_password?: string;
-};
-
 export type AccountsUpdateAccountRequest = {
-    avatar_url?: string;
-    display_name?: string;
     is_active?: boolean;
     role?: string;
 };
@@ -13772,6 +13770,10 @@ export type DeleteUsersByIdErrors = {
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -13857,6 +13859,10 @@ export type PutUsersByIdErrors = {
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -13872,49 +13878,6 @@ export type PutUsersByIdResponses = {
 };
 
 export type PutUsersByIdResponse = PutUsersByIdResponses[keyof PutUsersByIdResponses];
-
-export type PutUsersByIdPasswordData = {
-    /**
-     * Password payload
-     */
-    body: AccountsResetPasswordRequest;
-    path: {
-        /**
-         * User ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/users/{id}/password';
-};
-
-export type PutUsersByIdPasswordErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutUsersByIdPasswordError = PutUsersByIdPasswordErrors[keyof PutUsersByIdPasswordErrors];
-
-export type PutUsersByIdPasswordResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
 
 export type GetVideoModelsData = {
     body?: never;

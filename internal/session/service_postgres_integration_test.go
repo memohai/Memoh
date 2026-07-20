@@ -675,8 +675,13 @@ func setupPostgresSessionForkFixtures(t *testing.T, ctx context.Context, tx pgx.
 	t.Helper()
 	name := fmt.Sprintf("postgres-session-test-%d", time.Now().UnixNano())
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO users (id, username, role, is_active)
-		VALUES ($1, $2, 'admin', true)
+		WITH created_user AS (
+			INSERT INTO users (id, username, is_active)
+			VALUES ($1, $2, true)
+			RETURNING id
+		)
+		INSERT INTO team_members (user_id, role)
+		SELECT id, 'admin' FROM created_user
 	`, postgresSessionTestUserID, name); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}

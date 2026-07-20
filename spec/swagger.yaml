@@ -13,11 +13,19 @@ definitions:
         type: string
       is_active:
         type: boolean
+      joined_at:
+        type: string
       last_login_at:
+        type: string
+      membership_is_active:
+        type: boolean
+      membership_updated_at:
         type: string
       metadata:
         additionalProperties: {}
         type: object
+      principal_is_active:
+        type: boolean
       role:
         type: string
       timezone:
@@ -51,17 +59,8 @@ definitions:
           $ref: '#/definitions/accounts.Account'
         type: array
     type: object
-  accounts.ResetPasswordRequest:
-    properties:
-      new_password:
-        type: string
-    type: object
   accounts.UpdateAccountRequest:
     properties:
-      avatar_url:
-        type: string
-      display_name:
-        type: string
       is_active:
         type: boolean
       role:
@@ -13634,8 +13633,8 @@ paths:
       - users
   /users/{id}:
     delete:
-      description: Remove a workspace member by removing login credentials and disabling
-        the account
+      description: Deactivate the member in the current workspace without changing
+        global credentials
       parameters:
       - description: User ID
         in: path
@@ -13657,11 +13656,15 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Remove member (admin only)
+      summary: Deactivate member (admin only)
       tags:
       - users
     get:
@@ -13697,7 +13700,7 @@ paths:
       tags:
       - users
     put:
-      description: Update user profile and status
+      description: Update the user's role or membership status in the current workspace
       parameters:
       - description: User ID
         in: path
@@ -13727,48 +13730,15 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update user (admin only)
-      tags:
-      - users
-  /users/{id}/password:
-    put:
-      description: Reset a user password
-      parameters:
-      - description: User ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Password payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/accounts.ResetPasswordRequest'
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Reset user password (admin only)
       tags:
       - users
   /users/me:

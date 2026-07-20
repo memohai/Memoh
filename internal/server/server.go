@@ -27,6 +27,18 @@ type Handler interface {
 func NewServer(log *slog.Logger, addr string, jwtSecret string,
 	handlers ...Handler,
 ) *Server {
+	return newServer(log, addr, jwtSecret, nil, handlers...)
+}
+
+func NewServerWithSessionValidator(log *slog.Logger, addr string, jwtSecret string,
+	validateSession auth.UserSessionValidator, handlers ...Handler,
+) *Server {
+	return newServer(log, addr, jwtSecret, validateSession, handlers...)
+}
+
+func newServer(log *slog.Logger, addr string, jwtSecret string,
+	validateSession auth.UserSessionValidator, handlers ...Handler,
+) *Server {
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -67,7 +79,7 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 	}))
 	e.Use(auth.JWTMiddleware(jwtSecret, func(c echo.Context) bool {
 		return shouldSkipJWT(c.Request().URL.Path)
-	}))
+	}, validateSession))
 
 	for _, h := range handlers {
 		if h != nil {

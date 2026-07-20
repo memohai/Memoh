@@ -45,7 +45,7 @@ func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SET LOCAL search_path TO "+quotedSchema+", public"); err != nil {
 		t.Fatalf("set search path: %v", err)
 	}
-	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
+	baseline := readEmbeddedPreTeamInit(t)
 	if _, err := tx.Exec(ctx, baseline); err != nil {
 		t.Fatalf("apply 0001 baseline: %v", err)
 	}

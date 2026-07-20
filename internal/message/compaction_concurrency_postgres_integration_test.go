@@ -47,8 +47,12 @@ func setupCommittedCompactionFixture(t *testing.T) committedCompactionFixture {
 	sessionID := uuid.NewString()
 	name := "compaction-race-" + uuid.NewString()[:12]
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO users (id, username, role, is_active)
-		VALUES ($1, $2, 'admin', true)
+		WITH created_user AS (
+			INSERT INTO users (id, username, is_active)
+			VALUES ($1, $2, true) RETURNING id
+		)
+		INSERT INTO team_members (user_id, role)
+		SELECT id, 'admin' FROM created_user
 	`, userID, name); err != nil {
 		t.Fatalf("insert fixture user: %v", err)
 	}

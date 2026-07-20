@@ -28,11 +28,14 @@ func TestViewDoesNotBypassRLS(t *testing.T) {
 	// Seed a team-1 visible message (as owner/migrator, bypassing RLS for setup).
 	if _, err := pool.Exec(ctx, `
 		WITH u AS (
-			INSERT INTO users (team_id, username, is_active, metadata)
-			VALUES ($1, 't1u', true, '{}') RETURNING id
+			INSERT INTO users (username, is_active, metadata)
+			VALUES ('t1u', true, '{}') RETURNING id
+		), membership AS (
+			INSERT INTO team_members (team_id, user_id)
+			SELECT $1, u.id FROM u RETURNING user_id
 		), b AS (
 			INSERT INTO bots (team_id, owner_user_id, name, status, metadata)
-			SELECT $1, u.id, 'secretbot', 'ready', '{}' FROM u RETURNING id
+			SELECT $1, membership.user_id, 'secretbot', 'ready', '{}' FROM membership RETURNING id
 		), s AS (
 			INSERT INTO bot_sessions (team_id, bot_id, channel_type, title, metadata)
 			SELECT $1, b.id, 'local', 's', '{}' FROM b RETURNING id, bot_id
