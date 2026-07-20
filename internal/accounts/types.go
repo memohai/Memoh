@@ -64,11 +64,6 @@ type UpdatePasswordRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
-// ResetPasswordRequest is the input for admin password reset.
-type ResetPasswordRequest struct {
-	NewPassword string `json:"new_password"`
-}
-
 // ListAccountsResponse wraps a list of accounts.
 type ListAccountsResponse struct {
 	Items []Account `json:"items"`

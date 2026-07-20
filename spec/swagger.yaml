@@ -59,11 +59,6 @@ definitions:
           $ref: '#/definitions/accounts.Account'
         type: array
     type: object
-  accounts.ResetPasswordRequest:
-    properties:
-      new_password:
-        type: string
-    type: object
   accounts.UpdateAccountRequest:
     properties:
       is_active:
@@ -13744,43 +13739,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update user (admin only)
-      tags:
-      - users
-  /users/{id}/password:
-    put:
-      description: Reset the password for a member of the current workspace
-      parameters:
-      - description: User ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Password payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/accounts.ResetPasswordRequest'
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Reset user password (admin only)
       tags:
       - users
   /users/me:

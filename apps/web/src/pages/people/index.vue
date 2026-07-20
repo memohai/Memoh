@@ -116,17 +116,6 @@
               </TableCell>
               <TableCell>
                 <div class="flex justify-end gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    :title="t('people.resetPassword')"
-                    :aria-label="t('people.resetPasswordFor', { name: memberName(user) })"
-                    :disabled="isUserPending(user)"
-                    @click="openResetDialog(user)"
-                  >
-                    <KeyRound class="size-4" />
-                  </Button>
                   <ConfirmPopover
                     :title="t('people.removeMember')"
                     :message="t('people.removeConfirm', { name: memberName(user) })"
@@ -278,60 +267,6 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
-
-    <Dialog v-model:open="resetDialogOpen">
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{{ t('people.resetPassword') }}</DialogTitle>
-          <DialogDescription>
-            {{ t('people.resetPasswordDescription', { name: resetTargetName }) }}
-          </DialogDescription>
-        </DialogHeader>
-
-        <FormStack>
-          <FieldStack
-            :label="t('settings.newPassword')"
-            for="people-reset-password"
-          >
-            <Input
-              id="people-reset-password"
-              v-model="resetForm.password"
-              type="password"
-              autocomplete="new-password"
-            />
-          </FieldStack>
-          <FieldStack
-            :label="t('settings.confirmPassword')"
-            for="people-reset-confirm-password"
-          >
-            <Input
-              id="people-reset-confirm-password"
-              v-model="resetForm.confirmPassword"
-              type="password"
-              autocomplete="new-password"
-            />
-          </FieldStack>
-        </FormStack>
-
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="resettingPassword"
-            @click="resetDialogOpen = false"
-          >
-            {{ t('common.cancel') }}
-          </Button>
-          <Button
-            type="button"
-            :loading="resettingPassword"
-            @click="resetPassword"
-          >
-            {{ t('people.resetPassword') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   </PageShell>
 </template>
 
@@ -339,7 +274,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
-import { KeyRound, Trash2, UserPlus } from 'lucide-vue-next'
+import { Trash2, UserPlus } from 'lucide-vue-next'
 import {
   Alert,
   AlertDescription,
@@ -351,7 +286,6 @@ import {
   Button,
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -384,12 +318,10 @@ import {
   getUsers,
   postUsers,
   putUsersById,
-  putUsersByIdPassword,
 } from '@memohai/sdk'
 import type {
   AccountsAccount,
   AccountsCreateAccountRequest,
-  AccountsResetPasswordRequest,
   AccountsUpdateAccountRequest,
 } from '@memohai/sdk'
 
@@ -402,13 +334,10 @@ type UserAccount = AccountsAccount
 const users = ref<UserAccount[]>([])
 const loading = ref(false)
 const creating = ref(false)
-const resettingPassword = ref(false)
 const loadError = ref('')
 const pendingUserIds = ref<Set<string>>(new Set())
 
 const createDialogOpen = ref(false)
-const resetDialogOpen = ref(false)
-const resetTarget = ref<UserAccount | null>(null)
 
 const createForm = reactive({
   username: '',
@@ -420,18 +349,12 @@ const createForm = reactive({
   confirmPassword: '',
 })
 
-const resetForm = reactive({
-  password: '',
-  confirmPassword: '',
-})
-
 const membersTitle = computed(() =>
   users.value.length
     ? `${t('people.members')} · ${users.value.length}`
     : t('people.members'),
 )
 const currentUserId = computed(() => userStore.userInfo.id)
-const resetTargetName = computed(() => resetTarget.value ? memberName(resetTarget.value) : '')
 
 onMounted(() => {
   void loadUsers()
@@ -505,13 +428,6 @@ function openCreateDialog() {
   createDialogOpen.value = true
 }
 
-function openResetDialog(user: UserAccount) {
-  resetTarget.value = user
-  resetForm.password = ''
-  resetForm.confirmPassword = ''
-  resetDialogOpen.value = true
-}
-
 function validatePasswordPair(password: string, confirmPassword: string): boolean {
   if (!password.trim()) {
     toast.error(t('settings.passwordRequired'))
@@ -578,35 +494,6 @@ async function updateUserStatus(user: UserAccount, isActive: boolean) {
     await loadUsers()
   } finally {
     setUserPending(userID, false)
-  }
-}
-
-async function resetPassword() {
-  const target = resetTarget.value
-  if (!target?.id) return
-  const password = resetForm.password.trim()
-  const confirmPassword = resetForm.confirmPassword.trim()
-  if (!validatePasswordPair(password, confirmPassword)) return
-
-  resettingPassword.value = true
-  setUserPending(target.id, true)
-  try {
-    const body: AccountsResetPasswordRequest = {
-      new_password: password,
-    }
-    await putUsersByIdPassword({
-      path: { id: target.id },
-      body,
-      throwOnError: true,
-    })
-    toast.success(t('people.resetPasswordSuccess'))
-    resetDialogOpen.value = false
-    resetTarget.value = null
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('people.resetPasswordFailed'), { prefixFallback: true }))
-  } finally {
-    setUserPending(target.id, false)
-    resettingPassword.value = false
   }
 }
 

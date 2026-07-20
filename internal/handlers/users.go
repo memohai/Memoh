@@ -93,7 +93,6 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	userGroup.GET("", h.ListUsers)
 	userGroup.GET("/:id", h.GetUser)
 	userGroup.PUT("/:id", h.UpdateUser)
-	userGroup.PUT("/:id/password", h.ResetUserPassword)
 	userGroup.POST("", h.CreateUser)
 	userGroup.DELETE("/:id", h.RemoveMember)
 
@@ -309,56 +308,6 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
-}
-
-// ResetUserPassword godoc
-// @Summary Reset user password (admin only)
-// @Description Reset the password for a member of the current workspace
-// @Tags users
-// @Param id path string true "User ID"
-// @Param payload body accounts.ResetPasswordRequest true "Password payload"
-// @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /users/{id}/password [put].
-func (h *UsersHandler) ResetUserPassword(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if !isAdmin {
-		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
-	}
-	targetID := strings.TrimSpace(c.Param("id"))
-	if targetID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user id is required")
-	}
-	if _, err := h.service.Get(c.Request().Context(), targetID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, "user not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	var req accounts.ResetPasswordRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if strings.TrimSpace(req.NewPassword) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "new password is required")
-	}
-	if err := h.service.ResetPassword(c.Request().Context(), targetID, req.NewPassword); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, "user not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.NoContent(http.StatusNoContent)
 }
 
 // CreateUser godoc

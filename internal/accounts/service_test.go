@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
@@ -16,8 +14,6 @@ type testAccountStore struct {
 	record       dbstore.AccountRecord
 	getErr       error
 	adminUpdated dbstore.UpdateAccountAdminInput
-	password     dbstore.UpdateAccountPasswordInput
-	passwordErr  error
 }
 
 func TestCreatePersistsAccountWithoutProvisioningProviderInstances(t *testing.T) {
@@ -84,9 +80,8 @@ func (*testAccountStore) UpdateProfile(context.Context, dbstore.UpdateAccountPro
 	return dbstore.AccountRecord{}, errors.New("not implemented")
 }
 
-func (s *testAccountStore) UpdatePassword(_ context.Context, input dbstore.UpdateAccountPasswordInput) error {
-	s.password = input
-	return s.passwordErr
+func (*testAccountStore) UpdatePassword(context.Context, dbstore.UpdateAccountPasswordInput) error {
+	return errors.New("not implemented")
 }
 
 func (*testAccountStore) RemoveMember(context.Context, string) error {
@@ -128,35 +123,5 @@ func TestUpdateAdminLeavesMembershipStateUnspecified(t *testing.T) {
 	}
 	if store.adminUpdated.IsActive != nil {
 		t.Fatalf("role-only update supplied membership state %v", *store.adminUpdated.IsActive)
-	}
-}
-
-func TestResetPasswordHashesAndStoresNewCredential(t *testing.T) {
-	store := &testAccountStore{}
-	svc := NewService(nil, store)
-
-	if err := svc.ResetPassword(context.Background(), "user-1", "new-secret"); err != nil {
-		t.Fatalf("ResetPassword() error = %v", err)
-	}
-	if store.password.UserID != "user-1" {
-		t.Fatalf("UpdatePassword() user = %q, want user-1", store.password.UserID)
-	}
-	if store.password.PasswordHash == "new-secret" {
-		t.Fatal("ResetPassword() stored the plaintext password")
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(store.password.PasswordHash), []byte("new-secret")); err != nil {
-		t.Fatalf("stored password hash does not match new credential: %v", err)
-	}
-}
-
-func TestResetPasswordRejectsBlankCredential(t *testing.T) {
-	store := &testAccountStore{}
-	svc := NewService(nil, store)
-
-	if err := svc.ResetPassword(context.Background(), "user-1", "  "); err == nil {
-		t.Fatal("ResetPassword() should reject a blank password")
-	}
-	if store.password.UserID != "" {
-		t.Fatal("blank password must not reach the account store")
 	}
 }
