@@ -127,7 +127,7 @@ services:
       # Toolkit: run ./docker/toolkit/install.sh once before first use
       - ../.toolkit:/opt/memoh/runtime/toolkit
       - ../docker/toolkit/bin:/opt/memoh/runtime/toolkit/bin
-      - ../cmd/bridge/template:/opt/memoh/runtime/templates
+      - ../templates/workspace:/opt/memoh/runtime/templates
     ports:
       - "${MEMOH_DEV_SERVER_PORT:-18080}:8080"
       - "${MEMOH_DEV_OAUTH_PORT:-1455}:8080"
