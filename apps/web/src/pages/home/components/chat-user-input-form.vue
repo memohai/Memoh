@@ -1,13 +1,6 @@
 <template>
-  <div
-    data-slot="input-group"
-    role="group"
-    class="chat-composer-edge flex w-full flex-col rounded-[20px] bg-surface-composer px-2.5 py-2.5"
-  >
-    <div
-      class="max-h-[40vh] overflow-y-auto overscroll-contain"
-      style="scrollbar-gutter: stable;"
-    >
+  <ChatDecisionPanel>
+    <div>
       <div
         v-for="(question, questionIndex) in questions"
         :key="question.id"
@@ -65,36 +58,37 @@
         />
       </div>
     </div>
-    <div class="mt-2 border-t border-border-soft pt-2">
-      <Input
+
+    <template #actions>
+      <div
         v-if="footerInputVisible"
-        class="mb-2"
-        :model-value="footerText"
-        :placeholder="footerPlaceholder"
-        @update:model-value="setFooterText(String($event))"
-        @keydown.enter.prevent="handleSubmit"
-      />
-      <div class="flex gap-1.5">
-        <Button
-          type="button"
-          variant="default"
-          class="h-9 flex-1 rounded-lg"
-          :disabled="!canSubmit"
-          @click="handleSubmit"
-        >
-          {{ $t('chat.tools.submitUserInput') }}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          class="h-9 flex-1 rounded-lg"
-          @click="handleCancel"
-        >
-          {{ $t('chat.tools.cancelUserInput') }}
-        </Button>
+        class="basis-full"
+      >
+        <Input
+          :model-value="footerText"
+          :placeholder="footerPlaceholder"
+          @update:model-value="setFooterText(String($event))"
+          @keydown.enter.prevent="handleSubmit"
+        />
       </div>
-    </div>
-  </div>
+      <Button
+        type="button"
+        class="flex-1"
+        :disabled="!canSubmit"
+        @click="handleSubmit"
+      >
+        {{ $t('chat.tools.submitUserInput') }}
+      </Button>
+      <Button
+        type="button"
+        variant="secondary"
+        class="flex-1"
+        @click="handleCancel"
+      >
+        {{ $t('chat.tools.cancelUserInput') }}
+      </Button>
+    </template>
+  </ChatDecisionPanel>
 </template>
 
 <script setup lang="ts">
@@ -105,14 +99,14 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
 import type { UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { useChatViewTarget } from '../composables/useChatViewContext'
+import ChatDecisionPanel from './chat-decision-panel.vue'
 
 // Inline Q&A selector for the ask_user tool. It REPLACES the chat composer
 // while a request is pending (the parent hides the textarea and shows this
 // capsule, styled like the composer, in its place) and is fully
 // self-contained: option rows on top, then a divider, then the free-text
-// input ("tell the bot more") and the Submit / Cancel pair. Cancel resolves
-// the request as canceled, which hands the composer back. Picking an option
-// also reveals the composer again so the user can keep typing.
+// input ("tell the bot more") and the Submit / Cancel pair. The normal
+// composer stays hidden until the request is submitted or canceled.
 // Multi-question requests keep per-question inline inputs, because one footer
 // input cannot answer several text questions at once.
 const props = defineProps<{
@@ -120,7 +114,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'reveal-composer', opts: { focus?: boolean }): void
+  (e: 'focus-composer'): void
 }>()
 
 interface PendingUserInputDraft {
@@ -202,8 +196,6 @@ function toggleOption(question: UIUserInputQuestion, optionId: string) {
     draft.customSelected = false
     draft.customText = ''
   }
-  // Picking an option hands the textarea back so the user can keep typing.
-  emit('reveal-composer', { focus: isSingle.value })
 }
 
 function toggleCustom(question: UIUserInputQuestion) {
@@ -291,11 +283,10 @@ function handleSubmit() {
 }
 
 function handleCancel() {
-  // Hand the composer back (focused) before the canceled state unmounts us.
-  emit('reveal-composer', { focus: true })
   void chatStore.respondUserInput(props.userInput, {
     canceled: true,
     reason: 'user_canceled',
   }, chatViewTarget.value)
+  emit('focus-composer')
 }
 </script>
