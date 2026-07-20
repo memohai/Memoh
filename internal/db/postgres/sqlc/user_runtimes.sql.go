@@ -33,10 +33,11 @@ JOIN user_runtimes r
  AND r.team_id = public.memoh_current_team_id()
  AND r.user_id = b.owner_user_id
  AND r.revoked_at IS NULL
-JOIN users owner
-  ON owner.id = b.owner_user_id
- AND owner.team_id = public.memoh_current_team_id()
- AND owner.is_active = TRUE
+JOIN team_members owner_membership
+  ON owner_membership.team_id = public.memoh_current_team_id()
+ AND owner_membership.user_id = b.owner_user_id
+ AND owner_membership.is_active = TRUE
+JOIN users owner ON owner.id = owner_membership.user_id AND owner.is_active = TRUE
 WHERE b.team_id = public.memoh_current_team_id()
   AND b.id = $3
 ON CONFLICT (team_id, bot_id, runtime_id) DO UPDATE SET
@@ -118,12 +119,15 @@ SELECT
   binding.updated_at,
   runtime.name AS runtime_name,
   runtime.user_id AS runtime_user_id,
-  (runtime.revoked_at IS NOT NULL OR NOT owner.is_active) AS runtime_unavailable,
+  (runtime.revoked_at IS NOT NULL OR NOT owner.is_active OR NOT owner_membership.is_active) AS runtime_unavailable,
   bot.owner_user_id AS bot_owner_user_id
 FROM bot_remote_runtime_bindings binding
 JOIN user_runtimes runtime ON runtime.id = binding.runtime_id AND runtime.team_id = public.memoh_current_team_id()
 JOIN bots bot ON bot.id = binding.bot_id AND bot.team_id = public.memoh_current_team_id()
-JOIN users owner ON owner.id = bot.owner_user_id AND owner.team_id = public.memoh_current_team_id()
+JOIN team_members owner_membership
+  ON owner_membership.team_id = public.memoh_current_team_id()
+ AND owner_membership.user_id = bot.owner_user_id
+JOIN users owner ON owner.id = owner_membership.user_id
 WHERE binding.team_id = public.memoh_current_team_id()
   AND binding.bot_id = $1
   AND binding.id = $2
@@ -181,12 +185,15 @@ SELECT
   binding.updated_at,
   runtime.name AS runtime_name,
   runtime.user_id AS runtime_user_id,
-  (runtime.revoked_at IS NOT NULL OR NOT owner.is_active) AS runtime_unavailable,
+  (runtime.revoked_at IS NOT NULL OR NOT owner.is_active OR NOT owner_membership.is_active) AS runtime_unavailable,
   bot.owner_user_id AS bot_owner_user_id
 FROM bot_remote_runtime_bindings binding
 JOIN user_runtimes runtime ON runtime.id = binding.runtime_id AND runtime.team_id = public.memoh_current_team_id()
 JOIN bots bot ON bot.id = binding.bot_id AND bot.team_id = public.memoh_current_team_id()
-JOIN users owner ON owner.id = bot.owner_user_id AND owner.team_id = public.memoh_current_team_id()
+JOIN team_members owner_membership
+  ON owner_membership.team_id = public.memoh_current_team_id()
+ AND owner_membership.user_id = bot.owner_user_id
+JOIN users owner ON owner.id = owner_membership.user_id
 WHERE binding.team_id = public.memoh_current_team_id()
   AND binding.bot_id = $1
   AND binding.is_primary = TRUE
@@ -230,10 +237,11 @@ func (q *Queries) GetPrimaryBotRemoteRuntimeMount(ctx context.Context, botID pgt
 const getUserRuntimeByAPIToken = `-- name: GetUserRuntimeByAPIToken :one
 SELECT runtime.id, runtime.user_id, runtime.name, runtime.api_token, runtime.revoked_at, runtime.created_at, runtime.updated_at, runtime.team_id
 FROM user_runtimes runtime
-JOIN users owner
-  ON owner.id = runtime.user_id
- AND owner.team_id = public.memoh_current_team_id()
- AND owner.is_active = TRUE
+JOIN team_members owner_membership
+  ON owner_membership.team_id = public.memoh_current_team_id()
+ AND owner_membership.user_id = runtime.user_id
+ AND owner_membership.is_active = TRUE
+JOIN users owner ON owner.id = owner_membership.user_id AND owner.is_active = TRUE
 WHERE runtime.team_id = public.memoh_current_team_id()
   AND runtime.api_token = $1
   AND runtime.revoked_at IS NULL
@@ -267,12 +275,15 @@ SELECT
   binding.updated_at,
   runtime.name AS runtime_name,
   runtime.user_id AS runtime_user_id,
-  (runtime.revoked_at IS NOT NULL OR NOT owner.is_active) AS runtime_unavailable,
+  (runtime.revoked_at IS NOT NULL OR NOT owner.is_active OR NOT owner_membership.is_active) AS runtime_unavailable,
   bot.owner_user_id AS bot_owner_user_id
 FROM bot_remote_runtime_bindings binding
 JOIN user_runtimes runtime ON runtime.id = binding.runtime_id AND runtime.team_id = public.memoh_current_team_id()
 JOIN bots bot ON bot.id = binding.bot_id AND bot.team_id = public.memoh_current_team_id()
-JOIN users owner ON owner.id = bot.owner_user_id AND owner.team_id = public.memoh_current_team_id()
+JOIN team_members owner_membership
+  ON owner_membership.team_id = public.memoh_current_team_id()
+ AND owner_membership.user_id = bot.owner_user_id
+JOIN users owner ON owner.id = owner_membership.user_id
 WHERE binding.team_id = public.memoh_current_team_id()
   AND binding.bot_id = $1
 ORDER BY binding.created_at ASC, binding.id ASC

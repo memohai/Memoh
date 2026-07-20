@@ -130,6 +130,7 @@ type serverParams struct {
 	Logger            *slog.Logger
 	RuntimeConfig     *boot.RuntimeConfig
 	Config            config.Config
+	AccountService    *accounts.Service
 	ServerHandlers    []server.Handler `group:"server_handlers"`
 	ContainerdHandler *handlers.ContainerdHandler
 }
@@ -138,7 +139,13 @@ func provideServer(params serverParams) *server.Server {
 	allHandlers := make([]server.Handler, 0, len(params.ServerHandlers)+1)
 	allHandlers = append(allHandlers, params.ServerHandlers...)
 	allHandlers = append(allHandlers, params.ContainerdHandler)
-	return server.NewServer(params.Logger, params.RuntimeConfig.ServerAddr, params.Config.Auth.JWTSecret, allHandlers...)
+	return server.NewServerWithSessionValidator(
+		params.Logger,
+		params.RuntimeConfig.ServerAddr,
+		params.Config.Auth.JWTSecret,
+		params.AccountService.ValidateSession,
+		allHandlers...,
+	)
 }
 
 func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, emailService *emailpkg.Service, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelRuntime channel.Runtime, modelsService *models.Service) {

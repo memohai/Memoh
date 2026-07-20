@@ -10,6 +10,19 @@ VALUES (
 )
 RETURNING *;
 
+-- name: CreateProviderFromTemplate :one
+INSERT INTO providers (provider_template_id, name, client_type, icon, enable, config, metadata)
+VALUES (
+  sqlc.arg(provider_template_id),
+  sqlc.arg(name),
+  sqlc.arg(client_type),
+  sqlc.arg(icon),
+  sqlc.arg(enable),
+  sqlc.arg(config),
+  sqlc.arg(metadata)
+)
+RETURNING *;
+
 -- name: GetProviderByID :one
 SELECT * FROM providers WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id);
 
@@ -183,8 +196,8 @@ ON CONFLICT (team_id, name) DO UPDATE SET
 RETURNING *;
 
 -- name: UpsertRegistryModel :one
-INSERT INTO models (model_id, name, provider_id, type, config)
-VALUES (sqlc.arg(model_id), sqlc.arg(name), sqlc.arg(provider_id), sqlc.arg(type), sqlc.arg(config))
+INSERT INTO models (model_id, name, provider_id, type, enable, config)
+VALUES (sqlc.arg(model_id), sqlc.arg(name), sqlc.arg(provider_id), sqlc.arg(type), false, sqlc.arg(config))
 ON CONFLICT (team_id, provider_id, model_id) DO UPDATE SET
   name = EXCLUDED.name,
   type = EXCLUDED.type,

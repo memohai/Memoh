@@ -600,16 +600,17 @@ type ModelVariant struct {
 }
 
 type Provider struct {
-	ID         pgtype.UUID        `json:"id"`
-	Name       string             `json:"name"`
-	ClientType string             `json:"client_type"`
-	Icon       pgtype.Text        `json:"icon"`
-	Enable     bool               `json:"enable"`
-	Config     []byte             `json:"config"`
-	Metadata   []byte             `json:"metadata"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	TeamID     pgtype.UUID        `json:"team_id"`
+	ID                 pgtype.UUID        `json:"id"`
+	ProviderTemplateID pgtype.UUID        `json:"provider_template_id"`
+	Name               string             `json:"name"`
+	ClientType         string             `json:"client_type"`
+	Icon               pgtype.Text        `json:"icon"`
+	Enable             bool               `json:"enable"`
+	Config             []byte             `json:"config"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	TeamID             pgtype.UUID        `json:"team_id"`
 }
 
 type ProviderOauthToken struct {
@@ -712,6 +713,72 @@ type Team struct {
 	Metadata  []byte             `json:"metadata"`
 }
 
+type TeamAccount struct {
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+}
+
+type TeamMember struct {
+	TeamID    pgtype.UUID        `json:"team_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Role      string             `json:"role"`
+	IsActive  bool               `json:"is_active"`
+	DataRoot  pgtype.Text        `json:"data_root"`
+	Metadata  []byte             `json:"metadata"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TemplateProviderTemplate struct {
+	ID            pgtype.UUID        `json:"id"`
+	Key           string             `json:"key"`
+	Domain        string             `json:"domain"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	Icon          pgtype.Text        `json:"icon"`
+	Driver        string             `json:"driver"`
+	ConfigSchema  []byte             `json:"config_schema"`
+	DefaultConfig []byte             `json:"default_config"`
+	Metadata      []byte             `json:"metadata"`
+	Source        string             `json:"source"`
+	ContentHash   string             `json:"content_hash"`
+	SortOrder     int32              `json:"sort_order"`
+	Active        bool               `json:"active"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TemplateProviderTemplateModel struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ProviderTemplateID pgtype.UUID        `json:"provider_template_id"`
+	ModelID            string             `json:"model_id"`
+	Name               string             `json:"name"`
+	Type               string             `json:"type"`
+	Config             []byte             `json:"config"`
+	Metadata           []byte             `json:"metadata"`
+	SortOrder          int32              `json:"sort_order"`
+	Active             bool               `json:"active"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ToolApprovalRequest struct {
 	ID                           pgtype.UUID        `json:"id"`
 	BotID                        pgtype.UUID        `json:"bot_id"`
@@ -767,17 +834,14 @@ type User struct {
 	Username     pgtype.Text        `json:"username"`
 	Email        pgtype.Text        `json:"email"`
 	PasswordHash pgtype.Text        `json:"password_hash"`
-	Role         string             `json:"role"`
 	DisplayName  pgtype.Text        `json:"display_name"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	Timezone     string             `json:"timezone"`
-	DataRoot     pgtype.Text        `json:"data_root"`
 	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
 	IsActive     bool               `json:"is_active"`
 	Metadata     []byte             `json:"metadata"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	TeamID       pgtype.UUID        `json:"team_id"`
 }
 
 type UserChannelBinding struct {

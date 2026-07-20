@@ -47,6 +47,7 @@
           :delete-loading="deleteModelLoading"
           :search-aligned="searchVisible"
           :managed="managed"
+          :preview="preview"
           @edit="(model) => $emit('edit', model)"
           @delete="(id) => $emit('delete', id)"
         />
@@ -154,6 +155,7 @@ const props = defineProps<{
   models: ModelsGetResponse[] | undefined
   deleteModelLoading: boolean
   managed?: boolean
+  preview?: boolean
 }>()
 
 defineEmits<{

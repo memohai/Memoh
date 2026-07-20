@@ -169,6 +169,12 @@ services:
       MEMOH_CHANNEL_UPSTREAM: ${MEMOH_CHANNEL_UPSTREAM:-memoh-channel:8081}
     ports:
       - "8082:8082"
+      # HTTPS + HTTP/2：h2 多路复用可避免多标签页的 SSE 长连接占满浏览器对单
+      # origin 的 ~6 条 HTTP/1.1 连接、导致页面卡死（#822）。取消下面两处注释
+      # 并放入证书后自动启用（自签 / mkcert / Let's Encrypt 均可）。
+      # - "8443:8443"
+    # volumes:
+    #   - ./certs:/etc/nginx/certs:ro   # 需包含 server.crt 与 server.key
     depends_on:
       server:
         condition: service_healthy

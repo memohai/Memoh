@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +13,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
+
+// UserSessionValidator revalidates an account-backed JWT against current
+// server-side account state before the request reaches a handler.
+type UserSessionValidator func(ctx context.Context, userID string) error
 
 const (
 	claimSubject           = "sub"
@@ -25,8 +30,8 @@ const (
 )
 
 // JWTMiddleware returns a JWT auth middleware configured for HS256 tokens.
-func JWTMiddleware(secret string, skipper middleware.Skipper) echo.MiddlewareFunc {
-	return echojwt.WithConfig(echojwt.Config{
+func JWTMiddleware(secret string, skipper middleware.Skipper, validators ...UserSessionValidator) echo.MiddlewareFunc {
+	jwtMiddleware := echojwt.WithConfig(echojwt.Config{
 		SigningKey:    []byte(secret),
 		SigningMethod: "HS256",
 		TokenLookup:   "header:Authorization:Bearer ,query:token",
@@ -35,6 +40,38 @@ func JWTMiddleware(secret string, skipper middleware.Skipper) echo.MiddlewareFun
 			return jwt.MapClaims{}
 		},
 	})
+	if len(validators) == 0 || validators[0] == nil {
+		return jwtMiddleware
+	}
+	validateSession := validators[0]
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		validatedNext := func(c echo.Context) error {
+			if skipper != nil && skipper(c) {
+				return next(c)
+			}
+			if isChatRouteToken(c) {
+				return next(c)
+			}
+			userID, err := UserIDFromContext(c)
+			if err != nil {
+				return err
+			}
+			if err := validateSession(c.Request().Context(), userID); err != nil {
+				return echo.NewHTTPError(http.StatusUnauthorized, "user session is no longer active")
+			}
+			return next(c)
+		}
+		return jwtMiddleware(validatedNext)
+	}
+}
+
+func isChatRouteToken(c echo.Context) bool {
+	token, ok := c.Get("user").(*jwt.Token)
+	if !ok || token == nil || !token.Valid {
+		return false
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	return ok && claimString(claims, claimType) == chatTokenType
 }
 
 // UserIDFromContext extracts the user id from JWT claims.

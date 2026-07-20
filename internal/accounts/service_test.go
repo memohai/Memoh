@@ -10,12 +10,33 @@ import (
 )
 
 type testAccountStore struct {
-	created dbstore.CreateAccountInput
+	created      dbstore.CreateAccountInput
+	record       dbstore.AccountRecord
+	getErr       error
+	adminUpdated dbstore.UpdateAccountAdminInput
+}
+
+func TestCreatePersistsAccountWithoutProvisioningProviderInstances(t *testing.T) {
+	t.Parallel()
+
+	store := &testAccountStore{}
+	service := NewService(nil, store)
+	account, err := service.Create(context.Background(), "user-1", CreateAccountRequest{
+		Username: "alice",
+		Password: "secret",
+		Role:     "member",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if account.ID != "user-1" || store.created.UserID != "user-1" || store.created.Username != "alice" {
+		t.Fatalf("created account = %#v, input = %#v", account, store.created)
+	}
 }
 
 func (*testAccountStore) CountAccounts(context.Context) (int64, error) { return 0, nil }
-func (*testAccountStore) GetByUserID(context.Context, string) (dbstore.AccountRecord, error) {
-	return dbstore.AccountRecord{}, errors.New("not implemented")
+func (s *testAccountStore) GetByUserID(context.Context, string) (dbstore.AccountRecord, error) {
+	return s.record, s.getErr
 }
 
 func (*testAccountStore) GetByIdentity(context.Context, string) (dbstore.AccountRecord, error) {
@@ -50,8 +71,9 @@ func (s *testAccountStore) CreateAccount(_ context.Context, input dbstore.Create
 	}, nil
 }
 func (*testAccountStore) UpdateLastLogin(context.Context, string) error { return nil }
-func (*testAccountStore) UpdateAdmin(context.Context, dbstore.UpdateAccountAdminInput) (dbstore.AccountRecord, error) {
-	return dbstore.AccountRecord{}, errors.New("not implemented")
+func (s *testAccountStore) UpdateAdmin(_ context.Context, input dbstore.UpdateAccountAdminInput) (dbstore.AccountRecord, error) {
+	s.adminUpdated = input
+	return s.record, nil
 }
 
 func (*testAccountStore) UpdateProfile(context.Context, dbstore.UpdateAccountProfileInput) (dbstore.AccountRecord, error) {
@@ -66,50 +88,40 @@ func (*testAccountStore) RemoveMember(context.Context, string) error {
 	return errors.New("not implemented")
 }
 
-type testEmailBootstrapper struct {
-	userID string
-	err    error
-}
-
-func (b *testEmailBootstrapper) EnsureDefaultGmailProvider(_ context.Context, userID string) error {
-	b.userID = userID
-	return b.err
-}
-
-func TestCreateEnsuresDefaultGmailProvider(t *testing.T) {
-	store := &testAccountStore{}
-	bootstrapper := &testEmailBootstrapper{}
+func TestValidateSessionAndIsAdminRequireActiveAccount(t *testing.T) {
+	store := &testAccountStore{record: dbstore.AccountRecord{ID: "user-1", Role: "admin", IsActive: false}}
 	svc := NewService(nil, store)
-	svc.SetEmailProviderBootstrapper(bootstrapper)
 
-	account, err := svc.Create(context.Background(), "user-1", CreateAccountRequest{
-		Username: "alice",
-		Password: "secret",
-	})
+	if err := svc.ValidateSession(context.Background(), "user-1"); !errors.Is(err, ErrInactiveAccount) {
+		t.Fatalf("ValidateSession() error = %v, want ErrInactiveAccount", err)
+	}
+	isAdmin, err := svc.IsAdmin(context.Background(), "user-1")
 	if err != nil {
-		t.Fatalf("Create returned error: %v", err)
+		t.Fatalf("IsAdmin() error = %v", err)
 	}
-	if account.ID != "user-1" {
-		t.Fatalf("expected created account id user-1, got %q", account.ID)
+	if isAdmin {
+		t.Fatal("inactive account must not retain admin authority")
 	}
-	if bootstrapper.userID != "user-1" {
-		t.Fatalf("expected default gmail bootstrap for user-1, got %q", bootstrapper.userID)
+
+	store.record.IsActive = true
+	if err := svc.ValidateSession(context.Background(), "user-1"); err != nil {
+		t.Fatalf("ValidateSession() active error = %v", err)
+	}
+	isAdmin, err = svc.IsAdmin(context.Background(), "user-1")
+	if err != nil || !isAdmin {
+		t.Fatalf("IsAdmin() active = %v, %v", isAdmin, err)
 	}
 }
 
-func TestCreateReturnsBootstrapperError(t *testing.T) {
-	bootstrapper := &testEmailBootstrapper{err: errors.New("boom")}
-	svc := NewService(nil, &testAccountStore{})
-	svc.SetEmailProviderBootstrapper(bootstrapper)
+func TestUpdateAdminLeavesMembershipStateUnspecified(t *testing.T) {
+	store := &testAccountStore{record: dbstore.AccountRecord{ID: "user-1", Role: "member", IsActive: false}}
+	svc := NewService(nil, store)
+	role := "admin"
 
-	_, err := svc.Create(context.Background(), "user-1", CreateAccountRequest{
-		Username: "alice",
-		Password: "secret",
-	})
-	if err == nil {
-		t.Fatal("Create should return bootstrapper error")
+	if _, err := svc.UpdateAdmin(context.Background(), "user-1", UpdateAccountRequest{Role: &role}); err != nil {
+		t.Fatalf("UpdateAdmin() error = %v", err)
 	}
-	if !errors.Is(err, bootstrapper.err) {
-		t.Fatalf("expected bootstrapper error, got %v", err)
+	if store.adminUpdated.IsActive != nil {
+		t.Fatalf("role-only update supplied membership state %v", *store.adminUpdated.IsActive)
 	}
 }

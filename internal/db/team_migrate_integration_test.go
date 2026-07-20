@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
@@ -142,6 +143,124 @@ func freshMigratedDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("migrate up: %v", err)
 	}
 	return pool
+}
+
+// applyCanonicalInitOnly applies exactly 0001 so tests can verify that the
+// canonical baseline is independently complete instead of relying on later
+// incremental migrations to repair it.
+func applyCanonicalInitOnly(t *testing.T, dsn string) {
+	t.Helper()
+	migrations := postgresMigrationsFS(t)
+	up, err := fs.ReadFile(migrations, "0001_init.up.sql")
+	if err != nil {
+		t.Fatalf("read canonical init up: %v", err)
+	}
+	down, err := fs.ReadFile(migrations, "0001_init.down.sql")
+	if err != nil {
+		t.Fatalf("read canonical init down: %v", err)
+	}
+	src, err := iofs.New(fstest.MapFS{
+		"0001_init.up.sql":   &fstest.MapFile{Data: up},
+		"0001_init.down.sql": &fstest.MapFile{Data: down},
+	}, ".")
+	if err != nil {
+		t.Fatalf("canonical init source: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("canonical init migrate: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("apply canonical init: %v", err)
+	}
+}
+
+func TestCanonicalInitContainsFinalTeamMembershipSchema(t *testing.T) {
+	ctx := context.Background()
+	dsn := teamMigrationDSN(t)
+	pool := resetToEmpty(t)
+	applyCanonicalInitOnly(t, dsn)
+
+	var teams, members, accounts bool
+	if err := pool.QueryRow(ctx, `
+		SELECT to_regclass('public.teams') IS NOT NULL,
+		       to_regclass('public.team_members') IS NOT NULL,
+		       to_regclass('public.team_accounts') IS NOT NULL`).Scan(&teams, &members, &accounts); err != nil {
+		t.Fatalf("inspect canonical team relations: %v", err)
+	}
+	if !teams || !members || !accounts {
+		t.Fatalf("canonical team relations = teams:%v members:%v accounts:%v", teams, members, accounts)
+	}
+
+	var membershipColumns string
+	if err := pool.QueryRow(ctx, `
+		SELECT string_agg(column_name, ',' ORDER BY ordinal_position)
+		  FROM information_schema.columns
+		 WHERE table_schema='public' AND table_name='team_members'`).Scan(&membershipColumns); err != nil {
+		t.Fatalf("read canonical membership columns: %v", err)
+	}
+	const expectedMembershipColumns = "team_id,user_id,role,is_active,data_root,metadata,created_at,updated_at"
+	if membershipColumns != expectedMembershipColumns {
+		t.Fatalf("canonical membership columns = %q, want %q", membershipColumns, expectedMembershipColumns)
+	}
+
+	var legacyUserColumns int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM information_schema.columns
+		 WHERE table_schema='public' AND table_name='users'
+		   AND column_name IN ('team_id', 'role', 'data_root')`).Scan(&legacyUserColumns); err != nil {
+		t.Fatalf("inspect canonical users columns: %v", err)
+	}
+	if legacyUserColumns != 0 {
+		t.Fatalf("canonical users retains %d membership columns", legacyUserColumns)
+	}
+
+	var ownerParent string
+	if err := pool.QueryRow(ctx, `
+		SELECT parent.relname
+		  FROM pg_constraint con
+		  JOIN pg_class parent ON parent.oid=con.confrelid
+		 WHERE con.conrelid='public.bots'::regclass
+		   AND con.conname='bots_owner_user_id_fkey'`).Scan(&ownerParent); err != nil {
+		t.Fatalf("read canonical bot owner FK: %v", err)
+	}
+	if ownerParent != "team_members" {
+		t.Fatalf("canonical bot owner FK parent = %q, want team_members", ownerParent)
+	}
+
+	var rls, forced bool
+	var policyCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT relrowsecurity, relforcerowsecurity
+		  FROM pg_class WHERE oid='public.team_members'::regclass`).Scan(&rls, &forced); err != nil {
+		t.Fatalf("read canonical membership RLS: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM pg_policies
+		 WHERE schemaname='public' AND tablename='team_members'`).Scan(&policyCount); err != nil {
+		t.Fatalf("read canonical membership policies: %v", err)
+	}
+	if !rls || !forced || policyCount != 4 {
+		t.Fatalf("canonical membership protection = rls:%v forced:%v policies:%d", rls, forced, policyCount)
+	}
+
+	var teamID string
+	if err := pool.QueryRow(ctx, `SELECT public.memoh_current_team_id()::text`).Scan(&teamID); sqlState(err) != "42501" {
+		t.Fatalf("canonical team context SQLSTATE = %q, want 42501", sqlState(err))
+	}
+
+	stepDown(t, dsn, 1)
+	if err := pool.QueryRow(ctx, `
+		SELECT to_regclass('public.teams') IS NULL
+		   AND to_regclass('public.team_members') IS NULL
+		   AND to_regprocedure('public.memoh_current_team_id()') IS NULL`).Scan(&teams); err != nil {
+		t.Fatalf("inspect canonical init rollback: %v", err)
+	}
+	if !teams {
+		t.Fatal("canonical init down left team objects behind")
+	}
 }
 
 func TestSingletonTeamSeededAfterMigrate(t *testing.T) {
@@ -291,8 +410,9 @@ func resetToEmpty(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// stepUpToPreTeam applies the migration chain up to (but not including) the
-// teamSteps team migrations — i.e. the "legacy install" pre-team state.
+// stepUpToPreTeam materializes the historical pre-team state by applying the
+// current chain and rolling back the team boundary. This remains valid after
+// 0001 is updated to the canonical latest schema.
 func stepUpToPreTeam(t *testing.T, dsn string, teamSteps int) {
 	t.Helper()
 	src, err := iofs.New(postgresMigrationsFS(t), ".")
@@ -304,26 +424,12 @@ func stepUpToPreTeam(t *testing.T, dsn string, teamSteps int) {
 		t.Fatalf("migrate init: %v", err)
 	}
 	defer func() { _, _ = m.Close() }()
-	total := countAllMigrations(t)
-	if err := m.Steps(total - teamSteps); err != nil {
-		t.Fatalf("step up to pre-team (%d steps): %v", total-teamSteps, err)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrate to current schema before legacy rollback: %v", err)
 	}
-}
-
-// countAllMigrations returns the number of up migrations in the embedded FS.
-func countAllMigrations(t *testing.T) int {
-	t.Helper()
-	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
-	if err != nil {
-		t.Fatalf("read migrations dir: %v", err)
+	if err := m.Steps(-teamSteps); err != nil {
+		t.Fatalf("roll back to pre-team state (%d steps): %v", teamSteps, err)
 	}
-	n := 0
-	for _, e := range entries {
-		if len(e.Name()) > 7 && e.Name()[len(e.Name())-7:] == ".up.sql" {
-			n++
-		}
-	}
-	return n
 }
 
 // TestTeamChainReversible verifies the full team migration chain

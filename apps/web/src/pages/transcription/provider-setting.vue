@@ -30,7 +30,7 @@
             </span>
             <Switch
               :model-value="curProvider?.enable ?? false"
-              :disabled="!curProvider?.id || enableLoading"
+              :disabled="enableLoading"
               :aria-label="$t('common.enable')"
               @update:model-value="handleToggleEnable"
             />
@@ -168,10 +168,11 @@
         <template v-else>
           <ModelListRow
             v-for="(model, index) in providerModels"
-            :key="model.id"
+            :key="model.id || model.model_id"
             :label="model.name || model.model_id || ''"
             :meta="model.name && model.name !== model.model_id ? model.model_id : ''"
             :last="index === providerModels.length - 1"
+            :readonly="!model.id"
             @click="openModelEditor(model)"
           />
         </template>
@@ -212,6 +213,7 @@ import {
   getTranscriptionProvidersById,
   getTranscriptionProvidersMeta,
   getTranscriptionProvidersByIdModels,
+  postProvidersFromTemplate,
   postTranscriptionProvidersByIdImportModels,
   postTranscriptionModelsByIdTest,
   putProvidersById,
@@ -222,6 +224,7 @@ import type {
   AudioSpeechProviderResponse,
   AudioTestTranscriptionResponse,
   AudioTranscriptionModelResponse,
+  ProvidersGetResponse,
 } from '@memohai/sdk'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@felinic/ui'
@@ -233,6 +236,7 @@ import SettingsShell from '@/components/settings-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import ModelListRow from '@/components/settings/model-list-row.vue'
+import { useProviderTemplateModels } from '@/composables/useProviderTemplateModels'
 
 interface FieldSchema { key: string, type: string, title?: string, description?: string, enum?: string[], order?: number }
 interface ConfigSchema { fields?: FieldSchema[] }
@@ -296,8 +300,16 @@ function normalizeProviderMeta(meta: AudioProviderMetaResponse): ProviderMeta {
 }
 
 const { t } = useI18n()
-const curProvider = inject('curTranscriptionProvider', ref<AudioSpeechProviderResponse>())
+type TemplateTranscriptionProvider = AudioSpeechProviderResponse & { provider_template_id?: string }
+const curProvider = inject('curTranscriptionProvider', ref<TemplateTranscriptionProvider>())
+const emit = defineEmits<{
+  materialized: [provider: ProvidersGetResponse]
+}>()
 const curProviderId = computed(() => curProvider.value?.id)
+const curProviderTemplateId = computed(() => curProviderId.value
+  ? undefined
+  : curProvider.value?.provider_template_id)
+const { models: templateModels } = useProviderTemplateModels(curProviderTemplateId)
 const providerName = ref('')
 const providerConfig = reactive<Record<string, unknown>>({})
 const visibleSecrets = reactive<Record<string, boolean>>({})
@@ -307,6 +319,7 @@ const enableLoading = ref(false)
 const saveLoading = ref(false)
 const importLoading = ref(false)
 const queryCache = useQueryCache()
+let materializePromise: Promise<ProvidersGetResponse> | null = null
 const transcriptionTypeOptions = [
   { value: 'transcription', label: 'Transcription' },
 ]
@@ -346,12 +359,20 @@ const { data: providerModelData } = useQuery({
   },
 })
 
-const providerModels = computed(() => providerModelData.value ?? [])
+const providerModels = computed<AudioTranscriptionModelResponse[]>(() => {
+  if (curProviderId.value) return providerModelData.value ?? []
+  return templateModels.value.map(model => ({
+    model_id: model.model_id,
+    name: model.name,
+    provider_type: curProvider.value?.client_type,
+    config: model.config,
+  }))
+})
 
 watch(() => providerDetail.value, (provider) => {
   providerName.value = provider?.name ?? curProvider.value?.name ?? ''
   Object.keys(providerConfig).forEach((key) => delete providerConfig[key])
-  Object.assign(providerConfig, { ...(provider?.config ?? {}) })
+  Object.assign(providerConfig, { ...(provider?.config ?? curProvider.value?.config ?? {}) })
 }, { immediate: true, deep: true })
 
 function getModelSchema(modelID: string): ConfigSchema | null {
@@ -362,16 +383,21 @@ function getModelSchema(modelID: string): ConfigSchema | null {
 }
 
 function openModelEditor(model: AudioTranscriptionModelResponse) {
+  if (!model.id) return
   editingModel.value = model
   modelDialogOpen.value = true
 }
 
 async function handleToggleEnable(value: boolean) {
-  if (!curProviderId.value || !curProvider.value?.client_type) return
+  if (!curProvider.value?.client_type) return
   const prev = curProvider.value.enable ?? false
   curProvider.value = { ...curProvider.value, enable: value }
   enableLoading.value = true
   try {
+    if (!curProviderId.value) {
+      await materializeProvider(value)
+      return
+    }
     await putProvidersById({
       path: { id: curProviderId.value },
       body: {
@@ -393,9 +419,14 @@ async function handleToggleEnable(value: boolean) {
 }
 
 async function handleSaveProvider() {
-  if (!curProviderId.value || !curProvider.value?.client_type) return
+  if (!curProvider.value?.client_type) return
   saveLoading.value = true
   try {
+    if (!curProviderId.value) {
+      await materializeProvider(false)
+      toast.success(t('transcription.saveSuccess'))
+      return
+    }
     await putProvidersById({
       path: { id: curProviderId.value },
       body: {
@@ -413,6 +444,59 @@ async function handleSaveProvider() {
     toast.error(t('common.saveFailed'))
   } finally {
     saveLoading.value = false
+  }
+}
+
+async function materializeProvider(enable: boolean) {
+  if (curProvider.value?.id) return curProvider.value as ProvidersGetResponse
+  if (materializePromise) return materializePromise
+  const templateId = curProvider.value?.provider_template_id
+  if (!templateId) throw new Error('transcription provider template is missing')
+
+  materializePromise = (async () => {
+    const { data: created } = await postProvidersFromTemplate({
+      body: {
+        template_id: templateId,
+        domain: 'transcription',
+        name: providerName.value.trim() || curProvider.value?.name || '',
+        config: sanitizeConfig(providerConfig),
+      },
+      throwOnError: true,
+    })
+    if (!created?.id) throw new Error('transcription provider creation returned no id')
+
+    let result = created
+    if (!enable) {
+      const response = await putProvidersById({
+        path: { id: created.id },
+        body: { enable: false },
+        throwOnError: true,
+      })
+      result = response.data ?? { ...created, enable: false }
+    }
+
+    curProvider.value = result
+    emit('materialized', result)
+    queryCache.invalidateQueries({ key: ['transcription-providers'] })
+    queryCache.invalidateQueries({ key: ['provider-templates', 'transcription'] })
+
+    try {
+      await postTranscriptionProvidersByIdImportModels({
+        path: { id: created.id },
+        throwOnError: true,
+      })
+      queryCache.invalidateQueries({ key: ['transcription-provider-models', created.id] })
+      queryCache.invalidateQueries({ key: ['transcription-models'] })
+    } catch {
+      toast.error(t('transcription.importFailed'))
+    }
+    return result
+  })()
+
+  try {
+    return await materializePromise
+  } finally {
+    materializePromise = null
   }
 }
 

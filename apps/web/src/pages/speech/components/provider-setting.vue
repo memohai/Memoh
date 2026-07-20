@@ -27,7 +27,7 @@
           </span>
           <Switch
             :model-value="curProvider?.enable ?? false"
-            :disabled="!curProvider?.id || enableLoading"
+            :disabled="enableLoading"
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"
           />
@@ -165,10 +165,11 @@
         <template v-else>
           <ModelListRow
             v-for="(model, index) in providerModels"
-            :key="model.id"
+            :key="model.id || model.model_id"
             :label="model.name || model.model_id || ''"
             :meta="model.name && model.name !== model.model_id ? model.model_id : ''"
             :last="index === providerModels.length - 1"
+            :readonly="!model.id"
             @click="openModelEditor(model)"
           />
         </template>
@@ -219,8 +220,8 @@ import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getSpeechProvidersById, getSpeechProvidersByIdModels, getSpeechProvidersMeta, postSpeechModelsByIdTest, postSpeechProvidersByIdImportModels, putProvidersById, putSpeechModelsById } from '@memohai/sdk'
-import type { TtsSpeechModelResponse, TtsSpeechProviderResponse } from '@memohai/sdk'
+import { getSpeechProvidersById, getSpeechProvidersByIdModels, getSpeechProvidersMeta, postProvidersFromTemplate, postSpeechModelsByIdTest, postSpeechProvidersByIdImportModels, putProvidersById, putSpeechModelsById } from '@memohai/sdk'
+import type { AudioSpeechModelResponse, AudioSpeechProviderResponse, ProvidersGetResponse } from '@memohai/sdk'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
@@ -229,6 +230,7 @@ import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import ModelListRow from '@/components/settings/model-list-row.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useProviderTemplateModels } from '@/composables/useProviderTemplateModels'
 
 interface SpeechFieldSchema {
   key: string
@@ -273,23 +275,32 @@ function getInitials(name: string | undefined) {
 }
 
 const { t } = useI18n()
-const curProvider = inject('curTtsProvider', ref<TtsSpeechProviderResponse>())
+type TemplateSpeechProvider = AudioSpeechProviderResponse & { provider_template_id?: string }
+const curProvider = inject('curTtsProvider', ref<TemplateSpeechProvider>())
+const emit = defineEmits<{
+  materialized: [provider: ProvidersGetResponse]
+}>()
 const curProviderId = computed(() => curProvider.value?.id)
+const curProviderTemplateId = computed(() => curProviderId.value
+  ? undefined
+  : curProvider.value?.provider_template_id)
+const { models: templateModels } = useProviderTemplateModels(curProviderTemplateId)
 const providerName = ref('')
 const providerConfig = reactive<Record<string, unknown>>({})
 const visibleSecrets = reactive<Record<string, boolean>>({})
 const modelDialogOpen = ref(false)
-const editingModel = ref<TtsSpeechModelResponse | null>(null)
+const editingModel = ref<AudioSpeechModelResponse | null>(null)
 const enableLoading = ref(false)
 const saveLoading = ref(false)
 const importLoading = ref(false)
 const queryCache = useQueryCache()
+let materializePromise: Promise<ProvidersGetResponse> | null = null
 const speechTypeOptions = [
   { value: 'speech', label: 'Speech' },
 ]
 
 const { data: providerDetail } = useQuery({
-  key: () => ['speech-provider-detail', curProviderId.value],
+  key: () => ['speech-provider-detail', curProviderId.value ?? ''],
   query: async () => {
     if (!curProviderId.value) return null
     const { data } = await getSpeechProvidersById({
@@ -319,7 +330,7 @@ const orderedProviderFields = computed(() => {
 })
 
 const { data: providerSpeechModels } = useQuery({
-  key: () => ['speech-provider-models', curProviderId.value],
+  key: () => ['speech-provider-models', curProviderId.value ?? ''],
   query: async () => {
     if (!curProviderId.value) return []
     const { data } = await getSpeechProvidersByIdModels({
@@ -330,12 +341,22 @@ const { data: providerSpeechModels } = useQuery({
   },
 })
 
-const providerModels = computed(() => ((providerSpeechModels.value as TtsSpeechModelResponse[] | undefined) ?? []))
+const providerModels = computed<AudioSpeechModelResponse[]>(() => {
+  if (curProviderId.value) {
+    return (providerSpeechModels.value as AudioSpeechModelResponse[] | undefined) ?? []
+  }
+  return templateModels.value.map(model => ({
+    model_id: model.model_id,
+    name: model.name,
+    provider_type: curProvider.value?.client_type,
+    config: model.config,
+  }))
+})
 
 watch(() => providerDetail.value, (provider) => {
   providerName.value = provider?.name ?? curProvider.value?.name ?? ''
   Object.keys(providerConfig).forEach((key) => delete providerConfig[key])
-  Object.assign(providerConfig, { ...(provider?.config ?? {}) })
+  Object.assign(providerConfig, { ...(provider?.config ?? curProvider.value?.config ?? {}) })
 }, { immediate: true, deep: true })
 
 function getModelMeta(modelID: string): SpeechModelMeta | null {
@@ -352,18 +373,23 @@ function getModelSchema(modelID: string): SpeechConfigSchema | null {
   return meta?.config_schema ?? meta?.capabilities?.config_schema ?? null
 }
 
-function openModelEditor(model: TtsSpeechModelResponse) {
+function openModelEditor(model: AudioSpeechModelResponse) {
+  if (!model.id) return
   editingModel.value = model
   modelDialogOpen.value = true
 }
 
 async function handleToggleEnable(value: boolean) {
-  if (!curProviderId.value || !curProvider.value) return
+  if (!curProvider.value) return
   const prev = curProvider.value.enable ?? false
   curProvider.value = { ...curProvider.value, enable: value }
 
   enableLoading.value = true
   try {
+    if (!curProviderId.value) {
+      await materializeProvider(value)
+      return
+    }
     await putProvidersById({
       path: { id: curProviderId.value },
       body: {
@@ -385,9 +411,14 @@ async function handleToggleEnable(value: boolean) {
 }
 
 async function handleSaveProvider() {
-  if (!curProviderId.value || !curProvider.value) return
+  if (!curProvider.value) return
   saveLoading.value = true
   try {
+    if (!curProviderId.value) {
+      await materializeProvider(false)
+      toast.success(t('speech.saveSuccess'))
+      return
+    }
     await putProvidersById({
       path: { id: curProviderId.value },
       body: {
@@ -408,6 +439,59 @@ async function handleSaveProvider() {
   }
 }
 
+async function materializeProvider(enable: boolean) {
+  if (curProvider.value?.id) return curProvider.value as ProvidersGetResponse
+  if (materializePromise) return materializePromise
+  const templateId = curProvider.value?.provider_template_id
+  if (!templateId) throw new Error('speech provider template is missing')
+
+  materializePromise = (async () => {
+    const { data: created } = await postProvidersFromTemplate({
+      body: {
+        template_id: templateId,
+        domain: 'speech',
+        name: providerName.value.trim() || curProvider.value?.name || '',
+        config: sanitizeConfig(providerConfig),
+      },
+      throwOnError: true,
+    })
+    if (!created?.id) throw new Error('speech provider creation returned no id')
+
+    let result = created
+    if (!enable) {
+      const response = await putProvidersById({
+        path: { id: created.id },
+        body: { enable: false },
+        throwOnError: true,
+      })
+      result = response.data ?? { ...created, enable: false }
+    }
+
+    curProvider.value = result
+    emit('materialized', result)
+    queryCache.invalidateQueries({ key: ['speech-providers'] })
+    queryCache.invalidateQueries({ key: ['provider-templates', 'speech'] })
+
+    try {
+      await postSpeechProvidersByIdImportModels({
+        path: { id: created.id },
+        throwOnError: true,
+      })
+      queryCache.invalidateQueries({ key: ['speech-provider-models', created.id] })
+      queryCache.invalidateQueries({ key: ['speech-models'] })
+    } catch {
+      toast.error(t('speech.importFailed'))
+    }
+    return result
+  })()
+
+  try {
+    return await materializePromise
+  } finally {
+    materializePromise = null
+  }
+}
+
 async function handleSaveModel(modelId: string, config: Record<string, unknown>) {
   const model = providerModels.value.find(item => item.id === modelId)
   if (!model) return
@@ -421,7 +505,7 @@ async function handleSaveModel(modelId: string, config: Record<string, unknown>)
       throwOnError: true,
     })
     toast.success(t('speech.saveSuccess'))
-    queryCache.invalidateQueries({ key: ['speech-provider-models', curProviderId.value] })
+    queryCache.invalidateQueries({ key: ['speech-provider-models', curProviderId.value ?? ''] })
     queryCache.invalidateQueries({ key: ['speech-models'] })
   } catch {
     toast.error(t('common.saveFailed'))
@@ -440,7 +524,7 @@ async function handleImportModels() {
       created: data?.created ?? 0,
       skipped: data?.skipped ?? 0,
     }))
-    queryCache.invalidateQueries({ key: ['speech-provider-models', curProviderId.value] })
+    queryCache.invalidateQueries({ key: ['speech-provider-models', curProviderId.value ?? ''] })
     queryCache.invalidateQueries({ key: ['speech-models'] })
     queryCache.invalidateQueries({ key: ['speech-providers-meta'] })
   } catch {

@@ -199,7 +199,7 @@
           type="submit"
           size="sm"
           :loading="editLoading"
-          :disabled="!hasChanges || !form.meta.value.valid"
+          :disabled="(!isDraft && !hasChanges) || !form.meta.value.valid"
         >
           {{ $t('provider.saveChanges') }}
         </LoadingButton>
@@ -399,6 +399,7 @@ const props = defineProps<{
   editLoading: boolean
 }>()
 
+const isDraft = computed(() => !props.provider?.id && !!props.provider?.provider_template_id)
 const isManagedOAuthProvider = computed(() => isManagedOAuthClientType(props.provider?.client_type))
 
 const emit = defineEmits<{

@@ -1,5 +1,62 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- Global provider catalog. These rows describe reusable product templates and
+-- intentionally have no team_id or tenant RLS policy.
+CREATE SCHEMA IF NOT EXISTS template;
+
+CREATE TABLE IF NOT EXISTS template.provider_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key TEXT NOT NULL,
+  domain TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  icon TEXT,
+  driver TEXT NOT NULL,
+  config_schema JSONB NOT NULL DEFAULT '{}'::jsonb,
+  default_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT provider_templates_domain_key_unique UNIQUE (domain, key),
+  CONSTRAINT provider_templates_domain_check CHECK (
+    domain IN ('llm', 'speech', 'transcription', 'video')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_templates_domain_active_order
+  ON template.provider_templates (domain, active, sort_order, name);
+
+CREATE TABLE IF NOT EXISTS template.provider_template_models (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_template_id UUID NOT NULL REFERENCES template.provider_templates(id) ON DELETE CASCADE,
+  model_id TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL DEFAULT 'chat',
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT provider_template_models_identity_unique UNIQUE (provider_template_id, type, model_id),
+  CONSTRAINT provider_template_models_type_check CHECK (
+    type IN ('chat', 'embedding', 'speech', 'transcription', 'video')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_template_models_template_active_order
+  ON template.provider_template_models (provider_template_id, active, sort_order, model_id);
+
+GRANT USAGE ON SCHEMA template TO CURRENT_USER;
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  template.provider_templates,
+  template.provider_template_models
+TO CURRENT_USER;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
@@ -59,6 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_user_channel_bindings_user_id ON user_channel_bin
 
 CREATE TABLE IF NOT EXISTS providers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_template_id UUID,
   name TEXT NOT NULL,
   client_type TEXT NOT NULL DEFAULT 'openai-completions',
   icon TEXT,
@@ -67,6 +125,10 @@ CREATE TABLE IF NOT EXISTS providers (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT providers_provider_template_id_fkey
+    FOREIGN KEY (provider_template_id)
+    REFERENCES template.provider_templates(id)
+    ON DELETE SET NULL (provider_template_id),
   CONSTRAINT providers_name_unique UNIQUE (name),
   CONSTRAINT providers_client_type_check CHECK (client_type IN (
     'openai-responses',
@@ -104,7 +166,8 @@ CREATE TABLE IF NOT EXISTS search_providers (
   enable BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT search_providers_name_unique UNIQUE (name)
+  CONSTRAINT search_providers_name_unique UNIQUE (name),
+  CONSTRAINT search_providers_provider_unique UNIQUE (provider)
 );
 
 CREATE TABLE IF NOT EXISTS fetch_providers (
@@ -202,8 +265,10 @@ CREATE TABLE IF NOT EXISTS bots (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  acl_default_effect TEXT NOT NULL DEFAULT 'allow',
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
+  CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
   -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0093).
   CONSTRAINT bots_name_format_check CHECK (name ~ '^[a-z0-9][a-z0-9-]{1,62}$')
 );
@@ -266,6 +331,9 @@ CREATE TABLE IF NOT EXISTS bot_acl_rules (
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  description TEXT,
+  subject_channel_type TEXT,
   CONSTRAINT bot_acl_rules_action_check CHECK (action IN ('chat.trigger')),
   CONSTRAINT bot_acl_rules_effect_check CHECK (effect IN ('allow', 'deny')),
   CONSTRAINT bot_acl_rules_subject_kind_check CHECK (subject_kind IN ('guest_all', 'user', 'channel_identity')),
@@ -941,6 +1009,7 @@ CREATE TABLE IF NOT EXISTS email_providers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_email_providers_user_id ON email_providers(user_id);
+CREATE INDEX IF NOT EXISTS idx_providers_provider_template_id ON providers(provider_template_id);
 
 -- email_oauth_tokens: stored OAuth2 tokens for Gmail email providers
 CREATE TABLE IF NOT EXISTS email_oauth_tokens (
@@ -1101,3 +1170,997 @@ CREATE TABLE IF NOT EXISTS memory_edges (
 CREATE INDEX IF NOT EXISTS idx_memory_edges_src  ON memory_edges (bot_id, src_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_dst  ON memory_edges (bot_id, dst_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_rel  ON memory_edges (bot_id, rel);
+
+
+-- ---------------------------------------------------------------------------
+-- Canonical team and membership schema
+-- ---------------------------------------------------------------------------
+-- 0001 must describe the final PostgreSQL schema. The incremental 0112 and
+-- 0115 migrations retain the data-preserving upgrade path for existing
+-- installations; the same replay-safe finalizers are applied here so a
+-- baseline-only database has the identical Team and membership boundary.
+
+-- ---------------------------------------------------------------------------
+-- Team root
+-- ---------------------------------------------------------------------------
+-- Introduce the teams root table and seed the default singleton team.
+--
+-- This is the first migration of the team-core work. teams is the unique
+-- root special case: its own id IS the team id, so it must NOT carry a
+-- redundant team_id column. Existing installs upgrade in place (no wipe): the
+-- single default team is seeded idempotently and every existing business row
+-- is later backfilled to DefaultTeamID by subsequent migrations.
+--
+-- DefaultTeamID is the fixed constant published in internal/team/id.go
+-- (00000000-0000-0000-0000-000000000001). It must never be generated per install.
+
+CREATE TABLE IF NOT EXISTS teams (
+    id         UUID        PRIMARY KEY,
+    slug       TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    metadata   JSONB       NOT NULL DEFAULT '{}'::jsonb
+);
+
+-- slug is an optional directory field, not an identity/authorization boundary.
+-- When present it must be unique cell-wide; NULL slugs are allowed and excluded.
+CREATE UNIQUE INDEX IF NOT EXISTS teams_slug_unique ON teams (slug) WHERE slug IS NOT NULL;
+
+-- Seed the singleton team idempotently. Existing self-hosted installations
+-- continue to use this team without any configuration changes.
+DO $seed_default_team$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM teams
+         WHERE id = '00000000-0000-0000-0000-000000000001'
+    ) THEN
+        INSERT INTO teams (id, slug)
+        VALUES ('00000000-0000-0000-0000-000000000001', 'default');
+    END IF;
+END
+$seed_default_team$;
+
+-- ---------------------------------------------------------------------------
+-- Team context
+-- ---------------------------------------------------------------------------
+-- Add the fail-closed team context helper used by team-scoped queries and
+-- row-level security policies.
+
+CREATE OR REPLACE FUNCTION public.memoh_current_team_id()
+RETURNS uuid
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+  raw text;
+BEGIN
+  raw := pg_catalog.current_setting('memoh.team_id', true);
+  IF raw IS NULL OR pg_catalog.btrim(raw) = '' THEN
+    RAISE EXCEPTION 'memoh.team_id is not set'
+      USING ERRCODE = '42501';
+  END IF;
+  BEGIN
+    RETURN raw::uuid;
+  EXCEPTION
+    WHEN invalid_text_representation THEN
+      RAISE EXCEPTION 'memoh.team_id is invalid'
+        USING ERRCODE = '22P02';
+  END;
+END;
+$$;
+
+-- Create the final membership relation before applying the shared team-core
+-- finalizer. Its presence tells the replay-safe 0112 logic that users are
+-- already global principals rather than legacy team-owned accounts.
+CREATE TABLE IF NOT EXISTS public.team_members (
+    team_id    UUID        NOT NULL DEFAULT public.memoh_current_team_id(),
+    user_id    UUID        NOT NULL,
+    role       user_role   NOT NULL DEFAULT 'member',
+    is_active  BOOLEAN     NOT NULL DEFAULT true,
+    data_root  TEXT,
+    metadata   JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (team_id, user_id),
+    CONSTRAINT team_members_team_id_fkey
+        FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE RESTRICT,
+    CONSTRAINT team_members_user_id_fkey
+        FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS team_members_user_id_idx
+    ON public.team_members (user_id);
+
+-- ---------------------------------------------------------------------------
+-- Team columns and singleton backfill
+-- ---------------------------------------------------------------------------
+-- Add a nullable team_id column to every team business table (STATIC ALTERs
+-- so sqlc can see the column) and backfill it to the default singleton team
+-- before team-scoped constraints are installed.
+--
+-- New incremental (existing migrations untouched). team_id is added NULLABLE,
+-- given a DEFAULT of public.memoh_current_team_id() (so INSERTs auto-fill the current
+-- team), and backfilled to the default singleton; a later migration tightens
+-- it to NOT NULL after composite keys/FKs land. Existing installs upgrade in
+-- place (no wipe).
+--
+-- The ADD COLUMN statements are STATIC (one literal ALTER per table) rather than
+-- a dynamic DO/EXECUTE loop, because sqlc parses the schema declaratively and
+-- cannot see columns added inside DO/EXECUTE blocks. `ALTER TABLE IF EXISTS ...
+-- ADD COLUMN IF NOT EXISTS` is a safe no-op on the legacy upgrade path where a
+-- table (e.g. tts_providers/tts_models) does not exist. The table list is the
+-- applied fresh-install team set (53 tables), excluding schema_migrations
+-- tooling and the teams root.
+
+ALTER TABLE IF EXISTS public.bot_acl_rules ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_channel_admins ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_channel_configs ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_channel_routes ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_email_bindings ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_heartbeat_logs ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_history_message_assets ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_history_message_compacts ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_history_messages ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_plugin_installations ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_plugin_resources ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_remote_runtime_bindings ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_session_discuss_cursors ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_session_events ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_sessions ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_storage_bindings ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_user_grants ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bot_workspace_resource_limits ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.bots ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.channel_identities ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.channel_link_codes ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.container_versions ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.containers ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.email_oauth_tokens ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.email_outbox ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.email_providers ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.fetch_providers ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.lifecycle_events ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.mcp_connections ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.mcp_oauth_tokens ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.media_assets ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.memory_edges ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.memory_nodes ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.memory_providers ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.model_variants ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.models ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.provider_oauth_tokens ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.providers ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.schedule ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.schedule_logs ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.search_providers ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.snapshots ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.storage_providers ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.tasks ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.tool_approval_requests ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.tts_models ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.tts_providers ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.user_channel_bindings ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.user_channel_identity_bindings ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.user_input_requests ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.user_provider_oauth_tokens ADD COLUMN IF NOT EXISTS team_id uuid;
+ALTER TABLE IF EXISTS public.user_runtimes ADD COLUMN IF NOT EXISTS team_id uuid;
+-- A canonical 0001 already has global users plus team_members. Legacy
+-- databases do not, so only the legacy path needs the transitional users
+-- team_id column that 0115 later moves into team_members.
+DO $users_legacy_team_column$
+BEGIN
+    IF to_regclass('public.team_members') IS NULL THEN
+        ALTER TABLE IF EXISTS public.users ADD COLUMN IF NOT EXISTS team_id uuid;
+    END IF;
+END
+$users_legacy_team_column$;
+
+
+-- Give team_id a DEFAULT so any INSERT (sqlc-generated or raw) auto-fills the
+-- current team from the session/transaction GUC. Fail-closed: if the GUC is
+-- unset, public.memoh_current_team_id() raises rather than inserting a NULL/guessed team.
+ALTER TABLE IF EXISTS public.bot_acl_rules ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_channel_admins ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_channel_configs ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_channel_routes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_email_bindings ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_heartbeat_logs ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_history_message_assets ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_history_message_compacts ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_history_messages ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_plugin_installations ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_plugin_resources ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_remote_runtime_bindings ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_session_discuss_cursors ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_session_events ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_sessions ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_storage_bindings ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_user_grants ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bot_workspace_resource_limits ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.bots ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.channel_identities ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.channel_link_codes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.container_versions ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.containers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.email_oauth_tokens ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.email_outbox ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.email_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.fetch_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.lifecycle_events ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.mcp_connections ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.mcp_oauth_tokens ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.media_assets ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.memory_edges ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.memory_nodes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.memory_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.model_variants ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.models ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.provider_oauth_tokens ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.schedule ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.schedule_logs ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.search_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.snapshots ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.storage_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.tasks ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.tool_approval_requests ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.tts_models ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.tts_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.user_channel_bindings ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.user_channel_identity_bindings ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.user_input_requests ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.user_provider_oauth_tokens ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+ALTER TABLE IF EXISTS public.user_runtimes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+DO $users_legacy_team_default$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+          FROM pg_catalog.pg_attribute
+         WHERE attrelid = 'public.users'::regclass
+           AND attname = 'team_id'
+           AND NOT attisdropped
+    ) THEN
+        ALTER TABLE public.users
+            ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+    END IF;
+END
+$users_legacy_team_default$;
+
+-- Backfill every present team table to the default singleton. Dynamic because
+-- sqlc ignores UPDATE statements; enumerating the applied schema keeps this
+-- correct across the fresh/legacy path divergence.
+DO $$
+DECLARE
+    tbl text;
+    default_team constant uuid := '00000000-0000-0000-0000-000000000001';
+BEGIN
+    FOR tbl IN
+        SELECT c.relname
+          FROM pg_catalog.pg_class c
+          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public'
+           AND c.relkind IN ('r', 'p')
+           AND EXISTS (
+               SELECT 1
+                 FROM pg_attribute a
+                 JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+                WHERE a.attrelid = c.oid
+                  AND a.attname = 'team_id'
+                  AND NOT a.attisdropped
+                  AND pg_get_expr(d.adbin, d.adrelid) LIKE '%memoh_current_team_id()%'
+           )
+         ORDER BY c.relname
+    LOOP
+        EXECUTE format('UPDATE public.%I SET team_id = %L WHERE team_id IS NULL', tbl, default_team);
+    END LOOP;
+END
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Team-scoped keys and foreign keys
+-- ---------------------------------------------------------------------------
+-- Add team-scoped unique keys and composite foreign keys while preserving the
+-- existing primary keys and delete behavior.
+--
+-- This work is atomic because in PostgreSQL an FK binds to a specific unique
+-- index: you cannot rebuild a referenced key without dropping and recreating its
+-- dependent FKs in the same operation. Splitting across migrations would fight
+-- that coupling; doing it atomically is both correct and simpler to reason about.
+--
+-- Preconditions (from earlier sections): every team table already has a
+-- backfilled team_id and the teams root exists. Team tables are identified
+-- by the team default installed above, so user-managed
+-- tables in the public schema are not modified.
+--
+-- Existing ON DELETE SET NULL constraints use PostgreSQL's column-list form,
+-- SET NULL (child_column), so the reference is cleared without clearing the
+-- non-null team_id column.
+
+DO $$
+DECLARE
+    rec record;
+    cols text;
+    delete_action text;
+    update_action text;
+BEGIN
+    CREATE TEMP TABLE _team_tables (table_name text PRIMARY KEY) ON COMMIT DROP;
+    INSERT INTO _team_tables
+    SELECT c.relname
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_attribute a ON a.attrelid = c.oid
+      JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
+     WHERE n.nspname = 'public'
+       AND c.relkind IN ('r', 'p')
+       AND c.relname <> 'team_members'
+       AND a.attname = 'team_id'
+       AND NOT a.attisdropped
+       AND pg_get_expr(d.adbin, d.adrelid) LIKE '%memoh_current_team_id()%';
+
+    CREATE TEMP TABLE _fk_saved ON COMMIT DROP AS
+    SELECT con.oid,
+           c.relname            AS child_table,
+           con.conname          AS fk_name,
+           rt.relname           AS parent_table,
+           con.confdeltype      AS del_type,
+           con.confupdtype      AS upd_type,
+           (SELECT a.attname FROM pg_attribute a
+             WHERE a.attrelid = con.conrelid AND a.attnum = con.conkey[1])  AS child_col,
+           (SELECT a.attname FROM pg_attribute a
+             WHERE a.attrelid = con.confrelid AND a.attnum = con.confkey[1]) AS parent_col,
+           cardinality(con.conkey) AS ncols
+      FROM pg_constraint con
+      JOIN pg_class c  ON c.oid  = con.conrelid
+      JOIN pg_class rt ON rt.oid = con.confrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE con.contype = 'f'
+       AND n.nspname = 'public'
+       AND c.relname IN (SELECT table_name FROM _team_tables)
+       AND rt.relname IN (SELECT table_name FROM _team_tables)
+       AND cardinality(con.conkey) = 1;
+
+    -- Safety: this algorithm only handles single-column business FKs.
+    IF EXISTS (SELECT 1 FROM _fk_saved WHERE ncols <> 1) THEN
+        RAISE EXCEPTION 'multi-column FK present; composite re-key algorithm needs revision';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM _fk_saved WHERE upd_type IN ('n', 'd')) THEN
+        RAISE EXCEPTION 'ON UPDATE SET NULL/DEFAULT requires an explicit team-safe migration';
+    END IF;
+
+    FOR rec IN SELECT child_table, fk_name FROM _fk_saved LOOP
+        EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT %I', rec.child_table, rec.fk_name);
+    END LOOP;
+
+    -- Keep existing primary keys stable. Add a team-prefixed unique key for
+    -- each primary key so composite foreign keys have a valid target.
+    FOR rec IN
+        SELECT c.relname AS table_name, con.conname, con.conrelid, con.conkey
+          FROM pg_constraint con
+          JOIN pg_class c ON c.oid = con.conrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE con.contype = 'p' AND n.nspname = 'public'
+           AND c.relname IN (SELECT table_name FROM _team_tables)
+    LOOP
+        SELECT 'team_id, ' || string_agg(quote_ident(a.attname), ', ' ORDER BY k.ord)
+          INTO cols
+          FROM unnest(rec.conkey) WITH ORDINALITY AS k(attnum, ord)
+          JOIN pg_attribute a ON a.attrelid = rec.conrelid AND a.attnum = k.attnum;
+        EXECUTE format('ALTER TABLE public.%I ALTER COLUMN team_id SET NOT NULL', rec.table_name);
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conrelid = rec.conrelid
+               AND conname = 'memoh_team_key_' || substr(md5(rec.table_name || ':' || rec.conname), 1, 12)
+        ) THEN
+            EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I UNIQUE (%s)',
+                rec.table_name,
+                'memoh_team_key_' || substr(md5(rec.table_name || ':' || rec.conname), 1, 12),
+                cols);
+        END IF;
+    END LOOP;
+
+    -- ===== Phase 3: rebuild UNIQUE constraints with team_id prepended =====
+    FOR rec IN
+        SELECT c.relname AS table_name, con.conname, con.conrelid, con.conkey,
+               i.indnullsnotdistinct AS nulls_not_distinct
+          FROM pg_constraint con
+          JOIN pg_class c ON c.oid = con.conrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_index i ON i.indexrelid = con.conindid
+         WHERE con.contype = 'u' AND n.nspname = 'public'
+           AND c.relname IN (SELECT table_name FROM _team_tables)
+           AND con.conname NOT LIKE 'memoh_team_key_%'
+    LOOP
+        IF (SELECT attname FROM pg_attribute
+              WHERE attrelid = rec.conrelid AND attnum = rec.conkey[1]) = 'team_id' THEN
+            CONTINUE;
+        END IF;
+        SELECT 'team_id, ' || string_agg(quote_ident(a.attname), ', ' ORDER BY k.ord)
+          INTO cols
+          FROM unnest(rec.conkey) WITH ORDINALITY AS k(attnum, ord)
+          JOIN pg_attribute a ON a.attrelid = rec.conrelid AND a.attnum = k.attnum;
+        EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT %I', rec.table_name, rec.conname);
+        -- Preserve NULLS NOT DISTINCT: a bare UNIQUE would widen the semantics
+        -- (NULLs become distinct), letting duplicate rows with NULL key columns
+        -- through (e.g. bot_acl_rules_unique_target).
+        EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I UNIQUE %s (%s)',
+                       rec.table_name, rec.conname,
+                       CASE WHEN rec.nulls_not_distinct THEN 'NULLS NOT DISTINCT' ELSE '' END,
+                       cols);
+    END LOOP;
+
+    FOR rec IN SELECT * FROM _fk_saved LOOP
+        update_action := CASE rec.upd_type WHEN 'c' THEN 'CASCADE' WHEN 'r' THEN 'RESTRICT'
+                          ELSE 'NO ACTION' END;
+        delete_action := CASE rec.del_type
+            WHEN 'c' THEN 'CASCADE'
+            WHEN 'r' THEN 'RESTRICT'
+            WHEN 'n' THEN format('SET NULL (%I)', rec.child_col)
+            WHEN 'd' THEN format('SET DEFAULT (%I)', rec.child_col)
+            ELSE 'NO ACTION'
+        END;
+        EXECUTE format(
+            'ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY (team_id, %I) '
+            || 'REFERENCES public.%I (team_id, %I) ON UPDATE %s ON DELETE %s',
+            rec.child_table, rec.fk_name, rec.child_col,
+            rec.parent_table, rec.parent_col,
+            update_action, delete_action
+        );
+    END LOOP;
+
+    -- ===== Phase 4b: add root FK (team_id) -> teams(id) on every table =====
+    FOR rec IN
+        SELECT c.relname AS table_name
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE c.relkind IN ('r', 'p') AND n.nspname = 'public'
+           AND c.relname IN (SELECT table_name FROM _team_tables)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint con
+              JOIN pg_class rt ON rt.oid = con.confrelid
+             WHERE con.contype = 'f'
+               AND con.conrelid = ('public.'||quote_ident(rec.table_name))::regclass
+               AND rt.relname = 'teams'
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY (team_id) '
+                || 'REFERENCES public.teams (id) ON DELETE RESTRICT',
+                rec.table_name, rec.table_name || '_team_id_fkey');
+        END IF;
+    END LOOP;
+END
+$$;
+
+-- ===== Phase 3b: partial / expression unique indexes with team_id prepended =====
+DROP INDEX IF EXISTS idx_bot_channel_external_identity;
+CREATE UNIQUE INDEX idx_bot_channel_external_identity
+    ON public.bot_channel_configs (team_id, channel_type, external_identity);
+
+DROP INDEX IF EXISTS idx_bot_channel_routes_unique;
+CREATE UNIQUE INDEX idx_bot_channel_routes_unique
+    ON public.bot_channel_routes
+       (team_id, bot_id, channel_type, external_conversation_id, COALESCE(external_thread_id, ''::text));
+
+DROP INDEX IF EXISTS idx_bot_history_messages_turn_seq_unique;
+CREATE UNIQUE INDEX idx_bot_history_messages_turn_seq_unique
+    ON public.bot_history_messages (team_id, turn_id, turn_message_seq)
+    WHERE ((turn_id IS NOT NULL) AND (turn_message_seq IS NOT NULL));
+
+DROP INDEX IF EXISTS idx_bot_user_grants_unique_everyone;
+CREATE UNIQUE INDEX idx_bot_user_grants_unique_everyone
+    ON public.bot_user_grants (team_id, bot_id)
+    WHERE (subject_type = 'everyone'::text);
+
+DROP INDEX IF EXISTS idx_bot_user_grants_unique_user;
+CREATE UNIQUE INDEX idx_bot_user_grants_unique_user
+    ON public.bot_user_grants (team_id, bot_id, user_id)
+    WHERE (subject_type = 'user'::text);
+
+DROP INDEX IF EXISTS idx_bots_name;
+CREATE UNIQUE INDEX idx_bots_name
+    ON public.bots (team_id, name);
+
+DROP INDEX IF EXISTS idx_session_events_dedup;
+CREATE UNIQUE INDEX idx_session_events_dedup
+    ON public.bot_session_events (team_id, session_id, event_kind, external_message_id)
+    WHERE ((external_message_id IS NOT NULL) AND (external_message_id <> ''::text));
+
+DROP INDEX IF EXISTS idx_snapshots_container_runtime_name;
+CREATE UNIQUE INDEX idx_snapshots_container_runtime_name
+    ON public.snapshots (team_id, container_id, runtime_snapshot_name);
+
+-- ---------------------------------------------------------------------------
+-- Team row-level security
+-- ---------------------------------------------------------------------------
+-- Enable and force row-level security on Memoh team tables. Policies apply
+-- to the connecting role, so installations do not need cluster-wide roles or
+-- elevated CREATEROLE/BYPASSRLS privileges.
+
+DO $$
+DECLARE
+    tbl text;
+BEGIN
+    FOR tbl IN
+        SELECT c.relname
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE c.relkind IN ('r', 'p')
+           AND n.nspname = 'public'
+           AND EXISTS (
+               SELECT 1
+                 FROM pg_constraint con
+                 JOIN pg_class parent ON parent.oid = con.confrelid
+                WHERE con.conrelid = c.oid
+                  AND con.contype = 'f'
+                  AND parent.relnamespace = n.oid
+                  AND parent.relname = 'teams'
+           )
+         ORDER BY c.relname
+    LOOP
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', tbl);
+        EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', tbl);
+
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', tbl || '_team_select', tbl);
+        EXECUTE format(
+            'CREATE POLICY %I ON public.%I FOR SELECT USING (team_id = public.memoh_current_team_id())',
+            tbl || '_team_select', tbl);
+
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', tbl || '_team_insert', tbl);
+        EXECUTE format(
+            'CREATE POLICY %I ON public.%I FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id())',
+            tbl || '_team_insert', tbl);
+
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', tbl || '_team_update', tbl);
+        EXECUTE format(
+            'CREATE POLICY %I ON public.%I FOR UPDATE '
+            || 'USING (team_id = public.memoh_current_team_id()) '
+            || 'WITH CHECK (team_id = public.memoh_current_team_id())',
+            tbl || '_team_update', tbl);
+
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', tbl || '_team_delete', tbl);
+        EXECUTE format(
+            'CREATE POLICY %I ON public.%I FOR DELETE USING (team_id = public.memoh_current_team_id())',
+            tbl || '_team_delete', tbl);
+    END LOOP;
+END
+$$;
+
+ALTER TABLE public.teams ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.teams FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS teams_self_select ON public.teams;
+CREATE POLICY teams_self_select ON public.teams
+    FOR SELECT USING (id = public.memoh_current_team_id());
+
+-- ---------------------------------------------------------------------------
+-- Team-safe history view
+-- ---------------------------------------------------------------------------
+-- Fix the bot_visible_history_messages view so it cannot bypass team RLS.
+--
+-- The view was created without security_invoker, so it executed with its
+-- owner's privileges and could bypass the caller's RLS policies. This migration:
+--   1. recreates the view WITH (security_invoker = true) so it runs under the
+--      caller's privileges — the base table's RLS then scopes it automatically;
+--   2. projects team_id so consuming queries can carry explicit scope
+--      (defense-in-depth) and so the schema guard can verify the view;
+
+-- Adding team_id as the first projected column changes column order, which
+-- CREATE OR REPLACE VIEW rejects, so drop and recreate. No other object depends
+-- on this view (verified), so a plain DROP is safe.
+DROP VIEW IF EXISTS bot_visible_history_messages;
+
+CREATE VIEW bot_visible_history_messages
+WITH (security_invoker = true) AS
+SELECT
+  m.team_id,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id,
+  m.source_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.compact_id,
+  m.session_mode,
+  m.runtime_type,
+  m.model_id,
+  m.event_id,
+  m.display_text,
+  m.created_at
+FROM bot_history_messages m
+WHERE m.turn_visible = true
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- Team-prefixed secondary indexes
+-- ---------------------------------------------------------------------------
+-- Prepend team_id to every non-unique btree secondary index on a team table
+-- that does not already lead with it. Team queries filter by team_id (RLS +
+-- explicit public.memoh_current_team_id()), so a team_id-leading index lets the
+-- planner scan only the current team's slice. Purely a performance change.
+--
+-- New incremental (existing migrations untouched). Each index is dropped and
+-- recreated with team_id prepended, preserving its column list, partial WHERE,
+-- and (btree) access method. Non-btree (gin/gist) indexes are left untouched.
+
+DO $$
+DECLARE
+    rec record;
+    idxdef text;
+BEGIN
+    FOR rec IN
+        SELECT ic.relname AS index_name, pg_get_indexdef(i.indexrelid) AS def
+          FROM pg_index i
+          JOIN pg_class ic ON ic.oid = i.indexrelid
+          JOIN pg_class tc ON tc.oid = i.indrelid
+          JOIN pg_namespace n ON n.oid = tc.relnamespace
+          JOIN pg_am am ON am.oid = ic.relam
+         WHERE n.nspname = 'public'
+           AND NOT i.indisprimary AND NOT i.indisunique
+           AND am.amname = 'btree'
+           AND tc.relname <> 'team_members'
+           AND EXISTS (
+               SELECT 1
+                 FROM pg_constraint con
+                 JOIN pg_class parent ON parent.oid = con.confrelid
+                WHERE con.conrelid = tc.oid
+                  AND con.contype = 'f'
+                  AND parent.relnamespace = n.oid
+                  AND parent.relname = 'teams'
+           )
+           AND (SELECT attname FROM pg_attribute
+                 WHERE attrelid = i.indrelid AND attnum = i.indkey[0]) <> 'team_id'
+    LOOP
+        idxdef := regexp_replace(rec.def, '(USING btree \()', '\1team_id, ');
+        EXECUTE format('DROP INDEX IF EXISTS public.%I', rec.index_name);
+        EXECUTE idxdef;
+    END LOOP;
+END
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Global principals and team memberships
+-- ---------------------------------------------------------------------------
+-- The migration owner may be a non-superuser. Disable the old FORCE RLS
+-- boundary before inspecting every team; this file runs transactionally, so a
+-- failed preflight restores the original policies and RLS state.
+DROP POLICY IF EXISTS users_team_delete ON public.users;
+DROP POLICY IF EXISTS users_team_update ON public.users;
+DROP POLICY IF EXISTS users_team_insert ON public.users;
+DROP POLICY IF EXISTS users_team_select ON public.users;
+ALTER TABLE public.users NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;
+
+-- A username or email could briefly have been created once per team after
+-- 0112. Such rows cannot be merged automatically without choosing credentials
+-- and ownership, so fail before changing constraints.
+DO $duplicate_global_identities$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM public.users
+         WHERE username IS NOT NULL
+         GROUP BY username HAVING count(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'cannot globalize users: duplicate usernames exist across teams';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.users
+         WHERE email IS NOT NULL
+         GROUP BY email HAVING count(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'cannot globalize users: duplicate emails exist across teams';
+    END IF;
+END
+$duplicate_global_identities$;
+
+-- The canonical 0001 already creates this table with FORCE RLS. Temporarily
+-- disable it so the replay path can rebuild foreign keys without requiring a
+-- request-scoped team GUC. The legacy path reaches the same state with a new,
+-- not-yet-protected table.
+ALTER TABLE public.team_members NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.team_members DISABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.team_members (
+    team_id, user_id, role, is_active, data_root, created_at, updated_at
+)
+SELECT
+    (to_jsonb(u) ->> 'team_id')::uuid,
+    u.id,
+    (to_jsonb(u) ->> 'role')::user_role,
+    u.is_active,
+    to_jsonb(u) ->> 'data_root',
+    u.created_at,
+    u.updated_at
+FROM public.users AS u
+WHERE to_jsonb(u) ? 'team_id'
+ON CONFLICT (team_id, user_id) DO NOTHING;
+
+-- PostgreSQL validates replacement FKs by scanning their child tables. A
+-- non-superuser migration owner is subject to FORCE RLS during that internal
+-- scan, so temporarily suspend RLS while constraints are rebuilt.
+ALTER TABLE public.bot_acl_rules NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_acl_rules DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_channel_admins NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_channel_admins DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_history_messages NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_history_messages DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_user_grants NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_user_grants DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bots NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bots DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_link_codes NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_link_codes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.email_providers NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.email_providers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_bindings NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_bindings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_identity_bindings NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_identity_bindings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_provider_oauth_tokens NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_provider_oauth_tokens DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_runtimes NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_runtimes DISABLE ROW LEVEL SECURITY;
+
+-- Team-owned references now target membership rather than requiring the user
+-- principal itself to belong to exactly one team.
+ALTER TABLE public.bot_acl_rules
+    DROP CONSTRAINT IF EXISTS bot_acl_rules_created_by_user_id_fkey;
+ALTER TABLE public.bot_channel_admins
+    DROP CONSTRAINT IF EXISTS bot_channel_admins_created_by_user_id_fkey;
+ALTER TABLE public.bot_history_messages
+    DROP CONSTRAINT IF EXISTS bot_history_messages_sender_account_user_id_fkey;
+ALTER TABLE public.bot_sessions
+    DROP CONSTRAINT IF EXISTS bot_sessions_created_by_user_id_fkey;
+ALTER TABLE public.bot_user_grants
+    DROP CONSTRAINT IF EXISTS bot_user_grants_created_by_user_id_fkey,
+    DROP CONSTRAINT IF EXISTS bot_user_grants_user_id_fkey;
+ALTER TABLE public.bots
+    DROP CONSTRAINT IF EXISTS bots_owner_user_id_fkey;
+ALTER TABLE public.channel_link_codes
+    DROP CONSTRAINT IF EXISTS channel_link_codes_user_id_fkey;
+ALTER TABLE public.email_providers
+    DROP CONSTRAINT IF EXISTS email_providers_user_id_fkey;
+ALTER TABLE public.user_channel_bindings
+    DROP CONSTRAINT IF EXISTS user_channel_bindings_user_id_fkey;
+ALTER TABLE public.user_channel_identity_bindings
+    DROP CONSTRAINT IF EXISTS user_channel_identity_bindings_user_id_fkey;
+ALTER TABLE public.user_provider_oauth_tokens
+    DROP CONSTRAINT IF EXISTS user_provider_oauth_tokens_user_id_fkey;
+ALTER TABLE public.user_runtimes
+    DROP CONSTRAINT IF EXISTS user_runtimes_user_id_fkey;
+
+ALTER TABLE public.bot_acl_rules
+    ADD CONSTRAINT bot_acl_rules_created_by_user_id_fkey
+    FOREIGN KEY (team_id, created_by_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE SET NULL (created_by_user_id);
+ALTER TABLE public.bot_channel_admins
+    ADD CONSTRAINT bot_channel_admins_created_by_user_id_fkey
+    FOREIGN KEY (team_id, created_by_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE SET NULL (created_by_user_id);
+ALTER TABLE public.bot_history_messages
+    ADD CONSTRAINT bot_history_messages_sender_account_user_id_fkey
+    FOREIGN KEY (team_id, sender_account_user_id)
+    REFERENCES public.team_members(team_id, user_id);
+ALTER TABLE public.bot_sessions
+    ADD CONSTRAINT bot_sessions_created_by_user_id_fkey
+    FOREIGN KEY (team_id, created_by_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE SET NULL (created_by_user_id);
+ALTER TABLE public.bot_user_grants
+    ADD CONSTRAINT bot_user_grants_created_by_user_id_fkey
+    FOREIGN KEY (team_id, created_by_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE SET NULL (created_by_user_id),
+    ADD CONSTRAINT bot_user_grants_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.bots
+    ADD CONSTRAINT bots_owner_user_id_fkey
+    FOREIGN KEY (team_id, owner_user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.channel_link_codes
+    ADD CONSTRAINT channel_link_codes_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.email_providers
+    ADD CONSTRAINT email_providers_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.user_channel_bindings
+    ADD CONSTRAINT user_channel_bindings_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.user_channel_identity_bindings
+    ADD CONSTRAINT user_channel_identity_bindings_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.user_provider_oauth_tokens
+    ADD CONSTRAINT user_provider_oauth_tokens_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+ALTER TABLE public.user_runtimes
+    ADD CONSTRAINT user_runtimes_user_id_fkey
+    FOREIGN KEY (team_id, user_id)
+    REFERENCES public.team_members(team_id, user_id)
+    ON DELETE CASCADE;
+
+ALTER TABLE public.bot_acl_rules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_acl_rules FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_channel_admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_channel_admins FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_history_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_history_messages FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_user_grants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_user_grants FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bots FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_link_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_link_codes FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.email_providers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.email_providers FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_bindings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_bindings FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_identity_bindings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_channel_identity_bindings FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_provider_oauth_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_provider_oauth_tokens FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_runtimes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_runtimes FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE public.users
+    DROP CONSTRAINT IF EXISTS users_team_id_fkey,
+    DROP CONSTRAINT IF EXISTS memoh_team_key_018c4edf45ca,
+    DROP CONSTRAINT IF EXISTS users_email_unique,
+    DROP CONSTRAINT IF EXISTS users_username_unique;
+
+ALTER TABLE public.users
+    DROP COLUMN IF EXISTS team_id,
+    DROP COLUMN IF EXISTS role,
+    DROP COLUMN IF EXISTS data_root;
+
+ALTER TABLE public.users
+    ADD CONSTRAINT users_email_unique UNIQUE (email),
+    ADD CONSTRAINT users_username_unique UNIQUE (username);
+
+ALTER TABLE public.team_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.team_members FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS team_members_team_select ON public.team_members;
+DROP POLICY IF EXISTS team_members_team_insert ON public.team_members;
+DROP POLICY IF EXISTS team_members_team_update ON public.team_members;
+DROP POLICY IF EXISTS team_members_team_delete ON public.team_members;
+CREATE POLICY team_members_team_select ON public.team_members
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY team_members_team_insert ON public.team_members
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY team_members_team_update ON public.team_members
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY team_members_team_delete ON public.team_members
+    FOR DELETE USING (team_id = public.memoh_current_team_id());
+
+-- Preserve the account-shaped query contract while sourcing authorization
+-- fields from the current team's membership.
+CREATE OR REPLACE VIEW public.team_accounts
+WITH (security_invoker = true)
+AS
+SELECT
+    u.id,
+    u.username,
+    u.email,
+    u.password_hash,
+    tm.role,
+    u.display_name,
+    u.avatar_url,
+    u.timezone,
+    tm.data_root,
+    u.last_login_at,
+    (u.is_active AND tm.is_active) AS is_active,
+    u.metadata,
+    u.created_at,
+    u.updated_at,
+    tm.team_id,
+    u.is_active AS principal_is_active,
+    tm.is_active AS membership_is_active,
+    tm.created_at AS joined_at,
+    tm.updated_at AS membership_updated_at
+FROM public.team_members tm
+JOIN public.users u ON u.id = tm.user_id
+WHERE tm.team_id = public.memoh_current_team_id();
+
+-- Serialize membership authority changes and keep one active admin per team.
+CREATE OR REPLACE FUNCTION public.memoh_guard_last_active_team_admin()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    IF OLD.role <> 'admin'
+       OR NOT OLD.is_active
+       OR NOT EXISTS (
+           SELECT 1
+             FROM public.users principal
+            WHERE principal.id = OLD.user_id
+              AND principal.is_active
+       ) THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    IF TG_OP = 'UPDATE' AND NEW.role = 'admin' AND NEW.is_active THEN
+        RETURN NEW;
+    END IF;
+
+    -- Concurrent demotions/removals for the same team must observe each other.
+    PERFORM 1
+      FROM public.teams
+     WHERE id = OLD.team_id
+     FOR UPDATE;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM public.team_members candidate
+          JOIN public.users principal
+            ON principal.id = candidate.user_id
+           AND principal.is_active
+         WHERE candidate.team_id = OLD.team_id
+           AND candidate.user_id <> OLD.user_id
+           AND candidate.role = 'admin'
+           AND candidate.is_active
+    ) THEN
+        RAISE EXCEPTION 'team must retain at least one active admin'
+            USING ERRCODE = '23514',
+                  CONSTRAINT = 'team_members_last_active_admin';
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS team_members_last_active_admin_guard ON public.team_members;
+CREATE TRIGGER team_members_last_active_admin_guard
+BEFORE UPDATE OF role, is_active OR DELETE ON public.team_members
+FOR EACH ROW
+EXECUTE FUNCTION public.memoh_guard_last_active_team_admin();
+
+-- A fresh install replays the historical incremental migrations on the same
+-- golang-migrate connection. Bind that short-lived connection to the singleton
+-- team so data-rewrite statements remain valid under the canonical FORCE RLS
+-- schema. The connection is closed after migration; ordinary runtime
+-- connections still fail closed until they bind memoh.team_id themselves.
+SELECT set_config(
+    'memoh.team_id',
+    '00000000-0000-0000-0000-000000000001',
+    false
+);

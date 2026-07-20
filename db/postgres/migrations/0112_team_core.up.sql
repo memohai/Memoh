@@ -30,9 +30,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS teams_slug_unique ON teams (slug) WHERE slug I
 
 -- Seed the singleton team idempotently. Existing self-hosted installations
 -- continue to use this team without any configuration changes.
-INSERT INTO teams (id, slug)
-VALUES ('00000000-0000-0000-0000-000000000001', 'default')
-ON CONFLICT (id) DO NOTHING;
+DO $seed_default_team$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM teams
+         WHERE id = '00000000-0000-0000-0000-000000000001'
+    ) THEN
+        INSERT INTO teams (id, slug)
+        VALUES ('00000000-0000-0000-0000-000000000001', 'default');
+    END IF;
+END
+$seed_default_team$;
 
 -- ---------------------------------------------------------------------------
 -- Team context
@@ -138,7 +146,16 @@ ALTER TABLE IF EXISTS public.user_channel_identity_bindings ADD COLUMN IF NOT EX
 ALTER TABLE IF EXISTS public.user_input_requests ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.user_provider_oauth_tokens ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.user_runtimes ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.users ADD COLUMN IF NOT EXISTS team_id uuid;
+-- A canonical 0001 already has global users plus team_members. Legacy
+-- databases do not, so only the legacy path needs the transitional users
+-- team_id column that 0115 later moves into team_members.
+DO $users_legacy_team_column$
+BEGIN
+    IF to_regclass('public.team_members') IS NULL THEN
+        ALTER TABLE IF EXISTS public.users ADD COLUMN IF NOT EXISTS team_id uuid;
+    END IF;
+END
+$users_legacy_team_column$;
 
 
 -- Give team_id a DEFAULT so any INSERT (sqlc-generated or raw) auto-fills the
@@ -196,7 +213,20 @@ ALTER TABLE IF EXISTS public.user_channel_identity_bindings ALTER COLUMN team_id
 ALTER TABLE IF EXISTS public.user_input_requests ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.user_provider_oauth_tokens ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.user_runtimes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.users ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+DO $users_legacy_team_default$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+          FROM pg_catalog.pg_attribute
+         WHERE attrelid = 'public.users'::regclass
+           AND attname = 'team_id'
+           AND NOT attisdropped
+    ) THEN
+        ALTER TABLE public.users
+            ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
+    END IF;
+END
+$users_legacy_team_default$;
 
 -- Backfill every present team table to the default singleton. Dynamic because
 -- sqlc ignores UPDATE statements; enumerating the applied schema keeps this
@@ -264,6 +294,7 @@ BEGIN
       JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
      WHERE n.nspname = 'public'
        AND c.relkind IN ('r', 'p')
+       AND c.relname <> 'team_members'
        AND a.attname = 'team_id'
        AND NOT a.attisdropped
        AND pg_get_expr(d.adbin, d.adrelid) LIKE '%memoh_current_team_id()%';
@@ -578,6 +609,7 @@ BEGIN
          WHERE n.nspname = 'public'
            AND NOT i.indisprimary AND NOT i.indisunique
            AND am.amname = 'btree'
+           AND tc.relname <> 'team_members'
            AND EXISTS (
                SELECT 1
                  FROM pg_constraint con

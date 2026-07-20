@@ -96,6 +96,19 @@
     "channel": {
       "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。"
     },
+    "provider": {
+      "name_taken": "同じ名前のプロバイダーがすでに存在します。"
+    },
+    "provider_template": {
+      "not_found": "このプロバイダーテンプレートは利用できなくなりました。",
+      "domain_invalid": "プロバイダーテンプレートの種類が無効です。",
+      "domain_mismatch": "このプロバイダーテンプレートはここでは使用できません。",
+      "operation_failed": "プロバイダーテンプレートの操作に失敗しました。",
+      "request_invalid": "プロバイダー設定が無効です。"
+    },
+    "search_provider": {
+      "type_conflict": "このWeb検索プロバイダーはすでに設定されています。"
+    },
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
       "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
@@ -424,15 +437,10 @@
     "lastLogin": "最終ログイン",
     "never": "一度もない",
     "toggleStatus": "{name} のステータスを切り替えます",
-    "resetPassword": "パスワードをリセットする",
-    "resetPasswordFor": "{name}のパスワードをリセットする",
-    "resetPasswordDescription": "{name} に新しいパスワードを設定します。",
-    "resetPasswordSuccess": "パスワードのリセット",
-    "resetPasswordFailed": "パスワードのリセットに失敗しました",
-    "removeMember": "メンバーの削除",
-    "removeMemberFor": "{name} を削除します",
-    "removeConfirm": "{name}を削除しますか？このユーザーはワークスペースにログインできなくなります。",
-    "removeSuccess": "メンバーが削除されました",
+    "removeMember": "メンバーを削除",
+    "removeMemberFor": "{name} を削除",
+    "removeConfirm": "{name} をこのワークスペースから削除しますか？認証情報は保持されるため、後でアクセスを復元できます。",
+    "removeSuccess": "メンバーを削除しました",
     "removeFailed": "メンバーの削除に失敗しました",
     "createSuccess": "メンバーが作成されました",
     "createFailed": "メンバーの作成に失敗しました",
@@ -1037,6 +1045,8 @@
     "customProvider": "カスタムプロバイダー",
     "apiKey": "APIキー",
     "apiKeyPlaceholder": "APIキーを入力",
+    "templateNotConfigured": "未設定",
+    "requiredField": "{field}は必須です",
     "nameRequired": "名前を入力してください",
     "clientTypeRequired": "クライアントの種類を選択してください",
     "apiKeyRequired": "APIキーを入力してください",
@@ -1147,6 +1157,7 @@
       "yandex": "ヤンデックス"
     },
     "fetchProviderNames": {
+      "native": "ネイティブ取得",
       "jina": "Jina Reader",
       "cloudflare_markdown": "Cloudflare Markdown"
     }
@@ -1156,6 +1167,8 @@
     "add": "メモリプロバイダーを追加",
     "empty": "メモリプロバイダーがありません",
     "provider": "プロバイダーの種類",
+    "providerRequired": "プロバイダーの種類を選択してください",
+    "nameRequired": "名前を入力してください",
     "searchPlaceholder": "プロバイダーを検索...",
     "emptyTitle": "メモリプロバイダーがありません",
     "emptyDescription": "メモリプロバイダーを追加して、Bot の長期メモリを有効にします",

@@ -99,6 +99,19 @@
     "channel": {
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly."
     },
+    "provider": {
+      "name_taken": "A provider with this name already exists."
+    },
+    "provider_template": {
+      "not_found": "This provider template is no longer available.",
+      "domain_invalid": "This provider template type is invalid.",
+      "domain_mismatch": "This provider template cannot be used here.",
+      "operation_failed": "The provider template operation failed.",
+      "request_invalid": "The provider configuration is invalid."
+    },
+    "search_provider": {
+      "type_conflict": "This web search provider has already been configured."
+    },
     "workspace": {
       "unreachable": "The workspace could not be reached.",
       "display_prepare_failed": "Display preparation failed."
@@ -427,14 +440,9 @@
     "lastLogin": "Last login",
     "never": "Never",
     "toggleStatus": "Toggle status for {name}",
-    "resetPassword": "Reset password",
-    "resetPasswordFor": "Reset password for {name}",
-    "resetPasswordDescription": "Set a new password for {name}.",
-    "resetPasswordSuccess": "Password reset",
-    "resetPasswordFailed": "Failed to reset password",
     "removeMember": "Remove member",
     "removeMemberFor": "Remove {name}",
-    "removeConfirm": "Remove {name}? This removes their workspace login.",
+    "removeConfirm": "Remove {name} from this workspace? Their credentials will be kept so access can be restored later.",
     "removeSuccess": "Member removed",
     "removeFailed": "Failed to remove member",
     "createSuccess": "Member created",
@@ -1085,6 +1093,8 @@
     "customProvider": "Custom Provider",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter API key",
+    "templateNotConfigured": "Not configured",
+    "requiredField": "{field} is required",
     "nameRequired": "Name is required",
     "clientTypeRequired": "Client type is required",
     "apiKeyRequired": "API key is required",
@@ -1195,6 +1205,7 @@
       "yandex": "Yandex"
     },
     "fetchProviderNames": {
+      "native": "Native",
       "jina": "Jina Reader",
       "cloudflare_markdown": "Cloudflare Markdown"
     }
@@ -1204,6 +1215,8 @@
     "add": "Add Memory Provider",
     "empty": "No memory providers",
     "provider": "Provider Type",
+    "providerRequired": "Provider type is required",
+    "nameRequired": "Name is required",
     "searchPlaceholder": "Search providers...",
     "emptyTitle": "No Memory Providers",
     "emptyDescription": "Add a memory provider to enable long-term memory for your bots",

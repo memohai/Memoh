@@ -162,7 +162,7 @@ VALUES (
   $5,
   $6
 )
-RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
+RETURNING id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
 `
 
 type CreateProviderParams struct {
@@ -186,6 +186,58 @@ func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) 
 	var i Provider
 	err := row.Scan(
 		&i.ID,
+		&i.ProviderTemplateID,
+		&i.Name,
+		&i.ClientType,
+		&i.Icon,
+		&i.Enable,
+		&i.Config,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const createProviderFromTemplate = `-- name: CreateProviderFromTemplate :one
+INSERT INTO providers (provider_template_id, name, client_type, icon, enable, config, metadata)
+VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5,
+  $6,
+  $7
+)
+RETURNING id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
+`
+
+type CreateProviderFromTemplateParams struct {
+	ProviderTemplateID pgtype.UUID `json:"provider_template_id"`
+	Name               string      `json:"name"`
+	ClientType         string      `json:"client_type"`
+	Icon               pgtype.Text `json:"icon"`
+	Enable             bool        `json:"enable"`
+	Config             []byte      `json:"config"`
+	Metadata           []byte      `json:"metadata"`
+}
+
+func (q *Queries) CreateProviderFromTemplate(ctx context.Context, arg CreateProviderFromTemplateParams) (Provider, error) {
+	row := q.db.QueryRow(ctx, createProviderFromTemplate,
+		arg.ProviderTemplateID,
+		arg.Name,
+		arg.ClientType,
+		arg.Icon,
+		arg.Enable,
+		arg.Config,
+		arg.Metadata,
+	)
+	var i Provider
+	err := row.Scan(
+		&i.ID,
+		&i.ProviderTemplateID,
 		&i.Name,
 		&i.ClientType,
 		&i.Icon,
@@ -335,7 +387,7 @@ func (q *Queries) GetModelByProviderAndModelID(ctx context.Context, arg GetModel
 }
 
 const getProviderByClientType = `-- name: GetProviderByClientType :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE team_id = public.memoh_current_team_id() AND client_type = $1
+SELECT id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE team_id = public.memoh_current_team_id() AND client_type = $1
 `
 
 func (q *Queries) GetProviderByClientType(ctx context.Context, clientType string) (Provider, error) {
@@ -343,6 +395,7 @@ func (q *Queries) GetProviderByClientType(ctx context.Context, clientType string
 	var i Provider
 	err := row.Scan(
 		&i.ID,
+		&i.ProviderTemplateID,
 		&i.Name,
 		&i.ClientType,
 		&i.Icon,
@@ -357,7 +410,7 @@ func (q *Queries) GetProviderByClientType(ctx context.Context, clientType string
 }
 
 const getProviderByID = `-- name: GetProviderByID :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE team_id = public.memoh_current_team_id() AND id = $1
+SELECT id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) GetProviderByID(ctx context.Context, id pgtype.UUID) (Provider, error) {
@@ -365,6 +418,7 @@ func (q *Queries) GetProviderByID(ctx context.Context, id pgtype.UUID) (Provider
 	var i Provider
 	err := row.Scan(
 		&i.ID,
+		&i.ProviderTemplateID,
 		&i.Name,
 		&i.ClientType,
 		&i.Icon,
@@ -379,7 +433,7 @@ func (q *Queries) GetProviderByID(ctx context.Context, id pgtype.UUID) (Provider
 }
 
 const getProviderByName = `-- name: GetProviderByName :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE team_id = public.memoh_current_team_id() AND name = $1
+SELECT id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE team_id = public.memoh_current_team_id() AND name = $1
 `
 
 func (q *Queries) GetProviderByName(ctx context.Context, name string) (Provider, error) {
@@ -387,6 +441,7 @@ func (q *Queries) GetProviderByName(ctx context.Context, name string) (Provider,
 	var i Provider
 	err := row.Scan(
 		&i.ID,
+		&i.ProviderTemplateID,
 		&i.Name,
 		&i.ClientType,
 		&i.Icon,
@@ -919,7 +974,7 @@ func (q *Queries) ListModelsByType(ctx context.Context, type_ string) ([]Model, 
 }
 
 const listProviders = `-- name: ListProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+SELECT id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
 WHERE team_id = public.memoh_current_team_id() AND client_type NOT IN (
   'edge-speech',
   'openai-speech',
@@ -954,6 +1009,7 @@ func (q *Queries) ListProviders(ctx context.Context) ([]Provider, error) {
 		var i Provider
 		if err := rows.Scan(
 			&i.ID,
+			&i.ProviderTemplateID,
 			&i.Name,
 			&i.ClientType,
 			&i.Icon,
@@ -1070,7 +1126,7 @@ func (q *Queries) ListSpeechModelsByProviderID(ctx context.Context, providerID p
 }
 
 const listSpeechProviders = `-- name: ListSpeechProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+SELECT id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
 WHERE team_id = public.memoh_current_team_id() AND client_type IN (
   'edge-speech',
   'openai-speech',
@@ -1096,6 +1152,7 @@ func (q *Queries) ListSpeechProviders(ctx context.Context) ([]Provider, error) {
 		var i Provider
 		if err := rows.Scan(
 			&i.ID,
+			&i.ProviderTemplateID,
 			&i.Name,
 			&i.ClientType,
 			&i.Icon,
@@ -1212,7 +1269,7 @@ func (q *Queries) ListTranscriptionModelsByProviderID(ctx context.Context, provi
 }
 
 const listTranscriptionProviders = `-- name: ListTranscriptionProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+SELECT id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
 WHERE team_id = public.memoh_current_team_id() AND client_type IN (
   'openai-transcription',
   'openrouter-transcription',
@@ -1234,6 +1291,7 @@ func (q *Queries) ListTranscriptionProviders(ctx context.Context) ([]Provider, e
 		var i Provider
 		if err := rows.Scan(
 			&i.ID,
+			&i.ProviderTemplateID,
 			&i.Name,
 			&i.ClientType,
 			&i.Icon,
@@ -1350,7 +1408,7 @@ func (q *Queries) ListVideoModelsByProviderID(ctx context.Context, providerID pg
 }
 
 const listVideoProviders = `-- name: ListVideoProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+SELECT id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
 WHERE team_id = public.memoh_current_team_id() AND client_type IN (
   'openrouter-video',
   'modelark-video',
@@ -1370,6 +1428,7 @@ func (q *Queries) ListVideoProviders(ctx context.Context) ([]Provider, error) {
 		var i Provider
 		if err := rows.Scan(
 			&i.ID,
+			&i.ProviderTemplateID,
 			&i.Name,
 			&i.ClientType,
 			&i.Icon,
@@ -1451,7 +1510,7 @@ SET
   metadata = $6,
   updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $7
-RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
+RETURNING id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
 `
 
 type UpdateProviderParams struct {
@@ -1477,6 +1536,7 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 	var i Provider
 	err := row.Scan(
 		&i.ID,
+		&i.ProviderTemplateID,
 		&i.Name,
 		&i.ClientType,
 		&i.Icon,
@@ -1491,8 +1551,8 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 }
 
 const upsertRegistryModel = `-- name: UpsertRegistryModel :one
-INSERT INTO models (model_id, name, provider_id, type, config)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO models (model_id, name, provider_id, type, enable, config)
+VALUES ($1, $2, $3, $4, false, $5)
 ON CONFLICT (team_id, provider_id, model_id) DO UPDATE SET
   name = EXCLUDED.name,
   type = EXCLUDED.type,
@@ -1544,7 +1604,7 @@ ON CONFLICT (team_id, name) DO UPDATE SET
   icon = EXCLUDED.icon,
   client_type = EXCLUDED.client_type,
   updated_at = now()
-RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
+RETURNING id, provider_template_id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
 `
 
 type UpsertRegistryProviderParams struct {
@@ -1564,6 +1624,7 @@ func (q *Queries) UpsertRegistryProvider(ctx context.Context, arg UpsertRegistry
 	var i Provider
 	err := row.Scan(
 		&i.ID,
+		&i.ProviderTemplateID,
 		&i.Name,
 		&i.ClientType,
 		&i.Icon,

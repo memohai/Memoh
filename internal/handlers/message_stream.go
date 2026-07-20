@@ -406,10 +406,19 @@ func writeMessageCreated(writer io.Writer, flusher http.Flusher, botID string, m
 	})
 }
 
-func beginSSEResponse(c echo.Context) (io.Writer, http.Flusher, error) {
+// setSSEHeaders applies the response headers shared by every SSE endpoint.
+// X-Accel-Buffering disables per-response proxy buffering in nginx (and
+// compatible reverse proxies) so events reach the browser as soon as the
+// handler flushes them, without requiring proxy-side location tuning.
+func setSSEHeaders(c echo.Context) {
 	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
 	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	c.Response().Header().Set("X-Accel-Buffering", "no")
+}
+
+func beginSSEResponse(c echo.Context) (io.Writer, http.Flusher, error) {
+	setSSEHeaders(c)
 	c.Response().WriteHeader(http.StatusOK)
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {

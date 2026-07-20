@@ -43,6 +43,7 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewACPRuntimeHandler),
 			provideServerHandler(handlers.NewSwaggerHandler),
 			provideServerHandler(handlers.NewProvidersHandler),
+			provideServerHandler(handlers.NewProviderTemplatesHandler),
 			provideServerHandler(provideProviderOAuthHandler),
 			provideServerHandler(provideACPCodexOAuthServerHandler),
 			provideServerHandler(provideACPClaudeCodeOAuthServerHandler),

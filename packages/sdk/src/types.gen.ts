@@ -11,10 +11,14 @@ export type AccountsAccount = {
     email?: string;
     id?: string;
     is_active?: boolean;
+    joined_at?: string;
     last_login_at?: string;
+    membership_is_active?: boolean;
+    membership_updated_at?: string;
     metadata?: {
         [key: string]: unknown;
     };
+    principal_is_active?: boolean;
     role?: string;
     timezone?: string;
     updated_at?: string;
@@ -35,13 +39,7 @@ export type AccountsListAccountsResponse = {
     items?: Array<AccountsAccount>;
 };
 
-export type AccountsResetPasswordRequest = {
-    new_password?: string;
-};
-
 export type AccountsUpdateAccountRequest = {
-    avatar_url?: string;
-    display_name?: string;
     is_active?: boolean;
     role?: string;
 };
@@ -2501,6 +2499,18 @@ export type ProvidersCountResponse = {
     count?: number;
 };
 
+export type ProvidersCreateFromTemplateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    domain?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    template_id: string;
+};
+
 export type ProvidersCreateRequest = {
     client_type: string;
     config?: {
@@ -2526,6 +2536,7 @@ export type ProvidersGetResponse = {
         [key: string]: unknown;
     };
     name?: string;
+    provider_template_id?: string;
     updated_at?: string;
 };
 
@@ -2590,6 +2601,45 @@ export type ProvidersUpdateRequest = {
         [key: string]: unknown;
     };
     name?: string;
+};
+
+export type ProvidertemplatesGetResponse = {
+    config_schema?: {
+        [key: string]: unknown;
+    };
+    configured?: boolean;
+    created_at?: string;
+    default_config?: {
+        [key: string]: unknown;
+    };
+    description?: string;
+    domain?: string;
+    driver?: string;
+    icon?: string;
+    id?: string;
+    key?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    models?: Array<ProvidertemplatesModelResponse>;
+    name?: string;
+    sort_order?: number;
+    source?: string;
+    updated_at?: string;
+};
+
+export type ProvidertemplatesModelResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    id?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    model_id?: string;
+    name?: string;
+    sort_order?: number;
+    type?: string;
 };
 
 export type ScheduleCreateRequest = {
@@ -11690,6 +11740,74 @@ export type GetPingResponses = {
 
 export type GetPingResponse = GetPingResponses[keyof GetPingResponses];
 
+export type GetProviderTemplatesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Template domain (llm, speech, transcription, video)
+         */
+        domain?: string;
+    };
+    url: '/provider-templates';
+};
+
+export type GetProviderTemplatesErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetProviderTemplatesError = GetProviderTemplatesErrors[keyof GetProviderTemplatesErrors];
+
+export type GetProviderTemplatesResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProvidertemplatesGetResponse>;
+};
+
+export type GetProviderTemplatesResponse = GetProviderTemplatesResponses[keyof GetProviderTemplatesResponses];
+
+export type GetProviderTemplatesByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider template ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/provider-templates/{id}';
+};
+
+export type GetProviderTemplatesByIdErrors = {
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetProviderTemplatesByIdError = GetProviderTemplatesByIdErrors[keyof GetProviderTemplatesByIdErrors];
+
+export type GetProviderTemplatesByIdResponses = {
+    /**
+     * OK
+     */
+    200: ProvidertemplatesGetResponse;
+};
+
+export type GetProviderTemplatesByIdResponse = GetProviderTemplatesByIdResponses[keyof GetProviderTemplatesByIdResponses];
+
 export type GetProvidersData = {
     body?: never;
     path?: never;
@@ -11771,6 +11889,46 @@ export type GetProvidersCountResponses = {
 };
 
 export type GetProvidersCountResponse = GetProvidersCountResponses[keyof GetProvidersCountResponses];
+
+export type PostProvidersFromTemplateData = {
+    /**
+     * Provider template configuration
+     */
+    body: ProvidersCreateFromTemplateRequest;
+    path?: never;
+    query?: never;
+    url: '/providers/from-template';
+};
+
+export type PostProvidersFromTemplateErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type PostProvidersFromTemplateError = PostProvidersFromTemplateErrors[keyof PostProvidersFromTemplateErrors];
+
+export type PostProvidersFromTemplateResponses = {
+    /**
+     * Created
+     */
+    201: ProvidersGetResponse;
+};
+
+export type PostProvidersFromTemplateResponse = PostProvidersFromTemplateResponses[keyof PostProvidersFromTemplateResponses];
 
 export type GetProvidersNameByNameData = {
     body?: never;
@@ -13637,6 +13795,10 @@ export type DeleteUsersByIdErrors = {
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -13722,6 +13884,10 @@ export type PutUsersByIdErrors = {
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -13737,49 +13903,6 @@ export type PutUsersByIdResponses = {
 };
 
 export type PutUsersByIdResponse = PutUsersByIdResponses[keyof PutUsersByIdResponses];
-
-export type PutUsersByIdPasswordData = {
-    /**
-     * Password payload
-     */
-    body: AccountsResetPasswordRequest;
-    path: {
-        /**
-         * User ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/users/{id}/password';
-};
-
-export type PutUsersByIdPasswordErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutUsersByIdPasswordError = PutUsersByIdPasswordErrors[keyof PutUsersByIdPasswordErrors];
-
-export type PutUsersByIdPasswordResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
 
 export type GetVideoModelsData = {
     body?: never;

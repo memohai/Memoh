@@ -98,7 +98,7 @@ RUN /tmp/install.sh /assembly/toolkit "${TARGETARCH:-amd64}"
 # Assemble runtime directory
 FROM toolkit-assembly-glibc AS toolkit-assembly-final
 COPY --from=bridge-builder /out/bridge /assembly/bridge
-COPY cmd/bridge/template /assembly/templates
+COPY templates/workspace /assembly/templates
 COPY docker/toolkit/bin /assembly/toolkit/bin
 RUN chmod +x /assembly/toolkit/bin/*
 

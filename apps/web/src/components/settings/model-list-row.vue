@@ -13,8 +13,8 @@
        interaction contract, and stays its own hand-built component. -->
   <button
     type="button"
-    :class="rowClass"
-    :disabled="disabled"
+    :class="[rowClass, !readonly && interactiveRowClass]"
+    :disabled="disabled || readonly"
     @click="emit('click')"
   >
     <span class="min-w-0 truncate">
@@ -25,7 +25,10 @@
       >{{ meta }}</span>
     </span>
     <slot name="trailing">
-      <Settings class="size-4 shrink-0 text-muted-foreground/60" />
+      <Settings
+        v-if="!readonly"
+        class="size-4 shrink-0 text-muted-foreground/60"
+      />
     </slot>
   </button>
   <!-- Divider is a sibling, not a border on the row itself: callers already
@@ -48,10 +51,12 @@ withDefaults(defineProps<{
   meta?: string
   last?: boolean
   disabled?: boolean
+  readonly?: boolean
 }>(), {
   meta: '',
   last: false,
   disabled: false,
+  readonly: false,
 })
 
 // Multi-root template (button + sibling divider) disables Vue's automatic
@@ -63,5 +68,6 @@ const emit = defineEmits<{ click: [] }>()
 // overlay hover every other clickable surface in this vocabulary uses
 // (BackendCard, CalloutBanner's clickable variant) — the row's own chrome,
 // not a page injection.
-const rowClass = 'flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40' /* ui-allow-style */
+const rowClass = 'flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-foreground transition-colors disabled:pointer-events-none' /* ui-allow-style */
+const interactiveRowClass = 'hover:bg-accent disabled:opacity-40' /* ui-allow-style */
 </script>

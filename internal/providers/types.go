@@ -15,6 +15,14 @@ type CreateRequest struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
+type CreateFromTemplateRequest struct {
+	TemplateID string         `json:"template_id" validate:"required"`
+	Domain     string         `json:"domain,omitempty"`
+	Name       string         `json:"name,omitempty"`
+	Config     map[string]any `json:"config,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
 // UpdateRequest represents a request to update an existing provider.
 type UpdateRequest struct {
 	Name       *string        `json:"name,omitempty"`
@@ -27,15 +35,16 @@ type UpdateRequest struct {
 
 // GetResponse represents the response for getting a provider.
 type GetResponse struct {
-	ID         string         `json:"id"`
-	Name       string         `json:"name"`
-	ClientType string         `json:"client_type"`
-	Icon       string         `json:"icon,omitempty"`
-	Enable     bool           `json:"enable"`
-	Config     map[string]any `json:"config,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	ID                 string         `json:"id"`
+	ProviderTemplateID string         `json:"provider_template_id,omitempty"`
+	Name               string         `json:"name"`
+	ClientType         string         `json:"client_type"`
+	Icon               string         `json:"icon,omitempty"`
+	Enable             bool           `json:"enable"`
+	Config             map[string]any `json:"config,omitempty"`
+	Metadata           map[string]any `json:"metadata,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
 // ListResponse represents the response for listing providers.

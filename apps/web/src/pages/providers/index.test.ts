@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   providerData: undefined as unknown as Ref<Array<Record<string, unknown>> | undefined>,
   providersLoading: undefined as unknown as Ref<boolean>,
   modelData: undefined as unknown as Ref<Array<Record<string, unknown>>>,
+  templateData: undefined as unknown as Ref<Array<Record<string, unknown>> | undefined>,
+  templatesLoading: undefined as unknown as Ref<boolean>,
   route: { query: {} as Record<string, string> },
   replace: vi.fn(),
 }))
@@ -21,16 +23,21 @@ vi.mock('@pinia/colada', async () => {
   mocks.providerData = ref()
   mocks.providersLoading = ref(false)
   mocks.modelData = ref([])
+  mocks.templateData = ref()
+  mocks.templatesLoading = ref(false)
   return {
-    useQuery: ({ key }: { key: () => string[] }) => key()[0] === 'providers'
-      ? { data: mocks.providerData, isLoading: mocks.providersLoading }
-      : { data: mocks.modelData, isLoading: ref(false) },
+    useQuery: ({ key }: { key: () => string[] }) => {
+      if (key()[0] === 'providers') return { data: mocks.providerData, isLoading: mocks.providersLoading }
+      if (key()[0] === 'provider-templates') return { data: mocks.templateData, isLoading: mocks.templatesLoading }
+      return { data: mocks.modelData, isLoading: ref(false) }
+    },
   }
 })
 
 vi.mock('@memohai/sdk', () => ({
   getModels: vi.fn(),
   getProviders: vi.fn(),
+  getProviderTemplates: vi.fn(),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -62,7 +69,18 @@ vi.mock('@felinic/ui', () => {
   }
 })
 
-vi.mock('@/components/add-provider/index.vue', () => ({ default: () => h('div') }))
+vi.mock('@/components/add-provider/index.vue', () => ({
+  default: {
+    props: ['open'],
+    emits: ['update:open'],
+    setup(props: { open?: boolean }) {
+      return () => h('div', {
+        'data-testid': 'add-provider-dialog',
+        'data-open': String(props.open ?? false),
+      })
+    },
+  },
+}))
 vi.mock('@/components/provider-icon/index.vue', () => ({ default: () => h('span') }))
 vi.mock('@/components/settings/backend-card.vue', () => ({
   default: {
@@ -102,8 +120,22 @@ vi.mock('@/components/page-shell/index.vue', () => ({
 vi.mock('./model-setting.vue', () => ({
   default: {
     props: ['provider'],
-    setup(props: { provider?: { id?: string, name?: string } }) {
-      return () => h('div', { 'data-testid': 'provider-detail' }, `${props.provider?.id}:${props.provider?.name}`)
+    emits: ['materialized'],
+    setup(
+      props: { provider?: { id?: string, name?: string, provider_template_id?: string } },
+      { emit }: { emit: (event: 'materialized', provider: Record<string, unknown>) => void },
+    ) {
+      return () => h('div', { 'data-testid': 'provider-detail' }, [
+        `${props.provider?.id}:${props.provider?.name}`,
+        h('button', {
+          'data-testid': 'materialize-provider',
+          'onClick': () => emit('materialized', {
+            id: 'provider-anthropic',
+            name: props.provider?.name,
+            provider_template_id: props.provider?.provider_template_id,
+          }),
+        }),
+      ])
     },
   },
 }))
@@ -129,6 +161,8 @@ describe('provider route state', () => {
     ]
     mocks.providersLoading.value = false
     mocks.modelData.value = []
+    mocks.templateData.value = []
+    mocks.templatesLoading.value = false
     mocks.route.query = {}
     mocks.replace.mockReset()
   })
@@ -183,6 +217,45 @@ describe('provider route state', () => {
 
     expect(mocks.replace).toHaveBeenCalledWith({ query: { provider: 'provider-two' } })
     expect(root.querySelector('[data-testid="provider-detail"]')?.textContent).toBe('provider-two:Two')
+    app.unmount()
+  })
+
+  it('opens an unconfigured template as a draft detail without opening the add dialog', async () => {
+    mocks.templateData.value = [{
+      id: 'template-anthropic',
+      name: 'Anthropic',
+      driver: 'anthropic-messages',
+      default_config: { base_url: 'https://api.anthropic.com' },
+      configured: false,
+    }]
+    const { app, root } = await mountPage()
+
+    ;(root.querySelector('[data-provider="Anthropic"]') as HTMLButtonElement).click()
+    await nextTick()
+
+    expect(mocks.replace).toHaveBeenCalledWith({ query: { provider: 'template:template-anthropic' } })
+    expect(root.querySelector('[data-testid="provider-detail"]')?.textContent).toBe('undefined:Anthropic')
+    expect(root.querySelector('[data-testid="add-provider-dialog"]')).toBeNull()
+    app.unmount()
+  })
+
+  it('keeps the template route and detail open after the draft is materialized', async () => {
+    mocks.templateData.value = [{
+      id: 'template-anthropic',
+      name: 'Anthropic',
+      driver: 'anthropic-messages',
+      default_config: { base_url: 'https://api.anthropic.com' },
+      configured: false,
+    }]
+    const { app, root } = await mountPage()
+
+    ;(root.querySelector('[data-provider="Anthropic"]') as HTMLButtonElement).click()
+    await nextTick()
+    ;(root.querySelector('[data-testid="materialize-provider"]') as HTMLButtonElement).click()
+    await nextTick()
+
+    expect(mocks.replace).toHaveBeenLastCalledWith({ query: { provider: 'template:template-anthropic' } })
+    expect(root.querySelector('[data-testid="provider-detail"]')?.textContent).toContain('provider-anthropic:Anthropic')
     app.unmount()
   })
 

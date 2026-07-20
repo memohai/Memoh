@@ -99,6 +99,19 @@
     "channel": {
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。"
     },
+    "provider": {
+      "name_taken": "已存在同名提供方。"
+    },
+    "provider_template": {
+      "not_found": "该提供方模板已不可用。",
+      "domain_invalid": "提供方模板类型无效。",
+      "domain_mismatch": "该提供方模板不能用于此处。",
+      "operation_failed": "提供方模板操作失败。",
+      "request_invalid": "提供方配置无效。"
+    },
+    "search_provider": {
+      "type_conflict": "该搜索提供方已完成配置。"
+    },
     "workspace": {
       "unreachable": "暂时无法连接工作区，请稍后重试。",
       "display_prepare_failed": "显示环境准备失败，请稍后重试。"
@@ -427,14 +440,9 @@
     "lastLogin": "上次登录",
     "never": "从未登录",
     "toggleStatus": "切换 {name} 的状态",
-    "resetPassword": "重置密码",
-    "resetPasswordFor": "重置 {name} 的密码",
-    "resetPasswordDescription": "为 {name} 设置新密码。",
-    "resetPasswordSuccess": "密码已重置",
-    "resetPasswordFailed": "密码重置失败",
     "removeMember": "移除成员",
     "removeMemberFor": "移除 {name}",
-    "removeConfirm": "确定移除 {name} 吗？这会移除其工作区登录账号。",
+    "removeConfirm": "确定从当前工作区移除 {name} 吗？账号凭据会保留，以后可以重新启用。",
     "removeSuccess": "成员已移除",
     "removeFailed": "成员移除失败",
     "createSuccess": "成员已创建",
@@ -1085,6 +1093,8 @@
     "customProvider": "自定义服务商",
     "apiKey": "API 密钥",
     "apiKeyPlaceholder": "输入 API 密钥",
+    "templateNotConfigured": "未配置",
+    "requiredField": "{field} 为必填项",
     "nameRequired": "请填写名称",
     "clientTypeRequired": "请选择客户端类型",
     "apiKeyRequired": "请填写 API 密钥",
@@ -1195,6 +1205,7 @@
       "yandex": "Yandex"
     },
     "fetchProviderNames": {
+      "native": "原生抓取",
       "jina": "Jina Reader",
       "cloudflare_markdown": "Cloudflare Markdown"
     }
@@ -1204,6 +1215,8 @@
     "add": "添加记忆提供方",
     "empty": "暂无记忆提供方",
     "provider": "提供方类型",
+    "providerRequired": "请选择提供方类型",
+    "nameRequired": "请填写名称",
     "searchPlaceholder": "搜索提供方...",
     "emptyTitle": "暂无记忆提供方",
     "emptyDescription": "添加记忆提供方以启用 Bot 的长期记忆功能",

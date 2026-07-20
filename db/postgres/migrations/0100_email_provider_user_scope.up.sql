@@ -28,9 +28,12 @@ WITH bound_owners AS (
 ),
 fallback_owner AS (
   SELECT id AS owner_user_id
-  FROM users
+  FROM users AS u
   WHERE username IS NOT NULL
-  ORDER BY (role = 'admin') DESC, created_at ASC
+  -- 0001 is the canonical latest schema, where role has moved to
+  -- team_members. to_jsonb keeps this historical migration replayable while
+  -- preserving the legacy preference for an admin when the column exists.
+  ORDER BY (to_jsonb(u) ->> 'role' = 'admin') DESC, created_at ASC
   LIMIT 1
 ),
 provider_owners AS (
@@ -104,7 +107,7 @@ SELECT
 FROM email_provider_owner_map AS map
 JOIN email_oauth_tokens AS tok ON tok.email_provider_id = map.old_provider_id
 WHERE NOT map.is_primary
-ON CONFLICT (email_provider_id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 UPDATE bot_email_bindings AS beb
 SET email_provider_id = map.new_provider_id

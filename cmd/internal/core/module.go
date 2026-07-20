@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/oauthclients"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
+	"github.com/memohai/memoh/internal/providertemplates"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
@@ -89,6 +90,7 @@ func ServerModule() fx.Option {
 			provideACPClaudeCodeOAuthHandler,
 			provideHooksService,
 			provideProvidersService,
+			providertemplates.NewService,
 			fetchproviders.NewService,
 			searchproviders.NewService,
 			mcp.NewConnectionService,
@@ -122,12 +124,8 @@ func ServerModule() fx.Option {
 		fx.Invoke(
 			injectToolProviders,
 			injectACPToolProviders,
-			startRegistrySync,
-			startAudioProviderBootstrap,
-			startVideoProviderBootstrap,
-			startMemoryProviderBootstrap,
-			startFetchProviderBootstrap,
-			startSearchProviderBootstrap,
+			configureMemoryProviderRegistry,
+			startProviderTemplateSync,
 			startScheduleService,
 			startHeartbeatService,
 			startContainerReconciliation,

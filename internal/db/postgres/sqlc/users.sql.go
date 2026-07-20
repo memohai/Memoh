@@ -13,9 +13,8 @@ import (
 
 const countAccounts = `-- name: CountAccounts :one
 SELECT COUNT(*)::bigint AS count
-FROM users
-WHERE team_id = public.memoh_current_team_id()
-  AND username IS NOT NULL
+FROM team_accounts
+WHERE username IS NOT NULL
   AND password_hash IS NOT NULL
 `
 
@@ -27,45 +26,96 @@ func (q *Queries) CountAccounts(ctx context.Context) (int64, error) {
 }
 
 const createAccount = `-- name: CreateAccount :one
-UPDATE users
-SET username = $1,
-    email = $2,
-    password_hash = $3,
-    role = $4::user_role,
-    display_name = $5,
-    avatar_url = $6,
-    is_active = $7,
-    data_root = $8,
-    updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = $9
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+WITH updated_user AS (
+  UPDATE users
+  SET username = $1,
+      email = $2,
+      password_hash = $3,
+      display_name = $4,
+      avatar_url = $5,
+      updated_at = now()
+  WHERE users.id = $6
+    AND EXISTS (
+      SELECT 1 FROM team_members membership
+      WHERE membership.team_id = public.memoh_current_team_id()
+        AND membership.user_id = users.id
+    )
+  RETURNING users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
+), updated_membership AS (
+  UPDATE team_members membership
+  SET role = $7::user_role,
+      is_active = $8,
+      data_root = $9,
+      updated_at = now()
+  FROM updated_user
+  WHERE membership.team_id = public.memoh_current_team_id()
+    AND membership.user_id = updated_user.id
+  RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.metadata, membership.created_at, membership.updated_at
+)
+SELECT
+  changed_user.id, changed_user.username, changed_user.email,
+  changed_user.password_hash, changed_membership.role,
+  changed_user.display_name, changed_user.avatar_url, changed_user.timezone,
+  changed_membership.data_root, changed_user.last_login_at,
+  (changed_user.is_active AND changed_membership.is_active) AS is_active,
+  changed_user.metadata, changed_user.created_at, changed_user.updated_at,
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
+FROM updated_user changed_user
+JOIN updated_membership changed_membership
+  ON changed_membership.user_id = changed_user.id
 `
 
 type CreateAccountParams struct {
 	Username     pgtype.Text `json:"username"`
 	Email        pgtype.Text `json:"email"`
 	PasswordHash pgtype.Text `json:"password_hash"`
-	Role         string      `json:"role"`
 	DisplayName  pgtype.Text `json:"display_name"`
 	AvatarUrl    pgtype.Text `json:"avatar_url"`
+	UserID       pgtype.UUID `json:"user_id"`
+	Role         string      `json:"role"`
 	IsActive     bool        `json:"is_active"`
 	DataRoot     pgtype.Text `json:"data_root"`
-	UserID       pgtype.UUID `json:"user_id"`
 }
 
-func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (User, error) {
+type CreateAccountRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+}
+
+func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (CreateAccountRow, error) {
 	row := q.db.QueryRow(ctx, createAccount,
 		arg.Username,
 		arg.Email,
 		arg.PasswordHash,
-		arg.Role,
 		arg.DisplayName,
 		arg.AvatarUrl,
+		arg.UserID,
+		arg.Role,
 		arg.IsActive,
 		arg.DataRoot,
-		arg.UserID,
 	)
-	var i User
+	var i CreateAccountRow
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -82,14 +132,40 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (U
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (is_active, metadata)
-VALUES ($1, $2)
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+WITH created_user AS (
+  INSERT INTO users (is_active, metadata)
+  VALUES ($1, $2)
+  RETURNING users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
+), created_membership AS (
+  INSERT INTO team_members (team_id, user_id, is_active)
+  SELECT public.memoh_current_team_id(), id, $1
+  FROM created_user
+  RETURNING team_members.team_id, team_members.user_id, team_members.role, team_members.is_active, team_members.data_root, team_members.metadata, team_members.created_at, team_members.updated_at
+)
+SELECT
+  changed_user.id, changed_user.username, changed_user.email,
+  changed_user.password_hash, changed_membership.role,
+  changed_user.display_name, changed_user.avatar_url, changed_user.timezone,
+  changed_membership.data_root, changed_user.last_login_at,
+  (changed_user.is_active AND changed_membership.is_active) AS is_active,
+  changed_user.metadata, changed_user.created_at, changed_user.updated_at,
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
+FROM created_user changed_user
+JOIN created_membership changed_membership
+  ON changed_membership.user_id = changed_user.id
 `
 
 type CreateUserParams struct {
@@ -97,9 +173,31 @@ type CreateUserParams struct {
 	Metadata []byte `json:"metadata"`
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+type CreateUserRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+}
+
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
 	row := q.db.QueryRow(ctx, createUser, arg.IsActive, arg.Metadata)
-	var i User
+	var i CreateUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -116,17 +214,23 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
 
 const getAccountByIdentity = `-- name: GetAccountByIdentity :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id FROM users WHERE team_id = public.memoh_current_team_id() AND (username = $1 OR email = $1)
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at
+FROM team_accounts
+WHERE username = $1 OR email = $1
 `
 
-func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (User, error) {
+func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (TeamAccount, error) {
 	row := q.db.QueryRow(ctx, getAccountByIdentity, identity)
-	var i User
+	var i TeamAccount
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -143,17 +247,21 @@ func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
 
 const getAccountByUserID = `-- name: GetAccountByUserID :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id FROM users WHERE team_id = public.memoh_current_team_id() AND id = $1
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at FROM team_accounts WHERE id = $1
 `
 
-func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (User, error) {
+func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (TeamAccount, error) {
 	row := q.db.QueryRow(ctx, getAccountByUserID, userID)
-	var i User
+	var i TeamAccount
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -170,54 +278,58 @@ func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (U
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+SELECT users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
 FROM users
-WHERE team_id = public.memoh_current_team_id() AND id = $1
+JOIN team_members membership
+  ON membership.user_id = users.id
+ AND membership.team_id = public.memoh_current_team_id()
+WHERE users.id = $1
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByID, id)
+func (q *Queries) GetUserByID(ctx context.Context, userID pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByID, userID)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
-		&i.DataRoot,
 		&i.LastLoginAt,
 		&i.IsActive,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TeamID,
 	)
 	return i, err
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id FROM users
-WHERE team_id = public.memoh_current_team_id() AND username IS NOT NULL
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at FROM team_accounts
+WHERE username IS NOT NULL
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListAccounts(ctx context.Context) ([]User, error) {
+func (q *Queries) ListAccounts(ctx context.Context) ([]TeamAccount, error) {
 	rows, err := q.db.Query(ctx, listAccounts)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []User
+	var items []TeamAccount
 	for rows.Next() {
-		var i User
+		var i TeamAccount
 		if err := rows.Scan(
 			&i.ID,
 			&i.Username,
@@ -234,6 +346,10 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]User, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TeamID,
+			&i.PrincipalIsActive,
+			&i.MembershipIsActive,
+			&i.JoinedAt,
+			&i.MembershipUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -246,31 +362,25 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]User, error) {
 }
 
 const removeMember = `-- name: RemoveMember :one
-UPDATE users
-SET username = NULL,
-    email = NULL,
-    password_hash = NULL,
-    display_name = NULL,
-    avatar_url = NULL,
-    data_root = NULL,
-    is_active = FALSE,
+UPDATE team_members
+SET is_active = FALSE,
     updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id
+WHERE team_id = public.memoh_current_team_id()
+  AND user_id = $1
+RETURNING user_id
 `
 
 func (q *Queries) RemoveMember(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, removeMember, userID)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
+	var user_id pgtype.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
 }
 
 const searchAccounts = `-- name: SearchAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
-FROM users
-WHERE team_id = public.memoh_current_team_id()
-  AND username IS NOT NULL
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at
+FROM team_accounts
+WHERE username IS NOT NULL
   AND (
     $1::text = ''
     OR username ILIKE '%' || $1::text || '%'
@@ -286,15 +396,15 @@ type SearchAccountsParams struct {
 	LimitCount int32  `json:"limit_count"`
 }
 
-func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) ([]User, error) {
+func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) ([]TeamAccount, error) {
 	rows, err := q.db.Query(ctx, searchAccounts, arg.Query, arg.LimitCount)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []User
+	var items []TeamAccount
 	for rows.Next() {
-		var i User
+		var i TeamAccount
 		if err := rows.Scan(
 			&i.ID,
 			&i.Username,
@@ -311,6 +421,10 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TeamID,
+			&i.PrincipalIsActive,
+			&i.MembershipIsActive,
+			&i.JoinedAt,
+			&i.MembershipUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -323,33 +437,62 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) 
 }
 
 const updateAccountAdmin = `-- name: UpdateAccountAdmin :one
-UPDATE users
-SET role = $1::user_role,
-    display_name = $2,
-    avatar_url = $3,
-    is_active = $4,
-    updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = $5
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+WITH updated_membership AS (
+  UPDATE team_members membership
+  SET role = $1::user_role,
+      is_active = COALESCE($2::boolean, membership.is_active),
+      updated_at = now()
+  WHERE membership.team_id = public.memoh_current_team_id()
+    AND membership.user_id = $3
+  RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.metadata, membership.created_at, membership.updated_at
+)
+SELECT
+  changed_user.id, changed_user.username, changed_user.email,
+  changed_user.password_hash, changed_membership.role,
+  changed_user.display_name, changed_user.avatar_url, changed_user.timezone,
+  changed_membership.data_root, changed_user.last_login_at,
+  (changed_user.is_active AND changed_membership.is_active) AS is_active,
+  changed_user.metadata, changed_user.created_at, changed_user.updated_at,
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
+FROM updated_membership changed_membership
+JOIN users changed_user ON changed_user.id = changed_membership.user_id
 `
 
 type UpdateAccountAdminParams struct {
-	Role        string      `json:"role"`
-	DisplayName pgtype.Text `json:"display_name"`
-	AvatarUrl   pgtype.Text `json:"avatar_url"`
-	IsActive    bool        `json:"is_active"`
-	UserID      pgtype.UUID `json:"user_id"`
+	Role     string      `json:"role"`
+	IsActive pgtype.Bool `json:"is_active"`
+	UserID   pgtype.UUID `json:"user_id"`
 }
 
-func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdminParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateAccountAdmin,
-		arg.Role,
-		arg.DisplayName,
-		arg.AvatarUrl,
-		arg.IsActive,
-		arg.UserID,
-	)
-	var i User
+type UpdateAccountAdminRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+}
+
+func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdminParams) (UpdateAccountAdminRow, error) {
+	row := q.db.QueryRow(ctx, updateAccountAdmin, arg.Role, arg.IsActive, arg.UserID)
+	var i UpdateAccountAdminRow
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -366,6 +509,10 @@ func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdmin
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
@@ -374,100 +521,124 @@ const updateAccountLastLogin = `-- name: UpdateAccountLastLogin :one
 UPDATE users
 SET last_login_at = now(),
     updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+WHERE id = $1
+  AND EXISTS (
+    SELECT 1 FROM team_members membership
+    WHERE membership.team_id = public.memoh_current_team_id()
+      AND membership.user_id = users.id
+  )
+RETURNING id
 `
 
-func (q *Queries) UpdateAccountLastLogin(ctx context.Context, id pgtype.UUID) (User, error) {
-	row := q.db.QueryRow(ctx, updateAccountLastLogin, id)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.Email,
-		&i.PasswordHash,
-		&i.Role,
-		&i.DisplayName,
-		&i.AvatarUrl,
-		&i.Timezone,
-		&i.DataRoot,
-		&i.LastLoginAt,
-		&i.IsActive,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.TeamID,
-	)
-	return i, err
+func (q *Queries) UpdateAccountLastLogin(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, updateAccountLastLogin, userID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateAccountPassword = `-- name: UpdateAccountPassword :one
 UPDATE users
-SET password_hash = $2,
+SET password_hash = $1,
     updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+WHERE id = $2
+  AND EXISTS (
+    SELECT 1 FROM team_members membership
+    WHERE membership.team_id = public.memoh_current_team_id()
+      AND membership.user_id = users.id
+  )
+RETURNING id
 `
 
 type UpdateAccountPasswordParams struct {
-	ID           pgtype.UUID `json:"id"`
 	PasswordHash pgtype.Text `json:"password_hash"`
+	UserID       pgtype.UUID `json:"user_id"`
 }
 
-func (q *Queries) UpdateAccountPassword(ctx context.Context, arg UpdateAccountPasswordParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateAccountPassword, arg.ID, arg.PasswordHash)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.Email,
-		&i.PasswordHash,
-		&i.Role,
-		&i.DisplayName,
-		&i.AvatarUrl,
-		&i.Timezone,
-		&i.DataRoot,
-		&i.LastLoginAt,
-		&i.IsActive,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.TeamID,
-	)
-	return i, err
+func (q *Queries) UpdateAccountPassword(ctx context.Context, arg UpdateAccountPasswordParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, updateAccountPassword, arg.PasswordHash, arg.UserID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateAccountProfile = `-- name: UpdateAccountProfile :one
-UPDATE users
-SET display_name = $2,
-    avatar_url = $3,
-    timezone = $4,
-    is_active = $5,
-    metadata = $6,
-    updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+WITH updated_user AS (
+  UPDATE users
+  SET display_name = $1,
+      avatar_url = $2,
+      timezone = $3,
+      metadata = $4,
+      updated_at = now()
+  WHERE users.id = $5
+    AND EXISTS (
+      SELECT 1 FROM team_members membership
+      WHERE membership.team_id = public.memoh_current_team_id()
+        AND membership.user_id = users.id
+    )
+  RETURNING users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
+), current_membership AS (
+  SELECT membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.metadata, membership.created_at, membership.updated_at
+  FROM team_members membership
+  JOIN updated_user ON updated_user.id = membership.user_id
+  WHERE membership.team_id = public.memoh_current_team_id()
+)
+SELECT
+  changed_user.id, changed_user.username, changed_user.email,
+  changed_user.password_hash, changed_membership.role,
+  changed_user.display_name, changed_user.avatar_url, changed_user.timezone,
+  changed_membership.data_root, changed_user.last_login_at,
+  (changed_user.is_active AND changed_membership.is_active) AS is_active,
+  changed_user.metadata, changed_user.created_at, changed_user.updated_at,
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
+FROM updated_user changed_user
+JOIN current_membership changed_membership
+  ON changed_membership.user_id = changed_user.id
 `
 
 type UpdateAccountProfileParams struct {
-	ID          pgtype.UUID `json:"id"`
 	DisplayName pgtype.Text `json:"display_name"`
 	AvatarUrl   pgtype.Text `json:"avatar_url"`
 	Timezone    string      `json:"timezone"`
-	IsActive    bool        `json:"is_active"`
 	Metadata    []byte      `json:"metadata"`
+	UserID      pgtype.UUID `json:"user_id"`
 }
 
-func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountProfileParams) (User, error) {
+type UpdateAccountProfileRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+}
+
+func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountProfileParams) (UpdateAccountProfileRow, error) {
 	row := q.db.QueryRow(ctx, updateAccountProfile,
-		arg.ID,
 		arg.DisplayName,
 		arg.AvatarUrl,
 		arg.Timezone,
-		arg.IsActive,
 		arg.Metadata,
+		arg.UserID,
 	)
-	var i User
+	var i UpdateAccountProfileRow
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -484,34 +655,72 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountPro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
 
 const upsertAccountByUsername = `-- name: UpsertAccountByUsername :one
-INSERT INTO users (id, username, email, password_hash, role, display_name, avatar_url, is_active, data_root, metadata)
-VALUES (
-  $1,
-  $2,
-  $3,
-  $4,
-  $5::user_role,
-  $6,
-  $7,
-  $8,
-  $9,
-  '{}'::jsonb
+WITH upserted_user AS (
+  INSERT INTO users (
+    id, username, email, password_hash, display_name, avatar_url,
+    is_active, metadata
+  )
+  VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    '{}'::jsonb
+  )
+  ON CONFLICT (username) DO NOTHING
+  RETURNING users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
+), selected_user AS (
+  SELECT id, username, email, password_hash, display_name, avatar_url, timezone, last_login_at, is_active, metadata, created_at, updated_at FROM upserted_user
+  UNION ALL
+  SELECT users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
+  FROM users
+  WHERE users.username = $2
+    AND NOT EXISTS (SELECT 1 FROM upserted_user)
+), upserted_membership AS (
+  INSERT INTO team_members (
+    team_id, user_id, role, is_active, data_root
+  )
+  SELECT
+    public.memoh_current_team_id(),
+    id,
+    $8::user_role,
+    $7,
+    $9
+  FROM selected_user
+  ON CONFLICT (team_id, user_id) DO UPDATE SET
+    role = EXCLUDED.role,
+    is_active = EXCLUDED.is_active,
+    data_root = EXCLUDED.data_root,
+    updated_at = now()
+  RETURNING team_members.team_id, team_members.user_id, team_members.role, team_members.is_active, team_members.data_root, team_members.metadata, team_members.created_at, team_members.updated_at
 )
-ON CONFLICT (team_id, username) DO UPDATE SET
-  email = EXCLUDED.email,
-  password_hash = EXCLUDED.password_hash,
-  role = EXCLUDED.role,
-  display_name = EXCLUDED.display_name,
-  avatar_url = EXCLUDED.avatar_url,
-  is_active = EXCLUDED.is_active,
-  data_root = EXCLUDED.data_root,
-  updated_at = now()
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
+SELECT
+  changed_user.id, changed_user.username, changed_user.email,
+  changed_user.password_hash, changed_membership.role,
+  changed_user.display_name, changed_user.avatar_url, changed_user.timezone,
+  changed_membership.data_root, changed_user.last_login_at,
+  (changed_user.is_active AND changed_membership.is_active) AS is_active,
+  changed_user.metadata, changed_user.created_at, changed_user.updated_at,
+  changed_membership.team_id,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active,
+  changed_membership.created_at AS joined_at,
+  changed_membership.updated_at AS membership_updated_at
+FROM selected_user changed_user
+JOIN upserted_membership changed_membership
+  ON changed_membership.user_id = changed_user.id
 `
 
 type UpsertAccountByUsernameParams struct {
@@ -519,26 +728,48 @@ type UpsertAccountByUsernameParams struct {
 	Username     pgtype.Text `json:"username"`
 	Email        pgtype.Text `json:"email"`
 	PasswordHash pgtype.Text `json:"password_hash"`
-	Role         string      `json:"role"`
 	DisplayName  pgtype.Text `json:"display_name"`
 	AvatarUrl    pgtype.Text `json:"avatar_url"`
 	IsActive     bool        `json:"is_active"`
+	Role         string      `json:"role"`
 	DataRoot     pgtype.Text `json:"data_root"`
 }
 
-func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccountByUsernameParams) (User, error) {
+type UpsertAccountByUsernameRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	Username            pgtype.Text        `json:"username"`
+	Email               pgtype.Text        `json:"email"`
+	PasswordHash        pgtype.Text        `json:"password_hash"`
+	Role                string             `json:"role"`
+	DisplayName         pgtype.Text        `json:"display_name"`
+	AvatarUrl           pgtype.Text        `json:"avatar_url"`
+	Timezone            string             `json:"timezone"`
+	DataRoot            pgtype.Text        `json:"data_root"`
+	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
+	IsActive            pgtype.Bool        `json:"is_active"`
+	Metadata            []byte             `json:"metadata"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	PrincipalIsActive   bool               `json:"principal_is_active"`
+	MembershipIsActive  bool               `json:"membership_is_active"`
+	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
+	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+}
+
+func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccountByUsernameParams) (UpsertAccountByUsernameRow, error) {
 	row := q.db.QueryRow(ctx, upsertAccountByUsername,
 		arg.UserID,
 		arg.Username,
 		arg.Email,
 		arg.PasswordHash,
-		arg.Role,
 		arg.DisplayName,
 		arg.AvatarUrl,
 		arg.IsActive,
+		arg.Role,
 		arg.DataRoot,
 	)
-	var i User
+	var i UpsertAccountByUsernameRow
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -555,6 +786,10 @@ func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccount
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.PrincipalIsActive,
+		&i.MembershipIsActive,
+		&i.JoinedAt,
+		&i.MembershipUpdatedAt,
 	)
 	return i, err
 }
