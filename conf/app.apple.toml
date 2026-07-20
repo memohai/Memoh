@@ -7,6 +7,16 @@ format = "text"
 
 [server]
 addr = ":8080"
+rpc_listen_addr = ":9090"
+
+[channel]
+addr = ":8081"
+rpc_listen_addr = ":9091"
+
+[internal_rpc]
+server_target = "127.0.0.1:9090"
+channel_target = "127.0.0.1:9091"
+shared_secret = ""
 
 [admin]
 username = "admin"

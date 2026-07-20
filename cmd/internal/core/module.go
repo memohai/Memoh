@@ -29,23 +29,46 @@ import (
 	"github.com/memohai/memoh/internal/workspace"
 )
 
-// Module assembles the shared domain and agent-runtime providers used by
-// the Memoh binaries. It expects config.Config to be provided by the
-// composing command.
-func Module() fx.Option {
+// FoundationModule assembles process-neutral domain infrastructure shared by
+// Server and Channel. It intentionally excludes Agent, workspace runtimes,
+// schedulers, and provider bootstrap loops.
+func FoundationModule() fx.Option {
+	return fx.Options(
+		fx.Provide(
+			provideLogger,
+			provideDBConn,
+			providePostgresStore,
+			provideDBQueries,
+			provideAccountStore,
+			bots.NewService,
+			provideAccountService,
+			acl.NewService,
+			channelaccess.NewService,
+			toolapproval.NewService,
+			userinput.NewService,
+			policy.NewService,
+			oauthclients.NewRegistry,
+			conversation.NewService,
+			event.NewHub,
+			provideSessionService,
+			provideMessageService,
+		),
+	)
+}
+
+// ServerModule assembles the Server-owned Agent and workspace runtime. It
+// expects FoundationModule and the Channel catalog/runtime interfaces to be
+// provided by the composing command.
+func ServerModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
 			boot.ProvideRuntimeConfig,
-			provideLogger,
 			provideContainerService,
 			provideOverlayProviderRegistry,
 			provideNetworkService,
 			provideNetworkController,
-			provideDBConn,
+			settings.NewService,
 			providePGVectorStore,
-			providePostgresStore,
-			provideDBQueries,
-			provideAccountStore,
 			provideUserRuntimeStore,
 			provideBotRemoteRuntimeBindingStore,
 			provideUserRuntimeHub,
@@ -60,35 +83,22 @@ func Module() fx.Option {
 			memprovider.NewService,
 			provideMemoryProviderRegistry,
 			models.NewService,
-			bots.NewService,
 			provideACPRunner,
 			provideACPSessionPool,
 			provideACPCodexOAuthHandler,
 			provideACPClaudeCodeOAuthHandler,
-			provideAccountService,
-			acl.NewService,
-			channelaccess.NewService,
-			settings.NewService,
-			toolapproval.NewService,
-			userinput.NewService,
 			provideHooksService,
 			provideProvidersService,
 			fetchproviders.NewService,
 			searchproviders.NewService,
-			policy.NewService,
 			mcp.NewConnectionService,
-			oauthclients.NewRegistry,
 			pluginspkg.NewService,
 			mcp.NewToolSessionContextStore,
-			conversation.NewService,
-			event.NewHub,
 			provideAudioRegistry,
 			audiopkg.NewService,
 			provideVideoRegistry,
 			videopkg.NewService,
 			provideAudioTempStore,
-			provideSessionService,
-			provideMessageService,
 			provideMediaService,
 			provideAgent,
 			provideChatResolver,
@@ -125,4 +135,10 @@ func Module() fx.Option {
 			startAudioTempStoreCleanup,
 		),
 	)
+}
+
+// Module preserves the all-in-one composition API for tests and transitional
+// callers. Production commands compose the two modules explicitly.
+func Module() fx.Option {
+	return fx.Options(FoundationModule(), ServerModule())
 }

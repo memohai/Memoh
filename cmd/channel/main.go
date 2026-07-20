@@ -1,9 +1,6 @@
-// cmd/channel is the Channel boundary's single-instance verification
-// binary (spec §7.3): it assembles the shared Channel module over the
-// in-process turn adapter, hosting only the platform webhook endpoints.
-// Until a cross-process turn transport exists it is functionally an
-// all-in-one without the REST API — its purpose is proving the channel
-// dependency set stays explicit and closed, not serving deployments.
+// cmd/channel hosts external channel adapters, email receivers, and webhook
+// endpoints as a standalone service. Agent turns run in the Server process and
+// are reached through the authenticated internal RPC transport.
 package main
 
 import (
@@ -14,12 +11,12 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/labstack/echo/v4"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
 	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
 	coremodule "github.com/memohai/memoh/cmd/internal/core"
-	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
 	"github.com/memohai/memoh/internal/config"
@@ -28,7 +25,31 @@ import (
 	"github.com/memohai/memoh/internal/version"
 )
 
+type healthHandler struct{}
+
+func newHealthHandler() *healthHandler { return &healthHandler{} }
+
+func (*healthHandler) Register(e *echo.Echo) {
+	e.GET("/ping", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{
+			"status":      "ok",
+			"service":     "channel",
+			"version":     version.Version,
+			"commit_hash": version.ShortCommitHash(),
+		})
+	})
+	e.HEAD("/health", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Printf("memoh-channel %s\n", version.GetInfo())
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] != "serve" {
+		fmt.Fprintln(os.Stderr, "Usage: memoh-channel [serve|version]")
+		os.Exit(1)
+	}
 	fx.New(options()).Run()
 }
 
@@ -52,7 +73,6 @@ type serverParams struct {
 	fx.In
 
 	Logger         *slog.Logger
-	RuntimeConfig  *boot.RuntimeConfig
 	Config         config.Config
 	ServerHandlers []server.Handler `group:"server_handlers"`
 }
@@ -60,7 +80,7 @@ type serverParams struct {
 // provideServer hosts only the channel-owned HTTP surface: platform
 // webhooks and the weixin QR callback, plus ping for liveness.
 func provideServer(params serverParams) *server.Server {
-	return server.NewServer(params.Logger, params.RuntimeConfig.ServerAddr, params.Config.Auth.JWTSecret, params.ServerHandlers...)
+	return server.NewServer(params.Logger, params.Config.Channel.Addr, params.Config.Auth.JWTSecret, params.ServerHandlers...)
 }
 
 func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner) {
@@ -84,15 +104,23 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 func options() fx.Option {
 	return fx.Options(
 		fx.Provide(provideConfig),
-		coremodule.Module(),
-		channelmodule.Module(),
+		coremodule.FoundationModule(),
+		channelmodule.FoundationModule(),
+		channelmodule.RuntimeModule(),
 		fx.Provide(
-			provideServerHandler(handlers.NewPingHandler),
+			provideServerRPCConn,
+			provideTurnClient,
+			provideRuntimeRPCClient,
+			provideServerRuntimeClient,
+			provideChannelRPC,
+			provideServerHandler(newHealthHandler),
 			provideServerHandler(channel.NewWebhookServerHandler),
 			provideServerHandler(weixin.NewQRServerHandler),
+			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
+			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServer,
 		),
-		fx.Invoke(startServer),
+		fx.Invoke(startChannelRPC, startServer),
 		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {
 			return &fxevent.SlogLogger{Logger: logger.With(slog.String("component", "fx"))}
 		}),

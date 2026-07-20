@@ -145,6 +145,19 @@ type RequestedSkillResolver interface {
 	ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skillset.ResolvedSkill, error)
 }
 
+// CommandHandler is the command-control surface used by inbound channels.
+// The Server process supplies the local implementation; the standalone
+// Channel process supplies an authenticated RPC client.
+type CommandHandler interface {
+	CommandAccess(context.Context, command.ExecuteInput) (bool, error)
+	CurrentContext(context.Context, string) (command.CurrentContext, error)
+	ExecuteResult(context.Context, command.ExecuteInput) (*command.Result, error)
+	ExecuteWithInput(context.Context, command.ExecuteInput) (string, error)
+	HasCommandResource(string) bool
+	MemberRole(context.Context, string, string) (string, error)
+	ResolveLocale(context.Context, string) string
+}
+
 // SessionResult carries the minimum fields needed from a session.
 type SessionResult struct {
 	ID                    string
@@ -171,7 +184,7 @@ type ChannelInboundProcessor struct {
 	message             messagepkg.Writer
 	mediaService        mediaIngestor
 	reactor             channelReactor
-	commandHandler      *command.Handler
+	commandHandler      CommandHandler
 	registry            *channel.Registry
 	logger              *slog.Logger
 	jwtSecret           string
@@ -303,7 +316,7 @@ func (p *ChannelInboundProcessor) SetSessionEnsurer(ensurer SessionEnsurer) {
 
 // SetCommandHandler configures the slash command handler for intercepting
 // /command messages before they reach the LLM.
-func (p *ChannelInboundProcessor) SetCommandHandler(handler *command.Handler) {
+func (p *ChannelInboundProcessor) SetCommandHandler(handler CommandHandler) {
 	if p == nil {
 		return
 	}

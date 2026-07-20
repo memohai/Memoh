@@ -9,10 +9,10 @@ import (
 )
 
 type WebhookTunnelHandler struct {
-	manager *webhooktunnel.Manager
+	manager interface{ Status() webhooktunnel.Status }
 }
 
-func NewWebhookTunnelHandler(manager *webhooktunnel.Manager) *WebhookTunnelHandler {
+func NewWebhookTunnelHandler(manager interface{ Status() webhooktunnel.Status }) *WebhookTunnelHandler {
 	return &WebhookTunnelHandler{manager: manager}
 }
 

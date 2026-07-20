@@ -16,10 +16,10 @@ import (
 type EmailProvider struct {
 	logger  *slog.Logger
 	service *email.Service
-	manager *email.Manager
+	manager email.Runtime
 }
 
-func NewEmailProvider(log *slog.Logger, service *email.Service, manager *email.Manager) *EmailProvider {
+func NewEmailProvider(log *slog.Logger, service *email.Service, manager email.Runtime) *EmailProvider {
 	return &EmailProvider{
 		logger:  log.With(slog.String("tool", "email")),
 		service: service,

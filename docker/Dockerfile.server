@@ -33,7 +33,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -X github.com/memohai/memoh/internal/version.Version=${VERSION} \
       -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} \
       -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
-    -o memoh-server ./cmd/agent
+    -o memoh-server ./cmd/agent && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath \
+    -ldflags "-s -w \
+      -X github.com/memohai/memoh/internal/version.Version=${VERSION} \
+      -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} \
+      -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
+    -o memoh-channel ./cmd/channel
 
 # ---- Stage 3: Build bridge binary ----
 FROM build-base AS bridge-builder
@@ -176,6 +183,7 @@ RUN apt-get update \
 
 COPY --from=toolkit-assembly-final /assembly /opt/memoh/runtime
 COPY --from=server-builder /build/memoh-server /app/memoh-server
+COPY --from=server-builder /build/memoh-channel /app/memoh-channel
 COPY --from=server-builder /build/spec /app/spec
 COPY --from=server-builder /build/conf/providers /app/conf/providers
 
@@ -186,7 +194,7 @@ RUN mkdir -p /opt/memoh/data /run/containerd /var/lib/containerd
 
 VOLUME ["/var/lib/containerd", "/opt/memoh/data"]
 
-EXPOSE 8080 1455
+EXPOSE 8080 8081 9090 9091 1455
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health \
@@ -243,6 +251,7 @@ COPY --from=toolkit-assembly-final /assembly /opt/memoh/runtime
 
 # Server binary, spec, and provider presets
 COPY --from=server-builder /build/memoh-server /app/memoh-server
+COPY --from=server-builder /build/memoh-channel /app/memoh-channel
 COPY --from=server-builder /build/spec /app/spec
 COPY --from=server-builder /build/conf/providers /app/conf/providers
 
@@ -254,7 +263,7 @@ RUN mkdir -p /opt/memoh/data /run/containerd /var/lib/containerd
 
 VOLUME ["/var/lib/containerd", "/opt/memoh/data"]
 
-EXPOSE 8080 1455
+EXPOSE 8080 8081 9090 9091 1455
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health \

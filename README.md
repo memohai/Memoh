@@ -59,8 +59,11 @@ git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com
 cd Memoh
 cp conf/app.docker.toml config.toml
 # Edit config.toml
+export MEMOH_INTERNAL_RPC_SHARED_SECRET="$(openssl rand -hex 32)"
 docker compose up -d
 ```
+
+The Compose stack runs Server and Channel as separate services. Keep the internal RPC secret private and use the same value whenever the stack is recreated.
 
 Existing setup checkouts can keep using `git pull`: the post-merge hook initializes the new
 submodule, and setup enables recursive updates for future pulls. If that hook was never installed,

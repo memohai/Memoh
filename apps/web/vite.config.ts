@@ -12,6 +12,7 @@ export default defineConfig(({ command }) => {
   const defaultHost = '127.0.0.1'
   const defaultApiBaseUrl = process.env.VITE_API_URL ?? 'http://localhost:8080'
   const configuredProxyTarget = process.env.MEMOH_WEB_PROXY_TARGET?.trim()
+  const configuredChannelProxyTarget = process.env.MEMOH_CHANNEL_PROXY_TARGET?.trim()
   const configuredPath = process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
   const configPath = configuredPath && configuredPath.length > 0 ? configuredPath : '../../config.toml'
 
@@ -64,6 +65,18 @@ export default defineConfig(({ command }) => {
     },
   }
 
+  const channelProxy = {
+    target: configuredChannelProxyTarget || baseUrl,
+    changeOrigin: true,
+    ws: true,
+    xfwd: true,
+  }
+
+  const channelApiProxy = {
+    ...channelProxy,
+    rewrite: (path: string) => path.replace(/^\/api/, ''),
+  }
+
   return {
     plugins: [
       // Guard against pnpm patchedDependencies cache poisoning at vite
@@ -97,7 +110,10 @@ export default defineConfig(({ command }) => {
         overlay: false,
       },
       proxy: {
+        '^/api/bots/[^/]+/channel/weixin/qr/(start|poll)$': channelApiProxy,
         '/api': apiProxy,
+        '/channels': channelProxy,
+        '/email/mailgun/webhook': channelProxy,
         '/': browserHostProxy,
       },
     },
@@ -105,7 +121,10 @@ export default defineConfig(({ command }) => {
       port,
       host: '0.0.0.0',
       proxy: {
+        '^/api/bots/[^/]+/channel/weixin/qr/(start|poll)$': channelApiProxy,
         '/api': apiProxy,
+        '/channels': channelProxy,
+        '/email/mailgun/webhook': channelProxy,
         '/': browserHostProxy,
       },
       allowedHosts: true,

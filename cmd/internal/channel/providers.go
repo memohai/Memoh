@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	stdpath "path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/agent/turn"
 	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/boot"
+	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/dingtalk"
@@ -46,7 +47,7 @@ import (
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/db"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
@@ -67,6 +68,8 @@ import (
 	"github.com/memohai/memoh/internal/searchproviders"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/storage/providers/localfs"
+	"github.com/memohai/memoh/internal/team"
 	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/webhooktunnel"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -74,6 +77,14 @@ import (
 
 func providePipeline() *pipelinepkg.Pipeline {
 	return pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+}
+
+func provideLocalMediaService(log *slog.Logger, cfg config.Config) *media.Service {
+	dataRoot := cfg.Workspace.DataRoot
+	if strings.TrimSpace(dataRoot) == "" {
+		dataRoot = config.DefaultDataRoot
+	}
+	return media.NewService(log, localfs.New(filepath.Join(dataRoot, "media")))
 }
 
 func provideEventStore(log *slog.Logger, queries dbstore.Queries) *pipelinepkg.EventStore {
@@ -94,7 +105,24 @@ func provideRouteService(log *slog.Logger, queries dbstore.Queries, chatService 
 	return route.NewService(log, queries, chatService)
 }
 
-func provideChannelRegistry(log *slog.Logger, cfg config.Config, hub *local.RouteHub, mediaService *media.Service, tunnelManager *webhooktunnel.Manager, userInput *userinput.Service) *channel.Registry {
+type channelRegistryParams struct {
+	fx.In
+
+	Log           *slog.Logger
+	Config        config.Config
+	Hub           *local.RouteHub
+	MediaService  *media.Service
+	TunnelManager *webhooktunnel.Manager `optional:"true"`
+	UserInput     *userinput.Service
+}
+
+func provideChannelRegistry(params channelRegistryParams) *channel.Registry {
+	log := params.Log
+	cfg := params.Config
+	hub := params.Hub
+	mediaService := params.MediaService
+	tunnelManager := params.TunnelManager
+	userInput := params.UserInput
 	registry := channel.NewRegistry()
 
 	tgAdapter := telegram.NewTelegramAdapter(log)
@@ -184,14 +212,14 @@ func provideChannelRouter(
 	aclService *acl.Service,
 	policyService *policy.Service,
 	mediaService *media.Service,
-	audioService *audiopkg.Service,
-	settingsService *settings.Service,
+	audioService channelAudio,
+	settingsService channelSettings,
 	pipeline *pipelinepkg.Pipeline,
 	eventStore *pipelinepkg.EventStore,
 	discussDriver *pipelinepkg.DiscussDriver,
-	rc *boot.RuntimeConfig,
-	cmdHandler *command.Handler,
-	containerdHandler *handlers.ContainerdHandler,
+	cfg config.Config,
+	cmdHandler inbound.CommandHandler,
+	skillResolver inbound.RequestedSkillResolver,
 ) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
 	if !ok {
@@ -204,7 +232,7 @@ func provideChannelRouter(
 	qqAdapter.SetChannelIdentityResolver(identityService)
 	qqAdapter.SetRouteResolver(routeService)
 
-	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, turnService, identityService, policyService, rc.JwtSecret, 5*time.Minute)
+	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, turnService, identityService, policyService, cfg.Auth.JWTSecret, 5*time.Minute)
 	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
 	processor.SetPipeline(pipeline, eventStore, discussDriver)
 	discussDriver.SetTurnService(turnService)
@@ -214,13 +242,13 @@ func provideChannelRouter(
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
 	processor.SetDispatcher(inbound.NewRouteDispatcher(log))
 	processor.SetSpeechService(audioService, &settingsSpeechModelResolver{settings: settingsService})
-	processor.SetTranscriptionService(&settingsTranscriptionAdapter{audio: audioService}, &settingsTranscriptionModelResolver{settings: settingsService})
+	processor.SetTranscriptionService(audioService, &settingsTranscriptionModelResolver{settings: settingsService})
 	processor.SetIMDisplayOptions(&settingsIMDisplayOptions{settings: settingsService})
 	processor.SetDefaultChatRuntime(&settingsDefaultChatRuntime{settings: settingsService})
 	processor.SetACPAgentSetupReader(&botACPAgentSetupReader{bots: botService})
 	processor.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
 	processor.SetCommandHandler(cmdHandler)
-	processor.SetRequestedSkillResolver(containerdHandler)
+	processor.SetRequestedSkillResolver(skillResolver)
 	return processor
 }
 
@@ -300,7 +328,7 @@ func startWebhookTunnel(lc fx.Lifecycle, manager *webhooktunnel.Manager) {
 	})
 }
 
-func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, store *channel.Store, channelManager *channel.Manager, mediaService *media.Service) {
+func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, store *channel.Store, channelManager *channel.Manager, mediaService *media.Service, emailService *emailpkg.Service, emailManager *emailpkg.Manager, emailTrigger *emailpkg.Trigger) {
 	if cfg.WebhookTunnel.EffectiveMode() == config.WebhookTunnelModeDisabled {
 		return
 	}
@@ -317,6 +345,7 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 		return c.String(http.StatusOK, "ok\n")
 	})
 	channel.NewWebhookServerHandler(log, store, channelManager).Register(e)
+	handlers.NewEmailWebhookHandler(log, emailService, emailManager, emailTrigger).Register(e)
 	// This listener is only started for tunnel modes. Its public base URL is
 	// resolved from either configured public_base_url or the running tunnel, so
 	// the configured-public-base gate used by the main server is intentionally
@@ -416,7 +445,7 @@ func runtimeMetadataString(metadata map[string]any, key string) string {
 }
 
 type settingsSpeechModelResolver struct {
-	settings *settings.Service
+	settings channelSettings
 }
 
 func (r *settingsSpeechModelResolver) ResolveSpeechModelID(ctx context.Context, botID string) (string, error) {
@@ -428,7 +457,7 @@ func (r *settingsSpeechModelResolver) ResolveSpeechModelID(ctx context.Context, 
 }
 
 type settingsIMDisplayOptions struct {
-	settings *settings.Service
+	settings channelSettings
 }
 
 func (r *settingsIMDisplayOptions) ShowToolCallsInIM(ctx context.Context, botID string) (bool, error) {
@@ -440,7 +469,7 @@ func (r *settingsIMDisplayOptions) ShowToolCallsInIM(ctx context.Context, botID 
 }
 
 type settingsDefaultChatRuntime struct {
-	settings *settings.Service
+	settings channelSettings
 }
 
 func (r *settingsDefaultChatRuntime) DefaultChatRuntime(ctx context.Context, botID string) (inbound.DefaultChatRuntimeSettings, error) {
@@ -492,7 +521,7 @@ func (a *botPermissionCheckerAdapter) HasBotPermission(ctx context.Context, botI
 }
 
 type settingsTranscriptionModelResolver struct {
-	settings *settings.Service
+	settings channelSettings
 }
 
 func (r *settingsTranscriptionModelResolver) ResolveTranscriptionModelID(ctx context.Context, botID string) (string, error) {
@@ -503,16 +532,43 @@ func (r *settingsTranscriptionModelResolver) ResolveTranscriptionModelID(ctx con
 	return s.TranscriptionModelID, nil
 }
 
-type settingsTranscriptionAdapter struct {
-	audio *audiopkg.Service
+type channelAudio interface {
+	Synthesize(ctx context.Context, modelID string, text string, overrideCfg map[string]any) ([]byte, string, error)
+	Transcribe(ctx context.Context, modelID string, audio []byte, filename string, contentType string, overrideCfg map[string]any) (inbound.TranscriptionResult, error)
 }
 
-func (a *settingsTranscriptionAdapter) Transcribe(ctx context.Context, modelID string, audio []byte, filename string, contentType string, overrideCfg map[string]any) (inbound.TranscriptionResult, error) {
-	result, err := a.audio.Transcribe(ctx, modelID, audio, filename, contentType, overrideCfg)
+type localChannelAudio struct{ service *audiopkg.Service }
+
+func (a *localChannelAudio) Synthesize(ctx context.Context, modelID, text string, overrideCfg map[string]any) ([]byte, string, error) {
+	return a.service.Synthesize(ctx, modelID, text, overrideCfg)
+}
+
+func (a *localChannelAudio) Transcribe(ctx context.Context, modelID string, data []byte, filename, contentType string, overrideCfg map[string]any) (inbound.TranscriptionResult, error) {
+	result, err := a.service.Transcribe(ctx, modelID, data, filename, contentType, overrideCfg)
 	if err != nil {
 		return nil, err
 	}
 	return inboundTranscriptionResult{text: result.Text}, nil
+}
+
+func provideLocalChannelAudio(service *audiopkg.Service) channelAudio {
+	return &localChannelAudio{service: service}
+}
+
+func provideLocalCommandHandler(handler *command.Handler) inbound.CommandHandler { return handler }
+
+func provideLocalSkillResolver(handler *handlers.ContainerdHandler) inbound.RequestedSkillResolver {
+	return handler
+}
+
+type channelSettings interface {
+	GetBot(context.Context, string) (settings.Settings, error)
+}
+
+func provideLocalChannelSettings(service *settings.Service) channelSettings { return service }
+
+func provideStandaloneChannelSettings(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service) channelSettings {
+	return settings.NewService(log, queries, aclService, nil)
 }
 
 func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenStore, oauthClients *oauthclients.Registry) *emailpkg.Registry {
@@ -523,8 +579,65 @@ func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenSto
 	return reg
 }
 
-func provideEmailChatGateway(resolver *flow.Resolver, queries dbstore.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
-	return flow.NewEmailChatGateway(resolver, queries, cfg.Auth.JWTSecret, log)
+func provideEmailChatGateway(turnService turn.Service, queries dbstore.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
+	return &emailTurnGateway{turnService: turnService, queries: queries, jwtSecret: cfg.Auth.JWTSecret, logger: log}
+}
+
+type emailTurnGateway struct {
+	turnService turn.Service
+	queries     dbstore.Queries
+	jwtSecret   string
+	logger      *slog.Logger
+}
+
+func (g *emailTurnGateway) TriggerBotChat(ctx context.Context, botID, content string) error {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return err
+	}
+	bot, err := g.queries.GetBotByID(ctx, pgBotID)
+	if err != nil {
+		return fmt.Errorf("get bot: %w", err)
+	}
+	ownerID := bot.OwnerUserID.String()
+	token, _, err := auth.GenerateToken(ownerID, g.jwtSecret, 10*time.Minute)
+	if err != nil {
+		return fmt.Errorf("generate email turn token: %w", err)
+	}
+	handle, err := g.turnService.StartTurn(ctx, turn.StartTurnCommand{
+		SchemaVersion:  1,
+		TeamID:         team.DefaultTeamID,
+		Mode:           turn.ModeChat,
+		BotID:          botID,
+		ChatID:         botID,
+		UserID:         ownerID,
+		Token:          "Bearer " + token,
+		Query:          content,
+		CurrentChannel: "email",
+	})
+	if err != nil {
+		return fmt.Errorf("start email turn: %w", err)
+	}
+	defer handle.Cancel()
+	events, errs := handle.Events(), handle.Errs()
+	for events != nil || errs != nil {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				events = nil
+			}
+		case runErr, ok := <-errs:
+			if ok && runErr != nil {
+				return runErr
+			}
+			if !ok {
+				errs = nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func provideEmailTrigger(log *slog.Logger, service *emailpkg.Service, chatTriggerer emailpkg.ChatTriggerer) *emailpkg.Trigger {

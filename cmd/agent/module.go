@@ -8,8 +8,6 @@ import (
 
 	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
 	coremodule "github.com/memohai/memoh/cmd/internal/core"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/weixin"
 	"github.com/memohai/memoh/internal/handlers"
 )
 
@@ -20,12 +18,20 @@ func runServe() {
 func options() fx.Option {
 	return fx.Options(
 		fx.Provide(provideConfig),
-		coremodule.Module(),
-		channelmodule.Module(),
+		coremodule.FoundationModule(),
+		channelmodule.FoundationModule(),
+		coremodule.ServerModule(),
+		channelmodule.ServerLocalModule(),
 		fx.Provide(
+			provideChannelRPCConn,
+			provideRuntimeRPCClient,
+			provideChannelRuntimeClient,
+			provideChannelRuntime,
+			provideEmailRuntime,
+			provideWebhookTunnelStatus,
+			provideServerRPC,
 			provideServerHandler(handlers.NewPingHandler),
 			provideServerHandler(handlers.NewWebhookTunnelHandler),
-			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
 			provideServerHandler(provideAuthHandler),
 			provideServerHandler(provideMemoryHandler),
 			provideServerHandler(provideMessageHandler),
@@ -53,8 +59,6 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewCompactionHandler),
 			provideServerHandler(handlers.NewChannelHandler),
-			provideServerHandler(channel.NewWebhookServerHandler),
-			provideServerHandler(weixin.NewQRServerHandler),
 			provideServerHandler(provideUsersHandler),
 			provideServerHandler(handlers.NewMemoryProvidersHandler),
 			provideServerHandler(handlers.NewNetworkHandler),
@@ -64,7 +68,6 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewEmailProvidersHandler),
 			provideServerHandler(handlers.NewEmailBindingsHandler),
 			provideServerHandler(handlers.NewEmailOutboxHandler),
-			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServerHandler(provideEmailOAuthHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
@@ -77,6 +80,7 @@ func options() fx.Option {
 			provideServer,
 		),
 		fx.Invoke(
+			startServerRPC,
 			startServer,
 		),
 		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {

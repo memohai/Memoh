@@ -12,6 +12,7 @@ type Code string
 
 const (
 	CodeBotNameTaken                  Code = "bot.name_taken"
+	CodeChannelRuntimeUnavailable     Code = "channel.runtime_unavailable"
 	CodeWorkspaceUnreachable          Code = "workspace.unreachable"
 	CodeWorkspaceDisplayPrepareFailed Code = "workspace.display_prepare_failed"
 )
@@ -32,6 +33,10 @@ var catalog = map[Code]Definition{
 		HTTPStatus:  http.StatusConflict,
 		Detail:      "This name is already taken.",
 		AllowedArgs: []string{"field"},
+	},
+	CodeChannelRuntimeUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The channel service could not be reached.",
 	},
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,

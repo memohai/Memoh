@@ -93,6 +93,9 @@
     "bot": {
       "name_taken": "この名前はすでに使用されています。"
     },
+    "channel": {
+      "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。"
+    },
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
       "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
@@ -2661,7 +2664,7 @@
       "deleteFailed": "プラットフォームの削除に失敗しました",
       "webhookCallback": "WebフックコールバックURL",
       "webhookCallbackHint": "これを使用してくださいURLWebhook コールバックとしてURLプラットフォームコンソールで。",
-      "lineWebhookCallbackHint": "この URL を LINE Developers の Messaging API Webhook 設定に入力します。Base URL は公開 HTTPS で、/channels/... を Memoh server にルーティングする必要があります。",
+      "lineWebhookCallbackHint": "この URL を LINE Developers の Messaging API Webhook 設定に入力します。Base URL は公開 HTTPS で、/channels/... を Memoh Channel サービスにルーティングする必要があります。",
       "wechatOAWebhookCallbackHint": "この URL を WeChat Official Account のコールバック URL として設定します。",
       "webhookCallbackPending": "このプラットフォーム構成を保存すると、コールバック URL が生成されます。",
       "webhookCallbackPublicBasePending": "プラットフォーム構成は保存済みです。公開 HTTPS webhook base を設定するか、トンネルが準備完了になるまで待ってください。",

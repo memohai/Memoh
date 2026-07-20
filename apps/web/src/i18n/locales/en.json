@@ -96,6 +96,9 @@
     "bot": {
       "name_taken": "This name is already taken."
     },
+    "channel": {
+      "runtime_unavailable": "The channel service could not be reached. Please try again shortly."
+    },
     "workspace": {
       "unreachable": "The workspace could not be reached.",
       "display_prepare_failed": "Display preparation failed."
@@ -2675,7 +2678,7 @@
       "deleteFailed": "Failed to remove platform",
       "webhookCallback": "WebHook Callback URL",
       "webhookCallbackHint": "Use this URL as the webhook callback URL in the platform console.",
-      "lineWebhookCallbackHint": "Use this URL in the LINE Developers Messaging API webhook settings. The base URL must be a public HTTPS origin that routes /channels/... to the Memoh server.",
+      "lineWebhookCallbackHint": "Use this URL in the LINE Developers Messaging API webhook settings. The base URL must be a public HTTPS origin that routes /channels/... to the Memoh Channel service.",
       "wechatOAWebhookCallbackHint": "Use this URL as the callback URL in the WeChat Official Account platform.",
       "webhookCallbackPending": "Save this platform configuration to generate the callback URL.",
       "webhookCallbackPublicBasePending": "The platform configuration is saved. Configure a public HTTPS webhook base or wait for the tunnel to become ready.",

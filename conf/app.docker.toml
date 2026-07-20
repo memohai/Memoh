@@ -5,6 +5,16 @@ format = "text"
 
 [server]
 addr = "server:8080"
+rpc_listen_addr = ":9090"
+
+[channel]
+addr = ":8081"
+rpc_listen_addr = ":9091"
+
+[internal_rpc]
+server_target = "server:9090"
+channel_target = "channel:9091"
+shared_secret = ""
 
 [webhook_tunnel]
 mode = "disabled"

@@ -8,11 +8,12 @@ The public documentation site is maintained separately in `memohai/memoh-docs`.
 
 ## Architecture Overview
 
-Deploy/server mode consists of two core services:
+Deploy/server mode consists of three core services:
 
 | Service | Tech Stack | Port | Description |
 |---------|-----------|------|-------------|
 | **Server** (Backend) | Go + Echo | 8080 | Main service: REST API, auth, database, container management, **in-process AI agent** |
+| **Channel** (Backend) | Go + Echo | 8081 | External channel adapters, email delivery, and channel webhook endpoints; delegates agent turns to Server over authenticated internal gRPC |
 | **Web** (Frontend) | Vue 3 + Vite | 8082 | Management UI: visual configuration for Bots, Models, Channels, etc. |
 
 The native desktop client is a separate distribution boundary for Memoh Cloud or a hosted Memoh server. `apps/desktop` reuses `@memohai/web` modules, but owns the Electron shell, system tray behavior, menus, preload IPC, cache invalidation, and packaged application resources.
@@ -297,7 +298,7 @@ docker compose up -d        # Start all services
 # Visit http://localhost:8082
 ```
 
-Production deploy services are `postgres`, `migrate`, `server`, and `web`.
+Production deploy services are `postgres`, `migrate`, `server`, `channel`, and `web`.
 Optional profiles: `qdrant` (vector DB), `sparse` (BM25 search). Desktop connects to Memoh Cloud or this hosted server instead of running its own server.
 
 ## Key Development Rules

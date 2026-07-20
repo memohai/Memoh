@@ -14,6 +14,11 @@ import (
 const (
 	DefaultConfigPath            = "config.toml"
 	DefaultHTTPAddr              = ":8080"
+	DefaultChannelHTTPAddr       = ":8081"
+	DefaultServerRPCListenAddr   = ":9090"
+	DefaultChannelRPCListenAddr  = ":9091"
+	DefaultServerRPCTarget       = "127.0.0.1:9090"
+	DefaultChannelRPCTarget      = "127.0.0.1:9091"
 	DefaultNamespace             = "default"
 	DefaultSocketPath            = "/run/containerd/containerd.sock"
 	DefaultDataRoot              = "data"
@@ -50,6 +55,8 @@ const (
 type Config struct {
 	Log            LogConfig            `toml:"log"`
 	Server         ServerConfig         `toml:"server"`
+	Channel        ChannelConfig        `toml:"channel"`
+	InternalRPC    InternalRPCConfig    `toml:"internal_rpc"`
 	Admin          AdminConfig          `toml:"admin"`
 	Auth           AuthConfig           `toml:"auth"`
 	Agent          AgentConfig          `toml:"agent"`
@@ -116,7 +123,32 @@ type LogConfig struct {
 }
 
 type ServerConfig struct {
-	Addr string `toml:"addr"`
+	Addr          string `toml:"addr"`
+	RPCListenAddr string `toml:"rpc_listen_addr"`
+}
+
+type ChannelConfig struct {
+	Addr          string `toml:"addr"`
+	RPCListenAddr string `toml:"rpc_listen_addr"`
+}
+
+type InternalRPCConfig struct {
+	ServerTarget  string `toml:"server_target"`
+	ChannelTarget string `toml:"channel_target"`
+	SharedSecret  string `toml:"shared_secret" json:"-"`
+}
+
+func (c InternalRPCConfig) Validate() error {
+	if strings.TrimSpace(c.SharedSecret) == "" {
+		return errors.New("internal_rpc.shared_secret is required")
+	}
+	if strings.TrimSpace(c.ServerTarget) == "" {
+		return errors.New("internal_rpc.server_target is required")
+	}
+	if strings.TrimSpace(c.ChannelTarget) == "" {
+		return errors.New("internal_rpc.channel_target is required")
+	}
+	return nil
 }
 
 const (
@@ -540,7 +572,16 @@ func Load(path string) (Config, error) {
 			Format: "text",
 		},
 		Server: ServerConfig{
-			Addr: DefaultHTTPAddr,
+			Addr:          DefaultHTTPAddr,
+			RPCListenAddr: DefaultServerRPCListenAddr,
+		},
+		Channel: ChannelConfig{
+			Addr:          DefaultChannelHTTPAddr,
+			RPCListenAddr: DefaultChannelRPCListenAddr,
+		},
+		InternalRPC: InternalRPCConfig{
+			ServerTarget:  DefaultServerRPCTarget,
+			ChannelTarget: DefaultChannelRPCTarget,
 		},
 		Admin: AdminConfig{
 			Username: "admin",
@@ -658,6 +699,30 @@ func (cfg Config) validate() error {
 	return nil
 }
 
+// ValidateServerRuntime validates the settings required by the Server process.
+// It is intentionally separate from Load so migration commands do not require
+// runtime-to-runtime credentials.
+func (cfg Config) ValidateServerRuntime() error {
+	if strings.TrimSpace(cfg.Server.Addr) == "" {
+		return errors.New("server.addr is required")
+	}
+	if strings.TrimSpace(cfg.Server.RPCListenAddr) == "" {
+		return errors.New("server.rpc_listen_addr is required")
+	}
+	return cfg.InternalRPC.Validate()
+}
+
+// ValidateChannelRuntime validates the settings required by the Channel process.
+func (cfg Config) ValidateChannelRuntime() error {
+	if strings.TrimSpace(cfg.Channel.Addr) == "" {
+		return errors.New("channel.addr is required")
+	}
+	if strings.TrimSpace(cfg.Channel.RPCListenAddr) == "" {
+		return errors.New("channel.rpc_listen_addr is required")
+	}
+	return cfg.InternalRPC.Validate()
+}
+
 func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	if value := strings.TrimSpace(os.Getenv("MEMOH_INSTANCE_ID")); value != "" {
 		cfg.InstanceID = value
@@ -694,6 +759,15 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_TUNNEL_METRICS_URL")); value != "" {
 		cfg.WebhookTunnel.MetricsURL = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_INTERNAL_RPC_SHARED_SECRET")); value != "" {
+		cfg.InternalRPC.SharedSecret = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_INTERNAL_RPC_SERVER_TARGET")); value != "" {
+		cfg.InternalRPC.ServerTarget = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_INTERNAL_RPC_CHANNEL_TARGET")); value != "" {
+		cfg.InternalRPC.ChannelTarget = value
 	}
 }
 
