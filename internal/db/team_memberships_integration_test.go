@@ -16,9 +16,11 @@ import (
 func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 	ctx := context.Background()
 	dsn := teamMigrationDSN(t)
-	pool := resetToEmpty(t)
+	pool := freshMigratedDB(t)
 
-	stepUp(t, dsn, countAllMigrations(t)-1)
+	// 0001 now contains the final membership schema. Roll back 0115 to
+	// materialize its legacy input shape before seeding the upgrade fixture.
+	stepDown(t, dsn, 1)
 
 	var userID, botID string
 	if err := pool.QueryRow(ctx, `
