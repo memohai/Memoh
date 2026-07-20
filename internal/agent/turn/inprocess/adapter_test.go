@@ -268,6 +268,22 @@ func TestStartTurnClaimsIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestFailedStartDoesNotClaimIdempotencyKey(t *testing.T) {
+	a := New(&fakeRunner{})
+	cmd := turn.StartTurnCommand{
+		TeamID: "t", Mode: turn.ModeDiscuss, IdempotencyKey: "msg-1",
+	}
+	for range 2 {
+		_, err := a.StartTurn(context.Background(), cmd)
+		if err == nil {
+			t.Fatal("expected unconfigured discuss runtime error")
+		}
+		if errors.Is(err, turn.ErrDuplicateTurn) {
+			t.Fatalf("failed start claimed idempotency key: %v", err)
+		}
+	}
+}
+
 // TestCancelUnblocksFullEventBuffer reproduces the reviewer's 32-event
 // burst: with no consumer and a full buffer, Cancel must still unblock
 // the pump and close both channels.

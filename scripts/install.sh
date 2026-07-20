@@ -49,8 +49,13 @@ if [ "${MEMOH_WEBHOOK_PUBLIC_BASE_URL+x}" = x ]; then
 else
   WEBHOOK_PUBLIC_BASE_SET=false
 fi
+if [ "${MEMOH_INTERNAL_RPC_SHARED_SECRET+x}" = x ] && [ -n "$MEMOH_INTERNAL_RPC_SHARED_SECRET" ]; then
+  INTERNAL_RPC_SHARED_SECRET_SET=true
+else
+  INTERNAL_RPC_SHARED_SECRET_SET=false
+fi
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
-PROJECT_CONTAINERS="memoh-postgres memoh-pgvector memoh-migrate memoh-server memoh-web memoh-webhook-tunnel"
+PROJECT_CONTAINERS="memoh-postgres memoh-pgvector memoh-migrate memoh-server memoh-channel memoh-web memoh-webhook-tunnel"
 PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_pgvector_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_openviking_data"
 
 EXISTING_CONFIG_SOURCE=""
@@ -371,6 +376,11 @@ load_existing_settings() {
     value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "auth" "jwt_secret" || true)
     [ -n "$value" ] && JWT_SECRET="$value"
 
+    if [ "$INTERNAL_RPC_SHARED_SECRET_SET" = false ]; then
+      value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "internal_rpc" "shared_secret" || true)
+      [ -n "$value" ] && MEMOH_INTERNAL_RPC_SHARED_SECRET="$value"
+    fi
+
     if [ "$DATABASE_DRIVER_SET" = false ]; then
       value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "database" "driver" || true)
       [ -n "$value" ] && DATABASE_DRIVER="$value"
@@ -398,6 +408,11 @@ load_existing_settings() {
   if [ -n "$EXISTING_ENV_SOURCE" ]; then
     value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "POSTGRES_PASSWORD" || true)
     [ -n "$value" ] && PG_PASS="$value"
+
+    if [ "$INTERNAL_RPC_SHARED_SECRET_SET" = false ]; then
+      value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_INTERNAL_RPC_SHARED_SECRET" || true)
+      [ -n "$value" ] && MEMOH_INTERNAL_RPC_SHARED_SECRET="$value"
+    fi
 
     value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_DATA_DIR" || true)
     [ -n "$value" ] && MEMOH_DATA_DIR="$value"
@@ -530,8 +545,8 @@ cleanup_existing_installation() {
 
 show_failure_logs() {
   echo ""
-  echo "${RED}Startup failed. Recent database, migration, and server logs:${NC}"
-  log_services="postgres migrate server"
+  echo "${RED}Startup failed. Recent database, migration, server, and channel logs:${NC}"
+  log_services="postgres migrate server channel"
   $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES logs --no-color --tail=200 $log_services || true
 }
 
@@ -617,6 +632,7 @@ MEMOH_DATA_DIR_DEFAULT="${HOME:-/tmp}/memoh/data"
 ADMIN_USER="admin"
 ADMIN_PASS="$(gen_password)"
 JWT_SECRET="$(gen_secret)"
+MEMOH_INTERNAL_RPC_SHARED_SECRET="${MEMOH_INTERNAL_RPC_SHARED_SECRET:-$(gen_secret)}"
 PG_PASS="memoh123"
 WORKSPACE="$WORKSPACE_DEFAULT"
 MEMOH_DATA_DIR="$MEMOH_DATA_DIR_DEFAULT"
@@ -825,6 +841,7 @@ MEMOH_DATA_DIR=$(cd "$MEMOH_DATA_DIR" && pwd)
 export MEMOH_CONFIG=./config.toml
 export MEMOH_DATA_DIR
 export POSTGRES_PASSWORD="${PG_PASS}"
+export MEMOH_INTERNAL_RPC_SHARED_SECRET
 
 COMPOSE_FILES="-f ${COMPOSE_FILE_NAME}"
 COMPOSE_PROFILES=""
@@ -867,6 +884,7 @@ export MEMOH_WEBHOOK_TUNNEL_METRICS_URL="${MEMOH_WEBHOOK_TUNNEL_METRICS_URL:-htt
 
 : > .env
 write_env_value "POSTGRES_PASSWORD" "$PG_PASS"
+write_env_value "MEMOH_INTERNAL_RPC_SHARED_SECRET" "$MEMOH_INTERNAL_RPC_SHARED_SECRET"
 write_env_value "MEMOH_CONFIG" "./config.toml"
 write_env_value "MEMOH_DATA_DIR" "$MEMOH_DATA_DIR"
 write_env_value "MEMOH_DATABASE_DRIVER" "$DATABASE_DRIVER"

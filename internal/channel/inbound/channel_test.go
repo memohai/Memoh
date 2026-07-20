@@ -676,6 +676,26 @@ func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 	}
 }
 
+func TestTurnIdempotencyKeyScopesExternalMessageIDByRoute(t *testing.T) {
+	first := turnIdempotencyKey(channel.ChannelType("telegram"), "route-1", "42")
+	retry := turnIdempotencyKey(channel.ChannelType("telegram"), "route-1", "42")
+	otherChat := turnIdempotencyKey(channel.ChannelType("telegram"), "route-2", "42")
+	otherPlatform := turnIdempotencyKey(channel.ChannelType("discord"), "route-1", "42")
+
+	if first == "" || first != retry {
+		t.Fatalf("same delivery produced unstable key: %q, %q", first, retry)
+	}
+	if first == otherChat {
+		t.Fatal("same platform message ID collided across routes")
+	}
+	if first == otherPlatform {
+		t.Fatal("same message ID collided across platforms")
+	}
+	if got := turnIdempotencyKey(channel.ChannelType("telegram"), "route-1", "  "); got != "" {
+		t.Fatalf("empty external message ID produced key %q", got)
+	}
+}
+
 func TestChannelInboundProcessorRespondCommandRoutesUserInput(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
 		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"},

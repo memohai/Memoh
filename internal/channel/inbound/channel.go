@@ -1150,7 +1150,7 @@ startStream:
 		DisplayName:               identity.DisplayName,
 		RouteID:                   resolved.RouteID,
 		ChatToken:                 chatToken,
-		IdempotencyKey:            sourceMessageID,
+		IdempotencyKey:            turnIdempotencyKey(msg.Channel, resolved.RouteID, sourceMessageID),
 		ExternalMessageID:         sourceMessageID,
 		ReplyTarget:               target,
 		ConversationType:          msg.Conversation.Type,
@@ -1426,6 +1426,18 @@ startStream:
 		}
 	}
 	return nil
+}
+
+func turnIdempotencyKey(channelType channel.ChannelType, routeID, externalMessageID string) string {
+	externalMessageID = strings.TrimSpace(externalMessageID)
+	if externalMessageID == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(channelType.String()),
+		strings.TrimSpace(routeID),
+		externalMessageID,
+	}, ":")
 }
 
 // sendModeConfirmation sends a lightweight acknowledgement to the user when

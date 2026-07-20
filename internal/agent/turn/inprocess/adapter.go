@@ -87,6 +87,9 @@ func (a *Adapter) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 	if a.allowedTeam != "" && cmd.TeamID != a.allowedTeam {
 		return nil, fmt.Errorf("%w: %s", turn.ErrTeamNotServed, cmd.TeamID)
 	}
+	if cmd.Mode == turn.ModeDiscuss && (a.discuss == nil || a.discuss.agent == nil || a.discuss.resolver == nil) {
+		return nil, errors.New("turn: discuss runtime not configured")
+	}
 	if cmd.IdempotencyKey != "" && !a.idem.claim(cmd.TeamID, cmd.IdempotencyKey) {
 		return nil, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, cmd.IdempotencyKey)
 	}

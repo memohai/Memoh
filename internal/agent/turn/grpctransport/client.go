@@ -29,24 +29,30 @@ func (c *Client) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn
 	if err != nil {
 		return nil, err
 	}
-	stream, err := c.client.Run(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	stream, err := c.client.Run(runCtx)
 	if err != nil {
+		cancel()
 		return nil, mapClientError(err)
 	}
 	if err := stream.Send(&turnpb.RunRequest{Body: &turnpb.RunRequest_StartJson{StartJson: data}}); err != nil {
+		cancel()
 		return nil, mapClientError(err)
 	}
 	first, err := stream.Recv()
 	if err != nil {
+		cancel()
 		return nil, mapClientError(err)
 	}
 	started := first.GetStarted()
 	if started == nil || started.GetRunId() == "" {
+		cancel()
 		return nil, errors.New("turn rpc: missing started frame")
 	}
 	h := &runHandle{
 		id: started.GetRunId(), stream: stream,
 		events: make(chan turn.Event, 16), errs: make(chan error, 1),
+		ctx: runCtx, cancel: cancel, done: make(chan struct{}),
 	}
 	go h.pump()
 	return h, nil
@@ -61,7 +67,7 @@ func (c *Client) RespondToolApproval(ctx context.Context, input turn.ToolApprova
 	if err != nil {
 		return mapClientError(err)
 	}
-	return receiveContinuation(stream.Recv, eventCh)
+	return receiveContinuation(ctx, stream.Recv, eventCh)
 }
 
 func (c *Client) RespondUserInput(ctx context.Context, input turn.UserInputResponse, eventCh chan<- json.RawMessage) error {
@@ -73,7 +79,7 @@ func (c *Client) RespondUserInput(ctx context.Context, input turn.UserInputRespo
 	if err != nil {
 		return mapClientError(err)
 	}
-	return receiveContinuation(stream.Recv, eventCh)
+	return receiveContinuation(ctx, stream.Recv, eventCh)
 }
 
 func (c *Client) AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error) {
@@ -94,7 +100,7 @@ func (c *Client) AdvancePlainTextUserInput(ctx context.Context, input userinput.
 
 type continuationReceiver func() (*turnpb.EventResponse, error)
 
-func receiveContinuation(recv continuationReceiver, eventCh chan<- json.RawMessage) error {
+func receiveContinuation(ctx context.Context, recv continuationReceiver, eventCh chan<- json.RawMessage) error {
 	for {
 		event, err := recv()
 		if errors.Is(err, io.EOF) {
@@ -103,7 +109,11 @@ func receiveContinuation(recv continuationReceiver, eventCh chan<- json.RawMessa
 		if err != nil {
 			return mapClientError(err)
 		}
-		eventCh <- json.RawMessage(event.GetPayload())
+		select {
+		case eventCh <- json.RawMessage(event.GetPayload()):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -112,6 +122,9 @@ type runHandle struct {
 	stream turnpb.TurnService_RunClient
 	events chan turn.Event
 	errs   chan error
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
 	mu     sync.Mutex
 	once   sync.Once
 }
@@ -142,8 +155,7 @@ func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {
 
 func (h *runHandle) Cancel() {
 	h.once.Do(func() {
-		_ = h.send(context.Background(), &turnpb.RunRequest{Body: &turnpb.RunRequest_Cancel{Cancel: true}})
-		_ = h.stream.CloseSend()
+		h.cancel()
 	})
 }
 
@@ -161,13 +173,18 @@ func (h *runHandle) send(ctx context.Context, frame *turnpb.RunRequest) error {
 func (h *runHandle) pump() {
 	defer close(h.events)
 	defer close(h.errs)
+	defer close(h.done)
+	defer h.cancel()
 	for {
 		frame, err := h.stream.Recv()
 		if errors.Is(err, io.EOF) {
 			return
 		}
 		if err != nil {
-			h.errs <- mapClientError(err)
+			select {
+			case h.errs <- mapClientError(err):
+			case <-h.ctx.Done():
+			}
 			return
 		}
 		if frame.GetCompleted() != nil {
@@ -177,9 +194,13 @@ func (h *runHandle) pump() {
 		if event == nil {
 			continue
 		}
-		h.events <- turn.Event{
+		select {
+		case h.events <- turn.Event{
 			RunID: event.GetRunId(), TeamID: event.GetTeamId(), SessionID: event.GetSessionId(),
 			Seq: event.GetSeq(), Kind: event.GetKind(), Payload: json.RawMessage(event.GetPayload()),
+		}:
+		case <-h.ctx.Done():
+			return
 		}
 	}
 }
