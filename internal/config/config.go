@@ -699,6 +699,15 @@ func (cfg Config) validate() error {
 	return nil
 }
 
+// SplitChannelRuntime reports whether the channel runtime runs as a
+// separate process reached over the internal RPC. Setting the shared
+// secret opts into split mode (docker compose does); without it the
+// server embeds the full channel runtime, preserving the pre-split
+// all-in-one deployment for existing configs.
+func (cfg Config) SplitChannelRuntime() bool {
+	return strings.TrimSpace(cfg.InternalRPC.SharedSecret) != ""
+}
+
 // ValidateServerRuntime validates the settings required by the Server process.
 // It is intentionally separate from Load so migration commands do not require
 // runtime-to-runtime credentials.

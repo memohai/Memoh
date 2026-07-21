@@ -81,6 +81,40 @@ func RuntimeModule() fx.Option {
 	)
 }
 
+// EmbeddedModule runs the full channel runtime inside the Server process:
+// external channel adapters, email manager, and webhook tunnel, wired to
+// the local command/skill/audio surfaces with no RPC involved. This is the
+// pre-split all-in-one deployment shape — bare-metal installs without an
+// internal_rpc secret keep their channels working without operating a
+// second binary.
+func EmbeddedModule() fx.Option {
+	return fx.Options(
+		fx.Provide(
+			provideCommandHandler,
+			provideLocalCommandHandler,
+			provideLocalSkillResolver,
+			provideLocalChannelAudio,
+			provideLocalChannelSettings,
+			provideEmailChatGateway,
+			provideEmailTrigger,
+			emailpkg.NewManager,
+			provideChannelRouter,
+			provideChannelManager,
+			provideChannelLifecycleService,
+			provideLocalChannelRuntime,
+			provideChannelRuntimeInterface,
+			provideEmailRuntimeInterface,
+			webhooktunnel.NewManager,
+		),
+		fx.Invoke(
+			startChannelManager,
+			startEmailManager,
+			startWebhookTunnelListener,
+			startWebhookTunnel,
+		),
+	)
+}
+
 // Module preserves the previous all-in-one assembly for focused tests.
 func Module() fx.Option {
 	return fx.Options(FoundationModule(), ServerLocalModule())

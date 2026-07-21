@@ -1,26 +1,45 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
+	"os"
 
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
 	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
 	coremodule "github.com/memohai/memoh/cmd/internal/core"
+	channelpkg "github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/adapters/weixin"
+	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/handlers"
 )
 
 func runServe() {
-	fx.New(options()).Run()
+	cfg, err := provideConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoh: %v\n", err)
+		os.Exit(1)
+	}
+	fx.New(optionsFor(cfg)).Run()
 }
 
-func options() fx.Option {
+// optionsFor assembles the server for one of two deployment shapes.
+// With internal_rpc.shared_secret set (docker compose), the channel
+// runtime is a separate process reached over authenticated gRPC. Without
+// it (pre-split bare-metal installs), the full channel runtime runs
+// embedded in this process so external channels, email, and webhook
+// endpoints keep working with a single binary and an unchanged config.
+func optionsFor(cfg config.Config) fx.Option {
+	if cfg.SplitChannelRuntime() {
+		return fx.Options(commonOptions(), splitOptions())
+	}
+	return fx.Options(commonOptions(), embeddedOptions())
+}
+
+func splitOptions() fx.Option {
 	return fx.Options(
-		fx.Provide(provideConfig),
-		coremodule.FoundationModule(),
-		channelmodule.FoundationModule(),
-		coremodule.ServerModule(),
 		channelmodule.ServerLocalModule(),
 		fx.Provide(
 			provideChannelRPCConn,
@@ -30,6 +49,33 @@ func options() fx.Option {
 			provideEmailRuntime,
 			provideWebhookTunnelStatus,
 			provideServerRPC,
+		),
+		fx.Invoke(startServerRPC),
+	)
+}
+
+func embeddedOptions() fx.Option {
+	return fx.Options(
+		channelmodule.EmbeddedModule(),
+		fx.Provide(
+			provideLocalWebhookTunnelStatus,
+			// The webhook surfaces the channel process owns in split mode
+			// are served from this process again, as before the split.
+			provideServerHandler(channelpkg.NewWebhookServerHandler),
+			provideServerHandler(weixin.NewQRServerHandler),
+			provideServerHandler(handlers.NewEmailWebhookHandler),
+			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
+		),
+	)
+}
+
+func commonOptions() fx.Option {
+	return fx.Options(
+		fx.Provide(provideConfig),
+		coremodule.FoundationModule(),
+		channelmodule.FoundationModule(),
+		coremodule.ServerModule(),
+		fx.Provide(
 			provideServerHandler(handlers.NewPingHandler),
 			provideServerHandler(handlers.NewWebhookTunnelHandler),
 			provideServerHandler(provideAuthHandler),
@@ -81,7 +127,6 @@ func options() fx.Option {
 			provideServer,
 		),
 		fx.Invoke(
-			startServerRPC,
 			startServer,
 		),
 		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {

@@ -16,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/turn/turnpb"
 	"github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/email"
@@ -49,10 +50,79 @@ func provideRuntimeRPCClient(conn *grpc.ClientConn) *runtimeRpc.Client {
 func provideChannelRuntimeClient(client *runtimeRpc.Client) *channelruntime.Client {
 	return channelruntime.NewClient(client)
 }
-func provideChannelRuntime(client *channelruntime.Client) channel.Runtime { return client }
-func provideEmailRuntime(client *channelruntime.Client) email.Runtime     { return client }
+
+func provideChannelRuntime(client *channelruntime.Client, manager *channel.Manager) channel.Runtime {
+	return &localFirstChannelRuntime{local: manager, remote: client}
+}
+func provideEmailRuntime(client *channelruntime.Client) email.Runtime { return client }
+
+// channelSendRuntime is the slice of *channel.Manager the local route needs.
+type channelSendRuntime interface {
+	Send(context.Context, string, channel.ChannelType, channel.SendRequest) error
+	React(context.Context, string, channel.ChannelType, channel.ReactRequest) error
+}
+
+// localFirstChannelRuntime routes local channel types (web/cli) to this
+// process's manager and everything else over the internal RPC. The Web SSE
+// stream subscribes to THIS process's RouteHub; the channel process has its
+// own hub with no subscribers, so delivering web sends remotely would drop
+// them silently (send_message/speak/schedule notifications to the Web
+// surface would vanish).
+type localFirstChannelRuntime struct {
+	local  channelSendRuntime
+	remote channel.Runtime
+}
+
+func isLocalChannelType(typ channel.ChannelType) bool {
+	switch typ {
+	case local.WebType, local.CLIType:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *localFirstChannelRuntime) Send(ctx context.Context, botID string, typ channel.ChannelType, req channel.SendRequest) error {
+	if isLocalChannelType(typ) {
+		return r.local.Send(ctx, botID, typ, req)
+	}
+	return r.remote.Send(ctx, botID, typ, req)
+}
+
+func (r *localFirstChannelRuntime) React(ctx context.Context, botID string, typ channel.ChannelType, req channel.ReactRequest) error {
+	if isLocalChannelType(typ) {
+		return r.local.React(ctx, botID, typ, req)
+	}
+	return r.remote.React(ctx, botID, typ, req)
+}
+
+func (r *localFirstChannelRuntime) UpsertBotChannelConfig(ctx context.Context, botID string, typ channel.ChannelType, req channel.UpsertConfigRequest) (channel.ChannelConfig, error) {
+	return r.remote.UpsertBotChannelConfig(ctx, botID, typ, req)
+}
+
+func (r *localFirstChannelRuntime) SetBotChannelStatus(ctx context.Context, botID string, typ channel.ChannelType, disabled bool) (channel.ChannelConfig, error) {
+	return r.remote.SetBotChannelStatus(ctx, botID, typ, disabled)
+}
+
+func (r *localFirstChannelRuntime) DeleteBotChannelConfig(ctx context.Context, botID string, typ channel.ChannelType) error {
+	return r.remote.DeleteBotChannelConfig(ctx, botID, typ)
+}
+
+func (r *localFirstChannelRuntime) SetWebhookEndpoint(ctx context.Context, botID string, typ channel.ChannelType, req channel.SetWebhookEndpointRequest) (channel.SetWebhookEndpointResponse, error) {
+	return r.remote.SetWebhookEndpoint(ctx, botID, typ, req)
+}
+
+func (r *localFirstChannelRuntime) ConnectionStatusesByBot(botID string) []channel.ConnectionStatus {
+	return r.remote.ConnectionStatusesByBot(botID)
+}
 func provideWebhookTunnelStatus(client *channelruntime.Client) interface{ Status() webhooktunnel.Status } {
 	return client
+}
+
+// provideLocalWebhookTunnelStatus is the embedded-mode counterpart: the
+// tunnel manager runs in this process.
+func provideLocalWebhookTunnelStatus(manager *webhooktunnel.Manager) interface{ Status() webhooktunnel.Status } {
+	return manager
 }
 
 func provideServerRPC(log *slog.Logger, cfg config.Config, turnService turn.Service, commandHandler *command.Handler, skillHandler *handlers.ContainerdHandler, audioService *audio.Service) (*serverRPC, error) {
