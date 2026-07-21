@@ -30,7 +30,7 @@ func (r *recordingRemoteRuntime) Send(_ context.Context, _ string, typ channel.C
 	return nil
 }
 
-func (r *recordingRemoteRuntime) React(context.Context, string, channel.ChannelType, channel.ReactRequest) error {
+func (*recordingRemoteRuntime) React(context.Context, string, channel.ChannelType, channel.ReactRequest) error {
 	return nil
 }
 

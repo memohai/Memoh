@@ -178,7 +178,7 @@ func TestDefaultTeamIDReferences(t *testing.T) {
 	root := repoRoot(t)
 	for _, dir := range []string{"internal", "cmd"} {
 		for _, file := range goFiles(t, root, dir) {
-			data, err := os.ReadFile(filepath.Join(root, file))
+			data, err := os.ReadFile(filepath.Join(root, file)) //nolint:gosec // guard test walks repo-tracked files by design
 			if err != nil {
 				t.Fatalf("read %s: %v", file, err)
 			}

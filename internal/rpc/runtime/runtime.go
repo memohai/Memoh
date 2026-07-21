@@ -80,7 +80,7 @@ func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtime
 		if errors.As(err, &public) {
 			return nil, status.Error(codes.Unknown, public.Error())
 		}
-		if _, direct := err.(grpcStatusError); direct {
+		if _, direct := err.(grpcStatusError); direct { //nolint:errorlint // deliberate direct assertion: only a status built by this layer is wire vocabulary; a wrapped one is a downstream leak
 			return nil, err
 		}
 		return nil, status.Error(codes.Internal, "internal runtime operation failed")

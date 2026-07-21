@@ -72,7 +72,7 @@ func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel con
 // Inject is not supported in discuss mode: no reader consumes the inject
 // channel, so blocking until the run ends would just wedge the caller.
 // Shadowing runHandle.Inject fails fast instead.
-func (h *discussHandle) Inject(context.Context, turn.InjectMessage) error {
+func (*discussHandle) Inject(context.Context, turn.InjectMessage) error {
 	return errors.New("turn: discuss turns do not accept injected messages")
 }
 

@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	DefaultConfigPath            = "config.toml"
-	DefaultHTTPAddr              = ":8080"
-	DefaultChannelHTTPAddr       = ":8081"
+	DefaultConfigPath      = "config.toml"
+	DefaultHTTPAddr        = ":8080"
+	DefaultChannelHTTPAddr = ":8081"
 	// The internal RPC is plaintext; default to loopback so bare-metal
 	// split deployments never expose it on all interfaces by accident.
 	// Container deployments override this in their config template.

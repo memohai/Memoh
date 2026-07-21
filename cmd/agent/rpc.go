@@ -116,6 +116,7 @@ func (r *localFirstChannelRuntime) SetWebhookEndpoint(ctx context.Context, botID
 func (r *localFirstChannelRuntime) ConnectionStatusesByBot(botID string) []channel.ConnectionStatus {
 	return r.remote.ConnectionStatusesByBot(botID)
 }
+
 func provideWebhookTunnelStatus(client *channelruntime.Client) interface{ Status() webhooktunnel.Status } {
 	return client
 }
