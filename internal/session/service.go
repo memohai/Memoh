@@ -118,6 +118,32 @@ type CreateInput struct {
 	CreatedByUserID string
 }
 
+// SubagentConfig is the persisted runtime selection for a managed subagent.
+// ParentMessages is intentionally separate from visible session history.
+type SubagentConfig struct {
+	SessionID      string          `json:"session_id"`
+	ModelUUID      string          `json:"model_uuid,omitempty"`
+	ModelID        string          `json:"model_id"`
+	ProviderName   string          `json:"provider"`
+	Forked         bool            `json:"fork"`
+	ParentMessages json.RawMessage `json:"-"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+}
+
+type CreateSubagentInput struct {
+	Session        CreateInput
+	ModelUUID      string
+	ModelID        string
+	ProviderName   string
+	Forked         bool
+	ParentMessages json.RawMessage
+}
+
+type subagentTransactionalQueries interface {
+	InTx(context.Context, func(dbstore.Queries) error) error
+}
+
 // ForkFromAssistantInput creates a new chat session from the source session's
 // visible history through the assistant message's turn.
 type ForkFromAssistantInput struct {
@@ -258,6 +284,108 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	s.publishSessionCreated(sess)
 	s.runSessionStartHook(context.WithoutCancel(ctx), sess)
 	return sess, nil
+}
+
+// CreateSubagent atomically creates the hidden child session and its pinned
+// model/fork configuration when the backing store supports transactions.
+func (s *Service) CreateSubagent(ctx context.Context, input CreateSubagentInput) (Session, SubagentConfig, error) {
+	input.Session.Type = TypeSubagent
+	modelUUID, err := dbpkg.ParseUUID(input.ModelUUID)
+	if err != nil {
+		return Session{}, SubagentConfig{}, fmt.Errorf("invalid subagent model uuid: %w", err)
+	}
+	if strings.TrimSpace(input.ModelID) == "" {
+		return Session{}, SubagentConfig{}, errors.New("subagent model_id is required")
+	}
+	if strings.TrimSpace(input.ProviderName) == "" {
+		return Session{}, SubagentConfig{}, errors.New("subagent provider is required")
+	}
+	if input.Forked {
+		var messages []json.RawMessage
+		if len(input.ParentMessages) == 0 || json.Unmarshal(input.ParentMessages, &messages) != nil {
+			return Session{}, SubagentConfig{}, errors.New("forked subagent requires a valid parent message array")
+		}
+	} else {
+		input.ParentMessages = nil
+	}
+
+	var created Session
+	var config SubagentConfig
+	create := func(queries dbstore.Queries) error {
+		service := *s
+		service.queries = queries
+		service.publisher = nil
+		service.hookService = nil
+		createdSession, createErr := service.Create(ctx, input.Session)
+		if createErr != nil {
+			return createErr
+		}
+		pgSessionID, createErr := dbpkg.ParseUUID(createdSession.ID)
+		if createErr != nil {
+			return createErr
+		}
+		row, createErr := queries.CreateSubagentConfig(ctx, sqlc.CreateSubagentConfigParams{
+			SessionID:      pgSessionID,
+			ModelUuid:      modelUUID,
+			ModelID:        strings.TrimSpace(input.ModelID),
+			ProviderName:   strings.TrimSpace(input.ProviderName),
+			Forked:         input.Forked,
+			ParentMessages: append([]byte(nil), input.ParentMessages...),
+		})
+		if createErr != nil {
+			return createErr
+		}
+		created = createdSession
+		config = toSubagentConfig(row)
+		return nil
+	}
+
+	if tx, ok := s.queries.(subagentTransactionalQueries); ok {
+		err = tx.InTx(ctx, create)
+	} else {
+		err = create(s.queries)
+	}
+	if err != nil {
+		return Session{}, SubagentConfig{}, err
+	}
+	s.publishSessionCreated(created)
+	s.runSessionStartHook(context.WithoutCancel(ctx), created)
+	return created, config, nil
+}
+
+func (s *Service) GetSubagentConfig(ctx context.Context, sessionID string) (SubagentConfig, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return SubagentConfig{}, fmt.Errorf("invalid subagent session id: %w", err)
+	}
+	row, err := s.queries.GetSubagentConfig(ctx, pgSessionID)
+	if err != nil {
+		return SubagentConfig{}, err
+	}
+	return toSubagentConfig(row), nil
+}
+
+func (s *Service) UpsertSubagentConfig(ctx context.Context, config SubagentConfig) (SubagentConfig, error) {
+	pgSessionID, err := dbpkg.ParseUUID(config.SessionID)
+	if err != nil {
+		return SubagentConfig{}, fmt.Errorf("invalid subagent session id: %w", err)
+	}
+	pgModelUUID, err := parseOptionalUUID(config.ModelUUID)
+	if err != nil {
+		return SubagentConfig{}, fmt.Errorf("invalid subagent model uuid: %w", err)
+	}
+	row, err := s.queries.UpsertSubagentConfig(ctx, sqlc.UpsertSubagentConfigParams{
+		SessionID:      pgSessionID,
+		ModelUuid:      pgModelUUID,
+		ModelID:        strings.TrimSpace(config.ModelID),
+		ProviderName:   strings.TrimSpace(config.ProviderName),
+		Forked:         config.Forked,
+		ParentMessages: append([]byte(nil), config.ParentMessages...),
+	})
+	if err != nil {
+		return SubagentConfig{}, err
+	}
+	return toSubagentConfig(row), nil
 }
 
 // ForkFromAssistantMessage creates a new chat session containing the source
@@ -956,6 +1084,23 @@ func toSession(row sqlc.BotSession) Session {
 		CreatedByUserID: createdByUserID,
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
+	}
+}
+
+func toSubagentConfig(row sqlc.SubagentConfig) SubagentConfig {
+	modelUUID := ""
+	if row.ModelUuid.Valid {
+		modelUUID = row.ModelUuid.String()
+	}
+	return SubagentConfig{
+		SessionID:      row.SessionID.String(),
+		ModelUUID:      modelUUID,
+		ModelID:        row.ModelID,
+		ProviderName:   row.ProviderName,
+		Forked:         row.Forked,
+		ParentMessages: append(json.RawMessage(nil), row.ParentMessages...),
+		CreatedAt:      row.CreatedAt.Time,
+		UpdatedAt:      row.UpdatedAt.Time,
 	}
 }
 

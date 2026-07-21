@@ -394,33 +394,6 @@ func tryStepDown(t *testing.T, dsn string, n int) error {
 	return m.Steps(-n)
 }
 
-// migrateToVersion moves the isolated database to an exact migration version.
-// Tests for a specific historical boundary must not count from the current
-// migration tail because unrelated newer migrations can be added at any time.
-func migrateToVersion(t *testing.T, dsn string, version uint) {
-	t.Helper()
-	if err := tryMigrateToVersion(t, dsn, version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate to version %d: %v", version, err)
-	}
-}
-
-// tryMigrateToVersion is the fail-closed assertion variant of
-// migrateToVersion: callers receive the migration error instead of failing the
-// test immediately.
-func tryMigrateToVersion(t *testing.T, dsn string, version uint) error {
-	t.Helper()
-	src, err := iofs.New(postgresMigrationsFS(t), ".")
-	if err != nil {
-		t.Fatalf("iofs: %v", err)
-	}
-	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
-	if err != nil {
-		t.Fatalf("migrate init: %v", err)
-	}
-	defer func() { _, _ = m.Close() }()
-	return m.Migrate(version)
-}
-
 // resetToEmpty returns a connection to the test's isolated, empty database.
 func resetToEmpty(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -544,16 +517,22 @@ func TestTeamsRootDownSafetyGate(t *testing.T) {
 // consolidated team migration through the current chain tip. Team migration
 // tests must cross that whole boundary even when later migrations are added.
 func countMigrationsFromTeamCore(t *testing.T) int {
+	return countMigrationsFrom(t, "0112_team_core.up.sql")
+}
+
+// countMigrationsFrom returns the number of migrations from startMigration
+// through the current chain tip. Boundary tests use it so adding a later
+// migration does not change which historical schema they materialize.
+func countMigrationsFrom(t *testing.T, startMigration string) int {
 	t.Helper()
 	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
 	if err != nil {
 		t.Fatalf("read migrations dir: %v", err)
 	}
-	const teamMigration = "0112_team_core.up.sql"
 	found := false
 	count := 0
 	for _, e := range entries {
-		if e.Name() == teamMigration {
+		if e.Name() == startMigration {
 			found = true
 		}
 		if found && len(e.Name()) > 7 && e.Name()[len(e.Name())-7:] == ".up.sql" {
@@ -561,7 +540,7 @@ func countMigrationsFromTeamCore(t *testing.T) int {
 		}
 	}
 	if !found {
-		t.Fatalf("missing consolidated team migration %s", teamMigration)
+		t.Fatalf("missing migration %s", startMigration)
 	}
 	return count
 }

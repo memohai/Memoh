@@ -13,20 +13,15 @@ import (
 	"github.com/memohai/memoh/internal/team"
 )
 
-const (
-	preTeamMembershipsVersion uint = 114
-	teamMembershipsVersion    uint = 115
-)
-
 func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 	ctx := context.Background()
 	dsn := teamMigrationDSN(t)
 	pool := freshMigratedDB(t)
 
-	// 0001 now contains the final membership schema. Roll back to the exact
-	// pre-0115 version before seeding the upgrade fixture; counting one step
-	// from the tail breaks as soon as an unrelated 0116 migration is added.
-	migrateToVersion(t, dsn, preTeamMembershipsVersion)
+	// 0001 now contains the final membership schema. Roll back 0115 to
+	// materialize its legacy input shape before seeding the upgrade fixture.
+	membershipSteps := countMigrationsFrom(t, "0115_team_memberships.up.sql")
+	stepDown(t, dsn, membershipSteps)
 
 	var userID, botID string
 	if err := pool.QueryRow(ctx, `
@@ -41,7 +36,7 @@ func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 		t.Fatalf("seed pre-membership bot: %v", err)
 	}
 
-	migrateToVersion(t, dsn, teamMembershipsVersion)
+	stepUp(t, dsn, membershipSteps)
 
 	var hasTeamID, hasRole bool
 	if err := pool.QueryRow(ctx, `
@@ -79,7 +74,7 @@ func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 		t.Fatalf("bot owner FK parent = %q, want team_members", ownerParent)
 	}
 
-	migrateToVersion(t, dsn, preTeamMembershipsVersion)
+	stepDown(t, dsn, membershipSteps)
 
 	var restoredTeam, restoredRole, restoredRoot string
 	if err := pool.QueryRow(ctx, `
@@ -100,7 +95,7 @@ func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 		t.Fatal("team_members still exists after rolling back 0115")
 	}
 
-	migrateToVersion(t, dsn, teamMembershipsVersion)
+	stepUp(t, dsn, membershipSteps)
 	var preservedBot bool
 	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM bots WHERE id=$1)`, botID).Scan(&preservedBot); err != nil {
 		t.Fatalf("check bot after re-up: %v", err)
@@ -539,10 +534,6 @@ func TestTeamMembershipDownFailsWithMultipleMemberships(t *testing.T) {
 	pool := freshMigratedDB(t)
 	const teamTwo = "00000000-0000-0000-0000-0000000000f2"
 
-	// Remove any later migrations so the fail-closed assertion exercises 0115
-	// itself instead of whichever migration currently happens to be the tail.
-	migrateToVersion(t, dsn, teamMembershipsVersion)
-
 	if _, err := pool.Exec(ctx, `INSERT INTO teams (id, slug) VALUES ($1, 'down-team-two')`, teamTwo); err != nil {
 		t.Fatalf("seed second team: %v", err)
 	}
@@ -555,7 +546,7 @@ func TestTeamMembershipDownFailsWithMultipleMemberships(t *testing.T) {
 		VALUES ($1, $3), ($2, $3)`, team.DefaultTeamID, teamTwo, userID); err != nil {
 		t.Fatalf("seed multiple memberships: %v", err)
 	}
-	if err := tryMigrateToVersion(t, dsn, preTeamMembershipsVersion); err == nil {
+	if err := tryStepDown(t, dsn, countMigrationsFrom(t, "0115_team_memberships.up.sql")); err == nil {
 		t.Fatal("0115 down must fail closed when a user has multiple memberships")
 	}
 }
