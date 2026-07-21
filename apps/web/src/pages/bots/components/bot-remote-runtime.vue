@@ -99,9 +99,16 @@
             :key="target.target_id"
             stack="sm"
             :label="targetName(target)"
-            :description="targetSummary(target)"
+            :description="target.kind === 'native' ? t('bots.remoteRuntime.serverDescription') : undefined"
           >
             <div class="flex items-center gap-2">
+              <Badge
+                v-if="target.primary"
+                variant="secondary"
+                size="sm"
+              >
+                {{ t('bots.remoteRuntime.defaultBadge') }}
+              </Badge>
               <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span
                   class="size-1.5 rounded-full"
@@ -121,14 +128,6 @@
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    v-if="canEditTarget(target)"
-                    @select="openEditDialog(target)"
-                  >
-                    <Pencil class="size-4" />
-                    {{ t('common.edit') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator v-if="canEditTarget(target)" />
                   <DropdownMenuItem
                     variant="destructive"
                     @select="pendingDeleteTarget = target"
@@ -150,7 +149,7 @@
       <form @submit.prevent="saveMount">
         <DialogHeader>
           <DialogTitle>
-            {{ editingTarget ? t('bots.remoteRuntime.editTitle') : t('bots.remoteRuntime.addTitle') }}
+            {{ t('bots.remoteRuntime.addTitle') }}
           </DialogTitle>
           <DialogDescription>
             {{ t('bots.remoteRuntime.mountDescription') }}
@@ -164,7 +163,7 @@
           >
             <Select
               v-model="mountRuntimeId"
-              :disabled="!!editingTarget || runtimesLoading || mountSaving"
+              :disabled="runtimesLoading || mountSaving"
             >
               <SelectTrigger class="w-full">
                 <SelectValue :placeholder="t('bots.remoteRuntime.selectComputer')" />
@@ -180,19 +179,6 @@
               </SelectContent>
             </Select>
           </FieldStack>
-
-          <FieldStack
-            :label="t('bots.remoteRuntime.path')"
-            :help="t('bots.remoteRuntime.pathDescription', { path: defaultWorkspacePath })"
-          >
-            <Input
-              v-model="mountWorkspacePath"
-              :placeholder="defaultWorkspacePath"
-              :disabled="mountSaving"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </FieldStack>
         </FormStack>
 
         <DialogFooter class="mt-4">
@@ -205,7 +191,7 @@
             {{ t('common.cancel') }}
           </Button>
           <Button
-            v-if="!editingTarget && !runtimesLoading && availableRuntimeItems.length === 0"
+            v-if="!runtimesLoading && availableRuntimeItems.length === 0"
             type="button"
             @click="openComputers"
           >
@@ -217,7 +203,7 @@
             :disabled="!canSaveMount"
             :loading="mountSaving"
           >
-            {{ editingTarget ? t('common.save') : t('common.add') }}
+            {{ t('common.add') }}
           </Button>
         </DialogFooter>
       </form>
@@ -249,6 +235,7 @@ import {
   type WorkspaceWorkspaceTarget,
 } from '@memohai/sdk'
 import {
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -259,9 +246,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
-  Input,
   Select,
   SelectContent,
   SelectItem,
@@ -269,7 +254,7 @@ import {
   SelectValue,
   toast,
 } from '@felinic/ui'
-import { MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
@@ -366,7 +351,6 @@ const primaryTargetId = computed(() => (
 ))
 const initialLoading = computed(() => workspaceTargetsLoading.value && !workspaceTargetsResponse.value)
 const loadFailed = computed(() => !!workspaceTargetsError.value && !workspaceTargetsResponse.value)
-const defaultWorkspacePath = computed(() => 'bots/' + (props.botId || '<bot-id>'))
 const showThisComputerSetup = computed(() => (
   !!desktopRuntimeBridge
   && !!desktopRuntimeState.value
@@ -374,21 +358,10 @@ const showThisComputerSetup = computed(() => (
 ))
 
 const mountDialogOpen = ref(false)
-const editingTarget = ref<ValidWorkspaceTarget | null>(null)
 const mountRuntimeId = ref('')
-const mountWorkspacePath = ref('')
 const pendingDeleteTarget = ref<ValidWorkspaceTarget | null>(null)
 
 const dialogRuntimeItems = computed<RuntimeOption[]>(() => {
-  const editing = editingTarget.value
-  if (editing?.runtime_id) {
-    const runtime = runtimeItems.value.find(item => item.id === editing.runtime_id)
-    return [{
-      id: editing.runtime_id,
-      name: runtime ? runtimeName(runtime) : targetName(editing),
-      online: runtime?.online ?? editing.online ?? false,
-    }]
-  }
   return availableRuntimeItems.value.flatMap((runtime): RuntimeOption[] => (
     runtime.id
       ? [{
@@ -402,7 +375,7 @@ const dialogRuntimeItems = computed<RuntimeOption[]>(() => {
 
 const mountComputerHelp = computed(() => {
   if (runtimesError.value && !runtimes.value) return t('runtimes.loadFailedDescription')
-  if (!editingTarget.value && !runtimesLoading.value && availableRuntimeItems.value.length === 0) {
+  if (!runtimesLoading.value && availableRuntimeItems.value.length === 0) {
     return t('bots.remoteRuntime.noAvailableComputers')
   }
   return t('bots.remoteRuntime.computerDescription')
@@ -433,13 +406,12 @@ const { mutateAsync: setPrimaryRequest, isLoading: primarySaving } = useMutation
 })
 
 const { mutateAsync: saveMountRequest, isLoading: mountSaving } = useMutation({
-  mutation: async (input: { runtimeId: string, workspacePath: string }) => {
+  mutation: async (runtimeId: string) => {
     const { data } = await putBotsByBotIdWorkspaceTargetsRemotesByRuntimeId({
       path: {
         bot_id: props.botId,
-        runtime_id: input.runtimeId,
+        runtime_id: runtimeId,
       },
-      body: { workspace_path: input.workspacePath.trim() },
       throwOnError: true,
     })
     return data
@@ -495,20 +467,6 @@ function statusDotClass(status: string): string {
   }
 }
 
-function targetSummary(target: WorkspaceWorkspaceTarget): string {
-  if (target.kind === 'native') return t('bots.remoteRuntime.serverDescription')
-  return t('bots.remoteRuntime.folderSummary', {
-    path: target.workspace_path || defaultWorkspacePath.value,
-  })
-}
-
-function canEditTarget(target: WorkspaceWorkspaceTarget): boolean {
-  return target.kind === 'remote'
-    && !!target.runtime_id
-    && target.status !== 'owner_mismatch'
-    && target.status !== 'revoked'
-}
-
 function canSetPrimaryTarget(target: WorkspaceWorkspaceTarget): boolean {
   return target.status !== 'owner_mismatch' && target.status !== 'revoked'
 }
@@ -535,28 +493,14 @@ function setLocalPrimary(targetId: string): void {
 }
 
 function openAddDialog(): void {
-  editingTarget.value = null
   mountRuntimeId.value = availableRuntimeItems.value[0]?.id ?? ''
-  mountWorkspacePath.value = ''
-  mountDialogOpen.value = true
-}
-
-function openEditDialog(target: ValidWorkspaceTarget): void {
-  if (!target.runtime_id) return
-  editingTarget.value = target
-  mountRuntimeId.value = target.runtime_id
-  mountWorkspacePath.value = target.workspace_path || ''
   mountDialogOpen.value = true
 }
 
 async function saveMount(): Promise<void> {
   if (!canSaveMount.value) return
-  const editing = editingTarget.value
   try {
-    const saved = await saveMountRequest({
-      runtimeId: mountRuntimeId.value,
-      workspacePath: mountWorkspacePath.value,
-    })
+    const saved = await saveMountRequest(mountRuntimeId.value)
     if (saved?.target_id) {
       const index = targetItems.value.findIndex(target => target.target_id === saved.target_id)
       if (index >= 0) {
@@ -568,9 +512,7 @@ async function saveMount(): Promise<void> {
       }
     }
     mountDialogOpen.value = false
-    toast.success(editing
-      ? t('bots.remoteRuntime.updateSuccess')
-      : t('bots.remoteRuntime.addSuccess'))
+    toast.success(t('bots.remoteRuntime.addSuccess'))
     void refetchWorkspaceTargets()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.remoteRuntime.saveFailed')))

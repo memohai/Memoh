@@ -40,7 +40,7 @@ describe('runtime handshake', () => {
       workspaceBase: metadata.workspace_base,
     }, '1.2.3', metadata)
 
-    expect(metadata.capabilities).toContain('workspace_scope')
+    expect(metadata.capabilities).toContain('host_fs')
     expect(headers['Sec-WebSocket-Protocol']).toBe(runtimeProtocolGrpc)
     expect(headers.Authorization).toBe(`Bearer ${key}`)
     expect(headers).not.toHaveProperty('X-Memoh-Runtime-Hostname')

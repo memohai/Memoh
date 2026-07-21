@@ -266,10 +266,9 @@ func workspaceTargetMetadata(target *conversation.WorkspaceTarget) map[string]an
 	}
 	return map[string]any{
 		"execution_location": map[string]any{
-			"target_id":      strings.TrimSpace(target.TargetID),
-			"kind":           strings.TrimSpace(target.Kind),
-			"name":           strings.TrimSpace(target.Name),
-			"workspace_path": strings.TrimSpace(target.WorkspacePath),
+			"target_id": strings.TrimSpace(target.TargetID),
+			"kind":      strings.TrimSpace(target.Kind),
+			"name":      strings.TrimSpace(target.Name),
 		},
 	}
 }
@@ -289,10 +288,9 @@ func (r *Resolver) persistSessionWorkspaceTarget(ctx context.Context, req conver
 	target := req.WorkspaceTarget
 	metadata["workspace_target_id"] = strings.TrimSpace(target.TargetID)
 	metadata["workspace_target"] = map[string]any{
-		"target_id":      strings.TrimSpace(target.TargetID),
-		"kind":           strings.TrimSpace(target.Kind),
-		"name":           strings.TrimSpace(target.Name),
-		"workspace_path": strings.TrimSpace(target.WorkspacePath),
+		"target_id": strings.TrimSpace(target.TargetID),
+		"kind":      strings.TrimSpace(target.Kind),
+		"name":      strings.TrimSpace(target.Name),
 	}
 	_, err = r.sessionService.UpdateMetadata(ctx, req.SessionID, metadata)
 	return err

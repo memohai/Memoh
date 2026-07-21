@@ -11,7 +11,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-func (s *Store) CreateOrUpdateMount(ctx context.Context, botID, runtimeID, workspacePath string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
+func (s *Store) CreateOrUpdateMount(ctx context.Context, botID, runtimeID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
 	parsedBotID, err := db.ParseUUID(botID)
 	if err != nil {
 		return dbstore.BotRemoteRuntimeBindingRecord{}, err
@@ -21,7 +21,7 @@ func (s *Store) CreateOrUpdateMount(ctx context.Context, botID, runtimeID, works
 		return dbstore.BotRemoteRuntimeBindingRecord{}, err
 	}
 	targetID, err := s.queries.CreateOrUpdateBotRemoteRuntimeMount(ctx, dbsqlc.CreateOrUpdateBotRemoteRuntimeMountParams{
-		BotID: parsedBotID, RuntimeID: parsedRuntimeID, WorkspacePath: workspacePath,
+		BotID: parsedBotID, RuntimeID: parsedRuntimeID,
 	})
 	if err != nil {
 		return dbstore.BotRemoteRuntimeBindingRecord{}, mapQueryErr(err)
@@ -41,7 +41,7 @@ func (s *Store) ListMounts(ctx context.Context, botID string) ([]dbstore.BotRemo
 	records := make([]dbstore.BotRemoteRuntimeBindingRecord, 0, len(rows))
 	for _, row := range rows {
 		records = append(records, remoteMountRecord(
-			row.ID, row.BotID, row.RuntimeID, row.WorkspacePath, row.IsPrimary, row.ToolApprovalConfig,
+			row.ID, row.BotID, row.RuntimeID, row.IsPrimary, row.ToolApprovalConfig,
 			row.RuntimeName, row.RuntimeUserID, row.RuntimeUnavailable, row.BotOwnerUserID,
 			row.CreatedAt, row.UpdatedAt,
 		))
@@ -59,7 +59,7 @@ func (s *Store) GetMount(ctx context.Context, botID, targetID string) (dbstore.B
 		return dbstore.BotRemoteRuntimeBindingRecord{}, mapQueryErr(err)
 	}
 	return remoteMountRecord(
-		row.ID, row.BotID, row.RuntimeID, row.WorkspacePath, row.IsPrimary, row.ToolApprovalConfig,
+		row.ID, row.BotID, row.RuntimeID, row.IsPrimary, row.ToolApprovalConfig,
 		row.RuntimeName, row.RuntimeUserID, row.RuntimeUnavailable, row.BotOwnerUserID,
 		row.CreatedAt, row.UpdatedAt,
 	), nil
@@ -75,7 +75,7 @@ func (s *Store) GetPrimaryMount(ctx context.Context, botID string) (dbstore.BotR
 		return dbstore.BotRemoteRuntimeBindingRecord{}, mapQueryErr(err)
 	}
 	return remoteMountRecord(
-		row.ID, row.BotID, row.RuntimeID, row.WorkspacePath, row.IsPrimary, row.ToolApprovalConfig,
+		row.ID, row.BotID, row.RuntimeID, row.IsPrimary, row.ToolApprovalConfig,
 		row.RuntimeName, row.RuntimeUserID, row.RuntimeUnavailable, row.BotOwnerUserID,
 		row.CreatedAt, row.UpdatedAt,
 	), nil
@@ -163,7 +163,6 @@ func parseRemoteMountIDs(botID, targetID string) (pgtype.UUID, pgtype.UUID, erro
 
 func remoteMountRecord(
 	id, botID, runtimeID pgtype.UUID,
-	workspacePath string,
 	isPrimary bool,
 	toolApproval []byte,
 	runtimeName string,
@@ -176,7 +175,6 @@ func remoteMountRecord(
 		ID:             id.String(),
 		BotID:          botID.String(),
 		RuntimeID:      runtimeID.String(),
-		WorkspacePath:  workspacePath,
 		IsPrimary:      isPrimary,
 		ToolApproval:   append(dbstore.JSON(nil), toolApproval...),
 		RuntimeName:    runtimeName,

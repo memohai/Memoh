@@ -15,10 +15,9 @@ func TestToolExecutionMetadataRegistryAnnotatesToolCall(t *testing.T) {
 	t.Parallel()
 
 	location := &toolapproval.ExecutionLocation{
-		TargetID:      "runtime-target-id",
-		Kind:          "remote",
-		Name:          "Office Mac",
-		WorkspacePath: "/Users/alice",
+		TargetID: "runtime-target-id",
+		Kind:     "remote",
+		Name:     "Office Mac",
 	}
 	var update map[string]any
 	registry := newToolExecutionMetadataRegistry(func(_ sdk.ToolCall, metadata map[string]any) {

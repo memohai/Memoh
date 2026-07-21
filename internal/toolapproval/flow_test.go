@@ -159,10 +159,9 @@ func TestRunFlowNonInteractiveAutoRejects(t *testing.T) {
 func TestRunFlowApprovedEmitsPendingAndDecision(t *testing.T) {
 	t.Parallel()
 	location := &ExecutionLocation{
-		TargetID:      "target-1",
-		Kind:          "remote",
-		Name:          "Office Mac",
-		WorkspacePath: "projects/memoh",
+		TargetID: "target-1",
+		Kind:     "remote",
+		Name:     "Office Mac",
 	}
 	svc := &fakeFlowService{
 		evaluation: Evaluation{Decision: DecisionNeedsApproval, ExecutionLocation: location},

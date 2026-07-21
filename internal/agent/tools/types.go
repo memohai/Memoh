@@ -96,7 +96,6 @@ type SessionContext struct {
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string
-	WorkspacePath       string
 	Skills              map[string]SkillDetail
 	TimezoneLocation    *time.Location
 	Emitter             StreamEmitter

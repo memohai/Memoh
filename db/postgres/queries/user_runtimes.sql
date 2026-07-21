@@ -29,8 +29,8 @@ WHERE team_id = public.memoh_current_team_id()
 RETURNING *;
 
 -- name: CreateOrUpdateBotRemoteRuntimeMount :one
-INSERT INTO bot_remote_runtime_bindings (bot_id, runtime_id, workspace_path)
-SELECT b.id, r.id, sqlc.arg(workspace_path)
+INSERT INTO bot_remote_runtime_bindings (bot_id, runtime_id)
+SELECT b.id, r.id
 FROM bots b
 JOIN user_runtimes r
   ON r.id = sqlc.arg(runtime_id)
@@ -45,7 +45,6 @@ JOIN users owner ON owner.id = owner_membership.user_id AND owner.is_active = TR
 WHERE b.team_id = public.memoh_current_team_id()
   AND b.id = sqlc.arg(bot_id)
 ON CONFLICT (team_id, bot_id, runtime_id) DO UPDATE SET
-  workspace_path = EXCLUDED.workspace_path,
   updated_at = now()
 RETURNING id;
 
@@ -54,7 +53,6 @@ SELECT
   binding.id,
   binding.bot_id,
   binding.runtime_id,
-  binding.workspace_path,
   binding.is_primary,
   binding.tool_approval_config,
   binding.created_at,
@@ -79,7 +77,6 @@ SELECT
   binding.id,
   binding.bot_id,
   binding.runtime_id,
-  binding.workspace_path,
   binding.is_primary,
   binding.tool_approval_config,
   binding.created_at,
@@ -104,7 +101,6 @@ SELECT
   binding.id,
   binding.bot_id,
   binding.runtime_id,
-  binding.workspace_path,
   binding.is_primary,
   binding.tool_approval_config,
   binding.created_at,

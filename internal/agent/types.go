@@ -28,7 +28,6 @@ type SessionContext struct {
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string
-	WorkspacePath       string
 	IsSubagent          bool
 }
 

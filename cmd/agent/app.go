@@ -280,11 +280,10 @@ func (r workspaceTargetPolicyResolver) ResolveWorkspaceTargetPolicy(ctx context.
 		return toolapproval.WorkspaceTargetPolicy{}, err
 	}
 	return toolapproval.WorkspaceTargetPolicy{
-		TargetID:      resolved.TargetID,
-		Kind:          resolved.Kind,
-		Name:          resolved.Name,
-		WorkspacePath: resolved.WorkspacePath,
-		Config:        resolved.Approval,
+		TargetID: resolved.TargetID,
+		Kind:     resolved.Kind,
+		Name:     resolved.Name,
+		Config:   resolved.Approval,
 	}, nil
 }
 

@@ -20,7 +20,7 @@ export interface RuntimeHandshakeMetadataV1 {
   arch: string
   client_version: string
   workspace_base: string
-  capabilities: Array<'fs' | 'exec' | 'workspace_scope'>
+  capabilities: Array<'fs' | 'exec' | 'host_fs'>
 }
 
 export interface RuntimeHandshakeHeaders {

@@ -1,22 +1,22 @@
 #!/usr/bin/env node
 
+import { homedir } from 'node:os'
+
 import { RuntimeSession } from './session'
-import { ensureWorkspaceBase, selectWorkspaceBase } from './workspace-base'
 
 async function main(args: string[]): Promise<void> {
   if (args.includes('--help') || args.includes('-h')) {
     usage(0)
+  }
+  if (args.includes('--workspace-base')) {
+    throw new Error('--workspace-base is no longer supported; Remote Runtime uses the current user home directory')
   }
   const serverUrl = valueAfter(args, '--server') ?? process.env.MEMOH_RUNTIME_SERVER
   const key = valueAfter(args, '--key') ?? process.env.MEMOH_RUNTIME_KEY
   if (!serverUrl || !key) {
     throw new Error('--server and --key are required (or set MEMOH_RUNTIME_SERVER and MEMOH_RUNTIME_KEY)')
   }
-  const workspaceBase = selectWorkspaceBase({
-    serverUrl,
-    key,
-    workspaceBase: valueAfter(args, '--workspace-base'),
-  })
+  const workspaceBase = homedir()
   const controller = new AbortController()
   const stop = () => controller.abort()
   process.once('SIGINT', stop)
@@ -31,7 +31,6 @@ async function main(args: string[]): Promise<void> {
       onStatus: (status, error) => console.log(error ? `${status}: ${error}` : status),
       warn: message => console.warn(message),
     })
-    await ensureWorkspaceBase(workspaceBase)
     await session.start(controller.signal)
   } finally {
     process.off('SIGINT', stop)
@@ -52,7 +51,7 @@ function valueAfter(args: string[], name: string): string | undefined {
 }
 
 function usage(exitCode: number): never {
-  console.error('Usage: memoh-runtime --server <url> --key <key> [--workspace-base <path>] [--insecure-localhost]')
+  console.error('Usage: memoh-runtime --server <url> --key <key> [--insecure-localhost]')
   process.exit(exitCode)
 }
 

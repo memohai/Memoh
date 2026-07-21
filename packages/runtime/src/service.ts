@@ -11,7 +11,6 @@ import {
   type handleClientStreamingCall,
   type handleServerStreamingCall,
   type handleUnaryCall,
-  type Metadata,
   type ServerUnaryCall,
   type ServiceDefinition,
   type UntypedServiceImplementation,
@@ -21,8 +20,7 @@ import { loadSync } from '@grpc/proto-loader'
 import { ChildSupervisor } from './children'
 import { WorkspaceExecService } from './core/exec'
 import { rawChunkSize, WorkspaceFileService } from './core/fs'
-import { PathGuard } from './core/paths'
-import { WorkspaceScopeRegistry } from './core/scopes'
+import { HostPathResolver } from './core/paths'
 import { mapNodeError, rpcError } from './rpc'
 import type {
   DeleteFileRequest,
@@ -59,11 +57,10 @@ let serviceDefinitionPromise: Promise<ServiceDefinition> | undefined
 export async function startRuntimeGrpcServer(
   options: RuntimeGrpcServerOptions,
 ): Promise<RunningRuntimeGrpcServer> {
-  const paths = await PathGuard.create(options.workspaceBase)
-  const scopes = new WorkspaceScopeRegistry(paths)
+  const paths = await HostPathResolver.create(options.workspaceBase)
   const children = new ChildSupervisor({ warn: options.warn })
   let acceptingRPCs = true
-  const implementation = createContainerService(paths, scopes, children, () => acceptingRPCs)
+  const implementation = createContainerService(paths, children, () => acceptingRPCs)
   const server = new Server({
     'grpc.max_receive_message_length': grpcMessageLimit,
     'grpc.max_send_message_length': grpcMessageLimit,
@@ -143,48 +140,23 @@ async function loadContainerServiceDefinitionUncached(): Promise<ServiceDefiniti
 }
 
 export function createContainerService(
-  basePaths: PathGuard,
-  scopes: WorkspaceScopeRegistry,
+  paths: HostPathResolver,
   children: ChildSupervisor,
   acceptingRPCs: () => boolean = () => true,
 ): UntypedServiceImplementation {
-  const readinessFiles = new WorkspaceFileService(basePaths)
-  const scopedFiles = async (metadata: Metadata) => new WorkspaceFileService(await scopes.resolve(metadata))
-  const scopedCommands = async (metadata: Metadata) => new WorkspaceExecService(
-    await scopes.resolve(metadata),
-    children,
-    acceptingRPCs,
-  )
+  const files = new WorkspaceFileService(paths)
+  const commands = new WorkspaceExecService(paths, children, acceptingRPCs)
 
-  const ReadFile: handleUnaryCall<ReadFileRequest, unknown> = unary(async call => (await scopedFiles(call.metadata)).readFile(call.request))
-  const WriteFile: handleUnaryCall<WriteFileRequest, unknown> = unary(async call => (await scopedFiles(call.metadata)).writeFile(call.request))
-  const ListDir: handleUnaryCall<ListDirRequest, unknown> = unary(async call => (await scopedFiles(call.metadata)).listDir(call.request))
-  const Stat: handleUnaryCall<StatRequest, unknown> = unary(async call => {
-    if (!scopes.hasScope(call.metadata)) {
-      if (call.request.path?.trim() !== '/') {
-        throw rpcError(status.PERMISSION_DENIED, 'unscoped runtime access is limited to readiness')
-      }
-      return readinessFiles.stat(call.request)
-    }
-    return (await scopedFiles(call.metadata)).stat(call.request)
-  })
-  const Mkdir: handleUnaryCall<MkdirRequest, unknown> = unary(async call => (await scopedFiles(call.metadata)).mkdir(call.request))
-  const Rename: handleUnaryCall<RenameRequest, unknown> = unary(async call => (await scopedFiles(call.metadata)).rename(call.request))
-  const DeleteFile: handleUnaryCall<DeleteFileRequest, unknown> = unary(async call => (await scopedFiles(call.metadata)).deleteFile(call.request))
+  const ReadFile: handleUnaryCall<ReadFileRequest, unknown> = unary(async call => files.readFile(call.request))
+  const WriteFile: handleUnaryCall<WriteFileRequest, unknown> = unary(async call => files.writeFile(call.request))
+  const ListDir: handleUnaryCall<ListDirRequest, unknown> = unary(async call => files.listDir(call.request))
+  const Stat: handleUnaryCall<StatRequest, unknown> = unary(async call => files.stat(call.request))
+  const Mkdir: handleUnaryCall<MkdirRequest, unknown> = unary(async call => files.mkdir(call.request))
+  const Rename: handleUnaryCall<RenameRequest, unknown> = unary(async call => files.rename(call.request))
+  const DeleteFile: handleUnaryCall<DeleteFileRequest, unknown> = unary(async call => files.deleteFile(call.request))
 
   const Exec: handleBidiStreamingCall<ExecInput, ExecOutput> = call => {
-    call.pause()
-    void scopedCommands(call.metadata).then(commands => {
-      if (call.cancelled || call.destroyed) {
-        return
-      }
-      commands.exec(call)
-      call.resume()
-    }).catch(error => {
-      if (!call.cancelled && !call.destroyed) {
-        call.emit('error', mapNodeError(error, 'exec scope'))
-      }
-    })
+    commands.exec(call)
   }
   const Tunnel: handleBidiStreamingCall<unknown, unknown> = call => {
     const error = rpcError(status.PERMISSION_DENIED, 'tunnels are not allowed by Remote Runtime M1')
@@ -212,7 +184,6 @@ export function createContainerService(
       }
       let handle: Awaited<ReturnType<WorkspaceFileService['openReadRaw']>> | undefined
       try {
-        const files = await scopedFiles(call.metadata)
         handle = await files.openReadRaw(call.request.path)
         if (cancelled || call.destroyed) {
           return
@@ -248,8 +219,6 @@ export function createContainerService(
     let chain = Promise.resolve()
     let settled = call.cancelled || call.destroyed
     let cancelled = settled
-    const filesPromise = scopedFiles(call.metadata)
-    void filesPromise.catch(() => undefined)
     const fail = async (error: unknown) => {
       if (settled) {
         return
@@ -274,7 +243,6 @@ export function createContainerService(
           if (!chunk.path?.trim()) {
             throw rpcError(status.INVALID_ARGUMENT, 'first chunk must include path')
           }
-          const files = await filesPromise
           const opened = await files.openWriteRaw(chunk.path)
           if (settled || cancelled || call.destroyed) {
             await opened.close().catch(() => undefined)
@@ -295,12 +263,6 @@ export function createContainerService(
     })
     call.on('end', () => {
       void chain.then(async () => {
-        if (settled || cancelled || call.destroyed) {
-          return
-        }
-        // Scope admission is mandatory even for an empty client stream. Do
-        // not let a zero-chunk WriteRaw bypass the workspace metadata guard.
-        await filesPromise
         if (settled || cancelled || call.destroyed) {
           return
         }

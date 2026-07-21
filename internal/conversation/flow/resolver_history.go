@@ -42,8 +42,7 @@ func sameWorkspaceTarget(left, right *conversation.WorkspaceTarget) bool {
 		return left == right
 	}
 	return strings.TrimSpace(left.TargetID) == strings.TrimSpace(right.TargetID) &&
-		strings.TrimSpace(left.Kind) == strings.TrimSpace(right.Kind) &&
-		strings.TrimSpace(left.WorkspacePath) == strings.TrimSpace(right.WorkspacePath)
+		strings.TrimSpace(left.Kind) == strings.TrimSpace(right.Kind)
 }
 
 func workspaceTargetFromMetadata(metadata map[string]any) *conversation.WorkspaceTarget {
@@ -55,10 +54,9 @@ func workspaceTargetFromMetadata(metadata map[string]any) *conversation.Workspac
 		return nil
 	}
 	target := &conversation.WorkspaceTarget{
-		TargetID:      strings.TrimSpace(readAnyString(raw["target_id"])),
-		Kind:          strings.TrimSpace(readAnyString(raw["kind"])),
-		Name:          strings.TrimSpace(readAnyString(raw["name"])),
-		WorkspacePath: strings.TrimSpace(readAnyString(raw["workspace_path"])),
+		TargetID: strings.TrimSpace(readAnyString(raw["target_id"])),
+		Kind:     strings.TrimSpace(readAnyString(raw["kind"])),
+		Name:     strings.TrimSpace(readAnyString(raw["name"])),
 	}
 	if target.TargetID == "" {
 		return nil
@@ -82,9 +80,9 @@ func (r *Resolver) currentWorkspaceContextMessage(ctx context.Context, req conve
 			}
 		}
 	}
-	text := fmt.Sprintf("[Current execution location] The default Computer for this request is %q (target_id=%q, kind=%q, starting_folder=%q). Workspace tools that omit target_id run there.", current.Name, current.TargetID, current.Kind, current.WorkspacePath)
+	text := fmt.Sprintf("[Current execution location] The default Computer for this request is %q (target_id=%q, kind=%q). Workspace tools that omit target_id run there.", current.Name, current.TargetID, current.Kind)
 	if previous != nil && !sameWorkspaceTarget(previous, current) {
-		text = fmt.Sprintf("[Current execution location changed] The default Computer for this request changed from %q (target_id=%q) to %q (target_id=%q, kind=%q, starting_folder=%q). Earlier file and command results belong to their recorded Computer. Do not assume files, processes, or working-directory state exist on the new Computer; inspect it before continuing.", previous.Name, previous.TargetID, current.Name, current.TargetID, current.Kind, current.WorkspacePath)
+		text = fmt.Sprintf("[Current execution location changed] The default Computer for this request changed from %q (target_id=%q) to %q (target_id=%q, kind=%q). Earlier file and command results belong to their recorded Computer. Do not assume files, processes, or working-directory state exist on the new Computer; inspect it before continuing.", previous.Name, previous.TargetID, current.Name, current.TargetID, current.Kind)
 	}
 	message := conversation.ModelMessage{Role: "system", Content: conversation.NewTextContent(text)}
 	return &message

@@ -92,10 +92,9 @@ func (s *Service) EvaluatePolicy(ctx context.Context, input CreatePendingInput) 
 		return Evaluation{
 			Decision: policyDecision(target.Config, input.ToolName, args),
 			ExecutionLocation: &ExecutionLocation{
-				TargetID:      strings.TrimSpace(target.TargetID),
-				Kind:          strings.TrimSpace(target.Kind),
-				Name:          strings.TrimSpace(target.Name),
-				WorkspacePath: strings.TrimSpace(target.WorkspacePath),
+				TargetID: strings.TrimSpace(target.TargetID),
+				Kind:     strings.TrimSpace(target.Kind),
+				Name:     strings.TrimSpace(target.Name),
 			},
 		}, nil
 	}

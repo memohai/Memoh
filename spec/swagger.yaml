@@ -5077,11 +5077,6 @@ definitions:
       status:
         type: string
     type: object
-  workspace.MountRemoteWorkspaceRequest:
-    properties:
-      workspace_path:
-        type: string
-    type: object
   workspace.SetPrimaryWorkspaceTargetRequest:
     properties:
       target_id:
@@ -5091,6 +5086,8 @@ definitions:
     type: object
   workspace.UpdateWorkspaceTargetToolApprovalRequest:
     properties:
+      enabled:
+        type: boolean
       exec:
         $ref: '#/definitions/settings.ToolApprovalMode'
       read:
@@ -5120,8 +5117,6 @@ definitions:
         $ref: '#/definitions/workspace.WorkspaceTargetToolApproval'
       tool_approval_config:
         $ref: '#/definitions/settings.ToolApprovalConfig'
-      workspace_path:
-        type: string
     type: object
   workspace.WorkspaceTargetToolApproval:
     properties:
@@ -10640,8 +10635,6 @@ paths:
       - workspace-targets
   /bots/{bot_id}/workspace-targets/remotes/{runtime_id}:
     put:
-      consumes:
-      - application/json
       parameters:
       - description: Bot ID
         in: path
@@ -10653,12 +10646,6 @@ paths:
         name: runtime_id
         required: true
         type: string
-      - description: Remote workspace mount
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/workspace.MountRemoteWorkspaceRequest'
       produces:
       - application/json
       responses:

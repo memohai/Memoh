@@ -49,7 +49,7 @@ interface RawToolApprovalConfig {
 
 export function defaultToolApprovalConfig(kind: WorkspaceTargetKind = 'native'): ToolApprovalConfig {
   return {
-    enabled: true,
+    enabled: kind === 'remote',
     read: {
       mode: 'allow',
       require_approval: false,
@@ -187,13 +187,68 @@ export function normalizeToolApprovalConfig(
   const value = raw as RawToolApprovalConfig
   const write = normalizeFilePolicy(value.write, defaults.write, effectiveModes.write)
   return {
-    // Explicit per-operation modes are the source of truth. Keep this true when
-    // saving so old global-disable state cannot mask a target's selected modes.
-    enabled: true,
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : defaults.enabled,
     read: normalizeFilePolicy(value.read, defaults.read, effectiveModes.read),
     write: value.edit
       ? mergeFilePolicies(write, normalizeFilePolicy(value.edit, defaults.write, effectiveModes.write))
       : write,
     exec: normalizeExecPolicy(value.exec, defaults.exec, effectiveModes.exec),
+  }
+}
+
+export function parseToolApprovalRules(raw: string): string[] {
+  return raw
+    .split(/[\n,]/)
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
+export function formatToolApprovalRules(rules: string[]): string {
+  return rules.join('\n')
+}
+
+export function toolApprovalConfigsEqual(left: ToolApprovalConfig, right: ToolApprovalConfig): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+export function dirtyToolApprovalTargetIds(
+  drafts: Record<string, ToolApprovalConfig>,
+  saved: Record<string, ToolApprovalConfig>,
+): string[] {
+  return Object.keys(drafts).filter((targetId) => {
+    const draft = drafts[targetId]
+    if (!draft) return false
+    const savedConfig = saved[targetId]
+    return !savedConfig || !toolApprovalConfigsEqual(draft, savedConfig)
+  })
+}
+
+export interface ToolApprovalSaveResult {
+  savedTargetIds: string[]
+  failedTargets: Array<{ targetId: string, error: unknown }>
+}
+
+export async function saveDirtyToolApprovalTargets(
+  drafts: Record<string, ToolApprovalConfig>,
+  saved: Record<string, ToolApprovalConfig>,
+  save: (targetId: string, config: ToolApprovalConfig) => Promise<void>,
+): Promise<ToolApprovalSaveResult> {
+  const results = await Promise.all(dirtyToolApprovalTargetIds(drafts, saved).map(async (targetId) => {
+    const draft = drafts[targetId]
+    if (!draft) {
+      return { targetId, ok: false as const, error: new Error('missing tool approval draft') }
+    }
+    try {
+      await save(targetId, cloneToolApprovalConfig(draft))
+      return { targetId, ok: true as const }
+    } catch (error) {
+      return { targetId, ok: false as const, error }
+    }
+  }))
+  return {
+    savedTargetIds: results.filter(result => result.ok).map(result => result.targetId),
+    failedTargets: results
+      .filter((result): result is { targetId: string, ok: false, error: unknown } => !result.ok)
+      .map(result => ({ targetId: result.targetId, error: result.error })),
   }
 }

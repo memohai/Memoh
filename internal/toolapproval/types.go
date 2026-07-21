@@ -54,21 +54,19 @@ type CreatePendingInput struct {
 }
 
 type WorkspaceTargetPolicy struct {
-	TargetID      string
-	Kind          string
-	Name          string
-	WorkspacePath string
-	Config        settings.ToolApprovalConfig
+	TargetID string
+	Kind     string
+	Name     string
+	Config   settings.ToolApprovalConfig
 }
 
 // ExecutionLocation is the stable, user-facing identity of the workspace
 // target selected for one tool call. Runtime IDs stay internal; clients render
 // Name (or localize Kind for the Server Workspace).
 type ExecutionLocation struct {
-	TargetID      string `json:"-"`
-	Kind          string `json:"kind"`
-	Name          string `json:"name"`
-	WorkspacePath string `json:"-"`
+	TargetID string `json:"-"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
 }
 
 type WorkspaceTargetPolicyResolver interface {

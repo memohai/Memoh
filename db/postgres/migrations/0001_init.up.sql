@@ -294,13 +294,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_runtimes_active_user_name
 CREATE INDEX IF NOT EXISTS idx_user_runtimes_user_id ON user_runtimes(user_id);
 
 -- bot_remote_runtime_bindings: persistent Bot workspace placement on a
--- user-owned Remote Runtime. Paths are relative to the Runtime's advertised
--- workspace base; the Runtime client resolves and confines them locally.
+-- user-owned Remote Runtime. The Runtime exposes its host filesystem and uses
+-- the OS user's home directory as the default working directory.
 CREATE TABLE IF NOT EXISTS bot_remote_runtime_bindings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   runtime_id UUID NOT NULL REFERENCES user_runtimes(id) ON DELETE RESTRICT,
-  workspace_path TEXT NOT NULL CHECK (btrim(workspace_path) <> ''),
   is_primary BOOLEAN NOT NULL DEFAULT false,
   tool_approval_config JSONB NOT NULL DEFAULT '{"enabled":true,"read":{"mode":"allow","bypass_globs":[],"force_review_globs":[]},"write":{"mode":"ask","bypass_globs":[],"force_review_globs":[]},"exec":{"mode":"ask","bypass_commands":[],"force_review_commands":[]}}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

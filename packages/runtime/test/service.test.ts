@@ -64,7 +64,6 @@ let root: string
 let running: RunningRuntimeGrpcServer
 let transport: GrpcWebSocketTestHarness
 let client: TestClient
-const workspaceID = '11111111-1111-4111-8111-111111111111'
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'memoh-runtime-service-'))
@@ -96,21 +95,21 @@ describe('ContainerService', () => {
     const readiness = await unaryUnscoped<{ path: string }, { entry: FileEntry }>(client.Stat.bind(client), { path: '/' })
     expect(readiness.entry.is_dir).toBe(true)
 
-    await unary(client.WriteFile.bind(client), { path: '/data/notes/hello.txt', content: Buffer.from('one\ntwo\n') }, scopeMetadata())
-    const result = await unary(client.ReadFile.bind(client), { path: '/data/notes/hello.txt', line_offset: 2, n_lines: 1 }, scopeMetadata())
+    await unary(client.WriteFile.bind(client), { path: '/data/notes/hello.txt', content: Buffer.from('one\ntwo\n') })
+    const result = await unary(client.ReadFile.bind(client), { path: '/data/notes/hello.txt', line_offset: 2, n_lines: 1 })
     expect(result).toEqual({ content: 'two\n', total_lines: 2, binary: false })
 
-    const listing = await unary(client.ListDir.bind(client), { path: '/data', recursive: true }, scopeMetadata())
+    const listing = await unary(client.ListDir.bind(client), { path: '/data', recursive: true })
     expect(listing.entries.map(entry => entry.path)).toContain('notes/hello.txt')
 
-    await expect(unary(client.ReadFile.bind(client), { path: '/data/missing.txt' }, scopeMetadata()))
+    await expect(unary(client.ReadFile.bind(client), { path: '/data/missing.txt' }))
       .rejects.toMatchObject({ code: status.NOT_FOUND })
-    await expect(unary(client.DeleteFile.bind(client), { path: '/data/already-missing.txt' }, scopeMetadata())).resolves.toEqual({})
+    await expect(unary(client.DeleteFile.bind(client), { path: '/data/already-missing.txt' })).resolves.toEqual({})
   })
 
   it('streams raw files in 64 KiB chunks without changing bytes', async () => {
     const content = Buffer.alloc(150_000, 0x5a)
-    const writer = client.WriteRaw(scopeMetadata(), (error, response) => {
+    const writer = client.WriteRaw(new Metadata(), (error, response) => {
       if (error) {
         return
       }
@@ -125,7 +124,7 @@ describe('ContainerService', () => {
     })
 
     const chunks: Buffer[] = []
-    const reader = client.ReadRaw({ path: '/data/raw.bin' }, scopeMetadata())
+    const reader = client.ReadRaw({ path: '/data/raw.bin' }, new Metadata())
     reader.on('data', chunk => chunks.push(Buffer.from(chunk.data)))
     await streamEnd(reader)
     expect(Buffer.concat(chunks)).toEqual(content)
@@ -169,7 +168,7 @@ const child = spawn(process.execPath, [childPath], { stdio: 'ignore', windowsHid
 writeFileSync(pidPath, String(child.pid))
 setInterval(() => {}, 1_000)
 `)
-    const stream = client.Exec(scopeMetadata())
+    const stream = client.Exec(new Metadata())
     stream.on('error', () => undefined)
     stream.write({
       command: nodeScriptCommand(parentScript, pidPath, childScript),
@@ -190,91 +189,30 @@ setInterval(() => {}, 1_000)
     stream.cancel()
   })
 
-  it('keeps different Bot workspace paths separate on one device connection', async () => {
-    const secondID = '22222222-2222-4222-8222-222222222222'
-    const first = scopeMetadata(workspaceID, `bots/${workspaceID}`)
-    const second = scopeMetadata(secondID, `bots/${secondID}`)
-
-    await Promise.all([
-      unary(client.WriteFile.bind(client), { path: '/data/same.txt', content: Buffer.from('first') }, first),
-      unary(client.WriteFile.bind(client), { path: '/data/same.txt', content: Buffer.from('second') }, second),
-    ])
-
-    const [firstRead, secondRead] = await Promise.all([
-      unary(client.ReadFile.bind(client), { path: '/data/same.txt' }, first),
-      unary(client.ReadFile.bind(client), { path: '/data/same.txt' }, second),
-    ])
-    expect(firstRead.content).toBe('first\n')
-    expect(secondRead.content).toBe('second\n')
-
+  it('uses the home directory by default and allows host paths outside it', async () => {
     const cwdScript = await writeNodeFixture('cwd.cjs', 'process.stdout.write(process.cwd())\n')
-    const [firstExec, secondExec] = await Promise.all([
-      exec({ command: nodeScriptCommand(cwdScript), work_dir: '/data' }, first),
-      exec({ command: nodeScriptCommand(cwdScript), work_dir: '/data' }, second),
-    ])
-    expect(normalizePath(stdout(firstExec))).toBe(normalizePath(await realpath(join(root, 'bots', workspaceID))))
-    expect(normalizePath(stdout(secondExec))).toBe(normalizePath(await realpath(join(root, 'bots', secondID))))
+    const defaultExec = await exec({ command: nodeScriptCommand(cwdScript) })
+    expect(normalizePath(stdout(defaultExec))).toBe(normalizePath(await realpath(root)))
+
+    const outside = await mkdtemp(join(tmpdir(), 'memoh-runtime-service-outside-'))
+    try {
+      const outsideFile = join(outside, 'outside.txt')
+      await unary(client.WriteFile.bind(client), {
+        path: outsideFile,
+        content: Buffer.from('outside home'),
+      })
+      const result = await unary(client.ReadFile.bind(client), { path: outsideFile })
+      expect(result.content).toBe('outside home\n')
+
+      const outsideExec = await exec({ command: nodeScriptCommand(cwdScript), work_dir: outside })
+      expect(normalizePath(stdout(outsideExec))).toBe(normalizePath(await realpath(outside)))
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
   })
 
-  it('lets two Bot scopes explicitly share one workspace path', async () => {
-    const secondID = '22222222-2222-4222-8222-222222222222'
-    const first = scopeMetadata(workspaceID, 'shared/project')
-    const second = scopeMetadata(secondID, 'shared/project')
-
-    await unary(client.WriteFile.bind(client), {
-      path: '/data/shared.txt', content: Buffer.from('shared by both'),
-    }, first)
-    const result = await unary(client.ReadFile.bind(client), { path: '/data/shared.txt' }, second)
-    expect(result.content).toBe('shared by both\n')
-  })
-
-  it('supports Unicode workspace paths through binary metadata', async () => {
-    const metadata = scopeMetadata(workspaceID, '项目/源码')
-    await unary(client.WriteFile.bind(client), {
-      path: '/data/说明.txt', content: Buffer.from('你好'),
-    }, metadata)
-    const result = await unary(client.ReadFile.bind(client), { path: '/data/说明.txt' }, metadata)
-    expect(result.content).toBe('你好\n')
-  })
-
-  it('rejects unscoped and malformed workspace access', async () => {
-    await expect(unaryUnscoped(client.ReadFile.bind(client), { path: '/data/nope' }))
-      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-    await expect(exec({ command: 'echo ok', work_dir: '/data' }, new Metadata()))
-      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-    await expect(unary(client.WriteFile.bind(client), { path: '/data/nope', content: Buffer.from('x') }, scopeMetadata(workspaceID, '../escape')))
-      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-
-    const duplicate = scopeMetadata()
-    duplicate.add('x-memoh-workspace-id', '22222222-2222-4222-8222-222222222222')
-    await expect(unary(client.WriteFile.bind(client), { path: '/data/nope', content: Buffer.from('x') }, duplicate))
-      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-
-    await expect(unary(
-      client.WriteFile.bind(client),
-      { path: '/data/nope', content: Buffer.from('x') },
-      scopeMetadata('AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA', 'bots/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
-    )).rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-
-    const invalidUTF8 = scopeMetadata()
-    invalidUTF8.set('x-memoh-workspace-path-bin', Buffer.from([0xff]))
-    await expect(unary(client.WriteFile.bind(client), { path: '/data/nope', content: Buffer.from('x') }, invalidUTF8))
-      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-
-    await expect(exec({ command: 'echo ok', work_dir: tmpdir() }))
-      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-  })
-
-  it('requires valid workspace scope metadata for an empty WriteRaw stream', async () => {
-    await expect(emptyWriteRaw(new Metadata()))
-      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-
-    const duplicate = scopeMetadata()
-    duplicate.add('x-memoh-workspace-path-bin', Buffer.from(`bots/${workspaceID}`, 'utf8'))
-    await expect(emptyWriteRaw(duplicate))
-      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-
-    await expect(emptyWriteRaw(scopeMetadata())).resolves.toEqual({ bytes_written: '0' })
+  it('accepts an empty WriteRaw stream without workspace metadata', async () => {
+    await expect(emptyWriteRaw(new Metadata())).resolves.toEqual({ bytes_written: '0' })
   })
 
 })
@@ -297,7 +235,7 @@ function loadTestClientConstructor(): TestClientConstructor {
 function unary<Request, Response>(
   method: (request: Request, metadata: Metadata, callback: UnaryCallback<Response>) => void,
   request: Request,
-  metadata: Metadata,
+  metadata = new Metadata(),
 ): Promise<Response> {
   return new Promise((resolve, reject) => {
     method(request, metadata, (error, response) => error ? reject(error) : resolve(response))
@@ -320,7 +258,7 @@ function streamEnd(stream: ClientReadableStream<unknown>): Promise<void> {
   })
 }
 
-function exec(first: ExecInput, metadata = scopeMetadata()): Promise<ExecOutput[]> {
+function exec(first: ExecInput, metadata = new Metadata()): Promise<ExecOutput[]> {
   const stream = client.Exec(metadata)
   const frames: ExecOutput[] = []
   stream.on('data', frame => frames.push(frame))
@@ -340,13 +278,6 @@ function emptyWriteRaw(metadata: Metadata): Promise<{ bytes_written: string }> {
     writer.on('error', () => undefined)
     writer.end()
   })
-}
-
-function scopeMetadata(id = workspaceID, path = `bots/${id}`): Metadata {
-  const metadata = new Metadata()
-  metadata.set('x-memoh-workspace-id', id)
-  metadata.set('x-memoh-workspace-path-bin', Buffer.from(path, 'utf8'))
-  return metadata
 }
 
 function stdout(frames: ExecOutput[]): string {
