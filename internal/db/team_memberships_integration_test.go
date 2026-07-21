@@ -20,7 +20,8 @@ func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 
 	// 0001 now contains the final membership schema. Roll back 0115 to
 	// materialize its legacy input shape before seeding the upgrade fixture.
-	stepDown(t, dsn, 1)
+	membershipSteps := countMigrationsFrom(t, "0115_team_memberships.up.sql")
+	stepDown(t, dsn, membershipSteps)
 
 	var userID, botID string
 	if err := pool.QueryRow(ctx, `
@@ -35,7 +36,7 @@ func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 		t.Fatalf("seed pre-membership bot: %v", err)
 	}
 
-	stepUp(t, dsn, 1)
+	stepUp(t, dsn, membershipSteps)
 
 	var hasTeamID, hasRole bool
 	if err := pool.QueryRow(ctx, `
@@ -73,7 +74,7 @@ func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 		t.Fatalf("bot owner FK parent = %q, want team_members", ownerParent)
 	}
 
-	stepDown(t, dsn, 1)
+	stepDown(t, dsn, membershipSteps)
 
 	var restoredTeam, restoredRole, restoredRoot string
 	if err := pool.QueryRow(ctx, `
@@ -94,7 +95,7 @@ func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 		t.Fatal("team_members still exists after rolling back 0115")
 	}
 
-	stepUp(t, dsn, 1)
+	stepUp(t, dsn, membershipSteps)
 	var preservedBot bool
 	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM bots WHERE id=$1)`, botID).Scan(&preservedBot); err != nil {
 		t.Fatalf("check bot after re-up: %v", err)
@@ -545,7 +546,7 @@ func TestTeamMembershipDownFailsWithMultipleMemberships(t *testing.T) {
 		VALUES ($1, $3), ($2, $3)`, team.DefaultTeamID, teamTwo, userID); err != nil {
 		t.Fatalf("seed multiple memberships: %v", err)
 	}
-	if err := tryStepDown(t, dsn, 1); err == nil {
+	if err := tryStepDown(t, dsn, countMigrationsFrom(t, "0115_team_memberships.up.sql")); err == nil {
 		t.Fatal("0115 down must fail closed when a user has multiple memberships")
 	}
 }
