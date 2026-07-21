@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
@@ -70,6 +71,91 @@ func requireForbidden(t *testing.T, err error) {
 	}
 	if httpErr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", httpErr.Code)
+	}
+}
+
+func TestMemoryItemRoutesDecodeEscapedMemoryID(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	userID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	for _, tt := range []struct {
+		name            string
+		method          string
+		escapedMemoryID string
+		memoryID        string
+		body            string
+		decodedPath     bool
+	}{
+		{
+			name:            "update",
+			method:          http.MethodPut,
+			escapedMemoryID: botID + "%3Amem_123",
+			memoryID:        botID + ":mem_123",
+			body:            `{"memory":"updated"}`,
+		},
+		{
+			name:            "delete",
+			method:          http.MethodDelete,
+			escapedMemoryID: botID + "%3Amem_123",
+			memoryID:        botID + ":mem_123",
+		},
+		{
+			name:            "update literal percent triplet",
+			method:          http.MethodPut,
+			escapedMemoryID: botID + "%3Amem%253Afoo",
+			memoryID:        botID + ":mem%3Afoo",
+			body:            `{"memory":"updated"}`,
+		},
+		{
+			name:            "delete literal percent triplet",
+			method:          http.MethodDelete,
+			escapedMemoryID: botID + "%3Amem%253Afoo",
+			memoryID:        botID + ":mem%3Afoo",
+		},
+		{
+			name:            "update decoded literal percent triplet",
+			method:          http.MethodPut,
+			escapedMemoryID: botID + "%3Amem%253Afoo",
+			memoryID:        botID + ":mem%3Afoo",
+			body:            `{"memory":"updated"}`,
+			decodedPath:     true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, provider := newMemoryAuthzHandler(t, botID, userID)
+			e := echo.New()
+			e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+				return func(c echo.Context) error {
+					c.Set("user", &jwt.Token{
+						Valid: true,
+						Claims: jwt.MapClaims{
+							"sub":     userID,
+							"user_id": userID,
+						},
+					})
+					return next(c)
+				}
+			})
+			handler.Register(e)
+
+			req := httptest.NewRequest(tt.method, "/bots/"+botID+"/memory/"+tt.escapedMemoryID, bytes.NewBufferString(tt.body))
+			if tt.decodedPath {
+				req.URL.Path = "/bots/" + botID + "/memory/" + tt.memoryID
+				req.URL.RawPath = ""
+			}
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s encoded memory id %q status = %d, want 200; body = %s", tt.method, tt.memoryID, rec.Code, rec.Body.String())
+			}
+			if tt.method == http.MethodPut && (len(provider.updateCalls) != 1 || provider.updateCalls[0] != tt.memoryID) {
+				t.Fatalf("provider.Update calls = %v, want [%s]", provider.updateCalls, tt.memoryID)
+			}
+			if tt.method == http.MethodDelete && (len(provider.deleteCalls) != 1 || provider.deleteCalls[0] != tt.memoryID) {
+				t.Fatalf("provider.Delete calls = %v, want [%s]", provider.deleteCalls, tt.memoryID)
+			}
+		})
 	}
 }
 
