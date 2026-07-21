@@ -462,7 +462,14 @@ SELECT *
 FROM bot_sessions
 WHERE team_id = public.memoh_current_team_id()
   AND parent_session_id = sqlc.arg(parent_session_id)
+  AND type = 'subagent'
   AND deleted_at IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM subagent_configs config
+    WHERE config.team_id = public.memoh_current_team_id()
+      AND config.session_id = bot_sessions.id
+  )
 ORDER BY created_at DESC;
 
 -- name: SoftDeleteSessionsByBot :exec

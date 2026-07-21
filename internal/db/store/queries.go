@@ -102,6 +102,7 @@ type Queries interface {
 	CreateSessionEvent(ctx context.Context, arg dbsqlc.CreateSessionEventParams) (pgtype.UUID, error)
 	CreateStorageProvider(ctx context.Context, arg dbsqlc.CreateStorageProviderParams) (dbsqlc.StorageProvider, error)
 	CreateSubagentConfig(ctx context.Context, arg dbsqlc.CreateSubagentConfigParams) (dbsqlc.SubagentConfig, error)
+	CreateSubagentForkContext(ctx context.Context, arg dbsqlc.CreateSubagentForkContextParams) (dbsqlc.CreateSubagentForkContextRow, error)
 	CreateToolApprovalRequest(ctx context.Context, arg dbsqlc.CreateToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
 	CreateUserInputRequest(ctx context.Context, arg dbsqlc.CreateUserInputRequestParams) (dbsqlc.UserInputRequest, error)
 	CreateUser(ctx context.Context, arg dbsqlc.CreateUserParams) (dbsqlc.CreateUserRow, error)
@@ -293,6 +294,7 @@ type Queries interface {
 	ListMessagesBeforeMessageBySession(ctx context.Context, arg dbsqlc.ListMessagesBeforeMessageBySessionParams) ([]dbsqlc.ListMessagesBeforeMessageBySessionRow, error)
 	ListMessageRefsByCompactID(ctx context.Context, compactID pgtype.UUID) ([]dbsqlc.ListMessageRefsByCompactIDRow, error)
 	ListMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.ListMessagesBySessionRow, error)
+	ListSubagentForkContext(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.ListSubagentForkContextRow, error)
 	ListMessagesLatest(ctx context.Context, arg dbsqlc.ListMessagesLatestParams) ([]dbsqlc.ListMessagesLatestRow, error)
 	ListMessagesLatestBySession(ctx context.Context, arg dbsqlc.ListMessagesLatestBySessionParams) ([]dbsqlc.ListMessagesLatestBySessionRow, error)
 	ListMessagesLatestUIBySession(ctx context.Context, arg dbsqlc.ListMessagesLatestUIBySessionParams) ([]dbsqlc.ListMessagesLatestUIBySessionRow, error)
@@ -437,7 +439,6 @@ type Queries interface {
 	UpsertProviderTemplateModel(ctx context.Context, arg dbsqlc.UpsertProviderTemplateModelParams) (dbsqlc.TemplateProviderTemplateModel, error)
 	UpsertSessionDiscussCursor(ctx context.Context, arg dbsqlc.UpsertSessionDiscussCursorParams) (dbsqlc.BotSessionDiscussCursor, error)
 	UpsertSnapshot(ctx context.Context, arg dbsqlc.UpsertSnapshotParams) (dbsqlc.Snapshot, error)
-	UpsertSubagentConfig(ctx context.Context, arg dbsqlc.UpsertSubagentConfigParams) (dbsqlc.SubagentConfig, error)
 	UpsertUserChannelBinding(ctx context.Context, arg dbsqlc.UpsertUserChannelBindingParams) (dbsqlc.UserChannelBinding, error)
 	UpsertUserProviderOAuthToken(ctx context.Context, arg dbsqlc.UpsertUserProviderOAuthTokenParams) (dbsqlc.UserProviderOauthToken, error)
 	WithTx(tx pgx.Tx) Queries

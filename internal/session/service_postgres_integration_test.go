@@ -175,6 +175,144 @@ func TestPostgresForkFromAssistantMessageCopiesVisibleTurns(t *testing.T) {
 	}
 }
 
+func TestPostgresCreateSubagentStoresForkContextAsHiddenHistory(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresSessionTestTx(t, ctx)
+	setupPostgresSessionForkFixtures(t, ctx, tx)
+	legacySessionID := "00000000-0000-0000-0000-000000075122"
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_sessions (id, bot_id, type, title, parent_session_id, metadata)
+		VALUES ($1, $2, 'subagent', 'Legacy worker', $3, '{"agent_id":"legacy-worker"}'::jsonb)
+	`, legacySessionID, postgresSessionTestBotID, postgresSessionTestSessionID); err != nil {
+		t.Fatalf("insert configless legacy subagent: %v", err)
+	}
+
+	providerID := "00000000-0000-0000-0000-000000075120"
+	modelID := "00000000-0000-0000-0000-000000075121"
+	name := fmt.Sprintf("postgres-subagent-test-%d", time.Now().UnixNano())
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO providers (id, name, client_type)
+		VALUES ($1, $2, 'openai-completions')
+	`, providerID, name); err != nil {
+		t.Fatalf("insert subagent provider: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO models (id, model_id, provider_id, type)
+		VALUES ($1, 'subagent-test-model', $2, 'chat')
+	`, modelID, providerID); err != nil {
+		t.Fatalf("insert subagent model: %v", err)
+	}
+
+	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)), nil)
+	child, config, err := svc.CreateSubagent(ctx, CreateSubagentInput{
+		Session: CreateInput{
+			BotID:           postgresSessionTestBotID,
+			ParentSessionID: postgresSessionTestSessionID,
+			CreatedByUserID: postgresSessionTestUserID,
+			Title:           "Forked worker",
+			Metadata:        map[string]any{"agent_id": "worker"},
+		},
+		ModelUUID:    modelID,
+		ModelID:      "subagent-test-model",
+		ProviderName: name,
+		Forked:       true,
+		ForkContext: []SubagentForkContextMessage{
+			{
+				SourceMessageID: postgresSessionTestAssistant2ID,
+				Role:            "assistant",
+				Message:         []byte(`{"role":"assistant","content":[{"type":"text","text":"second reply"}]}`),
+			},
+			{
+				Role:    "system",
+				Message: []byte(`{"role":"system","content":[{"type":"text","text":"runtime workspace context"}]}`),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create forked subagent: %v", err)
+	}
+	if !config.Forked || config.SessionID != child.ID {
+		t.Fatalf("unexpected subagent config: %+v", config)
+	}
+	listed, err := svc.ListSubagentsByParent(ctx, postgresSessionTestSessionID)
+	if err != nil {
+		t.Fatalf("list managed subagents: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != child.ID {
+		t.Fatalf("configless legacy subagent was not ignored: %+v", listed)
+	}
+
+	contextMessages, err := svc.ListSubagentForkContext(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("list subagent fork context: %v", err)
+	}
+	if len(contextMessages) != 2 || contextMessages[0].Role != "assistant" || contextMessages[1].Role != "system" {
+		t.Fatalf("unexpected fork context: %+v", contextMessages)
+	}
+
+	messageSvc := message.NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)))
+	visible, err := messageSvc.ListBySession(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("list visible child history: %v", err)
+	}
+	if len(visible) != 0 {
+		t.Fatalf("fork context leaked into visible history: %+v", visible)
+	}
+
+	var hiddenCount, copiedAssetCount int
+	var nextTurnPosition int64
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*)
+		FROM bot_history_messages
+		WHERE session_id = $1
+		  AND turn_visible = false
+		  AND session_mode = 'subagent'
+		  AND metadata->>'context_scope' = 'subagent_fork'
+	`, child.ID).Scan(&hiddenCount); err != nil {
+		t.Fatalf("count hidden fork context: %v", err)
+	}
+	if hiddenCount != 2 {
+		t.Fatalf("hidden fork context count = %d, want 2", hiddenCount)
+	}
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*)
+		FROM bot_history_message_assets asset
+		JOIN bot_history_messages message ON message.id = asset.message_id
+		WHERE message.session_id = $1
+		  AND message.metadata->>'source_message_id' = $2
+		  AND asset.content_hash = 'sha256:postgres-session-test-asset'
+	`, child.ID, postgresSessionTestAssistant2ID).Scan(&copiedAssetCount); err != nil {
+		t.Fatalf("count copied fork assets: %v", err)
+	}
+	if copiedAssetCount != 1 {
+		t.Fatalf("copied fork asset count = %d, want 1", copiedAssetCount)
+	}
+	if err := tx.QueryRow(ctx, `SELECT next_turn_position FROM bot_sessions WHERE id = $1`, child.ID).Scan(&nextTurnPosition); err != nil {
+		t.Fatalf("read child next turn position: %v", err)
+	}
+	if nextTurnPosition != 3 {
+		t.Fatalf("next_turn_position = %d, want 3", nextTurnPosition)
+	}
+
+	firstVisible, err := messageSvc.Persist(ctx, message.PersistInput{
+		BotID:       postgresSessionTestBotID,
+		SessionID:   child.ID,
+		Role:        "user",
+		Content:     []byte(`{"role":"user","content":"child task"}`),
+		SessionMode: TypeSubagent,
+	})
+	if err != nil {
+		t.Fatalf("persist first visible child message: %v", err)
+	}
+	var visiblePosition int64
+	if err := tx.QueryRow(ctx, `SELECT turn_position FROM bot_history_messages WHERE id = $1`, firstVisible.ID).Scan(&visiblePosition); err != nil {
+		t.Fatalf("read first visible child position: %v", err)
+	}
+	if visiblePosition != 3 {
+		t.Fatalf("first visible child position = %d, want 3", visiblePosition)
+	}
+}
+
 func TestPostgresForkFromAssistantMessageRejectsInvalidTargetWithoutSideEffects(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresSessionTestTx(t, ctx)

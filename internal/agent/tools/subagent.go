@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
@@ -173,7 +172,7 @@ func (w *SubagentWatchdog) run(ctx context.Context) {
 type agentSessionService interface {
 	CreateSubagent(ctx context.Context, input sessionpkg.CreateSubagentInput) (sessionpkg.Session, sessionpkg.SubagentConfig, error)
 	GetSubagentConfig(ctx context.Context, sessionID string) (sessionpkg.SubagentConfig, error)
-	UpsertSubagentConfig(ctx context.Context, config sessionpkg.SubagentConfig) (sessionpkg.SubagentConfig, error)
+	ListSubagentForkContext(ctx context.Context, sessionID string) ([]sessionpkg.SubagentForkContextMessage, error)
 	ListSubagentsByParent(ctx context.Context, parentSessionID string) ([]sessionpkg.Session, error)
 }
 
@@ -520,21 +519,29 @@ func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionConte
 		return nil, fmt.Errorf("resolve subagent model: %w", err)
 	}
 	forked, _, _ := BoolArg(args, "fork")
-	var parentMessages json.RawMessage
+	var forkContext []sessionpkg.SubagentForkContextMessage
 	if forked {
 		if session.ForkContext == nil {
 			return nil, errors.New("fork context is not available for this session")
 		}
-		messages, snapshotErr := session.ForkContext.Messages()
+		entries, snapshotErr := session.ForkContext.Entries()
 		if snapshotErr != nil {
 			return nil, fmt.Errorf("read fork context: %w", snapshotErr)
 		}
-		parentMessages, snapshotErr = json.Marshal(messages)
-		if snapshotErr != nil {
-			return nil, fmt.Errorf("marshal fork context: %w", snapshotErr)
+		forkContext = make([]sessionpkg.SubagentForkContextMessage, 0, len(entries))
+		for i, entry := range entries {
+			content, marshalErr := json.Marshal(entry.Message)
+			if marshalErr != nil {
+				return nil, fmt.Errorf("marshal fork context message %d: %w", i, marshalErr)
+			}
+			forkContext = append(forkContext, sessionpkg.SubagentForkContextMessage{
+				SourceMessageID: strings.TrimSpace(entry.SourceMessageID),
+				Role:            string(entry.Message.Role),
+				Message:         content,
+			})
 		}
 	}
-	rec, config, err := p.createAgentSession(context.WithoutCancel(ctx), session, agentID, task, runtime, forked, parentMessages)
+	rec, config, err := p.createAgentSession(context.WithoutCancel(ctx), session, agentID, task, runtime, forked, forkContext)
 	if err != nil {
 		return nil, err
 	}
@@ -558,7 +565,7 @@ func (p *SpawnProvider) execSendMessage(ctx context.Context, session SessionCont
 	if err != nil {
 		return nil, err
 	}
-	config, err := p.loadOrCreateSubagentConfig(context.WithoutCancel(ctx), session, rec)
+	config, err := p.loadSubagentConfig(context.WithoutCancel(ctx), rec)
 	if err != nil {
 		return nil, err
 	}
@@ -847,10 +854,11 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	if req.messagePersisted {
 		history = dropLatestMatchingUserMessage(history, req.message)
 	}
-	if req.config.Forked && len(req.config.ParentMessages) > 0 {
-		var parentMessages []sdk.Message
-		if err := json.Unmarshal(req.config.ParentMessages, &parentMessages); err != nil {
-			res.Error = fmt.Sprintf("load fork context: %v", err)
+	if req.config.Forked {
+		parentMessages, loadErr := p.loadAgentForkContext(context.WithoutCancel(ctx), req.agentSessionID)
+		if loadErr != nil {
+			res.Error = fmt.Sprintf("load fork context: %v", loadErr)
+			res.Status = string(background.TaskFailed)
 			return res
 		}
 		combined := make([]sdk.Message, 0, len(parentMessages)+len(history))
@@ -978,7 +986,7 @@ func (p *SpawnProvider) createAgentSession(
 	agentID, task string,
 	runtime resolvedSubagentModel,
 	forked bool,
-	parentMessages json.RawMessage,
+	forkContext []sessionpkg.SubagentForkContextMessage,
 ) (agentRecord, sessionpkg.SubagentConfig, error) {
 	if p.sessionService == nil {
 		return agentRecord{}, sessionpkg.SubagentConfig{}, errors.New("session service not available")
@@ -995,11 +1003,11 @@ func (p *SpawnProvider) createAgentSession(
 				"agent_control_version": agentControlVersion,
 			},
 		},
-		ModelUUID:      runtime.UUID,
-		ModelID:        runtime.ModelID,
-		ProviderName:   runtime.ProviderName,
-		Forked:         forked,
-		ParentMessages: parentMessages,
+		ModelUUID:    runtime.UUID,
+		ModelID:      runtime.ModelID,
+		ProviderName: runtime.ProviderName,
+		Forked:       forked,
+		ForkContext:  forkContext,
 	})
 	if err != nil {
 		return agentRecord{}, sessionpkg.SubagentConfig{}, err
@@ -1013,31 +1021,15 @@ func (p *SpawnProvider) createAgentSession(
 	}, config, nil
 }
 
-func (p *SpawnProvider) loadOrCreateSubagentConfig(ctx context.Context, parent SessionContext, rec agentRecord) (sessionpkg.SubagentConfig, error) {
+func (p *SpawnProvider) loadSubagentConfig(ctx context.Context, rec agentRecord) (sessionpkg.SubagentConfig, error) {
 	if p.sessionService == nil {
 		return sessionpkg.SubagentConfig{}, errors.New("session service not available")
 	}
 	config, err := p.sessionService.GetSubagentConfig(ctx, rec.SessionID)
-	if err == nil {
-		return config, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return sessionpkg.SubagentConfig{}, err
-	}
-
-	// Sessions created before agent-control v2 have no pinned config. Preserve
-	// their historical behavior once, then pin the resolved model for future
-	// follow-ups.
-	runtime, err := p.modelResolver(ctx, parent, "", "", "")
 	if err != nil {
-		return sessionpkg.SubagentConfig{}, fmt.Errorf("resolve legacy subagent model: %w", err)
+		return sessionpkg.SubagentConfig{}, fmt.Errorf("load subagent config: %w", err)
 	}
-	return p.sessionService.UpsertSubagentConfig(ctx, sessionpkg.SubagentConfig{
-		SessionID:    rec.SessionID,
-		ModelUUID:    runtime.UUID,
-		ModelID:      runtime.ModelID,
-		ProviderName: runtime.ProviderName,
-	})
+	return config, nil
 }
 
 func (p *SpawnProvider) resolveNewAgentID(ctx context.Context, session SessionContext, raw string) (string, error) {
@@ -1103,6 +1095,25 @@ func (p *SpawnProvider) listAgentRecords(ctx context.Context, session SessionCon
 		return records[i].CreatedAt.Before(records[j].CreatedAt)
 	})
 	return records, nil
+}
+
+func (p *SpawnProvider) loadAgentForkContext(ctx context.Context, sessionID string) ([]sdk.Message, error) {
+	if p.sessionService == nil {
+		return nil, errors.New("session service not available")
+	}
+	rows, err := p.sessionService.ListSubagentForkContext(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]sdk.Message, 0, len(rows))
+	for _, row := range rows {
+		converted, ok := sdkMessageFromPersisted(messagepkg.Message{Role: row.Role, Content: row.Message})
+		if !ok {
+			return nil, fmt.Errorf("invalid fork context message role %q", row.Role)
+		}
+		messages = append(messages, converted)
+	}
+	return messages, nil
 }
 
 func (p *SpawnProvider) loadAgentMessages(ctx context.Context, sessionID string) []sdk.Message {

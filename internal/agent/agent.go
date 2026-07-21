@@ -152,7 +152,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		sendEvent(ctx, ch, toolStreamEventToAgentEvent(evt))
 	})
 	if cfg.ForkContext == nil {
-		cfg.ForkContext = tools.NewMessageSnapshot(cfg.Messages)
+		cfg.ForkContext = tools.NewMessageSnapshotWithSources(cfg.Messages, cfg.ForkContextSourceMessageIDs)
 	}
 
 	var sdkTools []sdk.Tool
@@ -648,7 +648,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		collected.Add(evt)
 	})
 	if cfg.ForkContext == nil {
-		cfg.ForkContext = tools.NewMessageSnapshot(cfg.Messages)
+		cfg.ForkContext = tools.NewMessageSnapshotWithSources(cfg.Messages, cfg.ForkContextSourceMessageIDs)
 	}
 
 	var sdkTools []sdk.Tool
