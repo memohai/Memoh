@@ -1201,13 +1201,20 @@ startStream:
 	if startErr != nil {
 		if errors.Is(startErr, turn.ErrDuplicateTurn) {
 			// Platform webhook redelivery of an already-claimed message:
-			// treat as delivered, no user-visible error.
+			// treat as delivered, no user-visible error. The processing
+			// marker added above must still be cleared — on Feishu it is a
+			// reaction on the source message that otherwise sticks forever.
 			if p.logger != nil {
 				p.logger.Info(
 					"duplicate inbound turn dropped",
 					slog.String("channel", msg.Channel.String()),
 					slog.String("external_message_id", sourceMessageID),
 				)
+			}
+			if statusNotifier != nil {
+				if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
+					p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
+				}
 			}
 			return nil
 		}
@@ -1245,6 +1252,18 @@ startStream:
 						return
 					}
 					if injectErr := handle.Inject(streamCtx, m); injectErr != nil {
+						// The message is lost and this forwarder stops; later
+						// queued messages surface via drainQueue at turn end.
+						// Losing this silently would contradict the 👀 receipt
+						// the user already got.
+						if p.logger != nil {
+							p.logger.Warn(
+								"inject into running turn failed, message dropped",
+								slog.String("channel", msg.Channel.String()),
+								slog.String("route_id", routeID),
+								slog.Any("error", injectErr),
+							)
+						}
 						return
 					}
 				case <-streamCtx.Done():
@@ -1259,6 +1278,7 @@ startStream:
 	var (
 		finalMessages []turn.ModelMessage
 		streamErr     error
+		pushBroken    bool
 	)
 	for chunkCh != nil || streamErrCh != nil {
 		select {
@@ -1298,7 +1318,10 @@ startStream:
 					continue
 				}
 				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
-					streamErr = pushErr
+					if streamErr == nil {
+						streamErr = pushErr
+					}
+					pushBroken = true
 					break
 				}
 			}
@@ -1310,11 +1333,16 @@ startStream:
 				streamErrCh = nil
 				continue
 			}
-			if err != nil {
+			// A run error must not abandon events already produced before
+			// it (buffered text deltas, agent_end with the final
+			// messages): keep consuming until the event channel closes,
+			// matching the pre-split unbuffered ordering. Only a broken
+			// push transport stops consumption early.
+			if err != nil && streamErr == nil {
 				streamErr = err
 			}
 		}
-		if streamErr != nil {
+		if pushBroken {
 			break
 		}
 	}

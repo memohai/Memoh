@@ -3802,3 +3802,72 @@ func TestChannelInboundProcessorCommandExecutesWithUnprovenReplyAttachments(t *t
 		t.Fatalf("expected /status output, got %q", reply)
 	}
 }
+
+// tailThenErrGateway streams text deltas that are already buffered when the
+// error arrives, mimicking a provider failing mid-stream after producing
+// output.
+type tailThenErrGateway struct {
+	fakeChatGateway
+	deltas []string
+}
+
+func (f *tailThenErrGateway) StreamChat(_ context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
+	f.gotReq = req
+	chunks := make(chan conversation.StreamChunk, len(f.deltas))
+	errs := make(chan error, 1)
+	for _, d := range f.deltas {
+		payload, _ := json.Marshal(map[string]any{"type": "text_delta", "delta": d})
+		chunks <- conversation.StreamChunk(payload)
+	}
+	errs <- errors.New("provider exploded mid-stream")
+	close(chunks)
+	close(errs)
+	return chunks, errs
+}
+
+// TestChannelInboundProcessorDeliversTailEventsBeforeError pins the drain
+// fix: deltas the model already produced must reach the platform before the
+// error is surfaced — the buffered turn.Service pair lets the error
+// overtake them otherwise, truncating the user-visible reply.
+func TestChannelInboundProcessorDeliversTailEventsBeforeError(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &tailThenErrGateway{deltas: []string{"partial ", "answer"}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, turninprocess.New(gateway), channelIdentitySvc, policySvc, "", 0)
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
+	msg := channel.InboundMessage{
+		BotID:        "bot-1",
+		Channel:      channel.ChannelType("feishu"),
+		Message:      channel.Message{Text: "hello"},
+		ReplyTarget:  "target-id",
+		Sender:       channel.Identity{SubjectID: "ext-1", DisplayName: "User1"},
+		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+	}
+
+	err := processor.HandleInbound(context.Background(), cfg, msg, sender)
+	if err == nil {
+		t.Fatal("expected stream error to propagate")
+	}
+	var deltas []string
+	errorSeen := false
+	for _, event := range sender.events {
+		switch event.Type {
+		case channel.StreamEventDelta:
+			if errorSeen {
+				t.Fatal("delta pushed after error event")
+			}
+			deltas = append(deltas, event.Delta)
+		case channel.StreamEventError:
+			errorSeen = true
+		}
+	}
+	if got := strings.Join(deltas, ""); got != "partial answer" {
+		t.Fatalf("tail deltas lost before error: %q", got)
+	}
+	if !errorSeen {
+		t.Fatal("expected error event after tail deltas")
+	}
+}
