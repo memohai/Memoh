@@ -1,7 +1,7 @@
 <template>
   <div
-    class="mx-4 flex min-h-[3.75rem] border-b border-border py-3 last:border-b-0"
-    :class="rootClass"
+    class="mx-4 flex min-h-[3.75rem] border-border py-3 last:border-b-0"
+    :class="[rootClass, dividerClass]"
   >
     <!-- Leading media: an icon, avatar, channel mark, or a load skeleton that
          sits before the text. Only renders (and only claims its gap) when a
@@ -65,12 +65,18 @@ const props = withDefaults(defineProps<{
   // field (a full-width Textarea under its label) needs, where the control is
   // never a beside-the-label affordance.
   stack?: 'never' | 'sm' | 'always'
+  // A row can visually continue into the next row (for example, a mode picker
+  // followed by fields owned by that mode) without drawing a divider between them.
+  divider?: boolean
 }>(), {
   label: '',
   description: '',
   align: 'center',
   stack: 'never',
+  divider: true,
 })
+
+const dividerClass = computed(() => (props.divider ? 'border-b' : 'border-b-0'))
 
 const rootClass = computed(() => {
   // Full literal class strings only — Tailwind scans source text, so a runtime
@@ -101,4 +107,3 @@ const trailingClass = computed(() => {
   }
 })
 </script>
-
