@@ -15,10 +15,9 @@ type workspaceRequestTargetResolver struct{}
 
 func (workspaceRequestTargetResolver) ResolveWorkspaceTarget(_ context.Context, _ string, targetID string) (workspace.ResolvedWorkspaceTarget, error) {
 	return workspace.ResolvedWorkspaceTarget{
-		TargetID:      strings.TrimSpace(targetID),
-		Kind:          workspace.WorkspaceTargetRemote,
-		Name:          "Computer B",
-		WorkspacePath: "/work/b",
+		TargetID: strings.TrimSpace(targetID),
+		Kind:     workspace.WorkspaceTargetRemote,
+		Name:     "Computer B",
 	}, nil
 }
 
@@ -84,18 +83,18 @@ func TestInjectWorkspaceTransitionRecordsMarksComputerChanges(t *testing.T) {
 	}
 }
 
-func TestInjectWorkspaceTransitionRecordsMarksStartingFolderChanges(t *testing.T) {
+func TestInjectWorkspaceTransitionRecordsIgnoresLegacyStartingFolderChanges(t *testing.T) {
 	records := []historyfrag.HistoryRecord{
 		workspaceHistoryRecord("user", "first", "computer-a", "remote", "Computer A", "/work/one"),
 		workspaceHistoryRecord("user", "second", "computer-a", "remote", "Computer A", "/work/two"),
 	}
 
 	got := injectWorkspaceTransitionRecords(records)
-	if len(got) != 4 {
-		t.Fatalf("record count = %d, want 4", len(got))
+	if len(got) != 3 {
+		t.Fatalf("record count = %d, want 3", len(got))
 	}
-	if got[2].ModelMessage.Role != "system" || !strings.Contains(got[2].ModelMessage.TextContent(), "changed") {
-		t.Fatalf("path-change marker = %#v", got[2].ModelMessage)
+	if strings.Contains(got[0].ModelMessage.TextContent(), "starting_folder") {
+		t.Fatalf("legacy workspace_path leaked into marker: %#v", got[0].ModelMessage)
 	}
 }
 

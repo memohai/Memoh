@@ -2999,15 +2999,12 @@ export type WebhooktunnelStatus = {
     status?: string;
 };
 
-export type WorkspaceMountRemoteWorkspaceRequest = {
-    workspace_path?: string;
-};
-
 export type WorkspaceSetPrimaryWorkspaceTargetRequest = {
     target_id: string;
 };
 
 export type WorkspaceUpdateWorkspaceTargetToolApprovalRequest = {
+    enabled?: boolean;
     exec?: SettingsToolApprovalMode;
     read?: SettingsToolApprovalMode;
     tool_approval_config?: SettingsToolApprovalConfig;
@@ -3024,7 +3021,6 @@ export type WorkspaceWorkspaceTarget = {
     target_id?: string;
     tool_approval?: WorkspaceWorkspaceTargetToolApproval;
     tool_approval_config?: SettingsToolApprovalConfig;
-    workspace_path?: string;
 };
 
 export type WorkspaceWorkspaceTargetToolApproval = {
@@ -9784,10 +9780,7 @@ export type PutBotsByBotIdWorkspaceTargetsPrimaryResponses = {
 };
 
 export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdData = {
-    /**
-     * Remote workspace mount
-     */
-    body: WorkspaceMountRemoteWorkspaceRequest;
+    body?: never;
     path: {
         /**
          * Bot ID

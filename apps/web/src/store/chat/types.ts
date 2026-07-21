@@ -170,7 +170,6 @@ export interface ChatWorkspaceTargetSnapshot {
   target_id: string
   kind?: string
   name?: string
-  workspace_path?: string
 }
 
 export type ChatWorkspaceTargetSelectionSource = 'unset' | 'default' | 'session' | 'user'

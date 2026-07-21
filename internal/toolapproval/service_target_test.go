@@ -21,10 +21,9 @@ func (s *targetPolicyResolverStub) ResolveWorkspaceTargetPolicy(_ context.Contex
 
 func TestEvaluatePolicyUsesTargetConfigAndPinsCanonicalTarget(t *testing.T) {
 	resolver := &targetPolicyResolverStub{policy: WorkspaceTargetPolicy{
-		TargetID:      "canonical-target",
-		Kind:          "remote",
-		Name:          "Office Mac",
-		WorkspacePath: "/Users/alice",
+		TargetID: "canonical-target",
+		Kind:     "remote",
+		Name:     "Office Mac",
 		Config: settings.ToolApprovalConfig{
 			Enabled: true,
 			Write:   settings.ToolApprovalFilePolicy{Mode: settings.ToolApprovalDeny},
@@ -55,7 +54,7 @@ func TestEvaluatePolicyUsesTargetConfigAndPinsCanonicalTarget(t *testing.T) {
 	if evaluation.ExecutionLocation == nil {
 		t.Fatal("execution location is nil")
 	}
-	if got := *evaluation.ExecutionLocation; got.TargetID != "canonical-target" || got.Kind != "remote" || got.Name != "Office Mac" || got.WorkspacePath != "/Users/alice" {
+	if got := *evaluation.ExecutionLocation; got.TargetID != "canonical-target" || got.Kind != "remote" || got.Name != "Office Mac" {
 		t.Fatalf("execution location = %#v", got)
 	}
 }

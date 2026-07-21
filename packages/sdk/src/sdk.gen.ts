@@ -1527,14 +1527,7 @@ export const putBotsByBotIdWorkspaceTargetsPrimary = <ThrowOnError extends boole
 /**
  * Add or update a Remote Runtime workspace target
  */
-export const putBotsByBotIdWorkspaceTargetsRemotesByRuntimeId = <ThrowOnError extends boolean = false>(options: Options<PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdData, ThrowOnError>): RequestResult<PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdResponses, PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors, ThrowOnError> => (options.client ?? client).put<PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdResponses, PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors, ThrowOnError>({
-    url: '/bots/{bot_id}/workspace-targets/remotes/{runtime_id}',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
+export const putBotsByBotIdWorkspaceTargetsRemotesByRuntimeId = <ThrowOnError extends boolean = false>(options: Options<PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdData, ThrowOnError>): RequestResult<PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdResponses, PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors, ThrowOnError> => (options.client ?? client).put<PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdResponses, PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors, ThrowOnError>({ url: '/bots/{bot_id}/workspace-targets/remotes/{runtime_id}', ...options });
 
 /**
  * Delete a Remote Runtime workspace target

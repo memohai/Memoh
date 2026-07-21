@@ -262,8 +262,8 @@ func cloneFilePolicy(policy ToolApprovalFilePolicy) ToolApprovalFilePolicy {
 	return ToolApprovalFilePolicy{
 		Mode:             normalizeToolApprovalMode(policy.Mode),
 		RequireApproval:  policy.RequireApproval,
-		BypassGlobs:      append([]string(nil), policy.BypassGlobs...),
-		ForceReviewGlobs: append([]string(nil), policy.ForceReviewGlobs...),
+		BypassGlobs:      append([]string{}, policy.BypassGlobs...),
+		ForceReviewGlobs: append([]string{}, policy.ForceReviewGlobs...),
 	}
 }
 
@@ -271,8 +271,8 @@ func cloneExecPolicy(policy ToolApprovalExecPolicy) ToolApprovalExecPolicy {
 	return ToolApprovalExecPolicy{
 		Mode:                normalizeToolApprovalMode(policy.Mode),
 		RequireApproval:     policy.RequireApproval,
-		BypassCommands:      append([]string(nil), policy.BypassCommands...),
-		ForceReviewCommands: append([]string(nil), policy.ForceReviewCommands...),
+		BypassCommands:      append([]string{}, policy.BypassCommands...),
+		ForceReviewCommands: append([]string{}, policy.ForceReviewCommands...),
 	}
 }
 
@@ -307,10 +307,10 @@ func normalizeFilePolicy(policy, defaults ToolApprovalFilePolicy) ToolApprovalFi
 	defaults.Mode = normalizeToolApprovalMode(policy.Mode)
 	defaults.RequireApproval = policy.RequireApproval
 	if policy.BypassGlobs != nil {
-		defaults.BypassGlobs = append([]string(nil), policy.BypassGlobs...)
+		defaults.BypassGlobs = append([]string{}, policy.BypassGlobs...)
 	}
 	if policy.ForceReviewGlobs != nil {
-		defaults.ForceReviewGlobs = append([]string(nil), policy.ForceReviewGlobs...)
+		defaults.ForceReviewGlobs = append([]string{}, policy.ForceReviewGlobs...)
 	}
 	return defaults
 }
@@ -319,10 +319,10 @@ func normalizeExecPolicy(policy, defaults ToolApprovalExecPolicy) ToolApprovalEx
 	defaults.Mode = normalizeToolApprovalMode(policy.Mode)
 	defaults.RequireApproval = policy.RequireApproval
 	if policy.BypassCommands != nil {
-		defaults.BypassCommands = append([]string(nil), policy.BypassCommands...)
+		defaults.BypassCommands = append([]string{}, policy.BypassCommands...)
 	}
 	if policy.ForceReviewCommands != nil {
-		defaults.ForceReviewCommands = append([]string(nil), policy.ForceReviewCommands...)
+		defaults.ForceReviewCommands = append([]string{}, policy.ForceReviewCommands...)
 	}
 	return defaults
 }

@@ -1187,7 +1187,6 @@ function snapshotForWorkspaceTarget(target: ValidWorkspaceTarget): ChatWorkspace
     target_id: target.target_id,
     kind: target.kind,
     name: target.name,
-    workspace_path: target.workspace_path,
   }
 }
 
@@ -1206,7 +1205,6 @@ function workspaceTargetFromSessionMetadata(metadata: Record<string, unknown>): 
     target_id: targetId,
     kind: value('kind'),
     name: value('name'),
-    workspace_path: value('workspace_path'),
   }
 }
 

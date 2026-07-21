@@ -418,7 +418,6 @@ func TestSpawnAgentSessionInheritsParentUserIdentity(t *testing.T) {
 		WorkspaceTargetID:   "workspace-1",
 		WorkspaceTargetKind: "remote",
 		WorkspaceTargetName: "Build machine",
-		WorkspacePath:       "/workspace/project",
 		TimezoneLocation:    location,
 		Skills: map[string]SkillDetail{
 			"review": {Description: "Review code", Content: "instructions", Path: "/skills/review"},
@@ -437,7 +436,7 @@ func TestSpawnAgentSessionInheritsParentUserIdentity(t *testing.T) {
 	if !ok {
 		t.Fatal("expected subagent call")
 	}
-	if call.Identity.UserID != "user1" || call.Identity.ReplyTarget != "chat-target" || call.Identity.WorkspaceTargetID != "workspace-1" || call.Identity.WorkspacePath != "/workspace/project" {
+	if call.Identity.UserID != "user1" || call.Identity.ReplyTarget != "chat-target" || call.Identity.WorkspaceTargetID != "workspace-1" {
 		t.Fatalf("subagent identity was not fully inherited: %+v", call.Identity)
 	}
 	if call.Identity.TimezoneLocation != location || call.Skills["review"].Path != "/skills/review" {

@@ -57,10 +57,9 @@ func (r *Resolver) prepareWorkspaceRequest(ctx context.Context, req conversation
 	}
 	req.WorkspaceTargetID = strings.TrimSpace(resolved.TargetID)
 	req.WorkspaceTarget = &conversation.WorkspaceTarget{
-		TargetID:      strings.TrimSpace(resolved.TargetID),
-		Kind:          strings.TrimSpace(resolved.Kind),
-		Name:          strings.TrimSpace(resolved.Name),
-		WorkspacePath: strings.TrimSpace(resolved.WorkspacePath),
+		TargetID: strings.TrimSpace(resolved.TargetID),
+		Kind:     strings.TrimSpace(resolved.Kind),
+		Name:     strings.TrimSpace(resolved.Name),
 	}
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	return ctx, req, nil
@@ -78,10 +77,9 @@ func (r *Resolver) resolveWorkspaceTargetSnapshot(ctx context.Context, botID, ta
 		return nil, err
 	}
 	return &conversation.WorkspaceTarget{
-		TargetID:      strings.TrimSpace(resolved.TargetID),
-		Kind:          strings.TrimSpace(resolved.Kind),
-		Name:          strings.TrimSpace(resolved.Name),
-		WorkspacePath: strings.TrimSpace(resolved.WorkspacePath),
+		TargetID: strings.TrimSpace(resolved.TargetID),
+		Kind:     strings.TrimSpace(resolved.Kind),
+		Name:     strings.TrimSpace(resolved.Name),
 	}, nil
 }
 
@@ -90,10 +88,9 @@ func workspaceTargetFromRunConfig(cfg agentpkg.RunConfig) *conversation.Workspac
 		return nil
 	}
 	return &conversation.WorkspaceTarget{
-		TargetID:      strings.TrimSpace(cfg.Identity.WorkspaceTargetID),
-		Kind:          strings.TrimSpace(cfg.Identity.WorkspaceTargetKind),
-		Name:          strings.TrimSpace(cfg.Identity.WorkspaceTargetName),
-		WorkspacePath: strings.TrimSpace(cfg.Identity.WorkspacePath),
+		TargetID: strings.TrimSpace(cfg.Identity.WorkspaceTargetID),
+		Kind:     strings.TrimSpace(cfg.Identity.WorkspaceTargetKind),
+		Name:     strings.TrimSpace(cfg.Identity.WorkspaceTargetName),
 	}
 }
 

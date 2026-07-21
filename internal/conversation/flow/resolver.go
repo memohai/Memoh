@@ -752,7 +752,6 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 			cfg.Identity.WorkspaceTargetID = strings.TrimSpace(target.TargetID)
 			cfg.Identity.WorkspaceTargetKind = strings.TrimSpace(target.Kind)
 			cfg.Identity.WorkspaceTargetName = strings.TrimSpace(target.Name)
-			cfg.Identity.WorkspacePath = strings.TrimSpace(target.WorkspacePath)
 		} else if workspace.WorkspaceTargetFromContext(ctx) != "" {
 			return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, targetErr
 		}

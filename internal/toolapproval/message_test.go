@@ -16,10 +16,9 @@ func TestBuildPromptIncludesStableExecutionLocationName(t *testing.T) {
 		Operation:  OperationExec,
 		ToolInput:  map[string]any{"command": "pwd"},
 		ExecutionLocation: &ExecutionLocation{
-			TargetID:      "internal-runtime-id",
-			Kind:          "remote",
-			Name:          "Office Mac",
-			WorkspacePath: "/Users/alice",
+			TargetID: "internal-runtime-id",
+			Kind:     "remote",
+			Name:     "Office Mac",
 		},
 	})
 

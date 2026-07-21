@@ -49,8 +49,8 @@ const inheritedExactNames = new Set([
 
 const validEnvironmentName = /^[A-Za-z_][A-Za-z0-9_]*$/
 
-export function runtimeCapabilities(): Array<'fs' | 'exec' | 'workspace_scope'> {
-  return ['fs', 'exec', 'workspace_scope']
+export function runtimeCapabilities(): Array<'fs' | 'exec' | 'host_fs'> {
+  return ['fs', 'exec', 'host_fs']
 }
 
 export interface GuardedEnvironmentOptions {

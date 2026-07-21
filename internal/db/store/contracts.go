@@ -44,7 +44,6 @@ type BotRemoteRuntimeBindingRecord struct {
 	ID             string
 	BotID          string
 	RuntimeID      string
-	WorkspacePath  string
 	IsPrimary      bool
 	ToolApproval   JSON
 	RuntimeName    string
@@ -56,7 +55,7 @@ type BotRemoteRuntimeBindingRecord struct {
 }
 
 type BotRemoteRuntimeBindingStore interface {
-	CreateOrUpdateMount(ctx context.Context, botID, runtimeID, workspacePath string) (BotRemoteRuntimeBindingRecord, error)
+	CreateOrUpdateMount(ctx context.Context, botID, runtimeID string) (BotRemoteRuntimeBindingRecord, error)
 	ListMounts(ctx context.Context, botID string) ([]BotRemoteRuntimeBindingRecord, error)
 	GetMount(ctx context.Context, botID, targetID string) (BotRemoteRuntimeBindingRecord, error)
 	GetPrimaryMount(ctx context.Context, botID string) (BotRemoteRuntimeBindingRecord, error)

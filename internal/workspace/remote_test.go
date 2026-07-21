@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"slices"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -25,6 +26,7 @@ import (
 
 const (
 	remoteTestBotID      = "11111111-1111-4111-8111-111111111111"
+	remoteTestBotID2     = "11111111-1111-4111-8111-111111111112"
 	remoteTestRuntimeID  = "22222222-2222-4222-8222-222222222222"
 	remoteTestRuntimeID2 = "22222222-2222-4222-8222-222222222223"
 	remoteTestTargetID   = "44444444-4444-4444-8444-444444444444"
@@ -37,13 +39,12 @@ type fakeRemoteBindingStore struct {
 	createErr error
 }
 
-func (s *fakeRemoteBindingStore) CreateOrUpdateMount(_ context.Context, botID, runtimeID, workspacePath string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
+func (s *fakeRemoteBindingStore) CreateOrUpdateMount(_ context.Context, botID, runtimeID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
 	if s.createErr != nil {
 		return dbstore.BotRemoteRuntimeBindingRecord{}, s.createErr
 	}
 	for i := range s.records {
 		if s.records[i].BotID == botID && s.records[i].RuntimeID == runtimeID {
-			s.records[i].WorkspacePath = workspacePath
 			return s.records[i], nil
 		}
 	}
@@ -54,7 +55,7 @@ func (s *fakeRemoteBindingStore) CreateOrUpdateMount(_ context.Context, botID, r
 	raw, _ := json.Marshal(DefaultRemoteToolApprovalConfig())
 	record := dbstore.BotRemoteRuntimeBindingRecord{
 		ID: targetID, BotID: botID, RuntimeID: runtimeID,
-		WorkspacePath: workspacePath, RuntimeName: "Office Mac",
+		RuntimeName:   "Office Mac",
 		RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
 		ToolApproval: raw,
 	}
@@ -146,14 +147,14 @@ func TestRemoteWorkspaceMountsAreIndependentAndPrimaryIsUnique(t *testing.T) {
 	store := &fakeRemoteBindingStore{}
 	service := &RemoteWorkspaceService{store: store, runtimes: fakeRuntimeConnections{}}
 
-	first, err := service.Mount(context.Background(), remoteTestBotID, remoteTestRuntimeID, MountRemoteWorkspaceRequest{})
+	first, err := service.Mount(context.Background(), remoteTestBotID, remoteTestRuntimeID)
 	if err != nil {
 		t.Fatalf("Mount first: %v", err)
 	}
-	if first.TargetID != remoteTestTargetID || first.WorkspacePath != "bots/"+remoteTestBotID {
+	if first.TargetID != remoteTestTargetID {
 		t.Fatalf("first target = %#v", first)
 	}
-	second, err := service.Mount(context.Background(), remoteTestBotID, remoteTestRuntimeID2, MountRemoteWorkspaceRequest{WorkspacePath: "projects/api"})
+	second, err := service.Mount(context.Background(), remoteTestBotID, remoteTestRuntimeID2)
 	if err != nil {
 		t.Fatalf("Mount second: %v", err)
 	}
@@ -161,7 +162,7 @@ func TestRemoteWorkspaceMountsAreIndependentAndPrimaryIsUnique(t *testing.T) {
 		t.Fatal("mounts share a target ID")
 	}
 
-	updated, err := service.Mount(context.Background(), remoteTestBotID, remoteTestRuntimeID, MountRemoteWorkspaceRequest{WorkspacePath: "projects/web"})
+	updated, err := service.Mount(context.Background(), remoteTestBotID, remoteTestRuntimeID)
 	if err != nil {
 		t.Fatalf("update first: %v", err)
 	}
@@ -194,12 +195,45 @@ func TestRemoteWorkspaceDefaultApprovalDoesNotInheritNativeBypasses(t *testing.T
 	if len(config.Read.BypassGlobs) != 0 || len(config.Write.BypassGlobs) != 0 || len(config.Exec.BypassCommands) != 0 {
 		t.Fatalf("remote default inherited bypasses: %#v", config)
 	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("marshal remote default: %v", err)
+	}
+	roundTrip := toolApprovalConfig(raw)
+	if len(roundTrip.Read.BypassGlobs) != 0 || len(roundTrip.Write.BypassGlobs) != 0 || len(roundTrip.Exec.BypassCommands) != 0 {
+		t.Fatalf("remote default inherited bypasses after persistence: %#v", roundTrip)
+	}
+}
+
+func TestRemoteWorkspaceApprovalIsIsolatedPerBotBinding(t *testing.T) {
+	firstConfig := DefaultRemoteToolApprovalConfig()
+	secondConfig := DefaultRemoteToolApprovalConfig()
+	firstRaw, _ := json.Marshal(firstConfig)
+	secondRaw, _ := json.Marshal(secondConfig)
+	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{
+		{ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID, ToolApproval: firstRaw},
+		{ID: remoteTestTargetID2, BotID: remoteTestBotID2, RuntimeID: remoteTestRuntimeID, ToolApproval: secondRaw},
+	}}
+	service := &RemoteWorkspaceService{store: store}
+
+	firstConfig.Enabled = false
+	firstConfig.Write.BypassGlobs = []string{"shared/**"}
+	if err := service.UpdateToolApprovalConfig(context.Background(), remoteTestBotID, remoteTestTargetID, firstConfig); err != nil {
+		t.Fatalf("UpdateToolApprovalConfig: %v", err)
+	}
+	other, err := service.GetMount(context.Background(), remoteTestBotID2, remoteTestTargetID2)
+	if err != nil {
+		t.Fatalf("GetMount second Bot: %v", err)
+	}
+	if !other.ToolApprovalConfig.Enabled || slices.Contains(other.ToolApprovalConfig.Write.BypassGlobs, "shared/**") {
+		t.Fatalf("second Bot policy was changed: %#v", other.ToolApprovalConfig)
+	}
 }
 
 func TestOwnerMismatchIsRedactedButTargetCanBeDeleted(t *testing.T) {
 	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{{
 		ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
-		WorkspacePath: "private/project", RuntimeName: "Previous owner's Mac",
+		RuntimeName:   "Previous owner's Mac",
 		RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: "55555555-5555-4555-8555-555555555555",
 	}}}
 	service := &RemoteWorkspaceService{store: store, runtimes: fakeRuntimeConnections{}}
@@ -210,7 +244,7 @@ func TestOwnerMismatchIsRedactedButTargetCanBeDeleted(t *testing.T) {
 	if target.TargetID != remoteTestTargetID || target.Status != WorkspaceTargetStatusOwnerMismatch {
 		t.Fatalf("target = %#v", target)
 	}
-	if target.Name != "" || target.WorkspacePath != "" {
+	if target.Name != "" {
 		t.Fatalf("previous owner data leaked: %#v", target)
 	}
 	if err := service.DeleteMount(context.Background(), remoteTestBotID, remoteTestTargetID); err != nil {
@@ -221,7 +255,7 @@ func TestOwnerMismatchIsRedactedButTargetCanBeDeleted(t *testing.T) {
 func TestRemotePrimaryOfflineNeverFallsBackToNative(t *testing.T) {
 	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{{
 		ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
-		WorkspacePath: ".", IsPrimary: true,
+		IsPrimary:     true,
 		RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
 	}}}
 	manager := NewManager(slog.Default(), nil, nil, config.WorkspaceConfig{}, "", nil)
@@ -243,7 +277,7 @@ func TestRemotePrimaryDoesNotHideNativeContainerStatus(t *testing.T) {
 	native := &legacyRouteTestService{created: true, container: nativeInfo, byLabel: []ctr.ContainerInfo{nativeInfo}}
 	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{{
 		ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
-		WorkspacePath: ".", IsPrimary: true,
+		IsPrimary:     true,
 		RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
 	}}}
 	manager := NewManager(slog.Default(), native, nil, config.WorkspaceConfig{}, "", nil)
@@ -258,11 +292,11 @@ func TestRemotePrimaryDoesNotHideNativeContainerStatus(t *testing.T) {
 	}
 }
 
-func TestRemoteWorkspaceClientCarriesMountScope(t *testing.T) {
+func TestRemoteWorkspaceClientUsesHostFilesystemCapability(t *testing.T) {
 	rootClient, captured := newRemoteScopeTestClient(t)
 	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{{
 		ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
-		WorkspacePath: "projects/shared", IsPrimary: true,
+		IsPrimary:     true,
 		RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
 	}}}
 	service := &RemoteWorkspaceService{
@@ -271,9 +305,9 @@ func TestRemoteWorkspaceClientCarriesMountScope(t *testing.T) {
 			RuntimeID: remoteTestRuntimeID,
 			Client:    rootClient,
 			Info: userruntime.RuntimeInfo{
-				WorkspaceBase: "/Users/alice/workspaces",
+				WorkspaceBase: "/Users/alice",
 				OS:            "darwin",
-				Capabilities:  []string{userruntime.CapabilityFS, userruntime.CapabilityExec, userruntime.CapabilityWorkspaceScope},
+				Capabilities:  []string{userruntime.CapabilityFS, userruntime.CapabilityExec, userruntime.CapabilityHostFS},
 			},
 		}},
 	}
@@ -281,18 +315,41 @@ func TestRemoteWorkspaceClientCarriesMountScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveMount: %v", err)
 	}
-	if target.Info.Backend != bridge.WorkspaceBackendRemote || target.Info.DefaultWorkDir != "/Users/alice/workspaces/projects/shared" {
+	if target.Info.Backend != bridge.WorkspaceBackendRemote || target.Info.DefaultWorkDir != "/Users/alice" {
 		t.Fatalf("workspace info = %#v", target.Info)
 	}
-	if _, err := target.Client.Stat(context.Background(), "/"); err != nil {
+	if _, err := target.Client.Stat(context.Background(), "/Users/alice"); err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
 	md := <-captured
-	if got := md.Get(RemoteWorkspaceIDMetadataKey); len(got) != 1 || got[0] != remoteTestBotID {
-		t.Fatalf("workspace id metadata = %v", got)
+	if got := md.Get("x-memoh-workspace-id"); len(got) != 0 {
+		t.Fatalf("obsolete workspace id metadata = %v", got)
 	}
-	if got := md.Get(RemoteWorkspacePathMetadataKey); len(got) != 1 || got[0] != "projects/shared" {
-		t.Fatalf("workspace path metadata = %v", got)
+	if got := md.Get("x-memoh-workspace-path-bin"); len(got) != 0 {
+		t.Fatalf("obsolete workspace path metadata = %v", got)
+	}
+}
+
+func TestRemoteWorkspaceRejectsLegacyScopeCapability(t *testing.T) {
+	rootClient, _ := newRemoteScopeTestClient(t)
+	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{{
+		ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
+		RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
+	}}}
+	service := &RemoteWorkspaceService{
+		store: store,
+		runtimes: fakeRuntimeConnections{remoteTestRuntimeID: {
+			RuntimeID: remoteTestRuntimeID,
+			Client:    rootClient,
+			Info: userruntime.RuntimeInfo{
+				WorkspaceBase: "/Users/alice",
+				OS:            "darwin",
+				Capabilities:  []string{userruntime.CapabilityFS, userruntime.CapabilityExec, "workspace_scope"},
+			},
+		}},
+	}
+	if _, err := service.ResolveMount(context.Background(), remoteTestBotID, remoteTestTargetID); !errors.Is(err, ErrRemoteRuntimeClientUpdateNeeded) {
+		t.Fatalf("ResolveMount error = %v, want client update required", err)
 	}
 }
 

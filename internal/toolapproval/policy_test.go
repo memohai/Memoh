@@ -14,7 +14,7 @@ func TestPolicyDecisionExplicitModes(t *testing.T) {
 	t.Parallel()
 
 	cfg := settings.DefaultToolApprovalConfig()
-	cfg.Enabled = false
+	cfg.Enabled = true
 	cfg.Read.Mode = settings.ToolApprovalAllow
 	cfg.Read.ForceReviewGlobs = []string{"/etc/**"}
 	cfg.Write.Mode = settings.ToolApprovalDeny
@@ -35,6 +35,37 @@ func TestPolicyDecisionExplicitModes(t *testing.T) {
 	cfg.Exec.BypassCommands = []string{"go test *"}
 	if got := policyDecision(cfg, "exec", map[string]any{"command": "go test ./..."}); got != DecisionBypass {
 		t.Fatalf("exec ask bypass decision = %q, want bypass", got)
+	}
+}
+
+func TestPolicyDecisionDisabledTargetBypassesSavedPolicies(t *testing.T) {
+	t.Parallel()
+
+	cfg := settings.DefaultToolApprovalConfig()
+	cfg.Enabled = false
+	cfg.Read.Mode = settings.ToolApprovalAsk
+	cfg.Read.ForceReviewGlobs = []string{"/etc/**"}
+	cfg.Write.Mode = settings.ToolApprovalDeny
+	cfg.Exec.Mode = settings.ToolApprovalDeny
+
+	for name, tc := range map[string]struct {
+		tool  string
+		input map[string]any
+	}{
+		"read":  {tool: "read", input: map[string]any{"path": "/etc/passwd"}},
+		"write": {tool: "write", input: map[string]any{"path": "/etc/passwd"}},
+		"exec":  {tool: "exec", input: map[string]any{"command": "rm -rf /tmp/example"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := policyDecision(cfg, tc.tool, tc.input); got != DecisionBypass {
+				t.Fatalf("decision = %q, want bypass while target approval is disabled", got)
+			}
+		})
+	}
+
+	cfg.Enabled = true
+	if got := policyDecision(cfg, "write", map[string]any{"path": "/etc/passwd"}); got != DecisionDeny {
+		t.Fatalf("re-enabled write decision = %q, want saved deny mode", got)
 	}
 }
 

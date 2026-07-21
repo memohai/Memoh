@@ -70,7 +70,6 @@ type SpawnIdentity struct {
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string
-	WorkspacePath       string
 	TimezoneLocation    *time.Location
 	IsSubagent          bool
 }
@@ -887,7 +886,6 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			WorkspaceTargetID:   req.parentSession.WorkspaceTargetID,
 			WorkspaceTargetKind: req.parentSession.WorkspaceTargetKind,
 			WorkspaceTargetName: req.parentSession.WorkspaceTargetName,
-			WorkspacePath:       req.parentSession.WorkspacePath,
 			TimezoneLocation:    req.parentSession.TimezoneLocation,
 			IsSubagent:          true,
 		},

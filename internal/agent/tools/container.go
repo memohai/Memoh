@@ -89,9 +89,6 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 			targetDescription += " " + strconv.Quote(name)
 		}
 		text := "File and command tools default to the " + targetDescription + " for this turn"
-		if workspacePath := strings.TrimSpace(session.WorkspacePath); workspacePath != "" {
-			text += ", starting in " + strconv.Quote(workspacePath)
-		}
 		parts = append(parts, text+". An explicit `target_id` still takes precedence.")
 	}
 	if ref, ok := available.Ref(ToolRead()); ok {
@@ -373,13 +370,12 @@ type workspaceTargetResolver interface {
 }
 
 type executionLocation struct {
-	TargetID       string `json:"target_id"`
-	Name           string `json:"name"`
-	Type           string `json:"type"`
-	Default        bool   `json:"default"`
-	Available      bool   `json:"available"`
-	Status         string `json:"status"`
-	StartingFolder string `json:"starting_folder,omitempty"`
+	TargetID  string `json:"target_id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Default   bool   `json:"default"`
+	Available bool   `json:"available"`
+	Status    string `json:"status"`
 }
 
 type listExecutionLocationsResult struct {
@@ -474,13 +470,12 @@ func executionLocationFromTarget(target workspacepkg.WorkspaceTarget, requestTar
 		isDefault = strings.TrimSpace(target.TargetID) == requestTargetID
 	}
 	return executionLocation{
-		TargetID:       strings.TrimSpace(target.TargetID),
-		Name:           name,
-		Type:           targetType,
-		Default:        isDefault,
-		Available:      status == workspacepkg.WorkspaceTargetStatusOnline,
-		Status:         status,
-		StartingFolder: strings.TrimSpace(target.WorkspacePath),
+		TargetID:  strings.TrimSpace(target.TargetID),
+		Name:      name,
+		Type:      targetType,
+		Default:   isDefault,
+		Available: status == workspacepkg.WorkspaceTargetStatusOnline,
+		Status:    status,
 	}
 }
 

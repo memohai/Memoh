@@ -16,14 +16,15 @@ func policyDecision(cfg settings.ToolApprovalConfig, toolName string, input any)
 	if !ok {
 		return DecisionBypass
 	}
+	if !cfg.Enabled {
+		return DecisionBypass
+	}
 	switch operation {
 	case OperationRead:
 		if decision, decided := explicitModeDecision(cfg.Read.Mode); decided {
 			if decision != DecisionNeedsApproval {
 				return decision
 			}
-		} else if !cfg.Enabled {
-			return DecisionBypass
 		}
 		targets := approvalPaths(args)
 		if matchesAnyPathGlob(targets, cfg.Read.ForceReviewGlobs) {
@@ -41,8 +42,6 @@ func policyDecision(cfg settings.ToolApprovalConfig, toolName string, input any)
 			if decision != DecisionNeedsApproval {
 				return decision
 			}
-		} else if !cfg.Enabled {
-			return DecisionBypass
 		}
 		if strings.EqualFold(strings.TrimSpace(toolName), "apply_patch") {
 			targets := applyPatchPaths(readString(args, "patch"))
@@ -73,8 +72,6 @@ func policyDecision(cfg settings.ToolApprovalConfig, toolName string, input any)
 			if decision != DecisionNeedsApproval {
 				return decision
 			}
-		} else if !cfg.Enabled {
-			return DecisionBypass
 		}
 		command := readString(args, "command")
 		if matchesCommand(command, cfg.Exec.ForceReviewCommands) {
