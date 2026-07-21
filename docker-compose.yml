@@ -106,6 +106,8 @@ services:
     image: memohai/server:latest
     container_name: memoh-channel
     entrypoint: ["/app/memoh-channel", "serve"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
@@ -131,6 +133,10 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      # Wait for the server so inbound platform messages arriving in the
+      # startup window do not fail their turn RPC.
+      server:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8081/health"]
       interval: 30s

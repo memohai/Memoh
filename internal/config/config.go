@@ -15,8 +15,11 @@ const (
 	DefaultConfigPath            = "config.toml"
 	DefaultHTTPAddr              = ":8080"
 	DefaultChannelHTTPAddr       = ":8081"
-	DefaultServerRPCListenAddr   = ":9090"
-	DefaultChannelRPCListenAddr  = ":9091"
+	// The internal RPC is plaintext; default to loopback so bare-metal
+	// split deployments never expose it on all interfaces by accident.
+	// Container deployments override this in their config template.
+	DefaultServerRPCListenAddr   = "127.0.0.1:9090"
+	DefaultChannelRPCListenAddr  = "127.0.0.1:9091"
 	DefaultServerRPCTarget       = "127.0.0.1:9090"
 	DefaultChannelRPCTarget      = "127.0.0.1:9091"
 	DefaultNamespace             = "default"

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"time"
 
 	"go.uber.org/fx"
 	"google.golang.org/grpc"
@@ -154,6 +155,9 @@ func startServerRPC(lc fx.Lifecycle, log *slog.Logger, rpcServer *serverRPC, shu
 			}()
 			return nil
 		},
-		OnStop: func(context.Context) error { rpcServer.server.GracefulStop(); return nil },
+		OnStop: func(ctx context.Context) error {
+			intrpc.StopGracefully(rpcServer.server, ctx.Done(), 10*time.Second)
+			return nil
+		},
 	})
 }

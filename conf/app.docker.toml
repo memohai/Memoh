@@ -12,6 +12,9 @@ addr = ":8081"
 rpc_listen_addr = ":9091"
 
 [internal_rpc]
+# Docker compose runs the split deployment: the secret arrives via
+# MEMOH_INTERNAL_RPC_SHARED_SECRET (see docker-compose.yml). An empty value
+# here would fall back to the embedded all-in-one mode.
 server_target = "server:9090"
 channel_target = "channel:9091"
 shared_secret = ""

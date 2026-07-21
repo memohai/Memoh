@@ -136,7 +136,7 @@ type StartTurnCommand struct {
 	UserMessagePersisted bool
 
 	// Discuss-mode extras.
-	SessionToken string //nolint:gosec // session credential material, in-process only
+	SessionToken string //nolint:gosec // session credential material; crosses only the authenticated internal RPC in split deployments
 	ToolHTTPURL  string
 
 	// DiscussMessages is the composed conversation context for a discuss
