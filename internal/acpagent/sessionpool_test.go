@@ -954,6 +954,41 @@ func TestSessionPoolModelTransportFailureDropsUncertainRuntime(t *testing.T) {
 	}
 }
 
+func TestSessionPoolAbortedPromptConfigApplyKeepsRuntime(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	h := &runtimeHandle{
+		id:           newRuntimeID(),
+		botID:        "bot-1",
+		agentID:      acpprofile.AgentCodexID,
+		status:       stateIdle,
+		lastActive:   time.Now(),
+		boundSession: "session-1",
+		session:      &acpclient.Session{},
+	}
+	injectRuntime(pool, h)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, retry, err := pool.promptOnHandle(ctx, h, PromptInput{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		ModelID:   "model-b",
+		Prompt:    "hello",
+	})
+	if retry || err == nil {
+		t.Fatalf("promptOnHandle() = retry %v err %v, want config error without retry", retry, err)
+	}
+	if errors.Is(err, ErrRuntimeConfigUpdateFailed) {
+		t.Fatalf("promptOnHandle() error = %v, want cancellation kept out of the teardown contract", err)
+	}
+	if h.closed || h.session == nil {
+		t.Fatalf("aborted per-turn config apply dropped runtime: handle=%#v", h)
+	}
+	if _, err := pool.RuntimeStatusByID("bot-1", h.id); err != nil {
+		t.Fatalf("RuntimeStatusByID() error = %v, want reusable runtime", err)
+	}
+}
+
 func TestSessionPoolCanceledConfigUpdateKeepsRuntime(t *testing.T) {
 	pool := newSessionPool(nil, nil, nil)
 	h := &runtimeHandle{

@@ -1793,6 +1793,25 @@ watch(activeACPAgentId, (agentID, previousAgentID) => {
   overrideReasoningEffort.value = ''
 })
 
+// ACP overrides describe one runtime. An ephemeral pane is repointed to a
+// different session without remounting, so without this reset the previous
+// session's selection would be pushed onto the next session's runtime by the
+// scope watcher below (registration order guarantees this reset runs first)
+// and by per-turn sends. Reconcile re-seeds the cleared values from the new
+// runtime's own current state.
+const acpSessionIdentity = computed(() => JSON.stringify([
+  paneTarget.value.botId,
+  paneTarget.value.sessionId,
+  activeACPAgentId.value,
+  activeACPProjectPath.value,
+  activeACPProjectMode.value,
+]))
+watch(acpSessionIdentity, (identity, previousIdentity) => {
+  if (!activeUsesACPComposer.value || identity === previousIdentity) return
+  overrideModelId.value = ''
+  overrideReasoningEffort.value = ''
+})
+
 function reconcileACPComposerConfig() {
   const runtime = acpCapabilityRuntime.value
   if (!activeUsesACPComposer.value || !runtime) return

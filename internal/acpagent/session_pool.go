@@ -676,6 +676,13 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		if isPromptConfigSelectionError(err) {
 			return acpclient.PromptResult{}, false, err
 		}
+		if configUpdateCanceled(ctx, err) {
+			// The turn was aborted (or the client dropped) while the per-turn
+			// setter was in flight. Cancellation says nothing about the Agent
+			// process health; keep the runtime and let the next turn's apply
+			// reconverge on the desired values.
+			return acpclient.PromptResult{}, false, err
+		}
 		// A transport/protocol failure while mutating session config leaves the
 		// agent's effective state unknown. Drop the runtime so the next turn
 		// starts from a clean session.
