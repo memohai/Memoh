@@ -249,14 +249,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			compactionModelUUID = modelID
 		}
 	}
-	titleModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.TitleModelID); value != "" {
-		modelID, err := s.resolveModelUUID(ctx, value)
-		if err != nil {
-			return Settings{}, err
-		}
-		titleModelUUID = modelID
-	}
 	imageModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ImageModelID); value != "" {
 		modelID, err := s.resolveModelUUID(ctx, value)
@@ -372,7 +364,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		ChatAcpProjectMode:     current.ChatACPProjectMode,
 		HeartbeatModelID:       heartbeatModelUUID,
 		CompactionModelID:      compactionModelUUID,
-		TitleModelID:           titleModelUUID,
 		ImageModelID:           imageModelUUID,
 		SearchProviderID:       searchProviderUUID,
 		FetchProviderIDSet:     fetchProviderIDSet,
@@ -488,7 +479,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.ChatAcpProjectMode,
 		row.HeartbeatModelID,
 		row.CompactionModelID,
-		row.TitleModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
 		row.FetchProviderID,
@@ -525,7 +515,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.ChatAcpProjectMode,
 		row.HeartbeatModelID,
 		row.CompactionModelID,
-		row.TitleModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
 		row.FetchProviderID,
@@ -561,7 +550,6 @@ func normalizeBotSettingsFields(
 	chatACPProjectMode string,
 	heartbeatModelID pgtype.UUID,
 	compactionModelID pgtype.UUID,
-	titleModelID pgtype.UUID,
 	imageModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 	fetchProviderID pgtype.UUID,
@@ -604,9 +592,6 @@ func normalizeBotSettingsFields(
 	}
 	if compactionModelID.Valid {
 		settings.CompactionModelID = uuid.UUID(compactionModelID.Bytes).String()
-	}
-	if titleModelID.Valid {
-		settings.TitleModelID = uuid.UUID(titleModelID.Bytes).String()
 	}
 	if imageModelID.Valid {
 		settings.ImageModelID = uuid.UUID(imageModelID.Bytes).String()

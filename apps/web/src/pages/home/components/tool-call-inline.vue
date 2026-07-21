@@ -167,38 +167,14 @@
         />
       </Capsule>
     </CollapseSection>
-
-    <div
-      v-if="canRespondApproval"
-      class="mt-1.5 ml-5 flex items-center gap-2"
-    >
-      <Button
-        size="sm"
-        class="bg-success hover:bg-success/90 text-success-foreground"
-        @click="handleApproval('approve')"
-      >
-        {{ t('chat.tools.approve', 'Allow') }}
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        class="hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
-        @click="handleApproval('reject')"
-      >
-        {{ t('chat.tools.reject', 'Reject') }}
-      </Button>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
-import { Button } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
-import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
-import { useChatViewTarget } from '../composables/useChatViewContext'
 import {
   getToolDisplay,
   isDirPathTool,
@@ -213,8 +189,6 @@ import Capsule from './tool-detail/capsule.vue'
 
 const props = defineProps<{ block: ToolCallBlock, inGroup?: boolean }>()
 const { t } = useI18n()
-const chatStore = useChatStore()
-const chatViewTarget = useChatViewTarget()
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
@@ -359,11 +333,6 @@ function userInputStatusLabel(status: string) {
   }
 }
 
-const canRespondApproval = computed(() => {
-  const approval = props.block.approval
-  return Boolean(approval?.approval_id && approval.status === 'pending' && approval.can_approve !== false)
-})
-
 const filePath = computed(() => {
   if (!isFilePathTool(props.block.toolName)) return ''
   const input = props.block.input as Record<string, unknown> | undefined
@@ -384,9 +353,4 @@ function handleOpenInFiles() {
   openInFileManager(filePath.value, isDirPathTool(props.block.toolName))
 }
 
-function handleApproval(decision: 'approve' | 'reject') {
-  const approval = props.block.approval
-  if (!approval) return
-  void chatStore.respondToolApproval(approval, decision, chatViewTarget.value)
-}
 </script>

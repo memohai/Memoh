@@ -117,7 +117,6 @@ function createForm(overrides: Record<string, unknown> = {}) {
     chat_acp_agent_id: '',
     chat_acp_project_path: '',
     chat_acp_project_mode: '',
-    title_model_id: '',
     reasoning_enabled: false,
     reasoning_effort: 'medium',
     show_tool_calls_in_im: false,

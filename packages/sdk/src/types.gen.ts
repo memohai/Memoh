@@ -21,6 +21,7 @@ export type AccountsAccount = {
     principal_is_active?: boolean;
     role?: string;
     timezone?: string;
+    title_model_id?: string;
     updated_at?: string;
     username?: string;
 };
@@ -58,6 +59,7 @@ export type AccountsUpdateProfileRequest = {
     display_name?: string;
     metadata?: AccountsUpdateProfileMetadata;
     timezone?: string;
+    title_model_id?: string;
 };
 
 export type AclChannelIdentityCandidate = {
@@ -2809,7 +2811,6 @@ export type SettingsSettings = {
     search_provider_id?: string;
     show_tool_calls_in_im?: boolean;
     timezone?: string;
-    title_model_id?: string;
     tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
     tts_model_id?: string;
@@ -2871,7 +2872,6 @@ export type SettingsUpsertRequest = {
     search_provider_id?: string;
     show_tool_calls_in_im?: boolean;
     timezone?: string;
-    title_model_id?: string;
     tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
     tts_model_id?: string;
@@ -13428,11 +13428,11 @@ export type PutUsersMeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutUsersMeError = PutUsersMeErrors[keyof PutUsersMeErrors];

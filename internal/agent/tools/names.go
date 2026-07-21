@@ -36,6 +36,7 @@ func ToolUseSkill() ToolName       { return toolname.ToolUseSkill() }
 func ToolSpawnAgent() ToolName     { return toolname.ToolSpawnAgent() }
 func ToolSendMessage() ToolName    { return toolname.ToolSendMessage() }
 func ToolListAgents() ToolName     { return toolname.ToolListAgents() }
+func ToolListModels() ToolName     { return toolname.ToolListModels() }
 
 func ToolListSchedule() ToolName   { return toolname.ToolListSchedule() }
 func ToolGetSchedule() ToolName    { return toolname.ToolGetSchedule() }

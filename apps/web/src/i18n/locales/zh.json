@@ -96,6 +96,11 @@
     "bot": {
       "name_taken": "该名称已被占用。"
     },
+    "profile": {
+      "request_invalid": "个人资料更新请求无效。",
+      "title_model_invalid": "所选标题模型不可用或不是聊天模型。",
+      "update_failed": "个人资料更新失败。"
+    },
     "provider": {
       "name_taken": "已存在同名提供方。"
     },
@@ -285,6 +290,9 @@
     "avatarUrl": "头像链接",
     "timezone": "时区",
     "timezonePlaceholder": "例如 Asia/Shanghai",
+    "titleModel": "标题模型",
+    "titleModelDescription": "使用此模型为你名下所有 Bot 的会话生成标题。",
+    "titleModelPlaceholder": "未启用（使用首条消息）",
     "saveProfile": "保存更改",
     "profileUpdated": "个人资料已更新",
     "profileUpdateFailed": "个人资料更新失败",
@@ -2308,9 +2316,6 @@
       "defaultAgentDescription": "仅用于新建本地聊天，已有会话继续使用原来的 Agent。",
       "defaultAgentUnavailable": "Agent 不可用",
       "defaultAgentUnavailableDescription": "当前默认 Agent 不可用。保存前请选择 Memoh 或其他可用的 Agent。",
-      "titleModel": "标题模型",
-      "titleModelDescription": "选择用于自动生成会话标题的小模型。留空表示禁用该功能。",
-      "titleModelPlaceholder": "未启用（不自动生成标题）",
       "searchProvider": "搜索提供方",
       "searchProviderPlaceholder": "选择搜索提供方",
       "fetchProvider": "网页抓取提供方",

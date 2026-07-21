@@ -321,6 +321,13 @@ func backgroundStatusMap(session SessionContext, s background.TaskSnapshot) map[
 	case background.KindAgent:
 		result["agent_id"] = s.AgentID
 		result["session_id"] = s.AgentSessionID
+		if s.AgentModelID != "" {
+			result["model_id"] = s.AgentModelID
+		}
+		if s.AgentProvider != "" {
+			result["provider"] = s.AgentProvider
+		}
+		result["fork"] = s.AgentFork
 		if s.AgentMessage != "" {
 			result["input"] = s.AgentMessage
 		}

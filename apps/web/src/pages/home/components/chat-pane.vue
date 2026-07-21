@@ -332,13 +332,21 @@
                 leave-from-class="opacity-100 translate-y-0"
                 leave-to-class="opacity-0 translate-y-1"
               >
-                <ChatUserInputForm
-                  v-if="pendingUserInput"
-                  ref="userInputFormEl"
-                  :class="composerVisible ? 'mb-2' : ''"
-                  :user-input="pendingUserInput"
-                  @reveal-composer="handleUserInputReveal"
-                />
+                <div
+                  v-if="pendingDecision"
+                  ref="decisionFormEl"
+                  class="w-full"
+                >
+                  <ChatUserInputForm
+                    v-if="pendingUserInput"
+                    :user-input="pendingUserInput"
+                    @focus-composer="handleUserInputFocusComposer"
+                  />
+                  <ChatToolApprovalForm
+                    v-else-if="pendingToolApprovalBlock"
+                    :block="pendingToolApprovalBlock"
+                  />
+                </div>
               </Transition>
               <div
                 v-if="commandPanelEvent"
@@ -416,10 +424,10 @@
                 <span class="min-w-0 break-words">{{ composerError }}</span>
               </div>
               <!--
-              Compact uses a CONCRETE 28px radius (= half the compact height:
-              button 36px + py-2.5 ×2 = 56px), so a short composer still reads as
+              Compact uses a concrete 1.75rem radius (= half the compact height:
+              button 2.25rem + py-2.5 ×2 = 3.5rem), so a short composer still reads as
               a perfect pill — but, unlike rounded-full (9999px), the value can be
-              animated. Multiline shrinks the corners to 20px; transitioning
+              animated. Multiline shrinks the corners to 1.25rem; transitioning
               between two concrete radii interpolates smoothly, whereas animating
               out of 9999px snapped mid-way (the value stayed clamped-round until
               it crossed half-height, then jumped the corner in one step).
@@ -430,7 +438,7 @@
                 data-slot="input-group"
                 role="group"
                 class="chat-composer-edge relative flex w-full flex-wrap items-center gap-1 bg-surface-composer px-2.5 py-2.5 transition-[border-radius] motion-reduce:transition-none"
-                :class="(isMultiline || showAttachmentGrid) ? 'rounded-[20px]' : 'rounded-[28px]'"
+                :class="(isMultiline || showAttachmentGrid) ? 'chat-composer-radius-multiline' : 'chat-composer-radius-compact'"
                 :style="{ transitionDuration: `${composerRadiusMs}ms`, transitionTimingFunction: composerRadiusEase }"
                 @click.self="focusTextarea"
               >
@@ -806,7 +814,7 @@ import {
   Server,
 } from 'lucide-vue-next'
 import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
-import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot } from '@/store/chat-list'
+import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type ToolCallBlock } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
@@ -823,6 +831,7 @@ import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
 import ChatForkDialog from './chat-fork-dialog.vue'
 import ChatUserInputForm from './chat-user-input-form.vue'
+import ChatToolApprovalForm from './chat-tool-approval-form.vue'
 import ChatScrollRail, { type ScrollRailSegment } from './chat-scroll-rail.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
@@ -843,6 +852,7 @@ import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
+import { findLatestPendingChatDecision } from './chat-pending-decision'
 
 const props = withDefaults(defineProps<{
   // Stable dockview panel id (e.g. `chat:3`). Used for per-tab composer drafts and
@@ -962,24 +972,17 @@ watch([isWelcome, currentBotId, () => activeSession.value?.id], ([welcome]) => {
   if (welcome) welcomeGreetingIndex.value = pickWelcomeGreetingIndex()
 })
 
-const pendingUserInput = computed<UIUserInput | null>(() => {
-  for (let msgIndex = messages.value.length - 1; msgIndex >= 0; msgIndex--) {
-    const message = messages.value[msgIndex]
-    if (!message || message.role !== 'assistant') continue
-    for (let blockIndex = message.messages.length - 1; blockIndex >= 0; blockIndex--) {
-      const block = message.messages[blockIndex]
-      if (
-        block?.type === 'tool'
-        && block.userInput?.user_input_id
-        && block.userInput.status === 'pending'
-        && block.userInput.can_respond !== false
-      ) {
-        return block.userInput
-      }
-    }
-  }
-  return null
-})
+const pendingDecision = computed(() => findLatestPendingChatDecision(messages.value))
+const pendingUserInput = computed<UIUserInput | null>(() => (
+  pendingDecision.value?.kind === 'user_input'
+    ? pendingDecision.value.userInput
+    : null
+))
+const pendingToolApprovalBlock = computed<ToolCallBlock | null>(() => (
+  pendingDecision.value?.kind === 'tool_approval'
+    ? pendingDecision.value.block
+    : null
+))
 
 const hasPendingToolApproval = computed(() => messages.value.some(message => (
   message.role === 'assistant'
@@ -2014,30 +2017,23 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
   onDraftKeySwap: snapComposerNext,
 })
 
-// While an ask_user request is pending the selector REPLACES the composer:
-// the capsule hides until the form reveals it again (an option was picked, or
-// the request resolved — submit and cancel both hand the composer back).
-const userInputFormEl = useTemplateRef<InstanceType<typeof ChatUserInputForm>>('userInputFormEl')
-const userInputComposerRevealed = ref(false)
-const composerVisible = computed(() => !pendingUserInput.value || userInputComposerRevealed.value)
+// A pending ask_user or tool approval owns the composer position until it is
+// resolved. Local option-selection state must never reveal the textarea.
+const decisionFormEl = useTemplateRef<HTMLElement>('decisionFormEl')
+const composerVisible = computed(() => pendingDecision.value === null)
 
-watch(() => pendingUserInput.value?.user_input_id ?? null, () => {
-  userInputComposerRevealed.value = false
-})
-
-function handleUserInputReveal(opts: { focus?: boolean }) {
-  userInputComposerRevealed.value = true
-  if (opts.focus) void nextTick(focusTextarea)
+function handleUserInputFocusComposer() {
+  void nextTick(focusTextarea)
 }
 
 // The bottom backdrop normally rises to the composer's vertical centre; with
 // the composer hidden that measurement collapses to 0, so mirror the same
-// half-height rule against the user-input capsule that stands in for it.
-const { height: userInputFormHeight } = useElementSize(userInputFormEl)
+// half-height rule against the decision panel that stands in for it.
+const { height: decisionFormHeight } = useElementSize(decisionFormEl)
 const bottomMaskHeight = computed(() => (
   composerVisible.value
     ? composerMaskHeight.value
-    : `${COMPOSER_MASK_BELOW_PX + userInputFormHeight.value / 2}px`
+    : `${COMPOSER_MASK_BELOW_PX + decisionFormHeight.value / 2}px`
 ))
 
 watch([

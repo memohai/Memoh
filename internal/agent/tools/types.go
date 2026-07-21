@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -76,21 +77,128 @@ type Speech struct {
 // where the caller collects events after generation).
 type StreamEmitter func(ToolStreamEvent)
 
+// MessageSnapshot exposes an immutable copy of the messages currently visible
+// to the model. Agent steps update the snapshot before each model call; tools
+// can safely read it while sibling tool calls execute concurrently.
+type MessageSnapshot struct {
+	mu  sync.RWMutex
+	raw json.RawMessage
+}
+
+func NewMessageSnapshot(messages []sdk.Message) *MessageSnapshot {
+	s := &MessageSnapshot{}
+	_ = s.Store(messages)
+	return s
+}
+
+func (s *MessageSnapshot) Store(messages []sdk.Message) error {
+	if s == nil {
+		return nil
+	}
+	if messages == nil {
+		messages = []sdk.Message{}
+	}
+	raw, err := json.Marshal(providerNeutralMessages(messages))
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.raw = append(s.raw[:0], raw...)
+	s.mu.Unlock()
+	return nil
+}
+
+func providerNeutralMessages(messages []sdk.Message) []sdk.Message {
+	out := make([]sdk.Message, 0, len(messages))
+	for _, message := range messages {
+		clean := sdk.Message{Role: message.Role, Content: make([]sdk.MessagePart, 0, len(message.Content))}
+		for _, part := range message.Content {
+			switch value := part.(type) {
+			case sdk.TextPart:
+				clean.Content = append(clean.Content, sdk.TextPart{Text: value.Text})
+			case *sdk.TextPart:
+				if value != nil {
+					clean.Content = append(clean.Content, sdk.TextPart{Text: value.Text})
+				}
+			case sdk.ReasoningPart:
+				clean.Content = append(clean.Content, sdk.ReasoningPart{Text: value.Text})
+			case *sdk.ReasoningPart:
+				if value != nil {
+					clean.Content = append(clean.Content, sdk.ReasoningPart{Text: value.Text})
+				}
+			case sdk.ImagePart:
+				clean.Content = append(clean.Content, sdk.ImagePart{Image: value.Image, MediaType: value.MediaType})
+			case *sdk.ImagePart:
+				if value != nil {
+					clean.Content = append(clean.Content, sdk.ImagePart{Image: value.Image, MediaType: value.MediaType})
+				}
+			case sdk.FilePart:
+				clean.Content = append(clean.Content, sdk.FilePart{Data: value.Data, MediaType: value.MediaType, Filename: value.Filename})
+			case *sdk.FilePart:
+				if value != nil {
+					clean.Content = append(clean.Content, sdk.FilePart{Data: value.Data, MediaType: value.MediaType, Filename: value.Filename})
+				}
+			case sdk.ToolCallPart:
+				clean.Content = append(clean.Content, sdk.ToolCallPart{ToolCallID: value.ToolCallID, ToolName: value.ToolName, Input: value.Input})
+			case *sdk.ToolCallPart:
+				if value != nil {
+					clean.Content = append(clean.Content, sdk.ToolCallPart{ToolCallID: value.ToolCallID, ToolName: value.ToolName, Input: value.Input})
+				}
+			case sdk.ToolResultPart:
+				clean.Content = append(clean.Content, value)
+			case *sdk.ToolResultPart:
+				if value != nil {
+					clean.Content = append(clean.Content, *value)
+				}
+			default:
+				clean.Content = append(clean.Content, part)
+			}
+		}
+		out = append(out, clean)
+	}
+	return out
+}
+
+func (s *MessageSnapshot) Messages() ([]sdk.Message, error) {
+	if s == nil {
+		return []sdk.Message{}, nil
+	}
+	s.mu.RLock()
+	raw := append(json.RawMessage(nil), s.raw...)
+	s.mu.RUnlock()
+	if len(raw) == 0 {
+		return []sdk.Message{}, nil
+	}
+	var messages []sdk.Message
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		return nil, err
+	}
+	if messages == nil {
+		messages = []sdk.Message{}
+	}
+	return messages, nil
+}
+
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
-	BotID               string
-	ChatID              string
-	SessionID           string
-	SessionType         string
-	ChannelIdentityID   string
-	SessionToken        string //nolint:gosec // carries session credential material at runtime
-	CurrentPlatform     string
-	ReplyTarget         string
-	ConversationType    string
-	CanRequestUserInput bool
-	CanListUserInput    bool
-	SupportsImageInput  bool
-	IsSubagent          bool
+	BotID                string
+	ChatID               string
+	SessionID            string
+	SessionType          string
+	UserID               string
+	ChannelIdentityID    string
+	SessionToken         string //nolint:gosec // carries session credential material at runtime
+	CurrentPlatform      string
+	ReplyTarget          string
+	ConversationType     string
+	CanRequestUserInput  bool
+	CanListUserInput     bool
+	SupportsImageInput   bool
+	IsSubagent           bool
+	CurrentModelUUID     string
+	CurrentModelID       string
+	CurrentModelProvider string
+	ForkContext          *MessageSnapshot
 	// WorkspaceTargetID is the request-scoped default for file and command
 	// tools. An explicit tool target_id still takes precedence.
 	WorkspaceTargetID   string

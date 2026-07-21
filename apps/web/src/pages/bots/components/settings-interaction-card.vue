@@ -71,21 +71,6 @@
       </div>
     </SettingsRow>
 
-    <SettingsRow
-      :label="$t('bots.settings.titleModel')"
-      :description="$t('bots.settings.titleModelDescription')"
-    >
-      <div class="w-56">
-        <ModelSelect
-          v-model="form.title_model_id"
-          :models="models"
-          :providers="providers"
-          model-type="chat"
-          :placeholder="$t('bots.settings.titleModelPlaceholder')"
-        />
-      </div>
-    </SettingsRow>
-
     <SettingsRow :label="$t('bots.settings.reasoningEffort')">
       <Select
         v-model="reasoningFormValue"

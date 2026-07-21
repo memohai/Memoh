@@ -8,7 +8,7 @@
       <template v-if="loadingInitial">
         <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
           <div
-            v-for="i in 5"
+            v-for="i in 6"
             :key="i"
             class="mx-4 flex items-center justify-between border-b border-border py-3.5 last:border-b-0"
           >
@@ -32,7 +32,7 @@
           />
         </SettingsSection>
 
-        <!-- Card 2 · Account: timezone + password -->
+        <!-- Card 2 · Account: profile-wide preferences + password -->
         <SettingsSection :title="$t('settings.accountSection')">
           <SettingsRow :label="$t('settings.timezone')">
             <div class="w-64">
@@ -40,6 +40,23 @@
                 :model-value="profileForm.timezone"
                 :placeholder="$t('settings.timezonePlaceholder')"
                 @update:model-value="onTimezoneChange"
+              />
+            </div>
+          </SettingsRow>
+
+          <SettingsRow
+            :label="$t('settings.titleModel')"
+            :description="$t('settings.titleModelDescription')"
+          >
+            <div class="w-64">
+              <ModelSelect
+                v-model="profileForm.title_model_id"
+                :models="models"
+                :providers="providers"
+                model-type="chat"
+                :placeholder="$t('settings.titleModelPlaceholder')"
+                :none-label="$t('settings.titleModelPlaceholder')"
+                @update:model-value="onTitleModelChange"
               />
             </div>
           </SettingsRow>
@@ -106,6 +123,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useQuery } from '@pinia/colada'
 import { useRouter } from 'vue-router'
 import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
@@ -115,13 +133,14 @@ import { Check, Copy } from 'lucide-vue-next'
 import PageShell from '@/components/page-shell/index.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
+import ModelSelect from '@/pages/bots/components/model-select.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import ProfileIdentity from './components/profile-identity.vue'
 import PasswordSection from './components/password-section.vue'
 import ConnectedAccountsSection from './components/connected-accounts-section.vue'
 
-import { getUsersMe, putUsersMe, putUsersMePassword } from '@memohai/sdk'
+import { getModels, getProviders, getUsersMe, putUsersMe, putUsersMePassword } from '@memohai/sdk'
 import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest } from '@memohai/sdk'
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -139,6 +158,25 @@ const canSignOut = true
 // ---- User data ----
 const account = ref<UserAccount | null>(null)
 
+const { data: modelData } = useQuery({
+  key: ['all-models'],
+  query: async () => {
+    const { data } = await getModels({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: providerData } = useQuery({
+  key: ['all-providers'],
+  query: async () => {
+    const { data } = await getProviders({ throwOnError: true })
+    return data
+  },
+})
+
+const models = computed(() => modelData.value ?? [])
+const providers = computed(() => providerData.value ?? [])
+
 const loadingInitial = ref(true)
 const savingPassword = ref(false)
 
@@ -146,12 +184,14 @@ const originalProfile = reactive({
   display_name: '',
   avatar_url: '',
   timezone: '',
+  title_model_id: '',
 })
 
 const profileForm = reactive({
   display_name: '',
   avatar_url: '',
   timezone: '',
+  title_model_id: '',
 })
 
 const passwordDialogOpen = ref(false)
@@ -196,16 +236,19 @@ async function loadMyAccount() {
   const dName = data.display_name || ''
   const aUrl = data.avatar_url || ''
   const tZone = data.timezone || 'UTC'
+  const titleModelID = data.title_model_id || ''
 
   // Set forms
   profileForm.display_name = dName
   profileForm.avatar_url = aUrl
   profileForm.timezone = tZone
+  profileForm.title_model_id = titleModelID
   
   // Set originals
   originalProfile.display_name = dName
   originalProfile.avatar_url = aUrl
   originalProfile.timezone = tZone
+  originalProfile.title_model_id = titleModelID
 
   patchUserInfo({
     id: data.id,
@@ -222,23 +265,30 @@ function onTimezoneChange(value: string | number | undefined) {
   void autoSaveProfile()
 }
 
+function onTitleModelChange(value: string | undefined) {
+  profileForm.title_model_id = value || ''
+  void autoSaveProfile()
+}
+
 // Monotonic token so out-of-order PUT responses can't clobber newer state: each
 // save claims a token, and only the latest dispatch is allowed to apply its
 // result or roll back on failure.
 let saveToken = 0
 
-// Silent auto-save: triggered on name confirm, timezone change, and avatar apply.
+// Silent auto-save: triggered on name confirm, preference changes, and avatar apply.
 // Skips the request when nothing actually changed; only surfaces errors.
 async function autoSaveProfile() {
   const body: AccountsUpdateProfileRequest = {
     display_name: profileForm.display_name.trim(),
     avatar_url: profileForm.avatar_url.trim(),
     timezone: profileForm.timezone.trim(),
+    title_model_id: profileForm.title_model_id.trim(),
   }
   if (
     body.display_name === originalProfile.display_name
     && body.avatar_url === originalProfile.avatar_url
     && body.timezone === originalProfile.timezone
+    && body.title_model_id === originalProfile.title_model_id
   ) {
     return
   }
@@ -253,14 +303,17 @@ async function autoSaveProfile() {
     const dName = data.display_name || ''
     const aUrl = data.avatar_url || ''
     const tZone = data.timezone || 'UTC'
+    const titleModelID = data.title_model_id || ''
 
     profileForm.display_name = dName
     profileForm.avatar_url = aUrl
     profileForm.timezone = tZone
+    profileForm.title_model_id = titleModelID
 
     originalProfile.display_name = dName
     originalProfile.avatar_url = aUrl
     originalProfile.timezone = tZone
+    originalProfile.title_model_id = titleModelID
 
     patchUserInfo({
       displayName: dName,
@@ -274,6 +327,7 @@ async function autoSaveProfile() {
       profileForm.display_name = originalProfile.display_name
       profileForm.avatar_url = originalProfile.avatar_url
       profileForm.timezone = originalProfile.timezone
+      profileForm.title_model_id = originalProfile.title_model_id
       patchUserInfo({
         displayName: originalProfile.display_name,
         avatarUrl: originalProfile.avatar_url,

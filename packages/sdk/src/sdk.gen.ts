@@ -2402,7 +2402,7 @@ export const getUsersMe = <ThrowOnError extends boolean = false>(options?: Optio
 /**
  * Update current user profile
  *
- * Update current user display name or avatar
+ * Update current user profile and preferences
  */
 export const putUsersMe = <ThrowOnError extends boolean = false>(options: Options<PutUsersMeData, ThrowOnError>): RequestResult<PutUsersMeResponses, PutUsersMeErrors, ThrowOnError> => (options.client ?? client).put<PutUsersMeResponses, PutUsersMeErrors, ThrowOnError>({
     url: '/users/me',

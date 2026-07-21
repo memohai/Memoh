@@ -96,6 +96,11 @@
     "bot": {
       "name_taken": "This name is already taken."
     },
+    "profile": {
+      "request_invalid": "The profile update request is invalid.",
+      "title_model_invalid": "The selected title model is unavailable or is not a chat model.",
+      "update_failed": "The profile could not be updated."
+    },
     "provider": {
       "name_taken": "A provider with this name already exists."
     },
@@ -285,6 +290,9 @@
     "avatarUrl": "Avatar URL",
     "timezone": "Timezone",
     "timezonePlaceholder": "e.g. America/New_York",
+    "titleModel": "Title Model",
+    "titleModelDescription": "Use this model to generate titles for sessions owned by your Bots.",
+    "titleModelPlaceholder": "Disabled (use the first message)",
     "saveProfile": "Save Changes",
     "profileUpdated": "Profile Updated",
     "profileUpdateFailed": "Failed to update profile",
@@ -2308,9 +2316,6 @@
       "defaultAgentDescription": "Used for new local chats. Existing conversations keep their current Agent.",
       "defaultAgentUnavailable": "Unavailable Agent",
       "defaultAgentUnavailableDescription": "The current default Agent is unavailable. Choose Memoh or an available Agent before saving.",
-      "titleModel": "Title Model",
-      "titleModelDescription": "Pick a lightweight model to automatically title conversations. Leave empty to disable.",
-      "titleModelPlaceholder": "Disabled (no auto title)",
       "searchProvider": "Web Search",
       "searchProviderPlaceholder": "Select web search",
       "fetchProvider": "Web Fetch",

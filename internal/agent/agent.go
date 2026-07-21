@@ -151,6 +151,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	streamEmitter := tools.StreamEmitter(func(evt tools.ToolStreamEvent) {
 		sendEvent(ctx, ch, toolStreamEventToAgentEvent(evt))
 	})
+	if cfg.ForkContext == nil {
+		cfg.ForkContext = tools.NewMessageSnapshot(cfg.Messages)
+	}
 
 	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
@@ -644,6 +647,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	collectEmitter := tools.StreamEmitter(func(evt tools.ToolStreamEvent) {
 		collected.Add(evt)
 	})
+	if cfg.ForkContext == nil {
+		cfg.ForkContext = tools.NewMessageSnapshot(cfg.Messages)
+	}
 
 	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
@@ -770,6 +776,9 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 	system, messages, tools := models.ApplyPromptCache(
 		cfg.Model, cfg.PromptCacheTTL, cfg.System, cfg.Messages, tools,
 	)
+	if cfg.ForkContext != nil {
+		_ = cfg.ForkContext.Store(messages)
+	}
 	if cfg.BackgroundManager != nil {
 		basePrepare := prepareStep
 		baseSystem := captureBackgroundSystem(system, messages)
@@ -821,7 +830,11 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 				p = override
 			}
 		}
-		return pruneOldToolResults(p, keepSteps, threshold)
+		p = pruneOldToolResults(p, keepSteps, threshold)
+		if cfg.ForkContext != nil {
+			_ = cfg.ForkContext.Store(p.Messages)
+		}
+		return p
 	}
 	opts = append(opts, sdk.WithPrepareStep(midTaskPrune))
 
@@ -859,25 +872,30 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		}
 	}
 	session := tools.SessionContext{
-		BotID:               cfg.Identity.BotID,
-		ChatID:              cfg.Identity.ChatID,
-		SessionID:           cfg.Identity.SessionID,
-		SessionType:         cfg.SessionType,
-		ChannelIdentityID:   cfg.Identity.ChannelIdentityID,
-		SessionToken:        cfg.Identity.SessionToken,
-		WorkspaceTargetID:   cfg.Identity.WorkspaceTargetID,
-		WorkspaceTargetKind: cfg.Identity.WorkspaceTargetKind,
-		WorkspaceTargetName: cfg.Identity.WorkspaceTargetName,
-		CurrentPlatform:     cfg.Identity.CurrentPlatform,
-		ReplyTarget:         cfg.Identity.ReplyTarget,
-		ConversationType:    cfg.Identity.ConversationType,
-		CanRequestUserInput: cfg.CanRequestUserInput,
-		SupportsImageInput:  cfg.SupportsImageInput,
-		IsSubagent:          cfg.Identity.IsSubagent,
-		Skills:              skillsMap,
-		TimezoneLocation:    cfg.Identity.TimezoneLocation,
-		Emitter:             emitter,
-		LiveStream:          liveStream,
+		BotID:                cfg.Identity.BotID,
+		ChatID:               cfg.Identity.ChatID,
+		SessionID:            cfg.Identity.SessionID,
+		SessionType:          cfg.SessionType,
+		UserID:               cfg.Identity.UserID,
+		ChannelIdentityID:    cfg.Identity.ChannelIdentityID,
+		SessionToken:         cfg.Identity.SessionToken,
+		WorkspaceTargetID:    cfg.Identity.WorkspaceTargetID,
+		WorkspaceTargetKind:  cfg.Identity.WorkspaceTargetKind,
+		WorkspaceTargetName:  cfg.Identity.WorkspaceTargetName,
+		CurrentPlatform:      cfg.Identity.CurrentPlatform,
+		ReplyTarget:          cfg.Identity.ReplyTarget,
+		ConversationType:     cfg.Identity.ConversationType,
+		CanRequestUserInput:  cfg.CanRequestUserInput,
+		SupportsImageInput:   cfg.SupportsImageInput,
+		IsSubagent:           cfg.Identity.IsSubagent,
+		CurrentModelUUID:     cfg.CurrentModelUUID,
+		CurrentModelID:       cfg.CurrentModelID,
+		CurrentModelProvider: cfg.CurrentModelProvider,
+		ForkContext:          cfg.ForkContext,
+		Skills:               skillsMap,
+		TimezoneLocation:     cfg.Identity.TimezoneLocation,
+		Emitter:              emitter,
+		LiveStream:           liveStream,
 	}
 
 	var allTools []sdk.Tool
@@ -891,6 +909,9 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		if err != nil {
 			a.logger.Warn("tool provider failed", slog.Any("error", err))
 			continue
+		}
+		if session.IsSubagent {
+			providerTools = tools.FilterSubagentTools(providerTools)
 		}
 		if len(providerTools) == 0 {
 			continue

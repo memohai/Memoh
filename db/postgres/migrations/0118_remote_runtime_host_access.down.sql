@@ -1,4 +1,4 @@
--- 0116_remote_runtime_host_access
+-- 0118_remote_runtime_host_access
 -- Restore the legacy per-Bot Remote Runtime workspace path.
 
 ALTER TABLE IF EXISTS bot_remote_runtime_bindings

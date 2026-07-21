@@ -181,6 +181,7 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolSpawnAgent():  "subagents",
 		ToolSendMessage(): "subagents",
 		ToolListAgents():  "subagents",
+		ToolListModels():  "subagents",
 
 		ToolListSchedule():   "schedule",
 		ToolGetSchedule():    "schedule",
@@ -1019,8 +1020,8 @@ func TestSpawnProviderUsageGatesRegisteredTools(t *testing.T) {
 	if !strings.Contains(got, "`spawn_agent`") {
 		t.Fatalf("Usage with spawn_agent should mention it, got:\n%s", got)
 	}
-	if !strings.Contains(got, "restricted worker tool set") {
-		t.Fatalf("Usage with spawn_agent should describe restricted worker tools, got:\n%s", got)
+	if !strings.Contains(got, "configured tools") || !strings.Contains(got, "cannot ask the user") {
+		t.Fatalf("Usage with spawn_agent should describe the expanded worker tools and exclusions, got:\n%s", got)
 	}
 	if strings.Contains(got, "unless those tools are explicitly available") {
 		t.Fatalf("Usage with spawn_agent should not imply side-effect tools can be passed through, got:\n%s", got)

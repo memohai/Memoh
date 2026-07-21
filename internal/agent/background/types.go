@@ -32,6 +32,9 @@ type Task struct {
 	AgentMessage   string
 	AgentReport    string
 	AgentError     string
+	AgentModelID   string
+	AgentProvider  string
+	AgentFork      bool
 	WorkDir        string
 	Status         TaskStatus
 	ExitCode       int32
@@ -80,6 +83,9 @@ type TaskSnapshot struct {
 	AgentMessage   string
 	AgentReport    string
 	AgentError     string
+	AgentModelID   string
+	AgentProvider  string
+	AgentFork      bool
 	WorkDir        string
 	Status         TaskStatus
 	ExitCode       int32
@@ -119,6 +125,9 @@ func (t *Task) Snapshot() TaskSnapshot {
 		AgentMessage:   t.AgentMessage,
 		AgentReport:    t.AgentReport,
 		AgentError:     t.AgentError,
+		AgentModelID:   t.AgentModelID,
+		AgentProvider:  t.AgentProvider,
+		AgentFork:      t.AgentFork,
 		WorkDir:        t.WorkDir,
 		Status:         t.Status,
 		ExitCode:       t.ExitCode,

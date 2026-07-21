@@ -12788,7 +12788,7 @@ const docTemplate = `{
                 }
             },
             "put": {
-                "description": "Update current user display name or avatar",
+                "description": "Update current user profile and preferences",
                 "tags": [
                     "users"
                 ],
@@ -12814,13 +12814,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -13694,6 +13694,9 @@ const docTemplate = `{
                 "timezone": {
                     "type": "string"
                 },
+                "title_model_id": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 },
@@ -13782,6 +13785,9 @@ const docTemplate = `{
                     "$ref": "#/definitions/accounts.UpdateProfileMetadata"
                 },
                 "timezone": {
+                    "type": "string"
+                },
+                "title_model_id": {
                     "type": "string"
                 }
             }
@@ -20744,9 +20750,6 @@ const docTemplate = `{
                 "timezone": {
                     "type": "string"
                 },
-                "title_model_id": {
-                    "type": "string"
-                },
                 "tool_approval_config": {
                     "$ref": "#/definitions/settings.ToolApprovalConfig"
                 },
@@ -20926,9 +20929,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "timezone": {
-                    "type": "string"
-                },
-                "title_model_id": {
                     "type": "string"
                 },
                 "tool_approval_config": {
