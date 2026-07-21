@@ -657,7 +657,7 @@ import (
 
 // cmd/channel is a single-instance assembly-closure verification binary
 // (spec §7.3): functionally an all-in-one without the REST API until a
-// cross-process turn transport exists. Not a deployment artifact.
+// cross-process turn transport exists. Now a deployment artifact in split mode (docker compose); embedded mode in cmd/agent covers single-process deployments.
 func main() {
 	fx.New(
 		coremodule.Module(),

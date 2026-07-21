@@ -145,15 +145,21 @@ type Event struct {
 
 type RunHandle interface {
     RunID() string
-    Events() <-chan Event           // 进程内阶段的订阅形式；跨进程阶段另立传输
-    Cancel(ctx context.Context) error
+    Events() <-chan Event           // 进程内阶段的订阅形式；gRPC传输映射同构的流
+    Errs() <-chan error             // 终止错误通道；实现保证先排空事件再交付错误
+    Inject(ctx context.Context, msg InjectMessage) error
+    AddOutboundAssets(refs []OutboundAssetRef)
+    Cancel()
 }
 
 type Service interface {
     StartTurn(ctx context.Context, cmd StartTurnCommand) (RunHandle, error)
-    Inject(ctx context.Context, msg InjectTurnMessage) error
+    // resume命令（tool approval / user input / 纯文本ask_user推进）见turn.go；
+    // eventCh参数是进程内surface，gRPC传输以流式RPC承载同样的事件序列。
 }
 ```
+
+> 实现偏差记录：`Inject`从`Service`收敛到`RunHandle`（进程内无需按RunID路由，跨进程由Run流的控制帧承载）；`RunHandle`增加`Errs()`与`AddOutboundAssets()`以忠实桥接现有双通道与出站资产收集语义。
 
 `RunHandle.Events()`的Go channel是**进程内适配器的实现细节**，不属于命令契约本身；跨进程spec将定义等价的流式传输，事件结构（含Seq）不变。
 
@@ -193,13 +199,18 @@ DiscussDriver留在Channel侧的理由：它的输入是入站观察投影（Cha
 
 `cmd/internal/core`汇集数据库、Workspace、Agent、Schedule、Heartbeat等两个二进制共同需要的装配。Go的`internal`可见性保证这两个模块只能由`cmd/**`引用。
 
-### 7.2 `cmd/agent`（all-in-one）
+### 7.2 `cmd/agent`
 
-改为组合`cmd/internal/core`与`cmd/internal/channel`，注入`turn/inprocess`适配器。对外行为、配置、部署方式完全不变。
+改为组合`cmd/internal/core`与`cmd/internal/channel`，注入`turn/inprocess`适配器。按配置装配两种形态之一：
+
+- **embedded（默认，`internal_rpc.shared_secret`为空）**：`EmbeddedModule`把完整Channel运行时（外部渠道适配器、Email Manager、webhook tunnel与webhook/QR/email-webhook/公共媒体HTTP端点）嵌入本进程，等价于拆分前的all-in-one。既有裸机部署的config无需修改即可继续工作。
+- **split（设置shared_secret，docker compose采用）**：Channel运行时运行在独立的`cmd/channel`进程，经带共享密钥认证的内部gRPC互联；本进程只保留Web/CLI本地渠道路径（`ServerLocalModule`），并把web/cli出站短路到本进程Manager（Web SSE订阅的是本进程的RouteHub）。
 
 ### 7.3 `cmd/channel`
 
-装配`cmd/internal/channel`+进程内Turn适配器所需的Core模块。**迁移期它在功能上等价于去掉REST API的all-in-one**——因为Turn port尚无跨进程实现，Channel无法脱离Agent core独立服务。它的交付价值是**装配闭合验证**：证明Channel边界的依赖集是显式、封闭的。不作为部署形态宣传，不进发布产物。
+装配`cmd/internal/channel`的`RuntimeModule`：外部渠道适配器、Email、webhook端点与tunnel，Turn与命令/技能/音频面经`internal/agent/turn/grpctransport`与`internal/rpc`的认证gRPC回到Server进程。
+
+> 实现偏差记录：本spec最初把`cmd/channel`定位为「装配闭合验证、不进发布产物」，实现阶段跨进程传输（`turnpb`/`runtimepb`）已经落地，`cmd/channel`随之成为docker compose默认拓扑中的正式服务（`channel`，8081），并进入发布归档与安装脚本。裸机/单进程部署由§7.2的embedded形态兜底，二进制仍可单机可用。
 
 ## 8. 依赖规则
 
@@ -210,6 +221,12 @@ DiscussDriver留在Channel侧的理由：它的输入是入站观察投影（Cha
 | `internal/channel/**`、`internal/pipeline`不得import `fx` | 装配只在`cmd/**` |
 | `internal/agent/turn`不得import Echo、fx、sqlc、`internal/channel/**` | RFC第5节规则的第一条落地 |
 | `team.DefaultTeamID`仅允许`internal/db`、`cmd/**`与测试引用 | 防止业务包hardcode单团队假设 |
+
+以上规则由`internal/arch`的守卫测试机械执行（`go test ./internal/arch/`）。当前记录在案的豁免与规则细化（与守卫测试中的豁免表一一对应）：
+
+- `internal/agent/event`视同Turn port的一部分：turn事件payload就是序列化的agent事件，Channel侧消费该纯数据词汇包不构成边界泄漏。
+- `internal/channel/route/service.go`仍import `internal/conversation`：§4的目录重组推迟到独立PR，路由存储在迁移前继续持有会话记录创建。
+- `team.DefaultTeamID`豁免：`internal/memory/adapters/**`（既有单团队fallback）与`internal/channel/service.go`（configless渠道合成配置必须携带TeamID，`turn.Service`对空TeamID fail-closed）。
 
 ## 9. 提交序列
 

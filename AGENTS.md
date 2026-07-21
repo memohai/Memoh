@@ -13,7 +13,7 @@ Deploy/server mode consists of three core services:
 | Service | Tech Stack | Port | Description |
 |---------|-----------|------|-------------|
 | **Server** (Backend) | Go + Echo | 8080 | Main service: REST API, auth, database, container management, **in-process AI agent** |
-| **Channel** (Backend) | Go + Echo | 8081 | External channel adapters, email delivery, and channel webhook endpoints; delegates agent turns to Server over authenticated internal gRPC |
+| **Channel** (Backend) | Go + Echo | 8081 | External channel adapters, email delivery, and channel webhook endpoints; delegates agent turns to Server over authenticated internal gRPC. Split mode is opt-in via `internal_rpc.shared_secret` (docker compose sets it); without it the Server embeds the channel runtime and runs all-in-one |
 | **Web** (Frontend) | Vue 3 + Vite | 8082 | Management UI: visual configuration for Bots, Models, Channels, etc. |
 
 The native desktop client is a separate distribution boundary for Memoh Cloud or a hosted Memoh server. `apps/desktop` reuses `@memohai/web` modules, but owns the Electron shell, system tray behavior, menus, preload IPC, cache invalidation, and packaged application resources.
@@ -59,7 +59,11 @@ Infrastructure dependencies:
 ```
 Memoh/
 ├── cmd/                        # Go application entry points
-│   ├── agent/                  #   Main backend server (main.go, FX wiring)
+│   ├── agent/                  #   Main backend server (embedded all-in-one or split-mode server process)
+│   ├── channel/                #   Standalone channel service (split mode): platform adapters, email, webhooks
+│   ├── internal/               #   Shared FX composition roots
+│   │   ├── core/               #     Core (agent/db/api) module assembly
+│   │   └── channel/            #     Channel runtime module assembly (ServerLocal / Runtime / Embedded)
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers; supervises optional display/browser helpers)
 │   │   └── template/           #     Prompt templates for bridge (TOOLS.md, SOUL.md, IDENTITY.md, etc.)
 │   ├── gen-bridge-mtls/        #   Bridge mTLS certificate generator
@@ -72,6 +76,7 @@ Memoh/
 │   ├── acpclient/              #   ACP client process management
 │   ├── acpfeedback/            #   User-facing ACP error codes and messages
 │   ├── acpprofile/             #   ACP profile definitions
+│   ├── arch/                   #   Architecture guard tests (channel-boundary import rules, spec §8)
 │   ├── agent/                  #   In-process AI agent (Twilight AI SDK integration)
 │   │   ├── agent.go            #     Core agent: Stream() / Generate() via Twilight SDK
 │   │   ├── stream.go           #     Streaming event assembly
@@ -118,6 +123,7 @@ Memoh/
 │   │       ├── prune.go        #       Pruning tool
 │   │       ├── history.go      #       History access tool
 │   │       └── read_media.go   #       Media reading tool
+│   │   └── turn/               #     Turn contract (StartTurnCommand/Event/RunHandle) + inprocess & gRPC transports
 │   ├── agentpayload/           #   On-wire shapes for agent events forwarded to SSE subscribers
 │   ├── attachment/             #   Attachment normalization (MIME types, base64)
 │   ├── audio/                  #   Audio/TTS processing utilities
@@ -171,6 +177,7 @@ Memoh/
 │   ├── providers/              #   LLM provider management (OpenAI, Anthropic, etc.)
 │   ├── prune/                  #   Text pruning utilities (truncation with head/tail)
 │   ├── registry/               #   Provider registry service (YAML provider templates)
+│   ├── rpc/                    #   Internal server↔channel RPC (shared-secret auth, runtime method fan-out)
 │   ├── schedule/               #   Scheduled task service (cron)
 │   ├── searchproviders/        #   Search engine provider management (Brave, etc.)
 │   ├── server/                 #   HTTP server wrapper (Echo setup, middleware, shutdown)
@@ -179,6 +186,7 @@ Memoh/
 │   ├── skills/                 #   Skill registry and activation
 │   ├── slash/                  #   Slash-command classification and metadata (channel + web surfaces)
 │   ├── storage/                #   Storage provider interface (filesystem, container FS)
+│   ├── team/                   #   Singleton team identity (DefaultTeamID)
 │   ├── textutil/               #   UTF-8 safe text utilities
 │   ├── timezone/               #   Timezone utilities
 │   ├── toolapproval/           #   Tool call approval flow
@@ -298,8 +306,8 @@ docker compose up -d        # Start all services
 # Visit http://localhost:8082
 ```
 
-Production deploy services are `postgres`, `migrate`, `server`, `channel`, and `web`.
-Optional profiles: `qdrant` (vector DB), `sparse` (BM25 search). Desktop connects to Memoh Cloud or this hosted server instead of running its own server.
+Production deploy services are `postgres`, `pgvector`, `migrate`, `server`, `channel`, and `web`.
+Optional profile: `webhook-tunnel` (cloudflared for channels behind NAT). Desktop connects to Memoh Cloud or this hosted server instead of running its own server.
 
 ## Key Development Rules
 
@@ -466,6 +474,8 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[postgres]` — PostgreSQL connection
 - `[qdrant]` — Qdrant vector database connection
 - `[sparse]` — Sparse (BM25) search service connection
+- `[channel]` — Channel service HTTP/RPC listen addresses (split mode)
+- `[internal_rpc]` — Server↔Channel internal RPC targets and shared secret; empty secret selects the embedded all-in-one mode
 - `[web]` — Web frontend address
 - `[registry]` — Provider registry (`providers_dir` pointing to `conf/providers/`)
 - `[supermarket]` — Supermarket integration (base_url)
