@@ -163,23 +163,24 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 }
 
 type clientCallbacks struct {
-	client         *bridge.Client
-	logger         *slog.Logger
-	root           string
-	cwd            string
-	virtualRoot    bool
-	approval       ToolApprovalService
-	toolGateway    *mcp.ToolGatewayService
-	baseSession    ToolSessionContext
-	mu             sync.RWMutex
-	collector      *eventCollector
-	sink           EventSink
-	promptSession  ToolSessionContext
-	approvalGrants map[string]approvedToolGrant
-	events         *toolEventEmitter
-	toolMapper     *acpToolEventMapper
-	terminals      *terminalManager
-	toolLimit      ToolOutputLimit
+	client               *bridge.Client
+	logger               *slog.Logger
+	root                 string
+	cwd                  string
+	virtualRoot          bool
+	approval             ToolApprovalService
+	toolGateway          *mcp.ToolGatewayService
+	baseSession          ToolSessionContext
+	mu                   sync.RWMutex
+	collector            *eventCollector
+	sink                 EventSink
+	promptSession        ToolSessionContext
+	approvalGrants       map[string]approvedToolGrant
+	events               *toolEventEmitter
+	toolMapper           *acpToolEventMapper
+	terminals            *terminalManager
+	toolLimit            ToolOutputLimit
+	configOptionsHandler func(acp.SessionId, []acp.SessionConfigOption)
 	// quirks carries the per-agent title heuristics (acpprofile owns them);
 	// the zero value behaves like the defaults.
 	quirks acpprofile.ToolQuirks
@@ -239,6 +240,15 @@ func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSi
 	if c.terminals != nil {
 		c.terminals.setToolOutputLimit(limit)
 	}
+}
+
+func (c *clientCallbacks) setConfigOptionsHandler(handler func(acp.SessionId, []acp.SessionConfigOption)) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.configOptionsHandler = handler
+	c.mu.Unlock()
 }
 
 func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
@@ -977,7 +987,11 @@ func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotifica
 	collector := c.collector
 	sink := c.sink
 	limit := c.toolLimit
+	configOptionsHandler := c.configOptionsHandler
 	c.mu.RUnlock()
+	if p.Update.ConfigOptionUpdate != nil && configOptionsHandler != nil {
+		configOptionsHandler(p.SessionId, p.Update.ConfigOptionUpdate.ConfigOptions)
+	}
 	var events []event.StreamEvent
 	if c.toolMapper != nil {
 		events = c.toolMapper.eventsFromNotification(p)

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { captureChatPaneSendContext, matchesChatPaneSendContext } from './chat-pane-send'
+import {
+  captureChatPaneSendContext,
+  matchesChatPaneSendContext,
+  shouldRefreshACPComposerConfig,
+} from './chat-pane-send'
 
 describe('chat pane send context', () => {
   it('keeps the original target after an ephemeral pane is repointed', () => {
@@ -42,5 +46,30 @@ describe('chat pane send context', () => {
       sessionId: 'session-a',
       viewId: 'chat:2',
     }, 'bot-1:chat:2')).toBe(false)
+  })
+
+  it.each([
+    'acp.model_unavailable',
+    'acp.reasoning_effort_unavailable',
+  ])('refreshes ACP config after stale selection error %s', (errorCode) => {
+    expect(shouldRefreshACPComposerConfig({
+      ok: false,
+      stage: 'startup',
+      errorCode,
+    }, true)).toBe(true)
+  })
+
+  it('does not refresh ACP config for unrelated or inactive failures', () => {
+    expect(shouldRefreshACPComposerConfig({
+      ok: false,
+      stage: 'startup',
+      errorCode: 'acp.config_update_failed',
+    }, true)).toBe(false)
+    expect(shouldRefreshACPComposerConfig({
+      ok: false,
+      stage: 'startup',
+      errorCode: 'acp.model_unavailable',
+    }, false)).toBe(false)
+    expect(shouldRefreshACPComposerConfig({ ok: true }, true)).toBe(false)
   })
 })

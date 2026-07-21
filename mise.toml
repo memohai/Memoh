@@ -299,7 +299,7 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 0
 fi
 
-hermes_agent_version="${HERMES_AGENT_VERSION:-0.17.0}"
+hermes_agent_version="${HERMES_AGENT_VERSION:-0.18.2}"
 hermes_agent_package="${HERMES_AGENT_PACKAGE:-hermes-agent[acp,mcp]==$hermes_agent_version}"
 
 docker run --rm \

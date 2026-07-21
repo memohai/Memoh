@@ -644,6 +644,195 @@ func TestRunnerStartSessionWithoutProtocolModelsDoesNotInventFallback(t *testing
 	}
 }
 
+func TestRunnerStartSessionAppliesAndUpdatesReasoningConfig(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_REASONING", "category")
+
+	client := newTestBridgeClient(t, root)
+	agentPath := writeFakeAgentScript(t, root)
+	runner := NewRunner(nil, testWorkspace{
+		client: client,
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendLocal,
+			DefaultWorkDir: root,
+		},
+	})
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		BotID:                  "bot-1",
+		ProjectPath:            "/data/project",
+		Command:                agentPath,
+		DefaultReasoningEffort: "high",
+		Timeout:                10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	state := sess.ReasoningState()
+	if !state.Supported || state.CurrentEffort != "high" || len(state.Available) != 3 {
+		t.Fatalf("ReasoningState() = %#v, want applied agent config", state)
+	}
+	state, err = sess.SetReasoningEffort(context.Background(), "low")
+	if err != nil {
+		t.Fatalf("SetReasoningEffort() error = %v", err)
+	}
+	if state.CurrentEffort != "low" {
+		t.Fatalf("SetReasoningEffort() state = %#v", state)
+	}
+	if _, err := sess.SetReasoningEffort(context.Background(), "ultra"); !errors.Is(err, ErrReasoningEffortUnavailable) {
+		t.Fatalf("SetReasoningEffort(ultra) error = %v, want ErrReasoningEffortUnavailable", err)
+	}
+}
+
+func TestRunnerRejectsUnconfirmedSessionConfigUpdates(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_MODELS", "1")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_REASONING", "category")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CONFIG_NOOP", "1")
+
+	runner := NewRunner(nil, testWorkspace{
+		client: newTestBridgeClient(t, root),
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendLocal,
+			DefaultWorkDir: root,
+		},
+	})
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     writeFakeAgentScript(t, root),
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	if _, err := sess.SetModel(context.Background(), "gpt-5.1-codex-high"); !errors.Is(err, ErrSessionConfigUpdateUnconfirmed) {
+		t.Fatalf("SetModel() error = %v, want ErrSessionConfigUpdateUnconfirmed", err)
+	}
+	if _, err := sess.SetReasoningEffort(context.Background(), "high"); !errors.Is(err, ErrSessionConfigUpdateUnconfirmed) {
+		t.Fatalf("SetReasoningEffort() error = %v, want ErrSessionConfigUpdateUnconfirmed", err)
+	}
+	if got := sess.ModelState().CurrentModelID; got != "gpt-5.1-codex" {
+		t.Fatalf("ModelState() current = %q, want pre-update state", got)
+	}
+	if got := sess.ReasoningState().CurrentEffort; got != "medium" {
+		t.Fatalf("ReasoningState() current = %q, want pre-update state", got)
+	}
+}
+
+func TestRunnerRejectsInvalidSessionConfigResponse(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_REASONING", "category")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CONFIG_OMIT_OPTIONS", "1")
+
+	runner := NewRunner(nil, testWorkspace{
+		client: newTestBridgeClient(t, root),
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendLocal,
+			DefaultWorkDir: root,
+		},
+	})
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     writeFakeAgentScript(t, root),
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	_, err = sess.SetReasoningEffort(context.Background(), "high")
+	if err == nil || !strings.Contains(err.Error(), "validate session config response") {
+		t.Fatalf("SetReasoningEffort() error = %v, want response validation failure", err)
+	}
+}
+
+func TestRunnerStartSessionRejectsUnknownDefaultReasoningState(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_REASONING", "category")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CONFIG_ERROR_AFTER_APPLY", "1")
+
+	runner := NewRunner(nil, testWorkspace{
+		client: newTestBridgeClient(t, root),
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendLocal,
+			DefaultWorkDir: root,
+		},
+	})
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		BotID:                  "bot-1",
+		ProjectPath:            "/data/project",
+		Command:                writeFakeAgentScript(t, root),
+		DefaultReasoningEffort: "high",
+		Timeout:                10 * time.Second,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "apply default ACP reasoning effort") {
+		t.Fatalf("StartSession() = (%#v, %v), want default reasoning failure", sess, err)
+	}
+	if sess != nil {
+		t.Fatalf("StartSession() session = %#v, want nil after uncertain mutation", sess)
+	}
+}
+
+func TestRunnerModelSwitchConsumesReasoningConfigUpdate(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_MODELS", "1")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_REASONING", "category")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_REASONING_MODEL_NOTIFY", "1")
+
+	runner := NewRunner(nil, testWorkspace{
+		client: newTestBridgeClient(t, root),
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendLocal,
+			DefaultWorkDir: root,
+		},
+	})
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     writeFakeAgentScript(t, root),
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	if _, err := sess.SetModel(context.Background(), "gpt-5.1-codex-high"); err != nil {
+		t.Fatalf("SetModel() error = %v", err)
+	}
+	state := sess.ReasoningState()
+	if state.CurrentEffort != "max" || len(state.Available) != 2 || state.Available[0].ID != "balanced" {
+		t.Fatalf("ReasoningState() = %#v, want model-specific config update", state)
+	}
+}
+
 func TestRunnerStartSessionSendsNoMCPServers(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
@@ -3167,12 +3356,19 @@ func validateFakeAgentHermesHome() error {
 }
 
 type fakeACPAgent struct {
-	conn *acp.AgentSideConnection
-	cwd  string
+	conn                   *acp.AgentSideConnection
+	cwd                    string
+	modelID                string
+	reasoningEffort        string
+	reasoningModelSpecific bool
 }
 
 func (*fakeACPAgent) Authenticate(context.Context, acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
 	return acp.AuthenticateResponse{}, nil
+}
+
+func (*fakeACPAgent) Logout(context.Context, acp.LogoutRequest) (acp.LogoutResponse, error) {
+	return acp.LogoutResponse{}, nil
 }
 
 func (*fakeACPAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
@@ -3217,26 +3413,13 @@ func (a *fakeACPAgent) NewSession(_ context.Context, p acp.NewSessionRequest) (a
 	}
 	resp := acp.NewSessionResponse{SessionId: acp.SessionId("fake-session")}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_MODELS") == "1" {
-		description := "Highest reasoning"
-		resp.Models = &acp.SessionModelState{
-			CurrentModelId: acp.ModelId("gpt-5.1-codex"),
-			AvailableModels: []acp.ModelInfo{
-				{ModelId: acp.ModelId("gpt-5.1-codex"), Name: "GPT-5.1 Codex"},
-				{ModelId: acp.ModelId("gpt-5.1-codex-high"), Name: "GPT-5.1 Codex High", Description: &description},
-			},
-		}
+		a.modelID = "gpt-5.1-codex"
 	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_REASONING") != "" {
+		a.reasoningEffort = "medium"
+	}
+	resp.ConfigOptions = a.configOptions()
 	return resp, nil
-}
-
-func (*fakeACPAgent) UnstableSetSessionModel(_ context.Context, p acp.UnstableSetSessionModelRequest) (acp.UnstableSetSessionModelResponse, error) {
-	if p.SessionId != acp.SessionId("fake-session") {
-		return acp.UnstableSetSessionModelResponse{}, fmt.Errorf("unexpected session id %q", p.SessionId)
-	}
-	if p.ModelId == "" {
-		return acp.UnstableSetSessionModelResponse{}, errors.New("missing model id")
-	}
-	return acp.UnstableSetSessionModelResponse{}, nil
 }
 
 func (a *fakeACPAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
@@ -3370,8 +3553,89 @@ func (*fakeACPAgent) ResumeSession(context.Context, acp.ResumeSessionRequest) (a
 	return acp.ResumeSessionResponse{}, nil
 }
 
-func (*fakeACPAgent) SetSessionConfigOption(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, nil
+func (a *fakeACPAgent) SetSessionConfigOption(ctx context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	if p.ValueId == nil || p.ValueId.SessionId != acp.SessionId("fake-session") {
+		return acp.SetSessionConfigOptionResponse{}, errors.New("unexpected config request")
+	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_CONFIG_OMIT_OPTIONS") == "1" {
+		return acp.SetSessionConfigOptionResponse{}, nil
+	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_CONFIG_NOOP") == "1" {
+		return acp.SetSessionConfigOptionResponse{ConfigOptions: a.configOptions()}, nil
+	}
+	value := string(p.ValueId.Value)
+	switch string(p.ValueId.ConfigId) {
+	case "model":
+		if value != "gpt-5.1-codex" && value != "gpt-5.1-codex-high" {
+			return acp.SetSessionConfigOptionResponse{}, errors.New("unsupported model")
+		}
+		a.modelID = value
+		if os.Getenv("MEMOH_ACP_FAKE_AGENT_REASONING_MODEL_NOTIFY") == "1" {
+			a.reasoningEffort = "max"
+			a.reasoningModelSpecific = true
+		}
+	case "thinking":
+		available := map[string]bool{"low": true, "medium": true, "high": true}
+		if a.reasoningModelSpecific {
+			available = map[string]bool{"balanced": true, "max": true}
+		}
+		if !available[value] {
+			return acp.SetSessionConfigOptionResponse{}, errors.New("unsupported reasoning effort")
+		}
+		a.reasoningEffort = value
+	default:
+		return acp.SetSessionConfigOptionResponse{}, errors.New("unexpected config id")
+	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_CONFIG_ERROR_AFTER_APPLY") == "1" {
+		return acp.SetSessionConfigOptionResponse{}, errors.New("forced config failure after apply")
+	}
+	options := a.configOptions()
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_REASONING_NOTIFY") == "1" {
+		_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: p.ValueId.SessionId,
+			Update: acp.SessionUpdate{ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{
+				SessionUpdate: "config_option_update",
+				ConfigOptions: options,
+			}},
+		})
+	}
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: options}, nil
+}
+
+func (a *fakeACPAgent) reasoningConfigOptions() []acp.SessionConfigOption {
+	category := acp.SessionConfigOptionCategoryThoughtLevel
+	if a.reasoningModelSpecific {
+		return []acp.SessionConfigOption{
+			testSelectOption("thinking", &category, a.reasoningEffort, "balanced", "max"),
+		}
+	}
+	return []acp.SessionConfigOption{
+		testSelectOption("thinking", &category, a.reasoningEffort, "low", "medium", "high"),
+	}
+}
+
+func (a *fakeACPAgent) configOptions() []acp.SessionConfigOption {
+	var options []acp.SessionConfigOption
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_MODELS") == "1" {
+		category := acp.SessionConfigOptionCategoryModel
+		description := "Highest reasoning"
+		values := acp.SessionConfigSelectOptionsUngrouped{
+			{Value: acp.SessionConfigValueId("gpt-5.1-codex"), Name: "GPT-5.1 Codex"},
+			{Value: acp.SessionConfigValueId("gpt-5.1-codex-high"), Name: "GPT-5.1 Codex High", Description: &description},
+		}
+		options = append(options, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{
+			Id:           acp.SessionConfigId("model"),
+			Name:         "Model",
+			Type:         "select",
+			Category:     &category,
+			CurrentValue: acp.SessionConfigValueId(a.modelID),
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &values},
+		}})
+	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_REASONING") != "" {
+		options = append(options, a.reasoningConfigOptions()...)
+	}
+	return options
 }
 
 func (*fakeACPAgent) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {

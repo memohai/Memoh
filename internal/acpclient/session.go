@@ -45,14 +45,20 @@ type StartRequest struct {
 	// SessionConfigValues are pinned via session/set_config_option after the
 	// session is created, for options the agent advertises (see
 	// acpprofile.Profile.SessionConfigValues).
-	SessionConfigValues  map[string]string
-	Timeout              time.Duration
-	ToolSession          ToolSessionContext
-	ToolApproval         ToolApprovalService
-	ToolGateway          *mcp.ToolGatewayService
-	ToolPreflightGateway *mcp.ToolGatewayService
-	ToolHTTPURL          string
-	ToolHTTPHandler      http.Handler
+	SessionConfigValues map[string]string
+	// ReasoningConfigID is a profile compatibility mapping used only when the
+	// agent omits ACP's thought_level category. DefaultReasoningEffort is the
+	// profile default applied at startup; per-turn choices are applied by the
+	// session pool immediately before Prompt.
+	ReasoningConfigID      string
+	DefaultReasoningEffort string
+	Timeout                time.Duration
+	ToolSession            ToolSessionContext
+	ToolApproval           ToolApprovalService
+	ToolGateway            *mcp.ToolGatewayService
+	ToolPreflightGateway   *mcp.ToolGatewayService
+	ToolHTTPURL            string
+	ToolHTTPHandler        http.Handler
 }
 
 type PromptResult struct {
@@ -85,18 +91,22 @@ type PromptOptions struct {
 }
 
 type Session struct {
-	logger               *slog.Logger
-	proc                 *bridgeProcess
-	callbacks            *clientCallbacks
-	conn                 *clientConnection
-	sessionID            acp.SessionId
-	projectPath          string
-	modelState           ModelState
-	embeddedContext      bool
-	imagePromptSupported bool
-	defaultSink          EventSink
-	cancel               context.CancelFunc
-	reverseHTTPStop      func()
+	logger                    *slog.Logger
+	proc                      *bridgeProcess
+	callbacks                 *clientCallbacks
+	conn                      *clientConnection
+	sessionID                 acp.SessionId
+	projectPath               string
+	modelSelector             modelSelector
+	modelState                ModelState
+	reasoningConfigFallbackID string
+	reasoningConfigID         string
+	reasoningState            ReasoningState
+	embeddedContext           bool
+	imagePromptSupported      bool
+	defaultSink               EventSink
+	cancel                    context.CancelFunc
+	reverseHTTPStop           func()
 
 	promptMu     sync.Mutex
 	mu           sync.Mutex
@@ -106,6 +116,7 @@ type Session struct {
 	closed       bool
 }
 
+//nolint:contextcheck // startup failure closes the owned process through its lifecycle API.
 func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventSink) (*Session, error) {
 	if r == nil || r.workspace == nil {
 		return nil, errors.New("ACP workspace provider is not configured")
@@ -321,23 +332,48 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		cancel()
 		return nil, err
 	}
-	pinSessionConfigValues(ctx, conn, sess.SessionId, sess.ConfigOptions, req.SessionConfigValues, r.logger, req.AgentID)
+	configOptions := pinSessionConfigValues(ctx, conn, sess.SessionId, sess.ConfigOptions, req.SessionConfigValues, r.logger, req.AgentID)
+
+	clientSession := &Session{
+		logger:                    r.logger,
+		proc:                      proc,
+		callbacks:                 callbacks,
+		conn:                      conn,
+		sessionID:                 sess.SessionId,
+		projectPath:               projectPath,
+		reasoningConfigFallbackID: strings.TrimSpace(req.ReasoningConfigID),
+		embeddedContext:           initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
+		imagePromptSupported:      initResp.AgentCapabilities.PromptCapabilities.Image,
+		defaultSink:               sink,
+		cancel:                    cancel,
+		reverseHTTPStop:           toolHTTPStop,
+	}
+	clientSession.replaceConfigOptions(sess.SessionId, configOptions)
+	clientSession.installLegacyModels(sess.Models)
+	callbacks.setConfigOptionsHandler(clientSession.replaceConfigOptions)
+	if defaultReasoning := strings.TrimSpace(req.DefaultReasoningEffort); defaultReasoning != "" && clientSession.ReasoningState().Supported {
+		if _, err := clientSession.SetReasoningEffort(ctx, defaultReasoning); err != nil {
+			if errors.Is(err, ErrReasoningEffortUnavailable) ||
+				errors.Is(err, ErrReasoningSelectionUnsupported) ||
+				errors.Is(err, ErrReasoningEffortRequired) {
+				if r.logger != nil {
+					r.logger.Warn("failed to apply default ACP reasoning effort; leaving agent value",
+						slog.String("agent_id", req.AgentID),
+						slog.String("desired_effort", defaultReasoning),
+						slog.Any("error", err))
+				}
+			} else {
+				// A failed mutation may have reached the Agent even though its
+				// authoritative config snapshot never reached Memoh. Do not return a
+				// session whose cached equality checks can no longer be trusted.
+				_ = clientSession.Close()
+				return nil, fmt.Errorf("apply default ACP reasoning effort %q: %w", defaultReasoning, err)
+			}
+		}
+	}
 
 	finishStartup()
-	return &Session{
-		logger:               r.logger,
-		proc:                 proc,
-		callbacks:            callbacks,
-		conn:                 conn,
-		sessionID:            sess.SessionId,
-		projectPath:          projectPath,
-		modelState:           modelStateFromACP(sess.Models),
-		embeddedContext:      initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
-		imagePromptSupported: initResp.AgentCapabilities.PromptCapabilities.Image,
-		defaultSink:          sink,
-		cancel:               cancel,
-		reverseHTTPStop:      toolHTTPStop,
-	}, nil
+	return clientSession, nil
 }
 
 // pinSessionMode forces the agent session into the requested permission mode
@@ -387,12 +423,13 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 	return nil
 }
 
-// pinSessionConfigValues applies the profile's desired config option values
-// (e.g. Claude Code's "effort" select, which gates extended thinking on newer
-// models) to options the agent actually advertises. Unlike the session mode
-// this is a quality setting, not a security boundary, so failures are logged
-// and startup continues.
-func pinSessionConfigValues(ctx context.Context, conn *clientConnection, sessionID acp.SessionId, options []acp.SessionConfigOption, desired map[string]string, logger *slog.Logger, agentID string) {
+// pinSessionConfigValues applies any non-semantic profile config pins to
+// options the agent actually advertises. Thought level is handled separately
+// through ReasoningState so explicit user choices can override profile
+// defaults. Unlike the session mode, these are quality settings rather than a
+// security boundary, so failures are logged and startup continues.
+func pinSessionConfigValues(ctx context.Context, conn *clientConnection, sessionID acp.SessionId, options []acp.SessionConfigOption, desired map[string]string, logger *slog.Logger, agentID string) []acp.SessionConfigOption {
+	current := options
 	for _, option := range options {
 		if option.Select == nil {
 			continue
@@ -415,7 +452,7 @@ func pinSessionConfigValues(ctx context.Context, conn *clientConnection, session
 			}
 			continue
 		}
-		_, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+		resp, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
 			ValueId: &acp.SetSessionConfigOptionValueId{
 				SessionId: sessionID,
 				ConfigId:  option.Select.Id,
@@ -432,6 +469,7 @@ func pinSessionConfigValues(ctx context.Context, conn *clientConnection, session
 			}
 			continue
 		}
+		current = resp.ConfigOptions
 		if logger != nil {
 			logger.Info("pinned ACP session config option",
 				slog.String("agent_id", agentID),
@@ -440,6 +478,7 @@ func pinSessionConfigValues(ctx context.Context, conn *clientConnection, session
 				slog.String("previous_value", string(option.Select.CurrentValue)))
 		}
 	}
+	return current
 }
 
 func selectOptionHasValue(options acp.SessionConfigSelectOptions, value string) bool {

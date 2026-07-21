@@ -1,5 +1,6 @@
 import {
   getBots,
+  getBotsByBotIdAcpRuntimesByRuntimeId,
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getBotsByBotIdSessions,
   getBotsByBotIdSessionsBySessionId,
@@ -9,8 +10,10 @@ import {
   postBotsByBotIdSessionsBySessionIdAcpRuntime,
   deleteBotsByBotIdSessionsBySessionId,
   patchBotsByBotIdAcpRuntimesByRuntimeIdModel,
+  patchBotsByBotIdAcpRuntimesByRuntimeIdReasoning,
   patchBotsByBotIdSessionsBySessionId,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeModel,
+  patchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoning,
 } from '@memohai/sdk'
 import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 import type { Bot, SessionSummary } from './useChat.types'
@@ -177,6 +180,15 @@ export async function setACPRuntimeModel(botId: string, sessionId: string, model
   return data as AcpagentRuntimeStatus
 }
 
+export async function setACPRuntimeReasoning(botId: string, sessionId: string, effort: string): Promise<AcpagentRuntimeStatus> {
+  const { data } = await patchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoning({
+    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
+    body: { reasoning_effort: effort.trim() },
+    throwOnError: true,
+  })
+  return data as AcpagentRuntimeStatus
+}
+
 export async function createACPRuntime(botId: string, options: CreateACPRuntimeOptions): Promise<AcpagentRuntimeStatus> {
   const { data } = await postBotsByBotIdAcpRuntimes({
     path: { bot_id: botId.trim() },
@@ -189,11 +201,28 @@ export async function createACPRuntime(botId: string, options: CreateACPRuntimeO
   return data as AcpagentRuntimeStatus
 }
 
+export async function fetchACPRuntimeByID(botId: string, runtimeId: string): Promise<AcpagentRuntimeStatus> {
+  const { data } = await getBotsByBotIdAcpRuntimesByRuntimeId({
+    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
+    throwOnError: true,
+  })
+  return data as AcpagentRuntimeStatus
+}
+
 export async function setACPRuntimeModelByID(botId: string, runtimeId: string, modelId: string): Promise<AcpagentRuntimeStatus> {
   const { data } = await patchBotsByBotIdAcpRuntimesByRuntimeIdModel({
     path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
     // An empty model_id resets the runtime to the agent default model.
     body: { model_id: modelId.trim() },
+    throwOnError: true,
+  })
+  return data as AcpagentRuntimeStatus
+}
+
+export async function setACPRuntimeReasoningByID(botId: string, runtimeId: string, effort: string): Promise<AcpagentRuntimeStatus> {
+  const { data } = await patchBotsByBotIdAcpRuntimesByRuntimeIdReasoning({
+    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
+    body: { reasoning_effort: effort.trim() },
     throwOnError: true,
   })
   return data as AcpagentRuntimeStatus

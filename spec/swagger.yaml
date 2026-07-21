@@ -239,6 +239,8 @@ definitions:
         $ref: '#/definitions/acpclient.ModelState'
       project_path:
         type: string
+      reasoning:
+        $ref: '#/definitions/acpclient.ReasoningState'
       runtime_id:
         type: string
       session_id:
@@ -262,6 +264,26 @@ definitions:
           $ref: '#/definitions/acpclient.ModelInfo'
         type: array
       current_model_id:
+        type: string
+      supported:
+        type: boolean
+    type: object
+  acpclient.ReasoningEffortInfo:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  acpclient.ReasoningState:
+    properties:
+      available_efforts:
+        items:
+          $ref: '#/definitions/acpclient.ReasoningEffortInfo'
+        type: array
+      current_effort:
         type: string
       supported:
         type: boolean
@@ -3269,6 +3291,11 @@ definitions:
       model_id:
         type: string
     type: object
+  handlers.acpRuntimeReasoningRequest:
+    properties:
+      reasoning_effort:
+        type: string
+    type: object
   handlers.browserSessionCreateRequest:
     properties:
       path:
@@ -5662,7 +5689,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get ACP runtime state by runtime ID
       tags:
       - acp
@@ -5694,7 +5721,7 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
@@ -5702,12 +5729,63 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Set (or reset) an ACP runtime's model
+      tags:
+      - acp
+  /bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning:
+    patch:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Runtime ID
+        in: path
+        name: runtime_id
+        required: true
+        type: string
+      - description: Reasoning effort selection
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.acpRuntimeReasoningRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acpagent.RuntimeStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Set an ACP runtime's reasoning effort
       tags:
       - acp
   /bots/{bot_id}/acp/claude-code/oauth/authorize:
@@ -9541,7 +9619,7 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
@@ -9550,7 +9628,54 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Set ACP session runtime model
+      tags:
+      - acp
+  /bots/{bot_id}/sessions/{session_id}/acp-runtime/reasoning:
+    patch:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Reasoning effort selection
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.acpRuntimeReasoningRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acpagent.RuntimeStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Set ACP session runtime reasoning effort
       tags:
       - acp
   /bots/{bot_id}/sessions/{session_id}/compact:

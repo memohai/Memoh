@@ -147,6 +147,7 @@ export type AcpagentRuntimeStatus = {
     default_model_id?: string;
     models?: AcpclientModelState;
     project_path?: string;
+    reasoning?: AcpclientReasoningState;
     runtime_id?: string;
     session_id?: string;
     state?: string;
@@ -161,6 +162,18 @@ export type AcpclientModelInfo = {
 export type AcpclientModelState = {
     available_models?: Array<AcpclientModelInfo>;
     current_model_id?: string;
+    supported?: boolean;
+};
+
+export type AcpclientReasoningEffortInfo = {
+    description?: string;
+    id?: string;
+    name?: string;
+};
+
+export type AcpclientReasoningState = {
+    available_efforts?: Array<AcpclientReasoningEffortInfo>;
+    current_effort?: string;
     supported?: boolean;
 };
 
@@ -1937,6 +1950,10 @@ export type HandlersAcpRuntimeCreateRequest = {
 
 export type HandlersAcpRuntimeModelRequest = {
     model_id?: string;
+};
+
+export type HandlersAcpRuntimeReasoningRequest = {
+    reasoning_effort?: string;
 };
 
 export type HandlersBrowserSessionCreateRequest = {
@@ -3812,7 +3829,7 @@ export type GetBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetBotsByBotIdAcpRuntimesByRuntimeIdError = GetBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdErrors];
@@ -3849,7 +3866,7 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
@@ -3857,11 +3874,15 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
     409: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
 };
 
 export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors];
@@ -3874,6 +3895,59 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses = {
 };
 
 export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses];
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningData = {
+    /**
+     * Reasoning effort selection
+     */
+    body: HandlersAcpRuntimeReasoningRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Runtime ID
+         */
+        runtime_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning';
+};
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningError = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors];
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses = {
+    /**
+     * OK
+     */
+    200: AcpagentRuntimeStatus;
+};
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses];
 
 export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeData = {
     body?: never;
@@ -8612,7 +8686,7 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
@@ -8621,6 +8695,10 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelError = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelErrors[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelErrors];
@@ -8633,6 +8711,55 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses = {
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses];
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningData = {
+    /**
+     * Reasoning effort selection
+     */
+    body: HandlersAcpRuntimeReasoningRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/acp-runtime/reasoning';
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningError = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningErrors[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningErrors];
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponses = {
+    /**
+     * OK
+     */
+    200: AcpagentRuntimeStatus;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponses];
 
 export type PostBotsByBotIdSessionsBySessionIdCompactData = {
     body?: never;

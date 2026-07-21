@@ -117,6 +117,16 @@
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
       "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
+    },
+    "acp": {
+      "runtime_not_found": "この Agent ランタイムは利用できなくなりました。再起動します。",
+      "model_selection_unsupported": "この外部Agentはモデルの切り替えに対応していません。",
+      "model_id_required": "モデルを選択して、もう一度お試しください。",
+      "model_unavailable": "選択したモデルはこの外部Agentで利用できなくなりました。",
+      "reasoning_selection_unsupported": "この外部Agentは推論強度の選択に対応していません。",
+      "reasoning_effort_required": "推論強度を選択して、もう一度お試しください。",
+      "reasoning_effort_unavailable": "選択した推論強度はこの外部Agentで利用できなくなりました。",
+      "config_update_failed": "外部Agentに選択した設定を適用できませんでした。もう一度お試しください。"
     }
   },
   "auth": {
@@ -774,6 +784,7 @@
     "agentCodex": "コーデックス",
     "agentSwitchFailed": "エージェントの切り替えに失敗しました",
     "modelSwitchFailed": "モデルの切り替えに失敗しました",
+    "reasoningSwitchFailed": "推論強度の切り替えに失敗しました",
     "noProject": "プロジェクトに含まれていません",
     "noModels": "利用可能なモデルはありません",
     "defaultACPLoading": "デフォルトAgentはまだ読み込み中です。少し待ってからもう一度お試しください。",

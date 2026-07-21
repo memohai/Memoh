@@ -3,6 +3,7 @@ import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 import {
   ensureACPRuntime as requestEnsureACPRuntime,
   setACPRuntimeModel as requestSetACPRuntimeModel,
+  setACPRuntimeReasoning as requestSetACPRuntimeReasoning,
 } from '@/composables/api/useChat'
 
 export interface ACPRuntimeStatusRegistry {
@@ -15,6 +16,7 @@ export interface ACPRuntimeStatusRegistry {
 export interface ACPRuntimeRegistryTransport {
   ensureACPRuntime: typeof requestEnsureACPRuntime
   setACPRuntimeModel: typeof requestSetACPRuntimeModel
+  setACPRuntimeReasoning: typeof requestSetACPRuntimeReasoning
 }
 
 interface ACPRuntimeRegistryDeps {
@@ -25,6 +27,7 @@ interface ACPRuntimeRegistryDeps {
 const defaultTransport: ACPRuntimeRegistryTransport = {
   ensureACPRuntime: requestEnsureACPRuntime,
   setACPRuntimeModel: requestSetACPRuntimeModel,
+  setACPRuntimeReasoning: requestSetACPRuntimeReasoning,
 }
 
 export function createACPRuntimeRegistry(
@@ -107,26 +110,47 @@ export function createACPRuntimeRegistry(
     return ensureACPRuntimeFor(bid, sid)
   }
 
-  async function setACPRuntimeModelFor(botID: string, sessionID: string, modelID: string): Promise<AcpagentRuntimeStatus> {
+  async function updateACPRuntimeFor(
+    botID: string,
+    sessionID: string,
+    update: (botId: string, sessionId: string) => Promise<AcpagentRuntimeStatus>,
+  ): Promise<AcpagentRuntimeStatus> {
     const bid = botID.trim()
     const sid = sessionID.trim()
-    const mid = modelID.trim()
-    if (!bid || !sid || !mid) throw new Error('ACP model is not selected')
+    if (!bid || !sid) throw new Error('ACP session is not selected')
     const key = acpRuntimeKey(bid, sid)
     const generation = registryGeneration
     const statusVersion = (statusVersions.get(key) ?? 0) + 1
     statusVersions.set(key, statusVersion)
-    const runtime = await transport.setACPRuntimeModel(bid, sid, mid)
+    const runtime = await update(bid, sid)
     if (registryGeneration === generation && statusVersions.get(key) === statusVersion) {
       setACPRuntimeStatus(bid, sid, runtime)
     }
     return runtime
   }
 
+  async function setACPRuntimeModelFor(botID: string, sessionID: string, modelID: string): Promise<AcpagentRuntimeStatus> {
+    const mid = modelID.trim()
+    if (!mid) throw new Error('ACP model is not selected')
+    return updateACPRuntimeFor(botID, sessionID, (bid, sid) => transport.setACPRuntimeModel(bid, sid, mid))
+  }
+
   async function setACPRuntimeModel(modelID: string, sessionID?: string): Promise<AcpagentRuntimeStatus> {
     const bid = currentBotId.value?.trim() ?? ''
     const sid = sessionID?.trim() || sessionId.value?.trim() || ''
     return setACPRuntimeModelFor(bid, sid, modelID)
+  }
+
+  async function setACPRuntimeReasoningFor(botID: string, sessionID: string, effort: string): Promise<AcpagentRuntimeStatus> {
+    const value = effort.trim()
+    if (!value) throw new Error('ACP reasoning effort is not selected')
+    return updateACPRuntimeFor(botID, sessionID, (bid, sid) => transport.setACPRuntimeReasoning(bid, sid, value))
+  }
+
+  async function setACPRuntimeReasoning(effort: string, sessionID?: string): Promise<AcpagentRuntimeStatus> {
+    const bid = currentBotId.value?.trim() ?? ''
+    const sid = sessionID?.trim() || sessionId.value?.trim() || ''
+    return setACPRuntimeReasoningFor(bid, sid, effort)
   }
 
   function resetACPRuntimeRegistry() {
@@ -147,6 +171,8 @@ export function createACPRuntimeRegistry(
     ensureACPRuntime,
     setACPRuntimeModelFor,
     setACPRuntimeModel,
+    setACPRuntimeReasoningFor,
+    setACPRuntimeReasoning,
     resetACPRuntimeRegistry,
   }
 }

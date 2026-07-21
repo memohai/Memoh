@@ -147,6 +147,7 @@ export interface SendMessageResult {
   ok: boolean
   stage?: SendMessageStage
   error?: string
+  errorCode?: string
   restoreInput?: string
   restoreAttachments?: ChatAttachment[]
   restoreRequestedSkills?: RequestedSkillSelection[]
@@ -179,9 +180,7 @@ export interface ACPAgentSessionInput {
   sessionMode?: 'chat' | 'discuss'
   projectPath?: string
   projectMode?: string
-  modelId?: string
   title?: string
-  startRuntime?: boolean
   /** Warm pre-session runtime to bind to the created session. */
   runtimeId?: string
 }

@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/bwmarrin/discordgo v0.29.0
-	github.com/coder/acp-go-sdk v0.13.0
+	github.com/coder/acp-go-sdk v0.13.5
 	github.com/coder/websocket v1.8.14
 	github.com/containerd/cgroups/v3 v3.1.2
 	github.com/containerd/containerd/api v1.10.0

@@ -17,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/acpfeedback"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/memohai/memoh/internal/apperror"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
@@ -142,7 +143,13 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	req.Query = strings.TrimSpace(req.Query)
-	req = r.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
+	var leadingUser *messagepkg.Message
+	req, leadingUser = r.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
+	cleanupLeadingUser := func() {
+		if leadingUser != nil {
+			r.cleanupReplacementMessages(context.WithoutCancel(ctx), []messagepkg.Message{*leadingUser})
+		}
+	}
 	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -230,6 +237,8 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		RouteID:                  req.RouteID,
 		AgentID:                  agentID,
 		ProjectPath:              projectPath,
+		ModelID:                  strings.TrimSpace(req.Model),
+		ReasoningEffort:          strings.TrimSpace(req.ReasoningEffort),
 		Prompt:                   req.Query,
 		Images:                   preparedAttachments.Images,
 		AttachmentReferences:     preparedAttachments.References,
@@ -260,9 +269,15 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		r.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the turn ended before a decision arrived")
 		var feedbackErr *acpfeedback.Error
 		if errors.As(err, &feedbackErr) {
+			cleanupLeadingUser()
 			return err
 		}
+		if appErr := acpPromptConfigAppError(err); appErr != nil {
+			cleanupLeadingUser()
+			return appErr
+		}
 		if feedbackErr := acpPromptInputFeedback(err); feedbackErr != nil {
+			cleanupLeadingUser()
 			return feedbackErr
 		}
 		result = ensureACPPromptOutput(result)
@@ -272,7 +287,9 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		if failureDelta != "" {
 			emit(agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: failureDelta})
 		}
-		_ = r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err)
+		if err := r.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err); err != nil {
+			r.logger.Error("ACP failure persist failed", slog.Any("error", err), slog.String("session_id", req.SessionID))
+		}
 		emit(agentpkg.StreamEvent{Type: agentpkg.EventTextEnd})
 		emit(acpTerminalStreamEvent(agentpkg.EventAbort, failedResult))
 		return nil
@@ -398,6 +415,27 @@ func acpPromptInputFeedback(err error) *acpfeedback.Error {
 			"The attachment is invalid. Please attach it again.",
 			nil,
 		)
+	default:
+		return nil
+	}
+}
+
+func acpPromptConfigAppError(err error) error {
+	switch {
+	case errors.Is(err, acpclient.ErrModelSelectionUnsupported):
+		return apperror.New(apperror.CodeACPModelSelectionUnsupported, nil)
+	case errors.Is(err, acpclient.ErrModelIDRequired):
+		return apperror.New(apperror.CodeACPModelIDRequired, nil)
+	case errors.Is(err, acpclient.ErrModelUnavailable):
+		return apperror.New(apperror.CodeACPModelUnavailable, nil)
+	case errors.Is(err, acpclient.ErrReasoningSelectionUnsupported):
+		return apperror.New(apperror.CodeACPReasoningUnsupported, nil)
+	case errors.Is(err, acpclient.ErrReasoningEffortRequired):
+		return apperror.New(apperror.CodeACPReasoningEffortRequired, nil)
+	case errors.Is(err, acpclient.ErrReasoningEffortUnavailable):
+		return apperror.New(apperror.CodeACPReasoningUnavailable, nil)
+	case errors.Is(err, acpagent.ErrRuntimeConfigUpdateFailed):
+		return apperror.Wrap(apperror.CodeACPConfigUpdateFailed, err, nil)
 	default:
 		return nil
 	}
@@ -532,16 +570,16 @@ func acpDecisionProjectionStatus(ev agentpkg.StreamEvent) string {
 	return status
 }
 
-func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req conversation.ChatRequest) conversation.ChatRequest {
+func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req conversation.ChatRequest) (conversation.ChatRequest, *messagepkg.Message) {
 	if req.UserMessagePersisted || r == nil || r.messageService == nil || strings.TrimSpace(req.BotID) == "" {
-		return req
+		return req, nil
 	}
 	displayText := strings.TrimSpace(req.RawQuery)
 	if displayText == "" {
 		displayText = strings.TrimSpace(req.Query)
 	}
 	if displayText == "" && len(req.Attachments) == 0 {
-		return req
+		return req, nil
 	}
 	contentText := strings.TrimSpace(req.Query)
 	if contentText == "" {
@@ -553,7 +591,7 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 	})
 	if err != nil {
 		r.logger.Warn("persist ACP leading user message: marshal failed", slog.Any("error", err))
-		return req
+		return req, nil
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
 	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
@@ -578,11 +616,11 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.SessionID),
 			slog.Any("error", err))
-		return req
+		return req, nil
 	}
 	req.UserMessagePersisted = true
 	req.PersistedUserMessageID = persisted.ID
-	return req
+	return req, &persisted
 }
 
 func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req conversation.ChatRequest, ev agentpkg.StreamEvent) bool {
