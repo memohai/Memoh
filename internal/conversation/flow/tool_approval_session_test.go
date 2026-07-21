@@ -35,7 +35,7 @@ func (r workspaceTargetPolicyErrorResolver) ResolveWorkspaceTargetPolicy(context
 func (*denyToolApprovalSettingsQueries) GetSettingsByBotID(_ context.Context, botID pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
 		BotID:              botID,
-		ToolApprovalConfig: []byte(`{"read":{"mode":"deny"}}`),
+		ToolApprovalConfig: []byte(`{"enabled":true,"read":{"mode":"deny"}}`),
 	}, nil
 }
 

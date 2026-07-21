@@ -268,21 +268,19 @@ func TestListExecutionLocationsReadsCurrentBotTargetsAtExecutionTime(t *testing.
 
 	targetProvider := &containerTestTargetProvider{targets: []workspacepkg.WorkspaceTarget{
 		{
-			TargetID:      workspacepkg.WorkspaceTargetNative,
-			Kind:          workspacepkg.WorkspaceTargetNative,
-			Name:          "Server Workspace",
-			Primary:       true,
-			Online:        true,
-			Status:        workspacepkg.WorkspaceTargetStatusOnline,
-			WorkspacePath: "/data",
+			TargetID: workspacepkg.WorkspaceTargetNative,
+			Kind:     workspacepkg.WorkspaceTargetNative,
+			Name:     "Server Workspace",
+			Primary:  true,
+			Online:   true,
+			Status:   workspacepkg.WorkspaceTargetStatusOnline,
 		},
 		{
-			TargetID:      "target-1",
-			Kind:          workspacepkg.WorkspaceTargetRemote,
-			RuntimeID:     "runtime-id-must-not-leak",
-			Name:          "Office PC",
-			Status:        workspacepkg.WorkspaceTargetStatusOffline,
-			WorkspacePath: "projects/memoh",
+			TargetID:  "target-1",
+			Kind:      workspacepkg.WorkspaceTargetRemote,
+			RuntimeID: "runtime-id-must-not-leak",
+			Name:      "Office PC",
+			Status:    workspacepkg.WorkspaceTargetStatusOffline,
 		},
 	}}
 	provider := NewContainerProvider(nil, targetProvider, nil, "")
@@ -307,14 +305,14 @@ func TestListExecutionLocationsReadsCurrentBotTargetsAtExecutionTime(t *testing.
 		t.Fatalf("list calls/locations = %d/%d, want 1/2", targetProvider.listCalls, len(result.Locations))
 	}
 	remote := result.Locations[1]
-	if remote.TargetID != "target-1" || remote.Name != "Office PC" || remote.Type != "connected_computer" || remote.Default || remote.Available || remote.Status != workspacepkg.WorkspaceTargetStatusOffline || remote.StartingFolder != "projects/memoh" {
+	if remote.TargetID != "target-1" || remote.Name != "Office PC" || remote.Type != "connected_computer" || remote.Default || remote.Available || remote.Status != workspacepkg.WorkspaceTargetStatusOffline {
 		t.Fatalf("remote execution location = %#v", remote)
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		t.Fatalf("marshal execution locations: %v", err)
 	}
-	if strings.Contains(string(encoded), "runtime-id-must-not-leak") || strings.Contains(string(encoded), "tool_approval") {
+	if strings.Contains(string(encoded), "runtime-id-must-not-leak") || strings.Contains(string(encoded), "tool_approval") || strings.Contains(string(encoded), "starting_folder") {
 		t.Fatalf("private runtime fields leaked in result: %s", encoded)
 	}
 

@@ -36,7 +36,7 @@ func (*SkillProvider) Usage(_ context.Context, _ SessionContext, available Avail
 }
 
 func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent || len(session.Skills) == 0 {
+	if len(session.Skills) == 0 {
 		return nil, nil
 	}
 	skills := session.Skills

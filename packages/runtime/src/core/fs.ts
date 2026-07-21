@@ -26,7 +26,7 @@ import type {
   StatRequest,
   WriteFileRequest,
 } from '../types'
-import { PathGuard } from './paths'
+import { HostPathResolver } from './paths'
 
 const binaryProbeBytes = 8 * 1024
 const readMaxLines = 2_000
@@ -35,7 +35,7 @@ const readResponseMaxBytes = 16 * 1024 * 1024 - 1_024
 export const rawChunkSize = 64 * 1024
 
 export class WorkspaceFileService {
-  constructor(readonly paths: PathGuard) {}
+  constructor(readonly paths: HostPathResolver) {}
 
   async readFile(request: ReadFileRequest): Promise<{ content: string, total_lines: number, binary: boolean }> {
     const requested = requiredPath(request.path)
@@ -164,9 +164,9 @@ export class WorkspaceFileService {
   async rename(request: RenameRequest): Promise<Record<string, never>> {
     const oldPath = requiredPath(request.old_path, 'old_path')
     const newPath = requiredPath(request.new_path, 'new_path')
-    const source = await this.paths.resolve(oldPath)
+    const source = await this.paths.resolve(oldPath, { followFinalSymlink: false })
     const destination = await this.paths.prepareWrite(newPath)
-    await this.paths.revalidate(source)
+    await this.paths.revalidate(source, { followFinalSymlink: false })
     await this.paths.revalidate(destination, { allowMissing: true })
     try {
       await renamePath(source, destination)
@@ -177,11 +177,15 @@ export class WorkspaceFileService {
   }
 
   async deleteFile(request: DeleteFileRequest): Promise<Record<string, never>> {
-    const target = await this.paths.resolve(requiredPath(request.path), { allowMissing: true })
+    const target = await this.paths.resolve(requiredPath(request.path), {
+      allowMissing: true,
+      followFinalSymlink: false,
+    })
     try {
       const info = await lstat(target)
       if (info.isSymbolicLink()) {
-        throw rpcError(status.PERMISSION_DENIED, 'symbolic links are not allowed')
+        await unlink(target)
+        return {}
       }
       await this.paths.revalidate(target)
       if (info.isDirectory() && !request.recursive) {

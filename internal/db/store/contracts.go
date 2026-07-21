@@ -44,7 +44,6 @@ type BotRemoteRuntimeBindingRecord struct {
 	ID             string
 	BotID          string
 	RuntimeID      string
-	WorkspacePath  string
 	IsPrimary      bool
 	ToolApproval   JSON
 	RuntimeName    string
@@ -56,7 +55,7 @@ type BotRemoteRuntimeBindingRecord struct {
 }
 
 type BotRemoteRuntimeBindingStore interface {
-	CreateOrUpdateMount(ctx context.Context, botID, runtimeID, workspacePath string) (BotRemoteRuntimeBindingRecord, error)
+	CreateOrUpdateMount(ctx context.Context, botID, runtimeID string) (BotRemoteRuntimeBindingRecord, error)
 	ListMounts(ctx context.Context, botID string) ([]BotRemoteRuntimeBindingRecord, error)
 	GetMount(ctx context.Context, botID, targetID string) (BotRemoteRuntimeBindingRecord, error)
 	GetPrimaryMount(ctx context.Context, botID string) (BotRemoteRuntimeBindingRecord, error)
@@ -84,6 +83,7 @@ type AccountRecord struct {
 	JoinedAt            time.Time
 	MembershipUpdatedAt time.Time
 	LastLoginAt         time.Time
+	TitleModelID        string
 }
 
 type CreateUserInput struct {
@@ -110,11 +110,12 @@ type UpdateAccountAdminInput struct {
 }
 
 type UpdateAccountProfileInput struct {
-	UserID      string
-	DisplayName string
-	AvatarURL   string
-	Timezone    string
-	Metadata    string
+	UserID       string
+	DisplayName  string
+	AvatarURL    string
+	Timezone     string
+	Metadata     string
+	TitleModelID string
 }
 
 type UpdateAccountPasswordInput struct {
@@ -133,6 +134,7 @@ type AccountStore interface {
 	UpdateLastLogin(ctx context.Context, accountID string) error
 	UpdateAdmin(ctx context.Context, input UpdateAccountAdminInput) (AccountRecord, error)
 	UpdateProfile(ctx context.Context, input UpdateAccountProfileInput) (AccountRecord, error)
+	IsValidTitleModel(ctx context.Context, modelID string) (bool, error)
 	UpdatePassword(ctx context.Context, input UpdateAccountPasswordInput) error
 	RemoveMember(ctx context.Context, userID string) error
 }

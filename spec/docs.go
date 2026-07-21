@@ -8319,9 +8319,6 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/workspace-targets/remotes/{runtime_id}": {
             "put": {
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
@@ -8343,15 +8340,6 @@ const docTemplate = `{
                         "name": "runtime_id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "Remote workspace mount",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/workspace.MountRemoteWorkspaceRequest"
-                        }
                     }
                 ],
                 "responses": {
@@ -12836,7 +12824,7 @@ const docTemplate = `{
                 }
             },
             "put": {
-                "description": "Update current user display name or avatar",
+                "description": "Update current user profile and preferences",
                 "tags": [
                     "users"
                 ],
@@ -12862,13 +12850,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -13742,6 +13730,9 @@ const docTemplate = `{
                 "timezone": {
                     "type": "string"
                 },
+                "title_model_id": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 },
@@ -13830,6 +13821,9 @@ const docTemplate = `{
                     "$ref": "#/definitions/accounts.UpdateProfileMetadata"
                 },
                 "timezone": {
+                    "type": "string"
+                },
+                "title_model_id": {
                     "type": "string"
                 }
             }
@@ -20795,9 +20789,6 @@ const docTemplate = `{
                 "timezone": {
                     "type": "string"
                 },
-                "title_model_id": {
-                    "type": "string"
-                },
                 "tool_approval_config": {
                     "$ref": "#/definitions/settings.ToolApprovalConfig"
                 },
@@ -20977,9 +20968,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "timezone": {
-                    "type": "string"
-                },
-                "title_model_id": {
                     "type": "string"
                 },
                 "tool_approval_config": {
@@ -21304,14 +21292,6 @@ const docTemplate = `{
                 }
             }
         },
-        "workspace.MountRemoteWorkspaceRequest": {
-            "type": "object",
-            "properties": {
-                "workspace_path": {
-                    "type": "string"
-                }
-            }
-        },
         "workspace.SetPrimaryWorkspaceTargetRequest": {
             "type": "object",
             "required": [
@@ -21326,6 +21306,9 @@ const docTemplate = `{
         "workspace.UpdateWorkspaceTargetToolApprovalRequest": {
             "type": "object",
             "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
                 "exec": {
                     "$ref": "#/definitions/settings.ToolApprovalMode"
                 },
@@ -21369,9 +21352,6 @@ const docTemplate = `{
                 },
                 "tool_approval_config": {
                     "$ref": "#/definitions/settings.ToolApprovalConfig"
-                },
-                "workspace_path": {
-                    "type": "string"
                 }
             }
         },

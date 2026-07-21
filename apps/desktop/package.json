@@ -8,7 +8,8 @@
   "homepage": "https://github.com/memohai/Memoh",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/memohai/Memoh.git"
+    "url": "git+https://github.com/memohai/Memoh.git",
+    "directory": "apps/desktop"
   },
   "main": "./out/main/index.js",
   "scripts": {

@@ -69,16 +69,16 @@ func TestManagerWorkspaceTargetOverridePrecedenceAndConcurrentIsolation(t *testi
 	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{
 		{
 			ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
-			WorkspacePath: "projects/primary", RuntimeName: "Primary Mac", IsPrimary: true,
+			RuntimeName: "Primary Mac", IsPrimary: true,
 			RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
 		},
 		{
 			ID: remoteTestTargetID2, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID2,
-			WorkspacePath: "projects/request", RuntimeName: "Request PC",
+			RuntimeName:   "Request PC",
 			RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
 		},
 	}}
-	capabilities := []string{userruntime.CapabilityFS, userruntime.CapabilityExec, userruntime.CapabilityWorkspaceScope}
+	capabilities := []string{userruntime.CapabilityFS, userruntime.CapabilityExec, userruntime.CapabilityHostFS}
 	manager := NewManager(slog.Default(), nil, nil, config.WorkspaceConfig{}, "", nil)
 	manager.SetRemoteWorkspaceService(&RemoteWorkspaceService{
 		store: store,
@@ -133,7 +133,7 @@ func TestManagerWorkspaceTargetOverridePrecedenceAndConcurrentIsolation(t *testi
 	if err != nil {
 		t.Fatalf("WorkspaceInfo request override: %v", err)
 	}
-	if info.Backend != "remote" || info.OS != "win32" || info.DefaultWorkDir != `C:\Users\alice\workspaces\projects\request` {
+	if info.Backend != "remote" || info.OS != "win32" || info.DefaultWorkDir != `C:\Users\alice\workspaces` {
 		t.Fatalf("request WorkspaceInfo = %#v", info)
 	}
 	client, err := manager.MCPClient(requestCtx, remoteTestBotID)
@@ -144,8 +144,8 @@ func TestManagerWorkspaceTargetOverridePrecedenceAndConcurrentIsolation(t *testi
 		t.Fatalf("request target Stat: %v", err)
 	}
 	md := <-requestMetadata
-	if got := md.Get(RemoteWorkspacePathMetadataKey); len(got) != 1 || got[0] != "projects/request" {
-		t.Fatalf("request workspace metadata = %v", got)
+	if got := md.Get("x-memoh-workspace-path-bin"); len(got) != 0 {
+		t.Fatalf("obsolete request workspace metadata = %v", got)
 	}
 
 	const workers = 32

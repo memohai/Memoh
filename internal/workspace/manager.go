@@ -313,14 +313,13 @@ func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID st
 			return ResolvedWorkspaceTarget{}, err
 		}
 		return ResolvedWorkspaceTarget{
-			TargetID:      WorkspaceTargetNative,
-			Kind:          WorkspaceTargetNative,
-			Name:          "Server Workspace",
-			Primary:       primary,
-			WorkspacePath: info.DefaultWorkDir,
-			Client:        client,
-			Info:          info,
-			Approval:      approval,
+			TargetID: WorkspaceTargetNative,
+			Kind:     WorkspaceTargetNative,
+			Name:     "Server Workspace",
+			Primary:  primary,
+			Client:   client,
+			Info:     info,
+			Approval: approval,
 		}, nil
 	}
 	if _, ok := canonicalWorkspaceUUID(targetID); !ok || m.remote == nil {
@@ -411,17 +410,12 @@ func (m *Manager) ListWorkspaceTargets(ctx context.Context, botID string) ([]Wor
 	if err != nil {
 		return nil, err
 	}
-	info, err := m.nativeWorkspaceInfo(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
 	native := WorkspaceTarget{
 		TargetID:           WorkspaceTargetNative,
 		Kind:               WorkspaceTargetNative,
 		Name:               "Server Workspace",
 		Primary:            true,
 		Status:             WorkspaceTargetStatusOffline,
-		WorkspacePath:      info.DefaultWorkDir,
 		ToolApproval:       WorkspaceToolApprovalModes(approval),
 		ToolApprovalConfig: approval,
 	}

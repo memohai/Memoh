@@ -1,6 +1,11 @@
 {
   "name": "@memohai/icon",
   "version": "0.16.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/memohai/Memoh.git",
+    "directory": "packages/icons"
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

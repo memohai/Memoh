@@ -181,6 +181,7 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolSpawnAgent():  "subagents",
 		ToolSendMessage(): "subagents",
 		ToolListAgents():  "subagents",
+		ToolListModels():  "subagents",
 
 		ToolListSchedule():   "schedule",
 		ToolGetSchedule():    "schedule",
@@ -503,10 +504,9 @@ func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {
 		WorkspaceTargetID:   "target-1",
 		WorkspaceTargetKind: "remote",
 		WorkspaceTargetName: "Office PC",
-		WorkspacePath:       "projects/memoh",
 	}, availableToolsForTest(ToolRead(), ToolExec(), ToolListExecutionLocations(), ToolBrowserObserve(), ToolComputerObserve()))
 	assertUsageItemsAreBulleted(t, got)
-	for _, want := range []string{"request-selected connected computer", "Office PC", "projects/memoh", "explicit `target_id` still takes precedence", "request-selected default for this turn", "Browser Use and Computer Use", "native Server Workspace", "`browser_observe`", "`computer_observe`", "`target_id` `native`"} {
+	for _, want := range []string{"request-selected connected computer", "Office PC", "explicit `target_id` still takes precedence", "request-selected default for this turn", "Browser Use and Computer Use", "native Server Workspace", "`browser_observe`", "`computer_observe`", "`target_id` `native`"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with a request target should contain %q, got:\n%s", want, got)
 		}
@@ -1020,8 +1020,8 @@ func TestSpawnProviderUsageGatesRegisteredTools(t *testing.T) {
 	if !strings.Contains(got, "`spawn_agent`") {
 		t.Fatalf("Usage with spawn_agent should mention it, got:\n%s", got)
 	}
-	if !strings.Contains(got, "restricted worker tool set") {
-		t.Fatalf("Usage with spawn_agent should describe restricted worker tools, got:\n%s", got)
+	if !strings.Contains(got, "configured tools") || !strings.Contains(got, "cannot ask the user") {
+		t.Fatalf("Usage with spawn_agent should describe the expanded worker tools and exclusions, got:\n%s", got)
 	}
 	if strings.Contains(got, "unless those tools are explicitly available") {
 		t.Fatalf("Usage with spawn_agent should not imply side-effect tools can be passed through, got:\n%s", got)

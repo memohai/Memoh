@@ -30,6 +30,8 @@ definitions:
         type: string
       timezone:
         type: string
+      title_model_id:
+        type: string
       updated_at:
         type: string
       username:
@@ -87,6 +89,8 @@ definitions:
       metadata:
         $ref: '#/definitions/accounts.UpdateProfileMetadata'
       timezone:
+        type: string
+      title_model_id:
         type: string
     type: object
   acl.ChannelIdentityCandidate:
@@ -4743,8 +4747,6 @@ definitions:
         type: boolean
       timezone:
         type: string
-      title_model_id:
-        type: string
       tool_approval_config:
         $ref: '#/definitions/settings.ToolApprovalConfig'
       transcription_model_id:
@@ -4865,8 +4867,6 @@ definitions:
       show_tool_calls_in_im:
         type: boolean
       timezone:
-        type: string
-      title_model_id:
         type: string
       tool_approval_config:
         $ref: '#/definitions/settings.ToolApprovalConfig'
@@ -5079,11 +5079,6 @@ definitions:
       status:
         type: string
     type: object
-  workspace.MountRemoteWorkspaceRequest:
-    properties:
-      workspace_path:
-        type: string
-    type: object
   workspace.SetPrimaryWorkspaceTargetRequest:
     properties:
       target_id:
@@ -5093,6 +5088,8 @@ definitions:
     type: object
   workspace.UpdateWorkspaceTargetToolApprovalRequest:
     properties:
+      enabled:
+        type: boolean
       exec:
         $ref: '#/definitions/settings.ToolApprovalMode'
       read:
@@ -5122,8 +5119,6 @@ definitions:
         $ref: '#/definitions/workspace.WorkspaceTargetToolApproval'
       tool_approval_config:
         $ref: '#/definitions/settings.ToolApprovalConfig'
-      workspace_path:
-        type: string
     type: object
   workspace.WorkspaceTargetToolApproval:
     properties:
@@ -10642,8 +10637,6 @@ paths:
       - workspace-targets
   /bots/{bot_id}/workspace-targets/remotes/{runtime_id}:
     put:
-      consumes:
-      - application/json
       parameters:
       - description: Bot ID
         in: path
@@ -10655,12 +10648,6 @@ paths:
         name: runtime_id
         required: true
         type: string
-      - description: Remote workspace mount
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/workspace.MountRemoteWorkspaceRequest'
       produces:
       - application/json
       responses:
@@ -13791,7 +13778,7 @@ paths:
       tags:
       - users
     put:
-      description: Update current user display name or avatar
+      description: Update current user profile and preferences
       parameters:
       - description: Profile payload
         in: body
@@ -13807,11 +13794,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update current user profile
       tags:
       - users

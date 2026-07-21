@@ -22,6 +22,7 @@ type Account struct {
 	JoinedAt            time.Time      `json:"joined_at"`
 	MembershipUpdatedAt time.Time      `json:"membership_updated_at"`
 	LastLoginAt         time.Time      `json:"last_login_at,omitempty"`
+	TitleModelID        string         `json:"title_model_id,omitempty"`
 }
 
 // CreateAccountRequest is the input for creating an account.
@@ -43,10 +44,11 @@ type UpdateAccountRequest struct {
 
 // UpdateProfileRequest is the input for self-service profile updates.
 type UpdateProfileRequest struct {
-	DisplayName *string                `json:"display_name,omitempty"`
-	AvatarURL   *string                `json:"avatar_url,omitempty"`
-	Timezone    *string                `json:"timezone,omitempty"`
-	Metadata    *UpdateProfileMetadata `json:"metadata,omitempty"`
+	DisplayName  *string                `json:"display_name,omitempty"`
+	AvatarURL    *string                `json:"avatar_url,omitempty"`
+	Timezone     *string                `json:"timezone,omitempty"`
+	Metadata     *UpdateProfileMetadata `json:"metadata,omitempty"`
+	TitleModelID *string                `json:"title_model_id,omitempty"`
 }
 
 // UpdateProfileMetadata enumerates the user-writable keys of user.metadata.

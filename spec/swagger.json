@@ -8310,9 +8310,6 @@
         },
         "/bots/{bot_id}/workspace-targets/remotes/{runtime_id}": {
             "put": {
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
@@ -8334,15 +8331,6 @@
                         "name": "runtime_id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "Remote workspace mount",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/workspace.MountRemoteWorkspaceRequest"
-                        }
                     }
                 ],
                 "responses": {
@@ -12827,7 +12815,7 @@
                 }
             },
             "put": {
-                "description": "Update current user display name or avatar",
+                "description": "Update current user profile and preferences",
                 "tags": [
                     "users"
                 ],
@@ -12853,13 +12841,13 @@
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -13733,6 +13721,9 @@
                 "timezone": {
                     "type": "string"
                 },
+                "title_model_id": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 },
@@ -13821,6 +13812,9 @@
                     "$ref": "#/definitions/accounts.UpdateProfileMetadata"
                 },
                 "timezone": {
+                    "type": "string"
+                },
+                "title_model_id": {
                     "type": "string"
                 }
             }
@@ -20786,9 +20780,6 @@
                 "timezone": {
                     "type": "string"
                 },
-                "title_model_id": {
-                    "type": "string"
-                },
                 "tool_approval_config": {
                     "$ref": "#/definitions/settings.ToolApprovalConfig"
                 },
@@ -20968,9 +20959,6 @@
                     "type": "boolean"
                 },
                 "timezone": {
-                    "type": "string"
-                },
-                "title_model_id": {
                     "type": "string"
                 },
                 "tool_approval_config": {
@@ -21295,14 +21283,6 @@
                 }
             }
         },
-        "workspace.MountRemoteWorkspaceRequest": {
-            "type": "object",
-            "properties": {
-                "workspace_path": {
-                    "type": "string"
-                }
-            }
-        },
         "workspace.SetPrimaryWorkspaceTargetRequest": {
             "type": "object",
             "required": [
@@ -21317,6 +21297,9 @@
         "workspace.UpdateWorkspaceTargetToolApprovalRequest": {
             "type": "object",
             "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
                 "exec": {
                     "$ref": "#/definitions/settings.ToolApprovalMode"
                 },
@@ -21360,9 +21343,6 @@
                 },
                 "tool_approval_config": {
                     "$ref": "#/definitions/settings.ToolApprovalConfig"
-                },
-                "workspace_path": {
-                    "type": "string"
                 }
             }
         },

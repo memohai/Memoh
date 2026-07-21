@@ -96,6 +96,11 @@
     "channel": {
       "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。"
     },
+    "profile": {
+      "request_invalid": "プロフィール更新リクエストが無効です。",
+      "title_model_invalid": "選択したタイトルModelは利用できないか、チャットModelではありません。",
+      "update_failed": "プロフィールを更新できませんでした。"
+    },
     "provider": {
       "name_taken": "同じ名前のプロバイダーがすでに存在します。"
     },
@@ -285,6 +290,9 @@
     "avatarUrl": "アバターURL",
     "timezone": "タイムゾーン",
     "timezonePlaceholder": "例: America/New_York",
+    "titleModel": "タイトルModel",
+    "titleModelDescription": "所有するすべてのBotのセッションタイトルをこのModelで生成します。",
+    "titleModelPlaceholder": "無効（最初のメッセージを使用）",
     "saveProfile": "変更を保存",
     "profileUpdated": "プロフィールが更新されました",
     "profileUpdateFailed": "プロフィールの更新に失敗しました",
@@ -1551,6 +1559,11 @@
     "loadFailed": "Tool の承認設定を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
     "saveFailed": "Tool の承認設定を保存できませんでした",
+    "saveSuccess": "Tool の承認設定を保存しました",
+    "partialSaveFailed": "一部の変更は保存されましたが、{count} 件の場所で失敗しました。失敗した下書きは保持されています。",
+    "enabled": "Tool の承認",
+    "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
+    "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
     "target": {
       "title": "承認対象",
       "label": "Workspace またはコンピューター",
@@ -1593,6 +1606,8 @@
       "bypassHint": "これらのパターンのいずれかに一致する呼び出しは、確認なしで自動承認されます。",
       "mustReview": "レビュー必須 (拒否リスト)",
       "mustReviewHint": "これらのパターンのいずれかに一致する呼び出しは、このツールが自動承認されている場合でも常に承認を要求します。",
+      "pathSyntaxHint": "改行またはカンマで区切ります。既存の glob、basename、/** マッチングを使用できます。",
+      "commandSyntaxHint": "改行またはカンマで区切ります。実行ファイル名、完全なコマンド、* と ? のワイルドカードを使用できます。",
       "placeholders": {
         "filePaths": "/data/**\n/tmp/**",
         "fileReview": "/etc/**\n.env*",
@@ -1927,7 +1942,6 @@
       "defaultBadge": "既定",
       "nativeWorkspace": "Server Workspace",
       "serverDescription": "Server 上にあるこの Bot の既存 Workspace です。",
-      "folderSummary": "開始フォルダー: {path}",
       "thisComputerOff": "このコンピューターを使う",
       "thisComputerOffDescription": "先に「コンピューター」で使用を許可し、その後ここで追加します。",
       "openComputerSettings": "コンピューター設定を開く",
@@ -1935,14 +1949,10 @@
       "computerDescription": "「コンピューター」で使用可能にしたコンピューターから選びます。",
       "selectComputer": "コンピューターを選択",
       "noAvailableComputers": "追加できるコンピューターがありません。先に「コンピューター」で接続または使用を許可してください。",
-      "path": "開始フォルダー",
-      "pathDescription": "Memoh と共有するフォルダーからの相対位置です。空欄の場合は {path}、. を入力すると共有フォルダー自体を使用します。",
       "unknownComputer": "利用できないコンピューター",
       "addTitle": "この Bot にコンピューターを追加",
-      "editTitle": "このコンピューターを編集",
-      "mountDescription": "コンピューターと、この Bot がファイル操作やコマンド実行を開始するフォルダーを選びます。",
+      "mountDescription": "この Bot がファイル操作とコマンド実行に使用できるコンピューターを選びます。",
       "addSuccess": "Bot にコンピューターを追加しました",
-      "updateSuccess": "コンピューターの設定を更新しました",
       "saveFailed": "コンピューターを保存できませんでした",
       "removeFromBot": "Bot から削除",
       "deleteTitle": "この Bot からコンピューターを削除しますか?",
@@ -2297,9 +2307,6 @@
       "defaultAgentDescription": "新しいローカルチャットにのみ適用されます。既存の会話では現在のAgentが引き続き使用されます。",
       "defaultAgentUnavailable": "利用できないAgent",
       "defaultAgentUnavailableDescription": "現在のデフォルトAgentは利用できません。保存する前にMemohまたは利用可能なAgentを選択してください。",
-      "titleModel": "タイトルModel",
-      "titleModelDescription": "会話に自動的にタイトルを付けるには、軽量のModelを選択してください。無効にするには空のままにします。",
-      "titleModelPlaceholder": "無効 (自動タイトルなし)",
       "searchProvider": "ウェブ検索",
       "searchProviderPlaceholder": "ウェブ検索を選択",
       "fetchProvider": "ウェブフェッチ",

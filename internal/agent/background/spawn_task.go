@@ -58,6 +58,9 @@ type AgentTaskResult struct {
 	AgentID        string
 	AgentSessionID string
 	Message        string
+	ModelID        string
+	Provider       string
+	Fork           bool
 	Status         TaskStatus
 	Report         string
 	Error          string
@@ -172,6 +175,9 @@ func (m *Manager) CompleteAgentTask(taskID string, result AgentTaskResult) {
 	task.Status = status
 	task.AgentReport = result.Report
 	task.AgentError = result.Error
+	task.AgentModelID = result.ModelID
+	task.AgentProvider = result.Provider
+	task.AgentFork = result.Fork
 	if result.Message != "" {
 		task.AgentMessage = result.Message
 	}

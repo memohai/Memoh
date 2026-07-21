@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -20,9 +18,6 @@ import (
 )
 
 const (
-	RemoteWorkspaceIDMetadataKey   = "x-memoh-workspace-id"
-	RemoteWorkspacePathMetadataKey = "x-memoh-workspace-path-bin"
-
 	WorkspaceTargetNative = "native"
 	WorkspaceTargetRemote = "remote"
 
@@ -41,7 +36,6 @@ var (
 	ErrRemoteRuntimeRevoked             = errors.New("remote runtime has been revoked")
 	ErrRemoteRuntimeOwnerMismatch       = errors.New("remote runtime no longer belongs to the bot owner")
 	ErrRemoteRuntimeClientUpdateNeeded  = errors.New("remote runtime client must be updated")
-	ErrInvalidRemoteWorkspacePath       = errors.New("invalid remote workspace path")
 	ErrInvalidWorkspaceToolApprovalMode = errors.New("invalid workspace tool approval mode")
 )
 
@@ -62,7 +56,6 @@ type WorkspaceTarget struct {
 	Primary            bool                        `json:"primary"`
 	Online             bool                        `json:"online"`
 	Status             string                      `json:"status"`
-	WorkspacePath      string                      `json:"workspace_path,omitempty"`
 	ToolApproval       WorkspaceTargetToolApproval `json:"tool_approval"`
 	ToolApprovalConfig settings.ToolApprovalConfig `json:"tool_approval_config"`
 }
@@ -71,15 +64,12 @@ type WorkspaceTargetsResponse struct {
 	Targets []WorkspaceTarget `json:"targets"`
 }
 
-type MountRemoteWorkspaceRequest struct {
-	WorkspacePath string `json:"workspace_path,omitempty"`
-}
-
 type SetPrimaryWorkspaceTargetRequest struct {
 	TargetID string `json:"target_id" validate:"required"`
 }
 
 type UpdateWorkspaceTargetToolApprovalRequest struct {
+	Enabled            *bool                        `json:"enabled,omitempty"`
 	Read               settings.ToolApprovalMode    `json:"read,omitempty"`
 	Write              settings.ToolApprovalMode    `json:"write,omitempty"`
 	Exec               settings.ToolApprovalMode    `json:"exec,omitempty"`
@@ -87,14 +77,13 @@ type UpdateWorkspaceTargetToolApprovalRequest struct {
 }
 
 type ResolvedWorkspaceTarget struct {
-	TargetID      string
-	Kind          string
-	Name          string
-	Primary       bool
-	WorkspacePath string
-	Client        *bridge.Client
-	Info          bridge.WorkspaceInfo
-	Approval      settings.ToolApprovalConfig
+	TargetID string
+	Kind     string
+	Name     string
+	Primary  bool
+	Client   *bridge.Client
+	Info     bridge.WorkspaceInfo
+	Approval settings.ToolApprovalConfig
 }
 
 // RemoteWorkspaceService owns persistent remote mounts. Live runtime
@@ -112,7 +101,7 @@ func NewRemoteWorkspaceService(store dbstore.BotRemoteRuntimeBindingStore, runti
 	return &RemoteWorkspaceService{store: store, runtimes: runtimes}
 }
 
-func (s *RemoteWorkspaceService) Mount(ctx context.Context, botID, runtimeID string, req MountRemoteWorkspaceRequest) (WorkspaceTarget, error) {
+func (s *RemoteWorkspaceService) Mount(ctx context.Context, botID, runtimeID string) (WorkspaceTarget, error) {
 	if s == nil || s.store == nil {
 		return WorkspaceTarget{}, errors.New("remote workspace service not configured")
 	}
@@ -124,11 +113,7 @@ func (s *RemoteWorkspaceService) Mount(ctx context.Context, botID, runtimeID str
 	if !ok {
 		return WorkspaceTarget{}, userruntime.ErrInvalidInput
 	}
-	workspacePath, err := normalizeRemoteWorkspacePath(req.WorkspacePath, botID)
-	if err != nil {
-		return WorkspaceTarget{}, err
-	}
-	record, err := s.store.CreateOrUpdateMount(ctx, botID, runtimeID, workspacePath)
+	record, err := s.store.CreateOrUpdateMount(ctx, botID, runtimeID)
 	if errors.Is(err, db.ErrNotFound) {
 		return WorkspaceTarget{}, ErrRemoteRuntimeNotUsable
 	}
@@ -255,16 +240,15 @@ func (s *RemoteWorkspaceService) resolveRecord(record dbstore.BotRemoteRuntimeBi
 		return ResolvedWorkspaceTarget{}, err
 	}
 	return ResolvedWorkspaceTarget{
-		TargetID:      record.ID,
-		Kind:          WorkspaceTargetRemote,
-		Name:          record.RuntimeName,
-		Primary:       record.IsPrimary,
-		WorkspacePath: record.WorkspacePath,
-		Client:        client,
+		TargetID: record.ID,
+		Kind:     WorkspaceTargetRemote,
+		Name:     record.RuntimeName,
+		Primary:  record.IsPrimary,
+		Client:   client,
 		Info: bridge.WorkspaceInfo{
 			Backend:        bridge.WorkspaceBackendRemote,
 			OS:             connection.Info.OS,
-			DefaultWorkDir: remoteWorkspaceWorkDir(connection.Info, record.WorkspacePath),
+			DefaultWorkDir: connection.Info.WorkspaceBase,
 		},
 		Approval: toolApprovalConfig(record.ToolApproval),
 	}, nil
@@ -287,7 +271,7 @@ func (s *RemoteWorkspaceService) EnsurePrimaryReady(ctx context.Context, botID s
 	if err != nil || !primary {
 		return primary, err
 	}
-	entry, err := target.Client.Stat(ctx, "/")
+	entry, err := target.Client.Stat(ctx, target.Info.DefaultWorkDir)
 	if err != nil {
 		return true, fmt.Errorf("check remote workspace: %w", err)
 	}
@@ -356,10 +340,7 @@ func (s *RemoteWorkspaceService) clientForRecord(record dbstore.BotRemoteRuntime
 	if !supportsRemoteWorkspace(connection.Info.Capabilities) {
 		return nil, nil, ErrRemoteRuntimeClientUpdateNeeded
 	}
-	client := connection.Client.WithOutgoingMetadata(map[string]string{
-		RemoteWorkspaceIDMetadataKey:   record.BotID,
-		RemoteWorkspacePathMetadataKey: record.WorkspacePath,
-	})
+	client := connection.Client
 	if client == nil {
 		return nil, nil, ErrRemoteRuntimeOffline
 	}
@@ -374,7 +355,6 @@ func (s *RemoteWorkspaceService) target(record dbstore.BotRemoteRuntimeBindingRe
 		RuntimeID:          record.RuntimeID,
 		Name:               record.RuntimeName,
 		Primary:            record.IsPrimary,
-		WorkspacePath:      record.WorkspacePath,
 		ToolApproval:       WorkspaceToolApprovalModes(approval),
 		ToolApprovalConfig: approval,
 	}
@@ -382,7 +362,6 @@ func (s *RemoteWorkspaceService) target(record dbstore.BotRemoteRuntimeBindingRe
 	case record.RuntimeUserID != record.BotOwnerUserID:
 		target.Name = ""
 		target.RuntimeID = ""
-		target.WorkspacePath = ""
 		target.Status = WorkspaceTargetStatusOwnerMismatch
 	case record.RuntimeRevoked:
 		target.Status = WorkspaceTargetStatusRevoked
@@ -445,7 +424,6 @@ func ApplyWorkspaceToolApprovalModes(config settings.ToolApprovalConfig, modes W
 	if !validToolApprovalMode(modes.Read) || !validToolApprovalMode(modes.Write) || !validToolApprovalMode(modes.Exec) {
 		return settings.ToolApprovalConfig{}, ErrInvalidWorkspaceToolApprovalMode
 	}
-	config.Enabled = true
 	config.Read.Mode = modes.Read
 	config.Write.Mode = modes.Write
 	config.Exec.Mode = modes.Exec
@@ -476,42 +454,6 @@ func validToolApprovalMode(mode settings.ToolApprovalMode) bool {
 	return mode == settings.ToolApprovalAllow || mode == settings.ToolApprovalAsk || mode == settings.ToolApprovalDeny
 }
 
-func normalizeRemoteWorkspacePath(raw, botID string) (string, error) {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		value = path.Join("bots", botID)
-	}
-	if len(value) > 4096 || !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') || strings.Contains(value, `\`) {
-		return "", ErrInvalidRemoteWorkspacePath
-	}
-	if value == "." {
-		return value, nil
-	}
-	if strings.HasPrefix(value, "/") || strings.HasSuffix(value, "/") || strings.Contains(value, "//") {
-		return "", ErrInvalidRemoteWorkspacePath
-	}
-	for _, segment := range strings.Split(value, "/") {
-		if segment == "" || segment == "." || segment == ".." {
-			return "", ErrInvalidRemoteWorkspacePath
-		}
-	}
-	return value, nil
-}
-
-func remoteWorkspaceWorkDir(info userruntime.RuntimeInfo, workspacePath string) string {
-	base := strings.TrimSpace(info.WorkspaceBase)
-	if base == "" || workspacePath == "." {
-		if base == "" {
-			return "/data"
-		}
-		return base
-	}
-	if strings.EqualFold(info.OS, "win32") {
-		return strings.TrimRight(base, `/\`) + `\` + strings.ReplaceAll(workspacePath, "/", `\`)
-	}
-	return strings.TrimRight(base, "/") + "/" + workspacePath
-}
-
 func canonicalWorkspaceUUID(value string) (string, bool) {
 	id, err := uuid.Parse(strings.TrimSpace(value))
 	if err != nil {
@@ -523,5 +465,5 @@ func canonicalWorkspaceUUID(value string) (string, bool) {
 func supportsRemoteWorkspace(capabilities []string) bool {
 	return slices.Contains(capabilities, userruntime.CapabilityFS) &&
 		slices.Contains(capabilities, userruntime.CapabilityExec) &&
-		slices.Contains(capabilities, userruntime.CapabilityWorkspaceScope)
+		slices.Contains(capabilities, userruntime.CapabilityHostFS)
 }

@@ -53,7 +53,7 @@ func (*ContactsProvider) Usage(_ context.Context, session SessionContext, availa
 }
 
 func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent || p.routeService == nil {
+	if p.routeService == nil {
 		return nil, nil
 	}
 	sess := session

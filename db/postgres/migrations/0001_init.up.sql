@@ -249,7 +249,6 @@ CREATE TABLE IF NOT EXISTS bots (
   compaction_threshold INTEGER NOT NULL DEFAULT 100000,
   compaction_ratio INTEGER NOT NULL DEFAULT 80,
   compaction_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  title_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   image_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   discuss_probe_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -294,13 +293,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_runtimes_active_user_name
 CREATE INDEX IF NOT EXISTS idx_user_runtimes_user_id ON user_runtimes(user_id);
 
 -- bot_remote_runtime_bindings: persistent Bot workspace placement on a
--- user-owned Remote Runtime. Paths are relative to the Runtime's advertised
--- workspace base; the Runtime client resolves and confines them locally.
+-- user-owned Remote Runtime. The Runtime exposes its host filesystem and uses
+-- the OS user's home directory as the default working directory.
 CREATE TABLE IF NOT EXISTS bot_remote_runtime_bindings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   runtime_id UUID NOT NULL REFERENCES user_runtimes(id) ON DELETE RESTRICT,
-  workspace_path TEXT NOT NULL CHECK (btrim(workspace_path) <> ''),
   is_primary BOOLEAN NOT NULL DEFAULT false,
   tool_approval_config JSONB NOT NULL DEFAULT '{"enabled":true,"read":{"mode":"allow","bypass_globs":[],"force_review_globs":[]},"write":{"mode":"ask","bypass_globs":[],"force_review_globs":[]},"exec":{"mode":"ask","bypass_commands":[],"force_review_commands":[]}}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1260,6 +1258,7 @@ CREATE TABLE IF NOT EXISTS public.team_members (
     role       user_role   NOT NULL DEFAULT 'member',
     is_active  BOOLEAN     NOT NULL DEFAULT true,
     data_root  TEXT,
+    title_model_id UUID,
     metadata   JSONB       NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1633,6 +1632,16 @@ BEGIN
     END LOOP;
 END
 $$;
+
+-- The title model is a per-member preference in the current team. Models are
+-- team-owned, so keep the team id in the foreign key to prevent a profile from
+-- referencing a model in another team.
+ALTER TABLE public.team_members
+    DROP CONSTRAINT IF EXISTS team_members_title_model_id_fkey,
+    ADD CONSTRAINT team_members_title_model_id_fkey
+        FOREIGN KEY (team_id, title_model_id)
+        REFERENCES public.models(team_id, id)
+        ON DELETE SET NULL (title_model_id);
 
 -- ===== Phase 3b: partial / expression unique indexes with team_id prepended =====
 DROP INDEX IF EXISTS idx_bot_channel_external_identity;
@@ -2088,7 +2097,8 @@ SELECT
     u.is_active AS principal_is_active,
     tm.is_active AS membership_is_active,
     tm.created_at AS joined_at,
-    tm.updated_at AS membership_updated_at
+    tm.updated_at AS membership_updated_at,
+    tm.title_model_id
 FROM public.team_members tm
 JOIN public.users u ON u.id = tm.user_id
 WHERE tm.team_id = public.memoh_current_team_id();
@@ -2164,3 +2174,46 @@ SELECT set_config(
     '00000000-0000-0000-0000-000000000001',
     false
 );
+
+-- Managed subagents pin their selected model and may retain an invisible
+-- snapshot of the parent model context for forked execution.
+CREATE TABLE IF NOT EXISTS public.subagent_configs (
+    team_id         UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                                REFERENCES public.teams(id) ON DELETE RESTRICT,
+    session_id      UUID        PRIMARY KEY,
+    model_uuid      UUID,
+    model_id        TEXT        NOT NULL,
+    provider_name   TEXT        NOT NULL,
+    forked          BOOLEAN     NOT NULL DEFAULT false,
+    parent_messages JSONB,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT subagent_configs_team_session_key UNIQUE (team_id, session_id),
+    CONSTRAINT subagent_configs_session_id_fkey
+        FOREIGN KEY (team_id, session_id)
+        REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
+    CONSTRAINT subagent_configs_model_uuid_fkey
+        FOREIGN KEY (team_id, model_uuid)
+        REFERENCES public.models(team_id, id) ON DELETE SET NULL (model_uuid),
+    CONSTRAINT subagent_configs_fork_snapshot_check CHECK (
+        (forked AND parent_messages IS NOT NULL AND jsonb_typeof(parent_messages) = 'array')
+        OR (NOT forked AND parent_messages IS NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_subagent_configs_team_model
+    ON public.subagent_configs (team_id, model_uuid);
+
+ALTER TABLE public.subagent_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subagent_configs FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY subagent_configs_team_select ON public.subagent_configs
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY subagent_configs_team_insert ON public.subagent_configs
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY subagent_configs_team_update ON public.subagent_configs
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY subagent_configs_team_delete ON public.subagent_configs
+    FOR DELETE USING (team_id = public.memoh_current_team_id());

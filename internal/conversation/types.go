@@ -290,12 +290,11 @@ type ChatRequest struct {
 // WorkspaceTarget is the immutable execution-location snapshot resolved for
 // one agent request. TargetID addresses either the Server Workspace (native)
 // or one Bot-scoped remote workspace binding; runtime IDs are intentionally
-// not exposed here because they bypass the binding's path and policy.
+// not exposed here because they bypass the binding's policy.
 type WorkspaceTarget struct {
-	TargetID      string `json:"target_id"`
-	Kind          string `json:"kind"`
-	Name          string `json:"name"`
-	WorkspacePath string `json:"workspace_path,omitempty"`
+	TargetID string `json:"target_id"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
 }
 
 type RequestedSkillContext struct {

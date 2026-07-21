@@ -1,6 +1,11 @@
 {
   "name": "@memohai/config",
   "version": "0.16.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/memohai/Memoh.git",
+    "directory": "packages/config"
+  },
   "exports": {
     ".": "./src/index.ts"
   },

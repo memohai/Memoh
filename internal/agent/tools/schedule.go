@@ -37,7 +37,7 @@ func NewScheduleProvider(log *slog.Logger, service Scheduler) *ScheduleProvider 
 
 // Usage describes how the schedule tool group works together. Injected only
 // when the schedule tools are registered (main-agent sessions with a schedule
-// service); subagents register none, so this guidance never shows there.
+// service); guidance is emitted only when schedule tools are actually present.
 func (*ScheduleProvider) Usage(_ context.Context, _ SessionContext, available AvailableTools) string {
 	var parts []string
 	delivery := "include an instruction to deliver results to a person or channel when messaging is available"
@@ -67,7 +67,7 @@ func (*ScheduleProvider) Usage(_ context.Context, _ SessionContext, available Av
 }
 
 func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent || p.service == nil {
+	if p.service == nil {
 		return nil, nil
 	}
 	sess := session

@@ -10,8 +10,8 @@ import { guardedEnvironment } from './guards'
 import type { ResolvePathOptions } from './paths'
 import { shellSpawnSpec } from './shell'
 
-export interface ExecPathGuard {
-  workspaceRoot: string
+export interface ExecPathResolver {
+  defaultDirectory: string
   resolve(path: string, options?: ResolvePathOptions): Promise<string>
   revalidate(path: string, options?: ResolvePathOptions): Promise<string>
 }
@@ -28,7 +28,7 @@ const defaultTimeoutSeconds = 30
 
 export class WorkspaceExecService {
   constructor(
-    private readonly paths: ExecPathGuard,
+    private readonly paths: ExecPathResolver,
     private readonly children: ExecChildSupervisor,
     private readonly acceptingRPCs: () => boolean = () => true,
   ) {}
@@ -123,7 +123,7 @@ export class WorkspaceExecService {
     if (!command) {
       throw rpcError(status.INVALID_ARGUMENT, 'command is required')
     }
-    let workDirectory = this.paths.workspaceRoot
+    let workDirectory = this.paths.defaultDirectory
     if (request.work_dir?.trim()) {
       assertExecAdmissionActive(call, admissionActive)
       workDirectory = await this.paths.resolve(request.work_dir, { requireDirectory: true })

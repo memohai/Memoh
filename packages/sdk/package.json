@@ -1,6 +1,11 @@
 {
   "name": "@memohai/sdk",
   "version": "0.16.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/memohai/Memoh.git",
+    "directory": "packages/sdk"
+  },
   "description": "",
   "exports": {
     ".": "./src/index.ts",

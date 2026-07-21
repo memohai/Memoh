@@ -18,7 +18,7 @@ import (
 )
 
 type botRemoteRuntimeService interface {
-	Mount(ctx context.Context, botID, runtimeID string, req workspace.MountRemoteWorkspaceRequest) (workspace.WorkspaceTarget, error)
+	Mount(ctx context.Context, botID, runtimeID string) (workspace.WorkspaceTarget, error)
 	GetMount(ctx context.Context, botID, targetID string) (workspace.WorkspaceTarget, error)
 	SetPrimary(ctx context.Context, botID, targetID string) error
 	UpdateToolApprovalConfig(ctx context.Context, botID, targetID string, config settings.ToolApprovalConfig) error
@@ -97,11 +97,9 @@ func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
 // Mount godoc
 // @Summary Add or update a Remote Runtime workspace target
 // @Tags workspace-targets
-// @Accept json
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param runtime_id path string true "Runtime ID"
-// @Param request body workspace.MountRemoteWorkspaceRequest true "Remote workspace mount"
 // @Success 200 {object} workspace.WorkspaceTarget
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -112,11 +110,7 @@ func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var req workspace.MountRemoteWorkspaceRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	target, err := h.service.Mount(c.Request().Context(), botID, c.Param("runtime_id"), req)
+	target, err := h.service.Mount(c.Request().Context(), botID, c.Param("runtime_id"))
 	if err != nil {
 		return workspaceTargetHTTPError(h.log, err)
 	}
@@ -243,9 +237,12 @@ func (h *BotRemoteRuntimeHandler) resolveToolApprovalUpdate(
 	if req.ToolApprovalConfig != nil {
 		config = settings.NormalizeToolApprovalConfig(*req.ToolApprovalConfig)
 	}
+	if req.Enabled != nil {
+		config.Enabled = *req.Enabled
+	}
 	hasModes := req.Read != "" || req.Write != "" || req.Exec != ""
 	if !hasModes {
-		if req.ToolApprovalConfig == nil {
+		if req.ToolApprovalConfig == nil && req.Enabled == nil {
 			return config, workspace.ErrInvalidWorkspaceToolApprovalMode
 		}
 		return config, nil
@@ -272,8 +269,7 @@ func (h *BotRemoteRuntimeHandler) requirePermission(c echo.Context, permission s
 
 func workspaceTargetHTTPError(log *slog.Logger, err error) error {
 	switch {
-	case errors.Is(err, workspace.ErrInvalidRemoteWorkspacePath),
-		errors.Is(err, workspace.ErrInvalidWorkspaceToolApprovalMode),
+	case errors.Is(err, workspace.ErrInvalidWorkspaceToolApprovalMode),
 		errors.Is(err, userruntime.ErrInvalidInput):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	case errors.Is(err, workspace.ErrRemoteRuntimeNotUsable),

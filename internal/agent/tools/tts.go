@@ -81,7 +81,7 @@ func (*TTSProvider) Usage(_ context.Context, session SessionContext, available A
 }
 
 func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent || p.settings == nil || p.audio == nil || p.sender == nil || p.resolver == nil {
+	if p.settings == nil || p.audio == nil || p.sender == nil || p.resolver == nil {
 		return nil, nil
 	}
 	botID := strings.TrimSpace(session.BotID)

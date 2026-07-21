@@ -880,7 +880,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.TtsModelID = current.TtsModelID
 				eff.TranscriptionModelID = current.TranscriptionModelID
 				eff.HeartbeatModelID = current.HeartbeatModelID
-				eff.TitleModelID = current.TitleModelID
 				eff.CompactionModelID = current.CompactionModelID
 				eff.DiscussProbeModelID = current.DiscussProbeModelID
 			}
@@ -954,7 +953,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		HeartbeatEnabled:       &heartbeatEnabled,
 		HeartbeatInterval:      &heartbeatInterval,
 		HeartbeatModelID:       modelID(eff.HeartbeatModelID, deps.models),
-		TitleModelID:           modelID(eff.TitleModelID, deps.models),
 		CompactionEnabled:      &compactionEnabled,
 		CompactionThreshold:    &compactionThreshold,
 		CompactionRatio:        &compactionRatio,

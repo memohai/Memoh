@@ -25,11 +25,11 @@ func (q *Queries) ClearBotRemoteRuntimePrimary(ctx context.Context, botID pgtype
 }
 
 const createOrUpdateBotRemoteRuntimeMount = `-- name: CreateOrUpdateBotRemoteRuntimeMount :one
-INSERT INTO bot_remote_runtime_bindings (bot_id, runtime_id, workspace_path)
-SELECT b.id, r.id, $1
+INSERT INTO bot_remote_runtime_bindings (bot_id, runtime_id)
+SELECT b.id, r.id
 FROM bots b
 JOIN user_runtimes r
-  ON r.id = $2
+  ON r.id = $1
  AND r.team_id = public.memoh_current_team_id()
  AND r.user_id = b.owner_user_id
  AND r.revoked_at IS NULL
@@ -39,21 +39,19 @@ JOIN team_members owner_membership
  AND owner_membership.is_active = TRUE
 JOIN users owner ON owner.id = owner_membership.user_id AND owner.is_active = TRUE
 WHERE b.team_id = public.memoh_current_team_id()
-  AND b.id = $3
+  AND b.id = $2
 ON CONFLICT (team_id, bot_id, runtime_id) DO UPDATE SET
-  workspace_path = EXCLUDED.workspace_path,
   updated_at = now()
 RETURNING id
 `
 
 type CreateOrUpdateBotRemoteRuntimeMountParams struct {
-	WorkspacePath string      `json:"workspace_path"`
-	RuntimeID     pgtype.UUID `json:"runtime_id"`
-	BotID         pgtype.UUID `json:"bot_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+	BotID     pgtype.UUID `json:"bot_id"`
 }
 
 func (q *Queries) CreateOrUpdateBotRemoteRuntimeMount(ctx context.Context, arg CreateOrUpdateBotRemoteRuntimeMountParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, createOrUpdateBotRemoteRuntimeMount, arg.WorkspacePath, arg.RuntimeID, arg.BotID)
+	row := q.db.QueryRow(ctx, createOrUpdateBotRemoteRuntimeMount, arg.RuntimeID, arg.BotID)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
@@ -112,7 +110,6 @@ SELECT
   binding.id,
   binding.bot_id,
   binding.runtime_id,
-  binding.workspace_path,
   binding.is_primary,
   binding.tool_approval_config,
   binding.created_at,
@@ -142,7 +139,6 @@ type GetBotRemoteRuntimeMountRow struct {
 	ID                 pgtype.UUID        `json:"id"`
 	BotID              pgtype.UUID        `json:"bot_id"`
 	RuntimeID          pgtype.UUID        `json:"runtime_id"`
-	WorkspacePath      string             `json:"workspace_path"`
 	IsPrimary          bool               `json:"is_primary"`
 	ToolApprovalConfig []byte             `json:"tool_approval_config"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
@@ -160,7 +156,6 @@ func (q *Queries) GetBotRemoteRuntimeMount(ctx context.Context, arg GetBotRemote
 		&i.ID,
 		&i.BotID,
 		&i.RuntimeID,
-		&i.WorkspacePath,
 		&i.IsPrimary,
 		&i.ToolApprovalConfig,
 		&i.CreatedAt,
@@ -178,7 +173,6 @@ SELECT
   binding.id,
   binding.bot_id,
   binding.runtime_id,
-  binding.workspace_path,
   binding.is_primary,
   binding.tool_approval_config,
   binding.created_at,
@@ -203,7 +197,6 @@ type GetPrimaryBotRemoteRuntimeMountRow struct {
 	ID                 pgtype.UUID        `json:"id"`
 	BotID              pgtype.UUID        `json:"bot_id"`
 	RuntimeID          pgtype.UUID        `json:"runtime_id"`
-	WorkspacePath      string             `json:"workspace_path"`
 	IsPrimary          bool               `json:"is_primary"`
 	ToolApprovalConfig []byte             `json:"tool_approval_config"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
@@ -221,7 +214,6 @@ func (q *Queries) GetPrimaryBotRemoteRuntimeMount(ctx context.Context, botID pgt
 		&i.ID,
 		&i.BotID,
 		&i.RuntimeID,
-		&i.WorkspacePath,
 		&i.IsPrimary,
 		&i.ToolApprovalConfig,
 		&i.CreatedAt,
@@ -268,7 +260,6 @@ SELECT
   binding.id,
   binding.bot_id,
   binding.runtime_id,
-  binding.workspace_path,
   binding.is_primary,
   binding.tool_approval_config,
   binding.created_at,
@@ -293,7 +284,6 @@ type ListBotRemoteRuntimeMountsRow struct {
 	ID                 pgtype.UUID        `json:"id"`
 	BotID              pgtype.UUID        `json:"bot_id"`
 	RuntimeID          pgtype.UUID        `json:"runtime_id"`
-	WorkspacePath      string             `json:"workspace_path"`
 	IsPrimary          bool               `json:"is_primary"`
 	ToolApprovalConfig []byte             `json:"tool_approval_config"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
@@ -317,7 +307,6 @@ func (q *Queries) ListBotRemoteRuntimeMounts(ctx context.Context, botID pgtype.U
 			&i.ID,
 			&i.BotID,
 			&i.RuntimeID,
-			&i.WorkspacePath,
 			&i.IsPrimary,
 			&i.ToolApprovalConfig,
 			&i.CreatedAt,

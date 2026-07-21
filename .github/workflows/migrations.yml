@@ -13,6 +13,7 @@ on:
       - "internal/db/postgres/sqlc/**"
       - "internal/db/pgvector/**"
       - "internal/db/*migration*_test.go"
+      - "internal/db/team_*_integration_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/message/*postgres_integration_test.go"
   pull_request:
@@ -27,6 +28,7 @@ on:
       - "internal/db/postgres/sqlc/**"
       - "internal/db/pgvector/**"
       - "internal/db/*migration*_test.go"
+      - "internal/db/team_*_integration_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/message/*postgres_integration_test.go"
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
@@ -77,6 +78,7 @@ type fakeAgentSessionService struct {
 	mu       sync.Mutex
 	next     int
 	sessions []sessionpkg.Session
+	configs  map[string]sessionpkg.SubagentConfig
 }
 
 func (s *fakeAgentSessionService) Create(_ context.Context, input sessionpkg.CreateInput) (sessionpkg.Session, error) {
@@ -97,6 +99,48 @@ func (s *fakeAgentSessionService) Create(_ context.Context, input sessionpkg.Cre
 	}
 	s.sessions = append(s.sessions, sess)
 	return sess, nil
+}
+
+func (s *fakeAgentSessionService) CreateSubagent(ctx context.Context, input sessionpkg.CreateSubagentInput) (sessionpkg.Session, sessionpkg.SubagentConfig, error) {
+	sess, err := s.Create(ctx, input.Session)
+	if err != nil {
+		return sessionpkg.Session{}, sessionpkg.SubagentConfig{}, err
+	}
+	config := sessionpkg.SubagentConfig{
+		SessionID:      sess.ID,
+		ModelUUID:      input.ModelUUID,
+		ModelID:        input.ModelID,
+		ProviderName:   input.ProviderName,
+		Forked:         input.Forked,
+		ParentMessages: append(json.RawMessage(nil), input.ParentMessages...),
+	}
+	s.mu.Lock()
+	if s.configs == nil {
+		s.configs = make(map[string]sessionpkg.SubagentConfig)
+	}
+	s.configs[sess.ID] = config
+	s.mu.Unlock()
+	return sess, config, nil
+}
+
+func (s *fakeAgentSessionService) GetSubagentConfig(_ context.Context, sessionID string) (sessionpkg.SubagentConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	config, ok := s.configs[sessionID]
+	if !ok {
+		return sessionpkg.SubagentConfig{}, pgx.ErrNoRows
+	}
+	return config, nil
+}
+
+func (s *fakeAgentSessionService) UpsertSubagentConfig(_ context.Context, config sessionpkg.SubagentConfig) (sessionpkg.SubagentConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configs == nil {
+		s.configs = make(map[string]sessionpkg.SubagentConfig)
+	}
+	s.configs[config.SessionID] = config
+	return config, nil
 }
 
 func (s *fakeAgentSessionService) ListSubagentsByParent(_ context.Context, parentSessionID string) ([]sessionpkg.Session, error) {
@@ -257,8 +301,14 @@ func newAgentControlProvider(t *testing.T, agent *fakeSpawnAgent) (*SpawnProvide
 	p.sessionService = sessionSvc
 	p.SetAgent(agent)
 	p.SetMessageService(messageSvc)
-	p.modelResolver = func(context.Context, string) (*sdk.Model, string, string, error) {
-		return &sdk.Model{}, "model-1", "", nil
+	p.modelResolver = func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+		return resolvedSubagentModel{
+			Model:            &sdk.Model{},
+			UUID:             "00000000-0000-0000-0000-000000000123",
+			ModelID:          "test-model",
+			ProviderName:     "test-provider",
+			SupportsToolCall: true,
+		}, nil
 	}
 	return p, mgr, sessionSvc, messageSvc
 }
@@ -316,7 +366,7 @@ func TestAgentControlToolsExposeSingleAgentSurface(t *testing.T) {
 		t.Fatalf("Tools failed: %v", err)
 	}
 	got := toolNames(tools)
-	want := []string{"spawn_agent", "send_message", "list_agents"}
+	want := []string{"spawn_agent", "send_message", "list_agents", "list_models"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected tools: got %v want %v", got, want)
 	}
@@ -353,8 +403,26 @@ func TestAgentControlToolSchemasDoNotReferenceSiblingTools(t *testing.T) {
 }
 
 func TestSpawnAgentSessionInheritsParentUserIdentity(t *testing.T) {
-	p, _, sessions, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
-	session := SessionContext{BotID: "bot1", SessionID: "parent1", ChannelIdentityID: "user1"}
+	agent := &fakeSpawnAgent{}
+	p, _, sessions, _ := newAgentControlProvider(t, agent)
+	location := time.FixedZone("UTC+8", 8*60*60)
+	session := SessionContext{
+		BotID:               "bot1",
+		ChatID:              "chat1",
+		SessionID:           "parent1",
+		UserID:              "user1",
+		ChannelIdentityID:   "identity1",
+		CurrentPlatform:     "telegram",
+		ReplyTarget:         "chat-target",
+		ConversationType:    "group",
+		WorkspaceTargetID:   "workspace-1",
+		WorkspaceTargetKind: "remote",
+		WorkspaceTargetName: "Build machine",
+		TimezoneLocation:    location,
+		Skills: map[string]SkillDetail{
+			"review": {Description: "Review code", Content: "instructions", Path: "/skills/review"},
+		},
+	}
 
 	res := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "worker", "task": "alpha"}))
 	rec, ok := sessions.byAgent("parent1", "worker")
@@ -363,6 +431,16 @@ func TestSpawnAgentSessionInheritsParentUserIdentity(t *testing.T) {
 	}
 	if rec.CreatedByUserID != "user1" {
 		t.Fatalf("expected child session creator to inherit parent user, got %q", rec.CreatedByUserID)
+	}
+	call, ok := agent.callAt(0)
+	if !ok {
+		t.Fatal("expected subagent call")
+	}
+	if call.Identity.UserID != "user1" || call.Identity.ReplyTarget != "chat-target" || call.Identity.WorkspaceTargetID != "workspace-1" {
+		t.Fatalf("subagent identity was not fully inherited: %+v", call.Identity)
+	}
+	if call.Identity.TimezoneLocation != location || call.Skills["review"].Path != "/skills/review" {
+		t.Fatalf("subagent timezone or skills were not inherited: identity=%+v skills=%+v", call.Identity, call.Skills)
 	}
 }
 
@@ -428,6 +506,68 @@ func TestSendMessageReusesSessionAndHistory(t *testing.T) {
 	if len(stored) != 4 {
 		raw, _ := json.Marshal(stored)
 		t.Fatalf("expected two user+assistant turns persisted, got %d: %s", len(stored), raw)
+	}
+}
+
+func TestForkedSubagentKeepsInvisibleParentSnapshotAcrossFollowUps(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, _, messages := newAgentControlProvider(t, agent)
+	parentMessages := []sdk.Message{
+		sdk.UserMessage("parent question"),
+		sdk.AssistantMessage("parent working context"),
+	}
+	session := SessionContext{
+		BotID:       "bot1",
+		SessionID:   "parent1",
+		ForkContext: NewMessageSnapshot(parentMessages),
+	}
+
+	first := asMap(t, mustExecuteAgentTool(t, p, session, ToolSpawnAgent().String(), map[string]any{
+		"id":   "worker",
+		"task": "first child task",
+		"fork": true,
+	}))
+	if first["fork"] != true {
+		t.Fatalf("expected fork metadata in result, got %v", first)
+	}
+	firstCall, ok := agent.callAt(0)
+	if !ok || !reflect.DeepEqual(firstCall.Messages, parentMessages) {
+		t.Fatalf("expected only invisible parent prefix before first child query, got %+v", firstCall.Messages)
+	}
+	stored, _ := messages.ListBySession(context.Background(), first["session_id"].(string))
+	if len(stored) != 2 {
+		t.Fatalf("fork prefix must not be copied into visible child history, got %d stored messages", len(stored))
+	}
+
+	mustExecuteAgentTool(t, p, session, ToolSendMessage().String(), map[string]any{
+		"id":      "worker",
+		"message": "second child task",
+	})
+	secondCall, ok := agent.callAt(1)
+	if !ok || len(secondCall.Messages) != 4 {
+		t.Fatalf("expected parent prefix plus first child turn, got %+v", secondCall.Messages)
+	}
+	if !reflect.DeepEqual(secondCall.Messages[:2], parentMessages) {
+		t.Fatalf("follow-up lost immutable parent prefix: %+v", secondCall.Messages)
+	}
+}
+
+func TestNonForkedSubagentDoesNotInheritAvailableParentSnapshot(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	session := SessionContext{
+		BotID:       "bot1",
+		SessionID:   "parent1",
+		ForkContext: NewMessageSnapshot([]sdk.Message{sdk.UserMessage("parent-only")}),
+	}
+
+	mustExecuteAgentTool(t, p, session, ToolSpawnAgent().String(), map[string]any{
+		"id":   "worker",
+		"task": "isolated child task",
+	})
+	call, ok := agent.callAt(0)
+	if !ok || len(call.Messages) != 0 {
+		t.Fatalf("fork=false should not inherit parent context, got %+v", call.Messages)
 	}
 }
 

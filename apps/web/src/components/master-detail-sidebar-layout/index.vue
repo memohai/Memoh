@@ -1,6 +1,6 @@
 <template>
   <SidebarProvider
-    class="min-h-[initial]! absolute inset-0 "
+    class="min-h-[initial]! absolute inset-0 max-md:[&_[data-slot=sidebar]]:hidden"
     :default-open="true"
     disable-default-shortcut
   >
