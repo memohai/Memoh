@@ -314,3 +314,151 @@ func TestCancelUnblocksFullEventBuffer(t *testing.T) {
 		}
 	}
 }
+
+// errRunner streams optional chunks then reports an error, mimicking a
+// resolver whose provider failed mid-stream.
+type errRunner struct {
+	chunks []string
+	err    error
+}
+
+func (f *errRunner) StreamChat(ctx context.Context, _ conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
+	ch := make(chan conversation.StreamChunk, len(f.chunks))
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(ch)
+		defer close(errCh)
+		for _, c := range f.chunks {
+			select {
+			case ch <- conversation.StreamChunk(c):
+			case <-ctx.Done():
+				return
+			}
+		}
+		if f.err != nil {
+			errCh <- f.err
+		}
+	}()
+	return ch, errCh
+}
+
+func drainHandle(h turn.RunHandle) {
+	for range h.Events() {
+	}
+	for range h.Errs() {
+	}
+}
+
+// retryStartTurn retries a duplicate-rejected StartTurn until the claim is
+// released (or the deadline passes), returning the final error.
+func retryStartTurn(t *testing.T, a *Adapter, cmd turn.StartTurnCommand) error {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		h, err := a.StartTurn(context.Background(), cmd)
+		if err == nil {
+			drainHandle(h)
+			return nil
+		}
+		if !errors.Is(err, turn.ErrDuplicateTurn) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestRunEndClosesInjectChannel pins the fix for the per-turn goroutine
+// leak: the resolver's inject-forwarding goroutine exits by ranging over
+// InjectCh, so the adapter must close it when the run ends.
+func TestRunEndClosesInjectChannel(t *testing.T) {
+	r := &fakeRunner{chunks: []string{`{"type":"done"}`}}
+	a := New(r)
+	h, err := a.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainHandle(h)
+	select {
+	case _, ok := <-r.gotReq.InjectCh:
+		if ok {
+			t.Fatal("expected closed inject channel, got a message")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("inject channel not closed after run end")
+	}
+	if err := h.Inject(context.Background(), turn.InjectMessage{Text: "late"}); err == nil {
+		t.Fatal("expected error injecting after run end")
+	}
+}
+
+// TestFailedRunReleasesIdempotencyKey: a run that ends in an error must
+// free its claim so the platform redelivery retries instead of being
+// swallowed as a duplicate.
+func TestFailedRunReleasesIdempotencyKey(t *testing.T) {
+	a := New(&errRunner{err: errors.New("provider exploded")})
+	cmd := turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-1"}
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainHandle(h)
+	if err := retryStartTurn(t, a, cmd); err != nil {
+		t.Fatalf("claim not released after failed run: %v", err)
+	}
+}
+
+// TestCanceledRunReleasesIdempotencyKey: cancellation (consumer stop or a
+// transport disconnect tearing down the run context) must also free the
+// claim — the resolver reacts to ctx cancellation by closing both channels,
+// which is indistinguishable from clean completion inside the pump loop.
+func TestCanceledRunReleasesIdempotencyKey(t *testing.T) {
+	r := &fakeRunner{chunks: []string{`{"type":"done"}`}, block: make(chan struct{})}
+	a := New(r)
+	cmd := turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-2"}
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Cancel()
+	drainHandle(h)
+	r2 := &fakeRunner{chunks: []string{`{"type":"done"}`}}
+	a.runner = r2
+	if err := retryStartTurn(t, a, cmd); err != nil {
+		t.Fatalf("claim not released after canceled run: %v", err)
+	}
+}
+
+// TestCompletedRunKeepsIdempotencyKey guards the inverse: clean completion
+// must keep the claim so true redeliveries stay deduplicated.
+func TestCompletedRunKeepsIdempotencyKey(t *testing.T) {
+	a := New(&fakeRunner{chunks: []string{`{"type":"done"}`}})
+	cmd := turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-3"}
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainHandle(h)
+	time.Sleep(50 * time.Millisecond) // give a buggy release a chance to run
+	if _, err := a.StartTurn(context.Background(), cmd); !errors.Is(err, turn.ErrDuplicateTurn) {
+		t.Fatalf("err = %v, want ErrDuplicateTurn after clean completion", err)
+	}
+}
+
+// TestDiscussInjectFailsFast: discuss handles have no inject reader, so
+// Inject must fail immediately instead of blocking until the run ends.
+func TestDiscussInjectFailsFast(t *testing.T) {
+	h := newDiscussHandle(context.Background(), turn.StartTurnCommand{TeamID: "t"}, func() {}, nil)
+	done := make(chan error, 1)
+	go func() { done <- h.Inject(context.Background(), turn.InjectMessage{Text: "x"}) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected discuss inject to fail")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("discuss inject blocked instead of failing fast")
+	}
+}

@@ -41,3 +41,23 @@ func (r *idempotencyRegistry) claim(teamID, key string) bool {
 	}
 	return true
 }
+
+// release frees a claim so a platform redelivery can retry the turn.
+// Called only when a run ends in failure or cancellation: claim-on-start
+// without release would swallow the redelivery of a turn that never
+// produced a reply (at-zero-once instead of at-most-once).
+func (r *idempotencyRegistry) release(teamID, key string) {
+	composite := teamID + "\x00" + key
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.seen[composite]; !ok {
+		return
+	}
+	delete(r.seen, composite)
+	for i, c := range r.order {
+		if c == composite {
+			r.order = append(r.order[:i], r.order[i+1:]...)
+			break
+		}
+	}
+}

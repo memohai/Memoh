@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 
@@ -90,11 +91,16 @@ func (a *Adapter) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 	if cmd.Mode == turn.ModeDiscuss && (a.discuss == nil || a.discuss.agent == nil || a.discuss.resolver == nil) {
 		return nil, errors.New("turn: discuss runtime not configured")
 	}
-	if cmd.IdempotencyKey != "" && !a.idem.claim(cmd.TeamID, cmd.IdempotencyKey) {
-		return nil, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, cmd.IdempotencyKey)
+	var releaseClaim func()
+	if cmd.IdempotencyKey != "" {
+		if !a.idem.claim(cmd.TeamID, cmd.IdempotencyKey) {
+			return nil, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, cmd.IdempotencyKey)
+		}
+		teamID, key := cmd.TeamID, cmd.IdempotencyKey
+		releaseClaim = func() { a.idem.release(teamID, key) }
 	}
 	if cmd.Mode == turn.ModeDiscuss {
-		return a.startDiscussTurn(ctx, cmd)
+		return a.startDiscussTurn(ctx, cmd, releaseClaim)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 
@@ -128,6 +134,7 @@ func (a *Adapter) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 			defer assetMu.Unlock()
 			assets = append(assets, refs...)
 		},
+		releaseClaim: releaseClaim,
 	}
 	go h.pump(cmd, chunkCh, errCh)
 	return h, nil
@@ -141,6 +148,17 @@ type runHandle struct {
 	cancel    context.CancelFunc
 	inject    chan conversation.InjectMessage
 	addAssets func([]turn.OutboundAssetRef)
+
+	// injectMu guards inject against send-after-close: the pump closes the
+	// channel when the run ends so the resolver's forwarding goroutine
+	// (which ranges over it) can exit instead of leaking per turn.
+	injectMu     sync.Mutex
+	injectClosed bool
+
+	// failed records that the run ended in an error or cancellation; finish
+	// then releases the idempotency claim so a redelivery can retry.
+	failed       atomic.Bool
+	releaseClaim func()
 }
 
 func (h *runHandle) RunID() string             { return h.id }
@@ -149,6 +167,14 @@ func (h *runHandle) Errs() <-chan error        { return h.errs }
 func (h *runHandle) Cancel()                   { h.cancel() }
 
 func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
+	h.injectMu.Lock()
+	defer h.injectMu.Unlock()
+	if h.injectClosed {
+		if err := h.ctx.Err(); err != nil {
+			return err
+		}
+		return errors.New("turn: run already finished")
+	}
 	select {
 	case h.inject <- msg:
 		return nil
@@ -156,6 +182,27 @@ func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 		return ctx.Err()
 	case <-h.ctx.Done():
 		return h.ctx.Err()
+	}
+}
+
+// closeInject closes the inject channel exactly once. Safe against a
+// concurrent Inject: the pump cancels the run context before closing, so
+// any in-flight Inject unblocks via ctx.Done and drops the mutex first.
+func (h *runHandle) closeInject() {
+	h.injectMu.Lock()
+	defer h.injectMu.Unlock()
+	if h.injectClosed {
+		return
+	}
+	h.injectClosed = true
+	close(h.inject)
+}
+
+// finish releases the idempotency claim for runs that did not complete
+// cleanly. Runs the last thing in the pump's defer stack.
+func (h *runHandle) finish() {
+	if h.failed.Load() && h.releaseClaim != nil {
+		h.releaseClaim()
 	}
 }
 
@@ -201,9 +248,23 @@ func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {
 // pump forwards the runner's chunk/error pair into the handle's channels,
 // wrapping each chunk as a turn.Event with a monotonically increasing Seq.
 func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan conversation.StreamChunk, errCh <-chan error) {
+	// Deferred order (LIFO): detect external cancellation, cancel, close
+	// inject, release a failed claim, then close the channel pair — so by
+	// the time a consumer observes the closed channels, the idempotency
+	// claim of a failed/canceled run has already been released.
 	defer close(h.events)
 	defer close(h.errs)
-	defer h.cancel()
+	defer h.finish()
+	defer h.closeInject()
+	defer func() {
+		// A canceled run may look like a clean completion here: the
+		// resolver reacts to ctx cancellation by closing both channels.
+		// Check before cancel() masks the distinction.
+		if h.ctx.Err() != nil {
+			h.failed.Store(true)
+		}
+		h.cancel()
+	}()
 
 	var seq int64
 	for chunkCh != nil || errCh != nil {
@@ -224,6 +285,7 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan conversation.
 				Payload:   chunk,
 			}:
 			case <-h.ctx.Done():
+				h.failed.Store(true)
 				return
 			}
 		case err, ok := <-errCh:
@@ -232,6 +294,7 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan conversation.
 				continue
 			}
 			if err != nil {
+				h.failed.Store(true)
 				select {
 				case h.errs <- err:
 				case <-h.ctx.Done():

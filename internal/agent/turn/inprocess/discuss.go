@@ -42,30 +42,38 @@ type discussDeps struct {
 // gate for ACP runtimes lives here because it is a property of runtime
 // cost, not of channel policy: the caller supplies DiscussAddressed and
 // the runtime decides whether starting is worth it.
-func (a *Adapter) startDiscussTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
+func (a *Adapter) startDiscussTurn(ctx context.Context, cmd turn.StartTurnCommand, releaseClaim func()) (turn.RunHandle, error) {
 	if a.discuss == nil || a.discuss.agent == nil || a.discuss.resolver == nil {
 		return nil, errors.New("turn: discuss runtime not configured")
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	h := newDiscussHandle(runCtx, cmd, cancel)
+	h := newDiscussHandle(runCtx, cmd, cancel, releaseClaim)
 	go a.pumpDiscuss(runCtx, cmd, h)
 	return h, nil
 }
 
-func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc) *discussHandle {
+func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc, releaseClaim func()) *discussHandle {
 	return &discussHandle{
 		runHandle: runHandle{
-			id:        newRunID(),
-			events:    make(chan turn.Event, 16),
-			errs:      make(chan error, 1),
-			ctx:       ctx,
-			cancel:    cancel,
-			inject:    make(chan conversation.InjectMessage), // unused in discuss mode
-			addAssets: func([]turn.OutboundAssetRef) {},
+			id:           newRunID(),
+			events:       make(chan turn.Event, 16),
+			errs:         make(chan error, 1),
+			ctx:          ctx,
+			cancel:       cancel,
+			inject:       make(chan conversation.InjectMessage), // unused in discuss mode
+			addAssets:    func([]turn.OutboundAssetRef) {},
+			releaseClaim: releaseClaim,
 		},
 		teamID:    cmd.TeamID,
 		sessionID: cmd.SessionID,
 	}
+}
+
+// Inject is not supported in discuss mode: no reader consumes the inject
+// channel, so blocking until the run ends would just wedge the caller.
+// Shadowing runHandle.Inject fails fast instead.
+func (h *discussHandle) Inject(context.Context, turn.InjectMessage) error {
+	return errors.New("turn: discuss turns do not accept injected messages")
 }
 
 // discussHandle reuses runHandle's channel pair with manual event emission.
@@ -91,12 +99,15 @@ func (h *discussHandle) emit(kind string, payload []byte) bool {
 	}:
 		return true
 	case <-h.ctx.Done():
+		h.failed.Store(true)
 		return false
 	}
 }
 
-// emitErr mirrors emit for the error channel.
+// emitErr mirrors emit for the error channel. Any reported error marks the
+// run failed so finish releases the idempotency claim.
 func (h *discussHandle) emitErr(err error) bool {
+	h.failed.Store(true)
 	select {
 	case h.errs <- err:
 		return true
@@ -108,7 +119,15 @@ func (h *discussHandle) emitErr(err error) bool {
 func (a *Adapter) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
 	defer close(h.events)
 	defer close(h.errs)
-	defer h.cancel()
+	defer h.finish()
+	defer func() {
+		// External cancellation can surface as a cleanly closed agent
+		// stream; record it before cancel() masks the distinction.
+		if h.ctx.Err() != nil {
+			h.failed.Store(true)
+		}
+		h.cancel()
+	}()
 
 	resolved, err := a.discuss.resolver.ResolveRunConfig(ctx,
 		cmd.BotID, cmd.SessionID, cmd.SourceChannelIdentityID,
@@ -227,6 +246,7 @@ func (a *Adapter) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 				}
 			}
 		case <-ctx.Done():
+			h.failed.Store(true)
 			return
 		}
 	}

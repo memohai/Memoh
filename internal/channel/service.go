@@ -16,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/team"
 )
 
 // ErrChannelConfigNotFound indicates the bot has no persisted config for the channel type.
@@ -360,8 +361,14 @@ func (s *Store) ResolveEffectiveConfig(ctx context.Context, botID string, channe
 		return ChannelConfig{}, errors.New("channel type is required")
 	}
 	if s.registry.IsConfigless(channelType) {
+		// Configless channels have no bot_channel_configs row to carry a
+		// team, and turn.Service fails closed on an empty TeamID. The whole
+		// runtime is session-bound to the self-hosted singleton team (see
+		// internal/db.db.go GUC binding); a hosted multi-team runtime
+		// replaces this with request-scoped team resolution.
 		return ChannelConfig{
 			ID:          channelType.String() + ":" + strings.TrimSpace(botID),
+			TeamID:      team.DefaultTeamID,
 			BotID:       strings.TrimSpace(botID),
 			ChannelType: channelType,
 		}, nil
