@@ -394,6 +394,33 @@ func tryStepDown(t *testing.T, dsn string, n int) error {
 	return m.Steps(-n)
 }
 
+// migrateToVersion moves the isolated database to an exact migration version.
+// Tests for a specific historical boundary must not count from the current
+// migration tail because unrelated newer migrations can be added at any time.
+func migrateToVersion(t *testing.T, dsn string, version uint) {
+	t.Helper()
+	if err := tryMigrateToVersion(t, dsn, version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate to version %d: %v", version, err)
+	}
+}
+
+// tryMigrateToVersion is the fail-closed assertion variant of
+// migrateToVersion: callers receive the migration error instead of failing the
+// test immediately.
+func tryMigrateToVersion(t *testing.T, dsn string, version uint) error {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	return m.Migrate(version)
+}
+
 // resetToEmpty returns a connection to the test's isolated, empty database.
 func resetToEmpty(t *testing.T) *pgxpool.Pool {
 	t.Helper()
