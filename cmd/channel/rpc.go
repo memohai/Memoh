@@ -38,7 +38,9 @@ func provideServerRPCConn(lc fx.Lifecycle, cfg config.Config) (*grpc.ClientConn,
 	return conn, nil
 }
 
-func provideTurnClient(conn *grpc.ClientConn) turn.Service { return turntransport.NewClient(conn) }
+func provideTurnClient(conn *grpc.ClientConn, log *slog.Logger) turn.Service {
+	return turntransport.NewClient(conn, turntransport.WithClientLogger(log))
+}
 func provideRuntimeRPCClient(conn *grpc.ClientConn) *runtimeRpc.Client {
 	return runtimeRpc.NewClient(conn)
 }

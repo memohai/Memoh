@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -108,42 +109,83 @@ func (c *Client) Status() webhooktunnel.Status {
 	return out
 }
 
+// reasonSentinels maps wire reason strings back to channel sentinels.
+var reasonSentinels = map[string]error{
+	reasonConfigNotFound:     channel.ErrChannelConfigNotFound,
+	reasonDiscoveryFailed:    channel.ErrChannelDiscoveryFailed,
+	reasonEnableFailed:       channel.ErrEnableChannelFailed,
+	reasonInvalidWebhook:     channel.ErrInvalidWebhookEndpoint,
+	reasonWebhookUnsupported: channel.ErrWebhookEndpointUnsupported,
+}
+
+// reasonDetailSep separates the stable reason token from the original error
+// text on the wire. A non-printable unit separator cannot collide with
+// error message content.
+const reasonDetailSep = "\x1f"
+
+// channelReasonError restores a sentinel identity plus the original error
+// text after crossing the internal RPC, so operators keep seeing the
+// platform-side cause (e.g. the getMe failure behind a discovery error)
+// exactly as the in-process path rendered it.
+type channelReasonError struct {
+	sentinel error
+	text     string
+}
+
+func (e *channelReasonError) Error() string {
+	if e.text != "" {
+		return e.text
+	}
+	return e.sentinel.Error()
+}
+
+func (e *channelReasonError) Unwrap() error { return e.sentinel }
+
 func (c *Client) call(ctx context.Context, method string, input, output any) error {
 	err := c.rpc.Call(ctx, method, input, output)
 	if err == nil || errors.Is(err, runtimeRpc.ErrUnavailable) {
 		return err
 	}
-	switch status.Convert(err).Message() {
-	case reasonConfigNotFound:
-		return channel.ErrChannelConfigNotFound
-	case reasonDiscoveryFailed:
-		return channel.ErrChannelDiscoveryFailed
-	case reasonEnableFailed:
-		return channel.ErrEnableChannelFailed
-	case reasonInvalidWebhook:
-		return channel.ErrInvalidWebhookEndpoint
-	case reasonWebhookUnsupported:
-		return channel.ErrWebhookEndpointUnsupported
-	default:
-		return err
+	return restoreChannelError(err)
+}
+
+// restoreChannelError maps a wire error back to its channel sentinel,
+// keeping any transported cause text.
+func restoreChannelError(err error) error {
+	message := status.Convert(err).Message()
+	for reason, sentinel := range reasonSentinels {
+		if message == reason {
+			return sentinel
+		}
+		if detail, ok := strings.CutPrefix(message, reason+reasonDetailSep); ok {
+			return &channelReasonError{sentinel: sentinel, text: detail}
+		}
 	}
+	return err
 }
 
 func safeChannelError(err error) error {
 	switch {
 	case errors.Is(err, channel.ErrChannelConfigNotFound):
-		return status.Error(codes.NotFound, reasonConfigNotFound)
+		return reasonStatus(codes.NotFound, reasonConfigNotFound, err)
 	case errors.Is(err, channel.ErrChannelDiscoveryFailed):
-		return status.Error(codes.FailedPrecondition, reasonDiscoveryFailed)
+		return reasonStatus(codes.FailedPrecondition, reasonDiscoveryFailed, err)
 	case errors.Is(err, channel.ErrEnableChannelFailed):
-		return status.Error(codes.FailedPrecondition, reasonEnableFailed)
+		return reasonStatus(codes.FailedPrecondition, reasonEnableFailed, err)
 	case errors.Is(err, channel.ErrInvalidWebhookEndpoint):
-		return status.Error(codes.InvalidArgument, reasonInvalidWebhook)
+		return reasonStatus(codes.InvalidArgument, reasonInvalidWebhook, err)
 	case errors.Is(err, channel.ErrWebhookEndpointUnsupported):
-		return status.Error(codes.Unimplemented, reasonWebhookUnsupported)
+		return reasonStatus(codes.Unimplemented, reasonWebhookUnsupported, err)
 	default:
 		return err
 	}
+}
+
+// reasonStatus encodes a sentinel as its stable reason token followed by
+// the full original error text, letting the peer restore both the sentinel
+// identity and the pre-split message.
+func reasonStatus(code codes.Code, reason string, err error) error {
+	return status.Error(code, reason+reasonDetailSep+err.Error())
 }
 
 func Handlers(channelRuntime channel.Runtime, emailRuntime email.Runtime, tunnel *webhooktunnel.Manager) map[string]runtimeRpc.Handler {
@@ -185,14 +227,18 @@ func Handlers(channelRuntime channel.Runtime, emailRuntime email.Runtime, tunnel
 			if err := decode(raw, &in); err != nil {
 				return nil, err
 			}
-			return nil, channelRuntime.Send(ctx, in.BotID, in.ChannelType, in.Send)
+			// Public: send failures carry the platform adapter's own text
+			// ("telegram: chat not found"), which callers surface to users
+			// and the agent uses to self-correct — sanitizing it regresses
+			// the pre-split behavior.
+			return nil, runtimeRpc.Public(channelRuntime.Send(ctx, in.BotID, in.ChannelType, in.Send))
 		},
 		MethodReact: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in channelInput
 			if err := decode(raw, &in); err != nil {
 				return nil, err
 			}
-			return nil, channelRuntime.React(ctx, in.BotID, in.ChannelType, in.React)
+			return nil, runtimeRpc.Public(channelRuntime.React(ctx, in.BotID, in.ChannelType, in.React))
 		},
 		MethodStatuses: func(_ context.Context, raw json.RawMessage) (any, error) {
 			var botID string
@@ -206,7 +252,7 @@ func Handlers(channelRuntime channel.Runtime, emailRuntime email.Runtime, tunnel
 			if err := decode(raw, &id); err != nil {
 				return nil, err
 			}
-			return nil, emailRuntime.RefreshProvider(ctx, id)
+			return nil, runtimeRpc.Public(emailRuntime.RefreshProvider(ctx, id))
 		},
 		MethodSendEmail: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
@@ -216,7 +262,10 @@ func Handlers(channelRuntime channel.Runtime, emailRuntime email.Runtime, tunnel
 			if err := decode(raw, &in); err != nil {
 				return nil, err
 			}
-			return emailRuntime.SendEmail(ctx, in.BotID, in.ProviderID, in.Message)
+			// Public: SMTP/Mailgun failure detail feeds the send_email
+			// tool's self-correction loop.
+			out, err := emailRuntime.SendEmail(ctx, in.BotID, in.ProviderID, in.Message)
+			return out, runtimeRpc.Public(err)
 		},
 		MethodTunnelStatus: func(context.Context, json.RawMessage) (any, error) { return tunnel.Status(), nil },
 	}

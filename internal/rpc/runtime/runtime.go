@@ -14,9 +14,45 @@ import (
 	"github.com/memohai/memoh/internal/rpc/runtimepb"
 )
 
-var ErrUnavailable = errors.New("internal runtime unavailable")
+var (
+	ErrUnavailable = errors.New("internal runtime unavailable")
+	// ErrUnauthenticated marks a shared-secret mismatch between the server
+	// and channel processes. It always accompanies ErrUnavailable so
+	// availability mapping keeps working, but lets diagnostics distinguish
+	// a misconfigured secret from a transient outage.
+	ErrUnauthenticated = errors.New("internal runtime authentication failed")
+)
 
 type Handler func(context.Context, json.RawMessage) (any, error)
+
+// publicError marks an error whose message is safe and meaningful to
+// transport verbatim to the peer process — e.g. a platform adapter failure
+// the operator must see ("telegram: chat not found"). Anything not marked
+// is sanitized to an opaque internal error.
+type publicError struct{ err error }
+
+// Public wraps err for verbatim transport across the internal RPC.
+// Public(nil) is nil so handlers can wrap unconditionally.
+func Public(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &publicError{err: err}
+}
+
+func (e *publicError) Error() string { return e.err.Error() }
+func (e *publicError) Unwrap() error { return e.err }
+
+// grpcStatusError is implemented by errors constructed via status.Error.
+// Checked with a direct type assertion (no unwrap): only a status built by
+// this layer's handlers is intentional wire vocabulary. A status buried in
+// a wrap chain (e.g. a workspace-bridge Unavailable from a stopped bot
+// container) is a downstream detail that must NOT leak — the peer would
+// misdiagnose it as a server↔channel link failure.
+type grpcStatusError interface {
+	GRPCStatus() *status.Status
+	error
+}
 
 type Server struct {
 	runtimepb.UnimplementedRuntimeServiceServer
@@ -40,7 +76,11 @@ func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtime
 	result, err := handler(ctx, json.RawMessage(req.GetPayload()))
 	if err != nil {
 		s.logger.Error("runtime rpc call failed", slog.String("method", method), slog.Any("error", err))
-		if status.Code(err) != codes.Unknown {
+		var public *publicError
+		if errors.As(err, &public) {
+			return nil, status.Error(codes.Unknown, public.Error())
+		}
+		if _, direct := err.(grpcStatusError); direct {
 			return nil, err
 		}
 		return nil, status.Error(codes.Internal, "internal runtime operation failed")
@@ -76,8 +116,15 @@ func (c *Client) Call(ctx context.Context, method string, input, output any) err
 	resp, err := c.client.Call(ctx, &runtimepb.CallRequest{Method: method, Payload: payload})
 	if err != nil {
 		switch status.Code(err) {
-		case codes.Unavailable, codes.DeadlineExceeded, codes.Unauthenticated:
+		case codes.Unavailable, codes.DeadlineExceeded:
 			return errors.Join(ErrUnavailable, err)
+		case codes.Unauthenticated:
+			return errors.Join(ErrUnavailable, ErrUnauthenticated, err)
+		case codes.Unknown:
+			// Unknown carries a Public() message from the peer's handler;
+			// strip the rpc-status envelope so callers (and users) see the
+			// original adapter error text.
+			return errors.New(status.Convert(err).Message())
 		default:
 			return err
 		}

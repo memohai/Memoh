@@ -70,8 +70,9 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 			case *turnpb.RunRequest_InjectJson:
 				var payload injectPayload
 				if err := json.Unmarshal(body.InjectJson, &payload); err != nil {
-					controlErr <- status.Error(codes.InvalidArgument, "invalid inject payload")
-					return
+					s.logger.Warn("invalid turn inject payload dropped",
+						slog.String("run_id", handle.RunID()), slog.Any("error", err))
+					continue
 				}
 				msg := turn.InjectMessage{
 					Text:            payload.Text,
@@ -79,14 +80,20 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 					HeaderifiedText: payload.HeaderifiedText,
 				}
 				if err := handle.Inject(stream.Context(), msg); err != nil {
-					controlErr <- s.mapError("inject turn", err)
-					return
+					// A failed inject only loses the injected message; it must
+					// never tear down the stream — that would cancel a healthy
+					// (possibly already persisted) turn and misreport it as
+					// failed to the user.
+					s.logger.Warn("turn inject failed",
+						slog.String("run_id", handle.RunID()), slog.Any("error", err))
+					continue
 				}
 			case *turnpb.RunRequest_OutboundAssetsJson:
 				var refs []turn.OutboundAssetRef
 				if err := json.Unmarshal(body.OutboundAssetsJson, &refs); err != nil {
-					controlErr <- status.Error(codes.InvalidArgument, "invalid outbound assets payload")
-					return
+					s.logger.Warn("invalid turn outbound assets payload dropped",
+						slog.String("run_id", handle.RunID()), slog.Any("error", err))
+					continue
 				}
 				handle.AddOutboundAssets(refs)
 			case *turnpb.RunRequest_Cancel:
@@ -94,13 +101,16 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 					handle.Cancel()
 				}
 			default:
-				controlErr <- status.Error(codes.InvalidArgument, "unsupported turn control frame")
-				return
+				// Unknown control frames from a newer channel binary must not
+				// kill a running turn; skip them for forward compatibility.
+				s.logger.Warn("unsupported turn control frame skipped",
+					slog.String("run_id", handle.RunID()))
 			}
 		}
 	}()
 
 	events, errs := handle.Events(), handle.Errs()
+	var runErr error
 	for events != nil || errs != nil {
 		select {
 		case event, ok := <-events:
@@ -111,13 +121,16 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 			if err := stream.Send(&turnpb.RunResponse{Body: &turnpb.RunResponse_Event{Event: eventToProto(event)}}); err != nil {
 				return err
 			}
-		case runErr, ok := <-errs:
+		case err, ok := <-errs:
 			if !ok {
 				errs = nil
 				continue
 			}
-			if runErr != nil {
-				return s.mapError("run turn", runErr)
+			// Keep draining: tail events already produced by the run (text
+			// deltas, agent_end) must reach the consumer before the error
+			// terminates the stream, matching in-process ordering.
+			if err != nil && runErr == nil {
+				runErr = err
 			}
 		case recvErr := <-controlErr:
 			if errors.Is(recvErr, io.EOF) {
@@ -128,6 +141,9 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 		case <-stream.Context().Done():
 			return stream.Context().Err()
 		}
+	}
+	if runErr != nil {
+		return s.mapError("run turn", runErr)
 	}
 	return stream.Send(&turnpb.RunResponse{Body: &turnpb.RunResponse_Completed{Completed: &turnpb.Completed{}}})
 }
@@ -160,6 +176,7 @@ func (s *Server) streamContinuation(ctx context.Context, send func(*turnpb.Event
 		close(eventCh)
 	}()
 	var seq int64
+	var runErr error
 	for eventCh != nil || errCh != nil {
 		select {
 		case payload, ok := <-eventCh:
@@ -168,19 +185,36 @@ func (s *Server) streamContinuation(ctx context.Context, send func(*turnpb.Event
 				continue
 			}
 			seq++
-			if err := send(&turnpb.EventResponse{Seq: seq, Payload: payload}); err != nil {
+			if err := send(&turnpb.EventResponse{Seq: seq, Kind: kindOf(payload), Payload: payload}); err != nil {
 				return err
 			}
 		case err := <-errCh:
 			errCh = nil
+			// Drain buffered events (approval acks, partial assistant
+			// output) before surfacing the error; returning immediately
+			// would drop them non-deterministically.
 			if err != nil {
-				return s.mapError("resume turn", err)
+				runErr = err
 			}
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+	if runErr != nil {
+		return s.mapError("resume turn", runErr)
+	}
 	return nil
+}
+
+// kindOf extracts the "type" field from a raw event payload, best effort.
+func kindOf(payload json.RawMessage) string {
+	var env struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(payload, &env) != nil {
+		return ""
+	}
+	return env.Type
 }
 
 func (s *Server) AdvancePlainTextUserInput(ctx context.Context, req *turnpb.JsonRequest) (*turnpb.JsonResponse, error) {
@@ -210,6 +244,11 @@ func (s *Server) mapError(operation string, err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		return status.Error(codes.DeadlineExceeded, "turn deadline exceeded")
 	default:
+		if feedback := feedbackFromError(err); feedback != nil {
+			if message, ok := encodeFeedback(feedback); ok {
+				return status.Error(codes.FailedPrecondition, message)
+			}
+		}
 		s.logger.Error("internal turn rpc failed", slog.String("operation", operation), slog.Any("error", err))
 		return status.Error(codes.Internal, "internal turn operation failed")
 	}

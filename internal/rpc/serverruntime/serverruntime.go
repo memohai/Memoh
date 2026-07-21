@@ -3,6 +3,7 @@ package serverruntime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -11,6 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/inbound"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/handlers"
+	intrpc "github.com/memohai/memoh/internal/rpc"
 	runtimeRpc "github.com/memohai/memoh/internal/rpc/runtime"
 	"github.com/memohai/memoh/internal/skills"
 )
@@ -100,7 +102,17 @@ func (c *Client) Synthesize(ctx context.Context, modelID, text string, overrideC
 	return out.Audio, out.ContentType, nil
 }
 
+// maxTranscribeAudioBytes bounds the raw audio accepted for the internal
+// transcription RPC. Audio crosses the wire as base64 inside a single JSON
+// unary payload (≈4/3 expansion plus envelope), so anything close to the
+// transport's message cap would fail with an opaque ResourceExhausted;
+// reject it up front with an actionable error instead.
+const maxTranscribeAudioBytes = (intrpc.MaxMessageBytes/4)*3 - (1 << 20)
+
 func (c *Client) Transcribe(ctx context.Context, modelID string, data []byte, filename, contentType string, overrideCfg map[string]any) (inbound.TranscriptionResult, error) {
+	if len(data) > maxTranscribeAudioBytes {
+		return nil, fmt.Errorf("audio is too large for internal transcription rpc: %d bytes (limit %d)", len(data), maxTranscribeAudioBytes)
+	}
 	in := struct {
 		ModelID               string
 		Audio                 []byte

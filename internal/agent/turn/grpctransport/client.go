@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -18,10 +19,29 @@ import (
 
 type Client struct {
 	client turnpb.TurnServiceClient
+	logger *slog.Logger
 }
 
-func NewClient(conn grpc.ClientConnInterface) *Client {
-	return &Client{client: turnpb.NewTurnServiceClient(conn)}
+// ClientOption configures optional client capabilities.
+type ClientOption func(*Client)
+
+// WithClientLogger routes client-side transport warnings (dropped control
+// frames and the like) to the given logger instead of slog.Default().
+func WithClientLogger(log *slog.Logger) ClientOption {
+	return func(c *Client) {
+		if log != nil {
+			c.logger = log
+		}
+	}
+}
+
+func NewClient(conn grpc.ClientConnInterface, opts ...ClientOption) *Client {
+	c := &Client{client: turnpb.NewTurnServiceClient(conn), logger: slog.Default()}
+	for _, opt := range opts {
+		opt(c)
+	}
+	c.logger = c.logger.With(slog.String("component", "turn_rpc_client"))
+	return c
 }
 
 func (c *Client) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
@@ -53,6 +73,7 @@ func (c *Client) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn
 		id: started.GetRunId(), stream: stream,
 		events: make(chan turn.Event, 16), errs: make(chan error, 1),
 		ctx: runCtx, cancel: cancel, done: make(chan struct{}),
+		logger: c.logger,
 	}
 	go h.pump()
 	return h, nil
@@ -125,6 +146,7 @@ type runHandle struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
+	logger *slog.Logger
 	mu     sync.Mutex
 	once   sync.Once
 }
@@ -148,11 +170,24 @@ func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {
 	data, err := json.Marshal(refs)
 	if err != nil {
+		h.logger.Warn("encode outbound asset refs failed",
+			slog.String("run_id", h.id), slog.Any("error", err))
 		return
 	}
-	_ = h.send(context.Background(), &turnpb.RunRequest{Body: &turnpb.RunRequest_OutboundAssetsJson{OutboundAssetsJson: data}})
+	// Bound by the run context so a finished run fails fast; a failure here
+	// means the asset refs may miss server-side persistence, which must at
+	// least be visible in logs.
+	if err := h.send(h.ctx, &turnpb.RunRequest{Body: &turnpb.RunRequest_OutboundAssetsJson{OutboundAssetsJson: data}}); err != nil {
+		h.logger.Warn("send outbound asset refs failed",
+			slog.String("run_id", h.id), slog.Any("error", err))
+	}
 }
 
+// Cancel hard-cancels the stream context. This is deliberate: a canceling
+// consumer does not want tail events, and the server observes the broken
+// stream context to cancel the run and release its idempotency claim. The
+// RunRequest cancel frame remains server-supported for a future graceful
+// (drain-then-complete) cancel without a wire change.
 func (h *runHandle) Cancel() {
 	h.once.Do(func() {
 		h.cancel()
@@ -218,6 +253,11 @@ func mapClientError(err error) error {
 		return context.Canceled
 	case codes.DeadlineExceeded:
 		return context.DeadlineExceeded
+	case codes.FailedPrecondition:
+		if feedback := decodeFeedback(status.Convert(err).Message()); feedback != nil {
+			return feedback
+		}
+		return err
 	default:
 		return err
 	}
