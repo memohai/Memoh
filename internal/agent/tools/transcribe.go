@@ -56,7 +56,7 @@ func NewTranscriptionProvider(log *slog.Logger, settingsSvc *settings.Service, a
 }
 
 func (p *TranscriptionProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent || p.settings == nil || p.audio == nil || p.media == nil {
+	if p.settings == nil || p.audio == nil || p.media == nil {
 		return nil, nil
 	}
 	botID := strings.TrimSpace(session.BotID)

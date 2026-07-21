@@ -517,16 +517,22 @@ func TestTeamsRootDownSafetyGate(t *testing.T) {
 // consolidated team migration through the current chain tip. Team migration
 // tests must cross that whole boundary even when later migrations are added.
 func countMigrationsFromTeamCore(t *testing.T) int {
+	return countMigrationsFrom(t, "0112_team_core.up.sql")
+}
+
+// countMigrationsFrom returns the number of migrations from startMigration
+// through the current chain tip. Boundary tests use it so adding a later
+// migration does not change which historical schema they materialize.
+func countMigrationsFrom(t *testing.T, startMigration string) int {
 	t.Helper()
 	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
 	if err != nil {
 		t.Fatalf("read migrations dir: %v", err)
 	}
-	const teamMigration = "0112_team_core.up.sql"
 	found := false
 	count := 0
 	for _, e := range entries {
-		if e.Name() == teamMigration {
+		if e.Name() == startMigration {
 			found = true
 		}
 		if found && len(e.Name()) > 7 && e.Name()[len(e.Name())-7:] == ".up.sql" {
@@ -534,7 +540,7 @@ func countMigrationsFromTeamCore(t *testing.T) int {
 		}
 	}
 	if !found {
-		t.Fatalf("missing consolidated team migration %s", teamMigration)
+		t.Fatalf("missing migration %s", startMigration)
 	}
 	return count
 }

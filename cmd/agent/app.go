@@ -461,7 +461,6 @@ func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, hookS
 			sp.SetAgent(agentpkg.NewSpawnAdapter(a))
 			sp.SetMessageService(msgService)
 			sp.SetSystemPromptFunc(agentpkg.SpawnSystemPrompt)
-			sp.SetModelCreator(agentpkg.SpawnModelCreatorFunc())
 			sp.SetHookService(hookService)
 		}
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/memohai/memoh/internal/agent/tools"
 	"github.com/memohai/memoh/internal/contextfrag"
 )
 
@@ -18,6 +19,7 @@ type SessionContext struct {
 	BotID               string
 	ChatID              string
 	SessionID           string
+	UserID              string
 	ChannelIdentityID   string
 	CurrentPlatform     string
 	ReplyTarget         string
@@ -77,6 +79,10 @@ type InjectMessage struct {
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
 	Model                    *sdk.Model
+	CurrentModelUUID         string
+	CurrentModelID           string
+	CurrentModelProvider     string
+	ForkContext              *tools.MessageSnapshot
 	ReasoningEffort          string
 	ReasoningActive          bool
 	ReasoningDisabled        bool

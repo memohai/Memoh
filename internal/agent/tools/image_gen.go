@@ -81,7 +81,7 @@ func NewImageGenProvider(
 }
 
 func (p *ImageGenProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent || p.settings == nil || p.models == nil || p.queries == nil {
+	if p.settings == nil || p.models == nil || p.queries == nil {
 		return nil, nil
 	}
 	botID := strings.TrimSpace(session.BotID)
