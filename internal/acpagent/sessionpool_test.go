@@ -1155,6 +1155,44 @@ func TestSessionPoolPinsExactAdapterVersionForProcess(t *testing.T) {
 	}
 }
 
+func TestSessionPoolPinsAdapterVersionsPerBot(t *testing.T) {
+	runner := &dynamicRecordingRunner{versions: []string{"1.2.0", "1.3.0"}}
+	pool := newSessionPool(nil, runner, fakeBotGetter{})
+	const packageName = "@agentclientprotocol/codex-acp"
+
+	for _, tc := range []struct {
+		botID string
+		want  string
+	}{
+		{botID: "bot-1", want: "1.2.0"},
+		{botID: "bot-2", want: "1.3.0"},
+	} {
+		version, err := resolveAdapterVersionForTest(pool, tc.botID, packageName)
+		if err != nil {
+			t.Fatalf("resolveDynamicAdapter(%s) error = %v", tc.botID, err)
+		}
+		if version != tc.want {
+			t.Fatalf("resolveDynamicAdapter(%s) = %q, want %q", tc.botID, version, tc.want)
+		}
+	}
+
+	for _, tc := range []struct {
+		botID string
+		want  string
+	}{
+		{botID: "bot-1", want: "1.2.0"},
+		{botID: "bot-2", want: "1.3.0"},
+	} {
+		version, err := resolveAdapterVersionForTest(pool, tc.botID, packageName)
+		if err != nil || version != tc.want {
+			t.Fatalf("cached resolveDynamicAdapter(%s) = %q, %v; want %q, nil", tc.botID, version, err, tc.want)
+		}
+	}
+	if got := runner.resolveCallCount(); got != 2 {
+		t.Fatalf("version lookups = %d, want one per bot", got)
+	}
+}
+
 func TestSessionPoolSharesAdapterLookupAcrossConcurrentColdStarts(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -1209,6 +1247,194 @@ func TestSessionPoolSharesAdapterLookupAcrossConcurrentColdStarts(t *testing.T) 
 	requests := runner.requests()
 	if len(requests) != 2 || requests[0].Args[1] != "@agentclientprotocol/codex-acp@1.2.0" || requests[1].Args[1] != "@agentclientprotocol/codex-acp@1.2.0" {
 		t.Fatalf("concurrent exact-version requests = %#v", requests)
+	}
+}
+
+func TestSessionPoolCanceledAdapterLookupCanRetry(t *testing.T) {
+	started := make(chan struct{})
+	runner := &dynamicRecordingRunner{
+		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+		versions:       []string{"1.2.0"},
+		starts:         []dynamicStartResult{{session: &acpclient.Session{}}},
+		blockResolve:   true,
+		resolveStarted: started,
+	}
+	pool := newSessionPool(
+		nil,
+		runner,
+		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := pool.Ensure(ctx, PromptInput{
+			BotID:                 "bot-1",
+			SessionID:             "session-1",
+			AgentID:               acpprofile.AgentCodexID,
+			ProjectPath:           "/data/project",
+			RuntimeOwnerAccountID: "user-1",
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("adapter version lookup did not start")
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Ensure() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ensure did not return after lookup cancellation")
+	}
+	if requests := runner.requests(); len(requests) != 0 {
+		t.Fatalf("StartSession requests after lookup cancellation = %#v", requests)
+	}
+
+	runner.mu.Lock()
+	runner.blockResolve = false
+	runner.mu.Unlock()
+	if _, err := pool.Ensure(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-2",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		RuntimeOwnerAccountID: "user-1",
+	}); err != nil {
+		t.Fatalf("Ensure after lookup cancellation error = %v", err)
+	}
+	if got := runner.resolveCallCount(); got != 2 {
+		t.Fatalf("version lookups = %d, want canceled lookup followed by retry", got)
+	}
+	requests := runner.requests()
+	if len(requests) != 1 || len(requests[0].Args) != 2 || requests[0].Args[1] != "@agentclientprotocol/codex-acp@1.2.0" {
+		t.Fatalf("dynamic request after lookup retry = %#v", requests)
+	}
+}
+
+func TestSessionPoolAdapterLookupWaiterCanCancel(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	runner := &dynamicRecordingRunner{
+		versions:       []string{"1.2.0"},
+		blockResolve:   true,
+		resolveStarted: started,
+		resolveRelease: release,
+	}
+	pool := newSessionPool(nil, runner, fakeBotGetter{})
+	const packageName = "@agentclientprotocol/codex-acp"
+
+	type result struct {
+		version string
+		err     error
+	}
+	leaderResult := make(chan result, 1)
+	go func() {
+		version, err := resolveAdapterVersionForTest(pool, "bot-1", packageName)
+		leaderResult <- result{version: version, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("adapter version lookup did not start")
+	}
+
+	waiterCtx, cancelWaiter := context.WithCancel(context.Background())
+	waiterResult := make(chan error, 1)
+	go func() {
+		_, _, err := pool.resolveDynamicAdapter(waiterCtx, "bot-1", packageName, nil)
+		waiterResult <- err
+	}()
+	cancelWaiter()
+	select {
+	case err := <-waiterResult:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("waiting resolveDynamicAdapter() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting resolveDynamicAdapter did not return after cancellation")
+	}
+	if got := runner.resolveCallCount(); got != 1 {
+		t.Fatalf("version lookups while waiter canceled = %d, want 1", got)
+	}
+
+	close(release)
+	select {
+	case got := <-leaderResult:
+		if got.err != nil || got.version != "1.2.0" {
+			t.Fatalf("leading resolveDynamicAdapter() = %q, %v", got.version, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("leading resolveDynamicAdapter did not finish")
+	}
+	version, err := resolveAdapterVersionForTest(pool, "bot-1", packageName)
+	if err != nil || version != "1.2.0" {
+		t.Fatalf("cached resolveDynamicAdapter() = %q, %v", version, err)
+	}
+	if got := runner.resolveCallCount(); got != 1 {
+		t.Fatalf("version lookups after cached result = %d, want 1", got)
+	}
+}
+
+func TestSessionPoolAdapterLookupTimeoutFallsBackAndDisables(t *testing.T) {
+	started := make(chan struct{})
+	runner := &dynamicRecordingRunner{
+		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+		blockResolve:   true,
+		resolveStarted: started,
+		starts: []dynamicStartResult{
+			{session: &acpclient.Session{}},
+			{session: &acpclient.Session{}},
+		},
+	}
+	pool := newSessionPool(
+		nil,
+		runner,
+		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
+	)
+	pool.dynamicAdapterStartTimeout = 20 * time.Millisecond
+
+	if _, err := pool.Ensure(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		RuntimeOwnerAccountID: "user-1",
+	}); err != nil {
+		t.Fatalf("Ensure() error = %v", err)
+	}
+	select {
+	case <-started:
+	default:
+		t.Fatal("adapter version lookup did not start")
+	}
+	if got := runner.resolveCallCount(); got != 1 {
+		t.Fatalf("version lookups after timeout = %d, want 1", got)
+	}
+	requests := runner.requests()
+	if len(requests) != 1 || requests[0].Command != "codex-acp" {
+		t.Fatalf("requests after lookup timeout = %#v, want bundled fallback", requests)
+	}
+
+	if _, err := pool.Ensure(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-2",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		RuntimeOwnerAccountID: "user-1",
+	}); err != nil {
+		t.Fatalf("second Ensure() error = %v", err)
+	}
+	if got := runner.resolveCallCount(); got != 1 {
+		t.Fatalf("version lookups after disabled timeout = %d, want 1", got)
+	}
+	requests = runner.requests()
+	if len(requests) != 2 || requests[1].Command != "codex-acp" {
+		t.Fatalf("requests after disabled timeout = %#v, want bundled fallback", requests)
 	}
 }
 
@@ -2831,6 +3057,10 @@ type dynamicRecordingRunner struct {
 	versions       []string
 	resolveErrs    []error
 	resolveCalls   int
+	blockResolve   bool
+	resolveStarted chan struct{}
+	resolveRelease <-chan struct{}
+	resolveOnce    sync.Once
 	reqs           []acpclient.StartRequest
 	starts         []dynamicStartResult
 	blockDynamic   bool
@@ -2920,10 +3150,28 @@ func (r *dynamicRecordingRunner) WorkspaceInfo(context.Context, string) (bridge.
 	return r.info, nil
 }
 
-func (r *dynamicRecordingRunner) ResolveACPAdapterVersion(context.Context, string, string, []string) (string, error) {
+func (r *dynamicRecordingRunner) ResolveACPAdapterVersion(ctx context.Context, _ string, _ string, _ []string) (string, error) {
+	r.mu.Lock()
+	r.resolveCalls++
+	block := r.blockResolve
+	started := r.resolveStarted
+	release := r.resolveRelease
+	r.mu.Unlock()
+	if block {
+		r.resolveOnce.Do(func() {
+			if started != nil {
+				close(started)
+			}
+		})
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-release:
+		}
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.resolveCalls++
 	var err error
 	if len(r.resolveErrs) > 0 {
 		err = r.resolveErrs[0]
@@ -2977,6 +3225,11 @@ func (r *dynamicRecordingRunner) resolveCallCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.resolveCalls
+}
+
+func resolveAdapterVersionForTest(pool *SessionPool, botID, packageName string) (string, error) {
+	_, version, err := pool.resolveDynamicAdapter(context.Background(), botID, packageName, nil)
+	return version, err
 }
 
 func (*caBundleRunner) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {

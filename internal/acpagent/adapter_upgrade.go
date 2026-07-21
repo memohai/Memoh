@@ -24,16 +24,20 @@ type adapterVersionResolver interface {
 }
 
 type adapterUpgradeState struct {
-	once     sync.Once
+	mu       sync.Mutex
+	done     chan struct{}
+	resolved bool
 	version  string
 	err      error
 	disabled bool
 }
 
 // resolveDynamicAdapter performs at most one registry lookup per bot and
-// package during the lifetime of this server process. The exact result is
-// shared by all later cold starts; failures use the bundled adapter until the
-// server restarts.
+// package during the lifetime of this server process. The per-bot scope is
+// intentional because workspaces may use different registries or proxies. The
+// exact result is shared by all later cold starts; failures use the bundled
+// adapter until the server restarts. Canceled lookups are not cached, so a later
+// cold start can retry.
 func (p *SessionPool) resolveDynamicAdapter(
 	ctx context.Context,
 	botID string,
@@ -55,25 +59,54 @@ func (p *SessionPool) resolveDynamicAdapter(
 		p.adapterStates[key] = state
 	}
 	p.adapterMu.Unlock()
-	state.once.Do(func() {
-		state.version, state.err = resolver.ResolveACPAdapterVersion(ctx, botID, packageName, env)
-	})
-	p.adapterMu.Lock()
-	disabled := state.disabled
-	p.adapterMu.Unlock()
-	if disabled {
-		return state, "", nil
+
+	for {
+		state.mu.Lock()
+		if state.disabled {
+			state.mu.Unlock()
+			return state, "", nil
+		}
+		if state.resolved {
+			version, err := state.version, state.err
+			state.mu.Unlock()
+			return state, version, err
+		}
+		if state.done != nil {
+			done := state.done
+			state.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return state, "", ctx.Err()
+			case <-done:
+				continue
+			}
+		}
+
+		done := make(chan struct{})
+		state.done = done
+		state.mu.Unlock()
+
+		version, err := resolver.ResolveACPAdapterVersion(ctx, botID, packageName, env)
+		state.mu.Lock()
+		state.done = nil
+		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			state.resolved = true
+			state.version = version
+			state.err = err
+		}
+		close(done)
+		state.mu.Unlock()
+		return state, version, err
 	}
-	return state, state.version, state.err
 }
 
-func (p *SessionPool) disableDynamicAdapter(state *adapterUpgradeState) {
+func disableDynamicAdapter(state *adapterUpgradeState) {
 	if state == nil {
 		return
 	}
-	p.adapterMu.Lock()
+	state.mu.Lock()
 	state.disabled = true
-	p.adapterMu.Unlock()
+	state.mu.Unlock()
 }
 
 func (p *SessionPool) startDynamicAdapter(
@@ -101,7 +134,7 @@ func (p *SessionPool) startDynamicAdapter(
 		return nil, startCtx.Err()
 	}
 	if resolveErr != nil {
-		p.disableDynamicAdapter(state)
+		disableDynamicAdapter(state)
 	}
 	if version == "" || dynamicCtx.Err() != nil {
 		if err := dynamicCtx.Err(); err != nil {
@@ -127,7 +160,7 @@ func (p *SessionPool) startDynamicAdapter(
 		}
 		return nil, startCtx.Err()
 	}
-	p.disableDynamicAdapter(state)
+	disableDynamicAdapter(state)
 	if err == nil {
 		err = errors.New("dynamic ACP adapter returned no session")
 	}
