@@ -3,14 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/tools"
 	"github.com/memohai/memoh/internal/contextfrag"
-	"github.com/memohai/memoh/internal/models"
 )
 
 // SpawnAdapter wraps *Agent to satisfy tools.SpawnAgent without creating
@@ -49,16 +47,36 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 	}
 
 	identity := SessionContext{
-		BotID:             cfg.Identity.BotID,
-		ChatID:            cfg.Identity.ChatID,
-		SessionID:         cfg.Identity.SessionID,
-		ChannelIdentityID: cfg.Identity.ChannelIdentityID,
-		CurrentPlatform:   cfg.Identity.CurrentPlatform,
-		SessionToken:      cfg.Identity.SessionToken,
-		IsSubagent:        cfg.Identity.IsSubagent,
+		BotID:               cfg.Identity.BotID,
+		ChatID:              cfg.Identity.ChatID,
+		SessionID:           cfg.Identity.SessionID,
+		UserID:              cfg.Identity.UserID,
+		ChannelIdentityID:   cfg.Identity.ChannelIdentityID,
+		CurrentPlatform:     cfg.Identity.CurrentPlatform,
+		ReplyTarget:         cfg.Identity.ReplyTarget,
+		ConversationType:    cfg.Identity.ConversationType,
+		SessionToken:        cfg.Identity.SessionToken,
+		WorkspaceTargetID:   cfg.Identity.WorkspaceTargetID,
+		WorkspaceTargetKind: cfg.Identity.WorkspaceTargetKind,
+		WorkspaceTargetName: cfg.Identity.WorkspaceTargetName,
+		WorkspacePath:       cfg.Identity.WorkspacePath,
+		TimezoneLocation:    cfg.Identity.TimezoneLocation,
+		IsSubagent:          cfg.Identity.IsSubagent,
+	}
+	skills := make([]SkillEntry, 0, len(cfg.Skills))
+	for name, skill := range cfg.Skills {
+		skills = append(skills, SkillEntry{
+			Name:        name,
+			Description: skill.Description,
+			Content:     skill.Content,
+			Path:        skill.Path,
+		})
 	}
 	return RunConfig{
 		Model:                    cfg.Model,
+		CurrentModelUUID:         cfg.ModelUUID,
+		CurrentModelID:           cfg.ModelID,
+		CurrentModelProvider:     cfg.ModelProvider,
 		System:                   cfg.System,
 		Query:                    cfg.Query,
 		ContextQueryMaterialized: cfg.Query != "",
@@ -66,8 +84,12 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 		Messages:                 messages,
 		ReasoningEffort:          cfg.ReasoningEffort,
 		PromptCacheTTL:           cfg.PromptCacheTTL,
-		SupportsToolCall:         true,
+		ChatCompletionsCompat:    cfg.ChatCompletionsCompat,
+		SupportsImageInput:       cfg.SupportsImageInput,
+		SupportsToolCall:         cfg.SupportsToolCall,
 		Identity:                 identity,
+		Skills:                   skills,
+		BackgroundManager:        cfg.BackgroundManager,
 		ContextScope: contextfrag.Scope{
 			BotID:             identity.BotID,
 			ChatID:            identity.ChatID,
@@ -132,19 +154,4 @@ func SpawnSystemPrompt(sessionType string) string {
 	return GenerateSystemPrompt(SystemPromptParams{
 		SessionType: sessionType,
 	})
-}
-
-// SpawnModelCreatorFunc returns a tools.ModelCreator backed by the shared SDK model factory.
-// This keeps subagent model creation aligned with the shared SDK model factory.
-func SpawnModelCreatorFunc() tools.ModelCreator {
-	return func(modelID, clientType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model {
-		return models.NewSDKChatModel(models.SDKModelConfig{
-			ModelID:        modelID,
-			ClientType:     clientType,
-			APIKey:         apiKey,
-			CodexAccountID: codexAccountID,
-			BaseURL:        baseURL,
-			HTTPClient:     httpClient,
-		})
-	}
 }

@@ -1,4 +1,4 @@
--- 0116_global_title_model (rollback)
+-- 0117_global_title_model (rollback)
 -- Restore per-bot automatic session title model selection.
 
 ALTER TABLE public.bots NO FORCE ROW LEVEL SECURITY;

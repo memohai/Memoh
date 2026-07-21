@@ -74,7 +74,7 @@ func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, contain
 }
 
 // Usage frames the workspace browser/desktop tool group. Injected only when
-// these tools are registered (display-enabled, non-subagent sessions).
+// these tools are registered (display-enabled sessions).
 func (*BrowserProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
 	var parts []string
 	browserRefs := available.Refs(ToolBrowserObserve(), ToolBrowserAction())
@@ -125,7 +125,7 @@ func (*BrowserProvider) Usage(_ context.Context, session SessionContext, availab
 }
 
 func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent || p == nil || p.settings == nil {
+	if p == nil || p.settings == nil {
 		return nil, nil
 	}
 	botID := strings.TrimSpace(session.BotID)

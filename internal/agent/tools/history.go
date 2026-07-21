@@ -77,9 +77,6 @@ func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available Ava
 }
 
 func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.Tool, error) {
-	if sess.IsSubagent {
-		return nil, nil
-	}
 	var tools []sdk.Tool
 
 	if p.sessions != nil {

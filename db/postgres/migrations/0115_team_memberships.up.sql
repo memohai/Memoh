@@ -276,7 +276,7 @@ SELECT
     tm.is_active AS membership_is_active,
     tm.created_at AS joined_at,
     tm.updated_at AS membership_updated_at,
-    -- 0001 is the canonical latest schema and already has this 0116 column
+    -- 0001 is the canonical latest schema and already has this 0117 column
     -- during fresh replay. to_jsonb keeps 0115 compatible with older upgrade
     -- databases where team_members does not have the column yet.
     (to_jsonb(tm) ->> 'title_model_id')::uuid AS title_model_id

@@ -96,6 +96,11 @@
    *     --background editor surface (0.152). */
   --surface-composer: var(--surface-editor);
 
+  /* The chat composer and its decision panels share the same two shape states.
+   * Keep the values in rem so they continue to track the app font scale. */
+  --composer-radius-compact: 1.75rem;
+  --composer-radius-multiline: 1.25rem;
+
   /* The chat capsule's resting hairline is fainter than a normal field edge so
    * an idle composer doesn't read as a bright box (most noticeable in dark
    * mode). It brightens to the standard field edge on hover and one notch past
@@ -160,6 +165,14 @@
 [data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])):hover,
 [data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])):focus-within {
   --field-edge: var(--field-edge-rest);
+}
+
+.chat-composer-radius-compact {
+  border-radius: var(--composer-radius-compact);
+}
+
+.chat-composer-radius-multiline {
+  border-radius: var(--composer-radius-multiline);
 }
 
 /* The model preview pill is a WIDE ghost button. The shared ghost press uses a

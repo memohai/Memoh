@@ -18,6 +18,9 @@ func TestCompleteAgentTaskStoresResultAndWakesWaiter(t *testing.T) {
 		AgentID:        "worker",
 		AgentSessionID: "child-1",
 		Message:        "do work",
+		ModelID:        "worker-model",
+		Provider:       "provider-a",
+		Fork:           true,
 		Status:         TaskCompleted,
 		Report:         "finished report",
 	})
@@ -28,7 +31,7 @@ func TestCompleteAgentTaskStoresResultAndWakesWaiter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WaitForSessionTask returned error: %v", err)
 	}
-	if snap.Status != TaskCompleted || snap.AgentReport != "finished report" {
+	if snap.Status != TaskCompleted || snap.AgentReport != "finished report" || snap.AgentModelID != "worker-model" || snap.AgentProvider != "provider-a" || !snap.AgentFork {
 		t.Fatalf("snapshot = %+v, want completed agent report", snap)
 	}
 }

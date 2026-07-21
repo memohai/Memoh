@@ -1,4 +1,4 @@
--- 0116_global_title_model
+-- 0117_global_title_model
 -- Move automatic session title model selection from each bot to the owner's team profile.
 
 -- The migration may run as a non-superuser against FORCE RLS tables. Suspend

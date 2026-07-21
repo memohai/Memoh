@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
@@ -22,6 +22,7 @@ import (
 	"github.com/memohai/memoh/internal/hooks"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/oauthctx"
 	"github.com/memohai/memoh/internal/providers"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
@@ -36,26 +37,42 @@ type SpawnAgent interface {
 
 // SpawnRunConfig mirrors agent.RunConfig fields needed by subagent controls.
 type SpawnRunConfig struct {
-	Model           *sdk.Model
-	System          string
-	Query           string
-	SessionType     string
-	Identity        SpawnIdentity
-	LoopDetection   SpawnLoopConfig
-	Messages        []sdk.Message
-	ReasoningEffort string
-	PromptCacheTTL  string
+	Model                 *sdk.Model
+	ModelUUID             string
+	ModelID               string
+	ModelProvider         string
+	System                string
+	Query                 string
+	SessionType           string
+	Identity              SpawnIdentity
+	LoopDetection         SpawnLoopConfig
+	Messages              []sdk.Message
+	ReasoningEffort       string
+	PromptCacheTTL        string
+	ChatCompletionsCompat string
+	SupportsImageInput    bool
+	SupportsToolCall      bool
+	Skills                map[string]SkillDetail
+	BackgroundManager     *background.Manager
 }
 
 // SpawnIdentity mirrors agent.SessionContext fields needed by subagent controls.
 type SpawnIdentity struct {
-	BotID             string
-	ChatID            string
-	SessionID         string
-	ChannelIdentityID string
-	CurrentPlatform   string
-	SessionToken      string //nolint:gosec // #nosec G117 -- session identifier, not a secret
-	IsSubagent        bool
+	BotID               string
+	ChatID              string
+	SessionID           string
+	UserID              string
+	ChannelIdentityID   string
+	CurrentPlatform     string
+	ReplyTarget         string
+	ConversationType    string
+	SessionToken        string //nolint:gosec // #nosec G117 -- session identifier, not a secret
+	WorkspaceTargetID   string
+	WorkspaceTargetKind string
+	WorkspaceTargetName string
+	WorkspacePath       string
+	TimezoneLocation    *time.Location
+	IsSubagent          bool
 }
 
 // SpawnLoopConfig mirrors agent.LoopDetectionConfig.
@@ -79,7 +96,7 @@ const (
 	subagentRetryBaseDelay  = 2 * time.Second
 	subagentWatchdogTimeout = 3 * time.Minute
 
-	agentControlVersion = "v1"
+	agentControlVersion = "v2"
 )
 
 // ErrWatchdogTimedOut is returned when the subagent watchdog fires.
@@ -155,9 +172,37 @@ func (w *SubagentWatchdog) run(ctx context.Context) {
 }
 
 type agentSessionService interface {
-	Create(ctx context.Context, input sessionpkg.CreateInput) (sessionpkg.Session, error)
+	CreateSubagent(ctx context.Context, input sessionpkg.CreateSubagentInput) (sessionpkg.Session, sessionpkg.SubagentConfig, error)
+	GetSubagentConfig(ctx context.Context, sessionID string) (sessionpkg.SubagentConfig, error)
+	UpsertSubagentConfig(ctx context.Context, config sessionpkg.SubagentConfig) (sessionpkg.SubagentConfig, error)
 	ListSubagentsByParent(ctx context.Context, parentSessionID string) ([]sessionpkg.Session, error)
 }
+
+type resolvedSubagentModel struct {
+	Model                 *sdk.Model
+	UUID                  string
+	ModelID               string
+	ProviderName          string
+	PromptCacheTTL        string
+	ChatCompletionsCompat string
+	SupportsImageInput    bool
+	SupportsToolCall      bool
+}
+
+type subagentModelCatalogItem struct {
+	UUID         string
+	ModelID      string
+	ProviderName string
+	Description  string
+}
+
+type subagentModelResolver func(
+	ctx context.Context,
+	session SessionContext,
+	modelUUID string,
+	modelID string,
+	providerName string,
+) (resolvedSubagentModel, error)
 
 // SpawnProvider exposes managed subagent control tools.
 type SpawnProvider struct {
@@ -168,10 +213,9 @@ type SpawnProvider struct {
 	sessionService agentSessionService
 	messageService messagepkg.Service
 	systemPromptFn func(sessionType string) string
-	modelCreator   ModelCreator
 	bgManager      *background.Manager
 	hookService    *hooks.Service
-	modelResolver  func(ctx context.Context, botID string) (*sdk.Model, string, string, error)
+	modelResolver  subagentModelResolver
 	coord          *agentCoordinator
 	logger         *slog.Logger
 }
@@ -224,9 +268,14 @@ func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available Avail
 		canStartBackground = true
 		parts = append(parts,
 			"Use "+spawnRef+" to create a managed subagent for an independent task.",
-			"Each subagent has a restricted worker tool set: file tools, exec/background tools, web search, and web fetch.",
+			"Subagents can use the bot's configured tools, including workspace, web, memory, skills, browser, email, media, and MCP tools. They cannot ask the user, send direct chat messages or reactions, or create more subagents.",
+			"Choose `model_id` when another enabled chat model is better for the task. Add `provider` only when the same model_id exists under multiple providers. Omit `model_id` to reuse the current session model.",
+			"Set `fork: true` when the worker needs the parent model's current message context; otherwise it starts with only the assigned task.",
 			"Use subagents when work benefits from isolated context or can proceed while you continue. Don't use one for simple single-step work — just do it directly.",
 		)
+	}
+	if ref, ok := available.Ref(ToolListModels()); ok {
+		parts = append(parts, "Use "+ref+" to inspect the enabled chat models, provider names, and descriptions before choosing a model for a subagent.")
 	}
 	if ref, ok := available.Ref(ToolSendMessage()); ok {
 		canStartBackground = true
@@ -250,15 +299,19 @@ func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available Avail
 	return usageSection("Subagents", parts)
 }
 
-func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
 	if session.IsSubagent || p.agent == nil {
 		return nil, nil
 	}
 	sess := session
+	spawnDescription := "Create one managed subagent for an independent task. Returns a memorable agent_id."
+	if catalog, err := p.listModelCatalog(ctx); err == nil {
+		spawnDescription = appendModelCatalogToSpawnDescription(spawnDescription, catalog, session)
+	}
 	return []sdk.Tool{
 		{
 			Name:        ToolSpawnAgent().String(),
-			Description: "Create one managed subagent for an independent task. Returns a memorable agent_id.",
+			Description: spawnDescription,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -269,6 +322,18 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 					"task": map[string]any{
 						"type":        "string",
 						"description": "Task instruction for the new agent.",
+					},
+					"model_id": map[string]any{
+						"type":        "string",
+						"description": "Optional external model name from list_models. Omit to use the current session model.",
+					},
+					"provider": map[string]any{
+						"type":        "string",
+						"description": "Optional provider name used only to disambiguate duplicate model_id values.",
+					},
+					"fork": map[string]any{
+						"type":        "boolean",
+						"description": "If true, inherit the parent model's current message context while keeping the subagent system prompt and tools.",
 					},
 					"run_in_background": map[string]any{
 						"type":        "boolean",
@@ -317,6 +382,14 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 				return p.execListAgents(ctx.Context, sess, inputAsMap(input))
 			},
 		},
+		{
+			Name:        ToolListModels().String(),
+			Description: "List enabled chat models available for managed subagents, including model_id, provider, description, and the current session model marker.",
+			Parameters:  emptyObjectSchema(),
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execListModels(ctx.Context, sess, inputAsMap(input))
+			},
+		},
 	}, nil
 }
 
@@ -332,6 +405,9 @@ type agentRunResult struct {
 	AgentID        string `json:"agent_id"`
 	SessionID      string `json:"session_id,omitempty"`
 	TaskID         string `json:"task_id,omitempty"`
+	ModelID        string `json:"model_id,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	Fork           bool   `json:"fork,omitempty"`
 	Status         string `json:"status"`
 	Message        string `json:"message,omitempty"`
 	Text           string `json:"text,omitempty"`
@@ -348,9 +424,8 @@ type agentRequest struct {
 	message          string
 	messagePersisted bool
 	parentSession    SessionContext
-	model            *sdk.Model
-	modelID          string
-	promptCacheTTL   string
+	config           sessionpkg.SubagentConfig
+	runtime          resolvedSubagentModel
 	systemPrompt     string
 }
 
@@ -436,12 +511,36 @@ func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionConte
 	} else if err != nil && !errors.Is(err, errAgentNotFound) {
 		return nil, err
 	}
-	rec, err := p.createAgentSession(context.WithoutCancel(ctx), session, agentID, task)
+	requestedModelID := strings.TrimSpace(StringArg(args, "model_id"))
+	requestedProvider := strings.TrimSpace(StringArg(args, "provider"))
+	if requestedModelID == "" && requestedProvider != "" {
+		return nil, errors.New("provider requires model_id")
+	}
+	runtime, err := p.modelResolver(context.WithoutCancel(ctx), session, "", requestedModelID, requestedProvider)
+	if err != nil {
+		return nil, fmt.Errorf("resolve subagent model: %w", err)
+	}
+	forked, _, _ := BoolArg(args, "fork")
+	var parentMessages json.RawMessage
+	if forked {
+		if session.ForkContext == nil {
+			return nil, errors.New("fork context is not available for this session")
+		}
+		messages, snapshotErr := session.ForkContext.Messages()
+		if snapshotErr != nil {
+			return nil, fmt.Errorf("read fork context: %w", snapshotErr)
+		}
+		parentMessages, snapshotErr = json.Marshal(messages)
+		if snapshotErr != nil {
+			return nil, fmt.Errorf("marshal fork context: %w", snapshotErr)
+		}
+	}
+	rec, config, err := p.createAgentSession(context.WithoutCancel(ctx), session, agentID, task, runtime, forked, parentMessages)
 	if err != nil {
 		return nil, err
 	}
 	runInBackground, _, _ := BoolArg(args, "run_in_background")
-	return p.submitAgentTask(ctx, session, rec, task, runInBackground)
+	return p.submitAgentTask(ctx, session, rec, config, task, runInBackground)
 }
 
 func (p *SpawnProvider) execSendMessage(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
@@ -460,8 +559,37 @@ func (p *SpawnProvider) execSendMessage(ctx context.Context, session SessionCont
 	if err != nil {
 		return nil, err
 	}
+	config, err := p.loadOrCreateSubagentConfig(context.WithoutCancel(ctx), session, rec)
+	if err != nil {
+		return nil, err
+	}
 	runInBackground, _, _ := BoolArg(args, "run_in_background")
-	return p.submitAgentTask(ctx, session, rec, message, runInBackground)
+	return p.submitAgentTask(ctx, session, rec, config, message, runInBackground)
+}
+
+func (p *SpawnProvider) execListModels(ctx context.Context, session SessionContext, _ map[string]any) (any, error) {
+	catalog, err := p.listModelCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(catalog, func(i, j int) bool {
+		return catalog[i].UUID == session.CurrentModelUUID && catalog[j].UUID != session.CurrentModelUUID
+	})
+	items := make([]map[string]any, 0, len(catalog))
+	for _, item := range catalog {
+		items = append(items, map[string]any{
+			"model_id":    item.ModelID,
+			"provider":    item.ProviderName,
+			"description": item.Description,
+			"current":     item.UUID == session.CurrentModelUUID,
+		})
+	}
+	return map[string]any{
+		"current_model_id": session.CurrentModelID,
+		"current_provider": session.CurrentModelProvider,
+		"models":           items,
+		"count":            len(items),
+	}, nil
 }
 
 func (p *SpawnProvider) execListAgents(ctx context.Context, session SessionContext, _ map[string]any) (any, error) {
@@ -493,6 +621,11 @@ func (p *SpawnProvider) execListAgents(ctx context.Context, session SessionConte
 			"created_at":   session.FormatTime(rec.CreatedAt),
 			"updated_at":   session.FormatTime(rec.UpdatedAt),
 		}
+		if config, configErr := p.sessionService.GetSubagentConfig(ctx, rec.SessionID); configErr == nil {
+			item["model_id"] = config.ModelID
+			item["provider"] = config.ProviderName
+			item["fork"] = config.Forked
+		}
 		if snap.RunningTaskID != "" {
 			item["current_task_id"] = snap.RunningTaskID
 		}
@@ -504,11 +637,11 @@ func (p *SpawnProvider) execListAgents(ctx context.Context, session SessionConte
 	return map[string]any{"agents": items, "count": len(items)}, nil
 }
 
-func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionContext, rec agentRecord, message string, runInBackground bool) (any, error) {
+func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionContext, rec agentRecord, config sessionpkg.SubagentConfig, message string, runInBackground bool) (any, error) {
 	if p.bgManager == nil {
 		return nil, errors.New("background task manager not available")
 	}
-	sdkModel, modelID, promptCacheTTL, err := p.modelResolver(context.WithoutCancel(ctx), session.BotID)
+	runtime, err := p.modelResolver(context.WithoutCancel(ctx), session, config.ModelUUID, config.ModelID, config.ProviderName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model: %w", err)
 	}
@@ -522,9 +655,8 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 		agentSessionID: rec.SessionID,
 		message:        message,
 		parentSession:  session,
-		model:          sdkModel,
-		modelID:        modelID,
-		promptCacheTTL: promptCacheTTL,
+		config:         config,
+		runtime:        runtime,
 		systemPrompt:   systemPrompt,
 	}
 	description := truncateTitle(fmt.Sprintf("%s: %s", rec.AgentID, message), 120)
@@ -546,6 +678,9 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 			"agent_id":       rec.AgentID,
 			"session_id":     rec.SessionID,
 			"task_id":        taskID,
+			"model_id":       config.ModelID,
+			"provider":       config.ProviderName,
+			"fork":           config.Forked,
 			"status":         string(background.TaskQueued),
 			"description":    description,
 			"queue_position": queuePosition,
@@ -568,6 +703,9 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 			"agent_id":    rec.AgentID,
 			"session_id":  rec.SessionID,
 			"task_id":     taskID,
+			"model_id":    config.ModelID,
+			"provider":    config.ProviderName,
+			"fork":        config.Forked,
 			"status":      "background_started",
 			"description": description,
 			"message":     fmt.Sprintf("Agent %s started in background with task ID: %s. Use wait_until(task_id), then get_background_status(task_id) to inspect result.", rec.AgentID, taskID),
@@ -603,6 +741,9 @@ func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *ag
 		AgentID:        req.agentID,
 		AgentSessionID: req.agentSessionID,
 		Message:        req.message,
+		ModelID:        req.config.ModelID,
+		Provider:       req.config.ProviderName,
+		Fork:           req.config.Forked,
 		Status:         status,
 		Report:         result.Text,
 		Error:          result.Error,
@@ -641,6 +782,9 @@ func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, resu
 			AgentID:   next.agentID,
 			SessionID: next.agentSessionID,
 			TaskID:    next.taskID,
+			ModelID:   next.config.ModelID,
+			Provider:  next.config.ProviderName,
+			Fork:      next.config.Forked,
 			Status:    string(background.TaskFailed),
 			Message:   next.message,
 			Error:     err.Error(),
@@ -652,6 +796,9 @@ func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, resu
 			AgentID:   next.agentID,
 			SessionID: next.agentSessionID,
 			TaskID:    next.taskID,
+			ModelID:   next.config.ModelID,
+			Provider:  next.config.ProviderName,
+			Fork:      next.config.Forked,
 			Status:    string(background.TaskKilled),
 			Message:   next.message,
 		})
@@ -665,8 +812,24 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		AgentID:   req.agentID,
 		SessionID: req.agentSessionID,
 		TaskID:    req.taskID,
+		ModelID:   req.config.ModelID,
+		Provider:  req.config.ProviderName,
+		Fork:      req.config.Forked,
 		Message:   req.message,
 	}
+	runtime, err := p.modelResolver(
+		context.WithoutCancel(ctx),
+		req.parentSession,
+		req.config.ModelUUID,
+		req.config.ModelID,
+		req.config.ProviderName,
+	)
+	if err != nil {
+		res.Error = fmt.Sprintf("resolve pinned subagent model: %v", err)
+		res.Status = string(background.TaskFailed)
+		return res
+	}
+	req.runtime = runtime
 	if err := p.runSubagentHook(ctx, hooks.EventSubagentStart, req, res); err != nil {
 		res.Error = err.Error()
 		res.Status = string(background.TaskFailed)
@@ -685,21 +848,48 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	if req.messagePersisted {
 		history = dropLatestMatchingUserMessage(history, req.message)
 	}
+	if req.config.Forked && len(req.config.ParentMessages) > 0 {
+		var parentMessages []sdk.Message
+		if err := json.Unmarshal(req.config.ParentMessages, &parentMessages); err != nil {
+			res.Error = fmt.Sprintf("load fork context: %v", err)
+			return res
+		}
+		combined := make([]sdk.Message, 0, len(parentMessages)+len(history))
+		combined = append(combined, parentMessages...)
+		combined = append(combined, history...)
+		history = combined
+	}
 	cfg := SpawnRunConfig{
-		Model:          req.model,
-		System:         req.systemPrompt,
-		Query:          req.message,
-		SessionType:    sessionpkg.TypeSubagent,
-		PromptCacheTTL: req.promptCacheTTL,
-		Messages:       history,
+		Model:                 req.runtime.Model,
+		ModelUUID:             req.runtime.UUID,
+		ModelID:               req.runtime.ModelID,
+		ModelProvider:         req.runtime.ProviderName,
+		System:                req.systemPrompt,
+		Query:                 req.message,
+		SessionType:           sessionpkg.TypeSubagent,
+		PromptCacheTTL:        req.runtime.PromptCacheTTL,
+		ChatCompletionsCompat: req.runtime.ChatCompletionsCompat,
+		SupportsImageInput:    req.runtime.SupportsImageInput,
+		SupportsToolCall:      req.runtime.SupportsToolCall,
+		Messages:              history,
+		Skills:                req.parentSession.Skills,
+		BackgroundManager:     p.bgManager,
 		Identity: SpawnIdentity{
-			BotID:             req.parentSession.BotID,
-			ChatID:            req.parentSession.ChatID,
-			SessionID:         req.agentSessionID,
-			ChannelIdentityID: req.parentSession.ChannelIdentityID,
-			CurrentPlatform:   req.parentSession.CurrentPlatform,
-			SessionToken:      req.parentSession.SessionToken,
-			IsSubagent:        true,
+			BotID:               req.parentSession.BotID,
+			ChatID:              req.parentSession.ChatID,
+			SessionID:           req.agentSessionID,
+			UserID:              req.parentSession.UserID,
+			ChannelIdentityID:   req.parentSession.ChannelIdentityID,
+			CurrentPlatform:     req.parentSession.CurrentPlatform,
+			ReplyTarget:         req.parentSession.ReplyTarget,
+			ConversationType:    req.parentSession.ConversationType,
+			SessionToken:        req.parentSession.SessionToken,
+			WorkspaceTargetID:   req.parentSession.WorkspaceTargetID,
+			WorkspaceTargetKind: req.parentSession.WorkspaceTargetKind,
+			WorkspaceTargetName: req.parentSession.WorkspaceTargetName,
+			WorkspacePath:       req.parentSession.WorkspacePath,
+			TimezoneLocation:    req.parentSession.TimezoneLocation,
+			IsSubagent:          true,
 		},
 		LoopDetection: SpawnLoopConfig{Enabled: true},
 	}
@@ -727,7 +917,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		if err == nil {
 			res.Text = genResult.Text
 			if p.messageService != nil && req.agentSessionID != "" {
-				p.persistMessages(context.WithoutCancel(ctx), req.parentSession.BotID, req.agentSessionID, req.modelID, req.message, genResult, !req.messagePersisted)
+				p.persistMessages(context.WithoutCancel(ctx), req.parentSession.BotID, req.agentSessionID, req.runtime.UUID, req.message, genResult, !req.messagePersisted)
 			}
 			return res
 		}
@@ -784,23 +974,37 @@ func (p *SpawnProvider) runSubagentHook(ctx context.Context, eventName string, r
 	return nil
 }
 
-func (p *SpawnProvider) createAgentSession(ctx context.Context, parent SessionContext, agentID, task string) (agentRecord, error) {
+func (p *SpawnProvider) createAgentSession(
+	ctx context.Context,
+	parent SessionContext,
+	agentID, task string,
+	runtime resolvedSubagentModel,
+	forked bool,
+	parentMessages json.RawMessage,
+) (agentRecord, sessionpkg.SubagentConfig, error) {
 	if p.sessionService == nil {
-		return agentRecord{}, errors.New("session service not available")
+		return agentRecord{}, sessionpkg.SubagentConfig{}, errors.New("session service not available")
 	}
-	sess, err := p.sessionService.Create(ctx, sessionpkg.CreateInput{
-		BotID:           parent.BotID,
-		Type:            sessionpkg.TypeSubagent,
-		Title:           truncateTitle(task, 100),
-		ParentSessionID: parent.SessionID,
-		CreatedByUserID: strings.TrimSpace(parent.ChannelIdentityID),
-		Metadata: map[string]any{
-			"agent_id":              agentID,
-			"agent_control_version": agentControlVersion,
+	sess, config, err := p.sessionService.CreateSubagent(ctx, sessionpkg.CreateSubagentInput{
+		Session: sessionpkg.CreateInput{
+			BotID:           parent.BotID,
+			Type:            sessionpkg.TypeSubagent,
+			Title:           truncateTitle(task, 100),
+			ParentSessionID: parent.SessionID,
+			CreatedByUserID: strings.TrimSpace(parent.UserID),
+			Metadata: map[string]any{
+				"agent_id":              agentID,
+				"agent_control_version": agentControlVersion,
+			},
 		},
+		ModelUUID:      runtime.UUID,
+		ModelID:        runtime.ModelID,
+		ProviderName:   runtime.ProviderName,
+		Forked:         forked,
+		ParentMessages: parentMessages,
 	})
 	if err != nil {
-		return agentRecord{}, err
+		return agentRecord{}, sessionpkg.SubagentConfig{}, err
 	}
 	return agentRecord{
 		AgentID:   agentID,
@@ -808,7 +1012,34 @@ func (p *SpawnProvider) createAgentSession(ctx context.Context, parent SessionCo
 		Title:     sess.Title,
 		CreatedAt: sess.CreatedAt,
 		UpdatedAt: sess.UpdatedAt,
-	}, nil
+	}, config, nil
+}
+
+func (p *SpawnProvider) loadOrCreateSubagentConfig(ctx context.Context, parent SessionContext, rec agentRecord) (sessionpkg.SubagentConfig, error) {
+	if p.sessionService == nil {
+		return sessionpkg.SubagentConfig{}, errors.New("session service not available")
+	}
+	config, err := p.sessionService.GetSubagentConfig(ctx, rec.SessionID)
+	if err == nil {
+		return config, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return sessionpkg.SubagentConfig{}, err
+	}
+
+	// Sessions created before agent-control v2 have no pinned config. Preserve
+	// their historical behavior once, then pin the resolved model for future
+	// follow-ups.
+	runtime, err := p.modelResolver(ctx, parent, "", "", "")
+	if err != nil {
+		return sessionpkg.SubagentConfig{}, fmt.Errorf("resolve legacy subagent model: %w", err)
+	}
+	return p.sessionService.UpsertSubagentConfig(ctx, sessionpkg.SubagentConfig{
+		SessionID:    rec.SessionID,
+		ModelUUID:    runtime.UUID,
+		ModelID:      runtime.ModelID,
+		ProviderName: runtime.ProviderName,
+	})
 }
 
 func (p *SpawnProvider) resolveNewAgentID(ctx context.Context, session SessionContext, raw string) (string, error) {
@@ -997,6 +1228,13 @@ func agentResultMap(res agentRunResult) map[string]any {
 		"task_id":    res.TaskID,
 		"status":     res.Status,
 	}
+	if res.ModelID != "" {
+		out["model_id"] = res.ModelID
+	}
+	if res.Provider != "" {
+		out["provider"] = res.Provider
+	}
+	out["fork"] = res.Fork
 	if res.Message != "" {
 		out["message"] = res.Message
 	}
@@ -1113,54 +1351,179 @@ func (p *SpawnProvider) persistUserMessage(ctx context.Context, botID, sessionID
 	return true
 }
 
-// ModelCreator creates an sdk.Model from provider config. Set via SetModelCreator.
-type ModelCreator func(modelID, clientType, apiKey, codexAccountID, baseURL string, httpClient *http.Client) *sdk.Model
-
-func (p *SpawnProvider) SetModelCreator(fn ModelCreator) {
-	p.modelCreator = fn
+func (p *SpawnProvider) listModelCatalog(ctx context.Context) ([]subagentModelCatalogItem, error) {
+	if p.models == nil || p.queries == nil {
+		return nil, errors.New("model catalog services not configured")
+	}
+	modelList, err := p.models.ListEnabledByType(ctx, models.ModelTypeChat)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]subagentModelCatalogItem, 0, len(modelList))
+	for _, model := range modelList {
+		provider, fetchErr := models.FetchProviderByID(ctx, p.queries, model.ProviderID)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		description := ""
+		if model.Config.Description != nil {
+			description = strings.TrimSpace(*model.Config.Description)
+		}
+		items = append(items, subagentModelCatalogItem{
+			UUID:         model.ID,
+			ModelID:      model.ModelID,
+			ProviderName: provider.Name,
+			Description:  description,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].ProviderName != items[j].ProviderName {
+			return items[i].ProviderName < items[j].ProviderName
+		}
+		if items[i].ModelID != items[j].ModelID {
+			return items[i].ModelID < items[j].ModelID
+		}
+		return items[i].UUID < items[j].UUID
+	})
+	return items, nil
 }
 
-func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Model, string, string, error) {
-	if p.settings == nil || p.models == nil || p.queries == nil {
-		return nil, "", "", errors.New("model resolution services not configured")
+func appendModelCatalogToSpawnDescription(base string, catalog []subagentModelCatalogItem, session SessionContext) string {
+	if len(catalog) == 0 {
+		return base + " No enabled chat models are currently available."
 	}
-	botSettings, err := p.settings.GetBot(ctx, botID)
+	lines := make([]string, 0, len(catalog)+2)
+	lines = append(lines, base, "Enabled subagent models (model_id | provider | description):")
+	for _, item := range catalog {
+		marker := ""
+		if item.UUID == session.CurrentModelUUID {
+			marker = " [current]"
+		}
+		description := strings.Join(strings.Fields(item.Description), " ")
+		if description == "" {
+			description = "No description"
+		}
+		lines = append(lines, fmt.Sprintf("- %s | %s | %s%s", item.ModelID, item.ProviderName, description, marker))
+	}
+	lines = append(lines, "Use list_models for the same catalog as structured data.")
+	return strings.Join(lines, "\n")
+}
+
+func (p *SpawnProvider) resolveModel(
+	ctx context.Context,
+	session SessionContext,
+	modelUUID string,
+	requestedModelID string,
+	requestedProvider string,
+) (resolvedSubagentModel, error) {
+	if p.models == nil || p.queries == nil {
+		return resolvedSubagentModel{}, errors.New("model resolution services not configured")
+	}
+	modelUUID = strings.TrimSpace(modelUUID)
+	requestedModelID = strings.TrimSpace(requestedModelID)
+	requestedProvider = strings.TrimSpace(requestedProvider)
+
+	var modelInfo models.GetResponse
+	var err error
+	switch {
+	case modelUUID != "":
+		modelInfo, err = p.models.GetByID(ctx, modelUUID)
+		if err != nil {
+			return resolvedSubagentModel{}, fmt.Errorf("pinned model %s (%s) is unavailable: %w", requestedModelID, requestedProvider, err)
+		}
+	case requestedModelID != "":
+		catalog, catalogErr := p.listModelCatalog(ctx)
+		if catalogErr != nil {
+			return resolvedSubagentModel{}, catalogErr
+		}
+		matches := make([]subagentModelCatalogItem, 0, 1)
+		for _, item := range catalog {
+			if item.ModelID == requestedModelID && (requestedProvider == "" || item.ProviderName == requestedProvider) {
+				matches = append(matches, item)
+			}
+		}
+		if len(matches) == 0 {
+			if requestedProvider != "" {
+				return resolvedSubagentModel{}, fmt.Errorf("enabled chat model %q was not found for provider %q", requestedModelID, requestedProvider)
+			}
+			return resolvedSubagentModel{}, fmt.Errorf("enabled chat model %q was not found", requestedModelID)
+		}
+		if len(matches) > 1 {
+			providers := make([]string, 0, len(matches))
+			for _, match := range matches {
+				providers = append(providers, match.ProviderName)
+			}
+			return resolvedSubagentModel{}, fmt.Errorf("model_id %q is ambiguous; specify provider as one of: %s", requestedModelID, strings.Join(providers, ", "))
+		}
+		modelInfo, err = p.models.GetByID(ctx, matches[0].UUID)
+	default:
+		defaultModelUUID := strings.TrimSpace(session.CurrentModelUUID)
+		if defaultModelUUID == "" {
+			if p.settings == nil {
+				return resolvedSubagentModel{}, errors.New("no current model and bot settings service is not configured")
+			}
+			botSettings, settingsErr := p.settings.GetBot(ctx, session.BotID)
+			if settingsErr != nil {
+				return resolvedSubagentModel{}, settingsErr
+			}
+			defaultModelUUID = strings.TrimSpace(botSettings.ChatModelID)
+		}
+		if defaultModelUUID == "" {
+			return resolvedSubagentModel{}, errors.New("no current or default chat model is configured")
+		}
+		modelInfo, err = p.models.GetByID(ctx, defaultModelUUID)
+	}
 	if err != nil {
-		return nil, "", "", err
+		return resolvedSubagentModel{}, err
 	}
-	chatModelID := strings.TrimSpace(botSettings.ChatModelID)
-	if chatModelID == "" {
-		return nil, "", "", errors.New("no chat model configured for bot")
+	if modelInfo.Type != models.ModelTypeChat {
+		return resolvedSubagentModel{}, fmt.Errorf("model %s is not a chat model", modelInfo.ModelID)
 	}
-	modelInfo, err := p.models.GetByID(ctx, chatModelID)
-	if err != nil {
-		return nil, "", "", err
-	}
-	if !modelInfo.Enable {
-		return nil, "", "", fmt.Errorf("subagent chat model %s is disabled", modelInfo.ModelID)
+	if !modelInfo.Enable || (modelInfo.Config.CatalogAvailable != nil && !*modelInfo.Config.CatalogAvailable) {
+		return resolvedSubagentModel{}, fmt.Errorf("subagent chat model %s is disabled or unavailable", modelInfo.ModelID)
 	}
 	provider, err := models.FetchProviderByID(ctx, p.queries, modelInfo.ProviderID)
 	if err != nil {
-		return nil, "", "", err
+		return resolvedSubagentModel{}, err
 	}
-	if p.modelCreator == nil {
-		return nil, "", "", errors.New("model creator not configured")
+	if !provider.Enable {
+		return resolvedSubagentModel{}, fmt.Errorf("subagent model provider %s is disabled", provider.Name)
+	}
+	if requestedProvider != "" && provider.Name != requestedProvider {
+		return resolvedSubagentModel{}, fmt.Errorf("pinned model provider changed from %q to %q", requestedProvider, provider.Name)
+	}
+	if requestedModelID != "" && modelUUID != "" && modelInfo.ModelID != requestedModelID {
+		return resolvedSubagentModel{}, fmt.Errorf("pinned model id changed from %q to %q", requestedModelID, modelInfo.ModelID)
 	}
 	authResolver := providers.NewService(nil, p.queries, "")
-	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
+	authCtx := oauthctx.WithUserID(ctx, strings.TrimSpace(session.UserID))
+	creds, err := authResolver.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
-		return nil, "", "", err
+		return resolvedSubagentModel{}, err
 	}
-	sdkModel := p.modelCreator(
-		modelInfo.ModelID,
-		provider.ClientType,
-		creds.APIKey,
-		creds.CodexAccountID,
-		providers.ProviderConfigString(provider, "base_url"),
-		nil,
+	baseURL := providers.ProviderConfigString(provider, "base_url")
+	chatCompletionsCompat := models.ResolveChatCompletionsCompat(
+		baseURL,
+		providers.ProviderConfigString(provider, "chat_completions_compat"),
 	)
-	cacheTTL := providers.ProviderConfigString(provider, "prompt_cache_ttl")
-	return sdkModel, modelInfo.ID, cacheTTL, nil
+	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
+		ModelID:               modelInfo.ModelID,
+		ClientType:            provider.ClientType,
+		APIKey:                creds.APIKey,
+		CodexAccountID:        creds.CodexAccountID,
+		BaseURL:               baseURL,
+		ChatCompletionsCompat: chatCompletionsCompat,
+	})
+	return resolvedSubagentModel{
+		Model:                 sdkModel,
+		UUID:                  modelInfo.ID,
+		ModelID:               modelInfo.ModelID,
+		ProviderName:          provider.Name,
+		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
+		ChatCompletionsCompat: chatCompletionsCompat,
+		SupportsImageInput:    modelInfo.HasCompatibility(models.CompatVision),
+		SupportsToolCall:      modelInfo.HasCompatibility(models.CompatToolCall),
+	}, nil
 }
 
 func truncateTitle(s string, maxRunes int) string {
