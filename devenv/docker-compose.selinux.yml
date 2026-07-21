@@ -11,6 +11,10 @@ services:
     security_opt:
       - label=disable
 
+  channel:
+    security_opt:
+      - label=disable
+
   web:
     security_opt:
       - label=disable

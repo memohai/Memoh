@@ -9,6 +9,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/conversation"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/userinput"
@@ -128,7 +129,7 @@ func stripToolMessages(messages []conversation.ModelMessage) []conversation.Mode
 		// Remove assistant messages that only contain tool calls / reasoning with
 		// no visible text. Tool-call metadata may live either in ToolCalls or in
 		// structured content parts.
-		if strings.EqualFold(role, "assistant") && hasToolCallContent(m) {
+		if strings.EqualFold(role, "assistant") && turnpkg.HasToolCallContent(m) {
 			stripped, ok := stripNonAskUserToolCalls(m)
 			if !ok {
 				continue

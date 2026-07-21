@@ -10,6 +10,7 @@ import (
 
 	"github.com/memohai/memoh/internal/acpfeedback"
 	"github.com/memohai/memoh/internal/acpprofile"
+	turninprocess "github.com/memohai/memoh/internal/agent/turn/inprocess"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/route"
@@ -216,7 +217,7 @@ func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) 
 			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
 			gateway := &fakeChatGateway{}
 			ensurer := &fakeSessionEnsurer{}
-			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, turninprocess.New(gateway), channelIdentitySvc, &fakePolicyService{}, "", 0)
 			processor.SetACLService(&fakeChatACL{allowed: true})
 			processor.SetSessionEnsurer(ensurer)
 			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
@@ -238,7 +239,7 @@ func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) 
 					"bot_username": "memoh1bot",
 				},
 			}
-			cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelTypeTelegram}
+			cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelTypeTelegram}
 			if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
 				t.Fatalf("HandleInbound() error = %v", err)
 			}
@@ -294,7 +295,7 @@ func TestHandleNewSessionCommandCreatesACPChatSpec(t *testing.T) {
 		},
 	}
 
-	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{}, msg, sender, InboundIdentity{
+	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
 		BotID:             "bot-1",
 		ChannelIdentityID: channelIdentityID,
 		UserID:            ownerID,
@@ -339,7 +340,7 @@ func TestHandleNewSessionCommandCreatesNativeSessionWithCreator(t *testing.T) {
 		},
 	}
 
-	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{}, msg, sender, InboundIdentity{
+	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
 		BotID:             "bot-1",
 		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		UserID:            creatorID,
@@ -381,7 +382,7 @@ func TestHandleNewSessionCommandCancelsActiveStream(t *testing.T) {
 		},
 	}
 
-	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{}, msg, sender, InboundIdentity{
+	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
 		BotID: "bot-1",
 	}, mustCommandInvocation(t, msg.Message.PlainText()))
 	if err != nil {
@@ -423,7 +424,7 @@ func TestHandleNewSessionCommandBareNewInheritsDefaultACP(t *testing.T) {
 		},
 	}
 
-	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{}, msg, sender, InboundIdentity{
+	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
 		BotID:             "bot-1",
 		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		UserID:            ownerID,
@@ -469,7 +470,7 @@ func TestHandleNewSessionCommandExplicitACPInheritsDefaultProject(t *testing.T) 
 		},
 	}
 
-	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{}, msg, sender, InboundIdentity{
+	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
 		BotID:             "bot-1",
 		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		UserID:            ownerID,
@@ -513,7 +514,7 @@ func TestHandleNewSessionCommandPreflightsACPSetup(t *testing.T) {
 		},
 	}
 
-	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{}, msg, sender, InboundIdentity{
+	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
 		BotID:             "bot-1",
 		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		UserID:            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
@@ -577,7 +578,7 @@ func TestHandleNewSessionCommandACPRequiresWorkspaceExec(t *testing.T) {
 		},
 	}
 
-	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{}, msg, sender, InboundIdentity{
+	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
 		BotID:             "bot-1",
 		ChannelIdentityID: "user-no-exec",
 		UserID:            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",

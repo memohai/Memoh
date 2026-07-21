@@ -1,5 +1,5 @@
 services:
-  server:
+  channel:
     environment:
       MEMOH_WEBHOOK_TUNNEL_MODE: external
       MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR: ":18734"
@@ -9,17 +9,17 @@ services:
 
   webhook-tunnel:
     image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate --url http://server:18734 --metrics 0.0.0.0:18735
+    command: tunnel --no-autoupdate --url http://channel:18734 --metrics 0.0.0.0:18735
     environment:
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},server,memoh-dev-server"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},channel,memoh-dev-channel"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},server,memoh-dev-server"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},channel,memoh-dev-channel"
     ports:
       - "${MEMOH_DEV_WEBHOOK_TUNNEL_METRICS_PORT:-18735}:18735"
     depends_on:
-      server:
+      channel:
         condition: service_healthy
     restart: unless-stopped

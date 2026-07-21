@@ -23,6 +23,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextfrag"
@@ -460,7 +461,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if tz == nil {
 		tz = time.UTC
 	}
-	headerInput := UserMessageHeaderInput{
+	headerInput := turnpkg.UserMessageHeaderInput{
 		MessageID:         strings.TrimSpace(req.ExternalMessageID),
 		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 		DisplayName:       displayName,
@@ -474,11 +475,11 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 	headerifiedQuery := ""
 	if userQueryNeedsHeader(req, len(mergedAttachments)) {
-		headerifiedQuery = FormatUserHeader(headerInput, req.Query)
+		headerifiedQuery = turnpkg.FormatUserHeader(headerInput, req.Query)
 	}
 	headerifiedModelQuery := headerifiedQuery
 	if strings.TrimSpace(modelQuery) != strings.TrimSpace(req.Query) {
-		headerifiedModelQuery = FormatUserHeader(headerInput, modelQuery)
+		headerifiedModelQuery = turnpkg.FormatUserHeader(headerInput, modelQuery)
 	}
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
@@ -1159,9 +1160,9 @@ func buildModelSelectionRequest(p baseRunConfigParams, chatID string) conversati
 // identity) for a bot+session without loading messages or requiring a query.
 // The caller is responsible for filling RunConfig.Messages.
 // Used by the discuss driver to reuse the resolver's model/tools/prompt pipeline.
-func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (pipelinepkg.ResolveRunConfigResult, error) {
+func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (agentpkg.ResolveRunConfigResult, error) {
 	if strings.TrimSpace(botID) == "" {
-		return pipelinepkg.ResolveRunConfigResult{}, errors.New("bot id is required")
+		return agentpkg.ResolveRunConfigResult{}, errors.New("bot id is required")
 	}
 
 	sessionType, runtimeType := r.resolveRunConfigSessionDescriptor(ctx, sessionID)
@@ -1179,7 +1180,7 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 				SessionToken:      chatToken,
 			},
 		}
-		return pipelinepkg.ResolveRunConfigResult{
+		return agentpkg.ResolveRunConfigResult{
 			RunConfig:   cfg,
 			RuntimeType: runtimeType,
 		}, nil
@@ -1195,11 +1196,11 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 		SessionType:       sessionType,
 	})
 	if err != nil {
-		return pipelinepkg.ResolveRunConfigResult{}, err
+		return agentpkg.ResolveRunConfigResult{}, err
 	}
 
 	cfg = r.prepareRunConfig(ctx, cfg)
-	return pipelinepkg.ResolveRunConfigResult{
+	return agentpkg.ResolveRunConfigResult{
 		RunConfig:   cfg,
 		ModelID:     chatModel.ID,
 		RuntimeType: runtimeType,

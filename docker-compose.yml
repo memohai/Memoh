@@ -68,16 +68,15 @@ services:
       #   HTTP_PROXY=http://host.docker.internal:7890 docker compose up -d
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,pgvector,server,web,migrate,webhook-tunnel,memoh-postgres,memoh-pgvector,memoh-server,memoh-web,memoh-migrate,memoh-webhook-tunnel"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,web,migrate,webhook-tunnel,memoh-postgres,memoh-pgvector,memoh-server,memoh-web,memoh-migrate,memoh-webhook-tunnel"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel"
+      MEMOH_INTERNAL_RPC_SHARED_SECRET: "${MEMOH_INTERNAL_RPC_SHARED_SECRET:?MEMOH_INTERNAL_RPC_SHARED_SECRET is required}"
+      MEMOH_INTERNAL_RPC_SERVER_TARGET: "server:9090"
+      MEMOH_INTERNAL_RPC_CHANNEL_TARGET: "channel:9091"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
-      MEMOH_WEBHOOK_TUNNEL_MODE: "${MEMOH_WEBHOOK_TUNNEL_MODE:-}"
-      MEMOH_WEBHOOK_PUBLIC_BASE_URL: "${MEMOH_WEBHOOK_PUBLIC_BASE_URL:-}"
-      MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR: ":18734"
-      MEMOH_WEBHOOK_TUNNEL_METRICS_URL: "http://webhook-tunnel:18735"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
       - ./conf/providers:/app/conf/providers:ro
@@ -93,7 +92,7 @@ services:
       - "1455:8080"
       - "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}:${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}/udp"
     expose:
-      - "18734"
+      - "9090"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -103,20 +102,65 @@ services:
     networks:
       - memoh-network
 
+  channel:
+    image: memohai/server:latest
+    container_name: memoh-channel
+    entrypoint: ["/app/memoh-channel", "serve"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,server,channel,webhook-tunnel,memoh-postgres,memoh-server,memoh-channel,memoh-webhook-tunnel"
+      http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
+      https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,server,channel,webhook-tunnel,memoh-postgres,memoh-server,memoh-channel,memoh-webhook-tunnel"
+      MEMOH_INTERNAL_RPC_SHARED_SECRET: "${MEMOH_INTERNAL_RPC_SHARED_SECRET:?MEMOH_INTERNAL_RPC_SHARED_SECRET is required}"
+      MEMOH_INTERNAL_RPC_SERVER_TARGET: "server:9090"
+      MEMOH_INTERNAL_RPC_CHANNEL_TARGET: "channel:9091"
+      MEMOH_WEBHOOK_TUNNEL_MODE: "${MEMOH_WEBHOOK_TUNNEL_MODE:-}"
+      MEMOH_WEBHOOK_PUBLIC_BASE_URL: "${MEMOH_WEBHOOK_PUBLIC_BASE_URL:-}"
+      MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR: ":18734"
+      MEMOH_WEBHOOK_TUNNEL_METRICS_URL: "http://webhook-tunnel:18735"
+    volumes:
+      - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
+      - memoh_data:/opt/memoh/data
+      - /etc/localtime:/etc/localtime:ro
+    expose:
+      - "8081"
+      - "9091"
+      - "18734"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      # Wait for the server so inbound platform messages arriving in the
+      # startup window do not fail their turn RPC.
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8081/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
   webhook-tunnel:
     image: cloudflare/cloudflared:latest
     container_name: memoh-webhook-tunnel
-    command: tunnel --no-autoupdate --url http://server:18734 --metrics 0.0.0.0:18735
+    command: tunnel --no-autoupdate --url http://channel:18734 --metrics 0.0.0.0:18735
     profiles: [webhook-tunnel]
     environment:
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},server,memoh-server"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},channel,memoh-channel"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},server,memoh-server"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},channel,memoh-channel"
     depends_on:
-      - server
+      - channel
     expose:
       - "18735"
     restart: unless-stopped
@@ -128,6 +172,7 @@ services:
     container_name: memoh-web
     environment:
       MEMOH_SERVER_UPSTREAM: ${MEMOH_SERVER_UPSTREAM:-memoh-server:8080}
+      MEMOH_CHANNEL_UPSTREAM: ${MEMOH_CHANNEL_UPSTREAM:-memoh-channel:8081}
     ports:
       - "8082:8082"
       # HTTPS + HTTP/2：h2 多路复用可避免多标签页的 SSE 长连接占满浏览器对单
@@ -137,7 +182,10 @@ services:
     # volumes:
     #   - ./certs:/etc/nginx/certs:ro   # 需包含 server.crt 与 server.key
     depends_on:
-      - server
+      server:
+        condition: service_healthy
+      channel:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - memoh-network

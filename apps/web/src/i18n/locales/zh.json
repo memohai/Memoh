@@ -96,6 +96,9 @@
     "bot": {
       "name_taken": "该名称已被占用。"
     },
+    "channel": {
+      "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。"
+    },
     "profile": {
       "request_invalid": "个人资料更新请求无效。",
       "title_model_invalid": "所选标题模型不可用或不是聊天模型。",
@@ -2695,7 +2698,7 @@
       "deleteFailed": "移除平台失败",
       "webhookCallback": "WebHook 回调地址",
       "webhookCallbackHint": "请将此地址填入对应平台控制台的 Webhook 配置中。",
-      "lineWebhookCallbackHint": "请将此地址填入 LINE Developers 的 Messaging API Webhook 设置。Base URL 必须是公网 HTTPS，并能把 /channels/... 路由到 Memoh server。",
+      "lineWebhookCallbackHint": "请将此地址填入 LINE Developers 的 Messaging API Webhook 设置。Base URL 必须是公网 HTTPS，并能把 /channels/... 路由到 Memoh Channel 服务。",
       "wechatOAWebhookCallbackHint": "请将此地址填入微信服务号平台的回调 URL 配置中。",
       "webhookCallbackPending": "保存当前配置后即可生成回调地址。",
       "webhookCallbackPublicBasePending": "平台配置已保存。请配置公网 HTTPS webhook base，或等待隧道就绪。",

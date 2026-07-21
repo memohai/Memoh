@@ -32,6 +32,7 @@ FROM nginx:alpine
 COPY --from=builder /build/apps/web/dist /usr/share/nginx/html
 
 ENV MEMOH_SERVER_UPSTREAM=memoh-server:8080 \
+    MEMOH_CHANNEL_UPSTREAM=memoh-channel:8081 \
     MEMOH_TLS_CERT=/etc/nginx/certs/server.crt \
     MEMOH_TLS_KEY=/etc/nginx/certs/server.key \
     MEMOH_WEB_HTTPS_PORT=8443

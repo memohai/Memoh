@@ -29,6 +29,15 @@ services:
     environment:
       CONFIG_PATH: /workspace/devenv/app.kata.dev.toml
 
+  channel:
+    image: ${MEMOH_KATA_DEV_IMAGE:-memoh-dev-server-kata}
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.server.kata
+      args: *kata-build-proxy
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.kata.dev.toml
+
   server:
     image: ${MEMOH_KATA_DEV_IMAGE:-memoh-dev-server-kata}
     build:

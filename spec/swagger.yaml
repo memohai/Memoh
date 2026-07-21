@@ -1310,6 +1310,8 @@ definitions:
       self_identity:
         additionalProperties: {}
         type: object
+      team_id:
+        type: string
       updated_at:
         type: string
       verified_at:
@@ -10806,6 +10808,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete bot channel config
       tags:
       - bots
@@ -10890,6 +10896,10 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Update bot channel config
       tags:
       - bots
@@ -10936,6 +10946,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Send message via bot channel
       tags:
       - bots
@@ -10982,6 +10996,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Send message via bot channel session token
       tags:
       - bots
@@ -11030,6 +11048,10 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Update bot channel status
       tags:
       - bots
@@ -11074,6 +11096,10 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Set bot channel webhook endpoint
       tags:
       - bots

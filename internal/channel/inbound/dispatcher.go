@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/conversation"
 )
 
-// InjectMessage is an alias for conversation.InjectMessage, re-exported so
+// InjectMessage is an alias for turn.InjectMessage, re-exported so
 // callers within this package do not need to import the conversation package
 // directly for inject-related types.
-type InjectMessage = conversation.InjectMessage
+type InjectMessage = turn.InjectMessage
 
 // InboundMode determines how a new inbound message is handled when an agent
 // stream is already active for the same route.
@@ -41,7 +41,7 @@ type QueuedTask struct {
 	Sender      channel.StreamReplySender
 	Ident       InboundIdentity
 	Text        string
-	Attachments []conversation.ChatAttachment
+	Attachments []turn.Attachment
 }
 
 // PersistFunc is a deferred persistence closure called after the active stream

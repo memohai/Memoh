@@ -16,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/team"
 )
 
 // ErrChannelConfigNotFound indicates the bot has no persisted config for the channel type.
@@ -360,8 +361,14 @@ func (s *Store) ResolveEffectiveConfig(ctx context.Context, botID string, channe
 		return ChannelConfig{}, errors.New("channel type is required")
 	}
 	if s.registry.IsConfigless(channelType) {
+		// Configless channels have no bot_channel_configs row to carry a
+		// team, and turn.Service fails closed on an empty TeamID. The whole
+		// runtime is session-bound to the self-hosted singleton team (see
+		// internal/db.db.go GUC binding); a hosted multi-team runtime
+		// replaces this with request-scoped team resolution.
 		return ChannelConfig{
 			ID:          channelType.String() + ":" + strings.TrimSpace(botID),
+			TeamID:      team.DefaultTeamID,
 			BotID:       strings.TrimSpace(botID),
 			ChannelType: channelType,
 		}, nil
@@ -507,7 +514,7 @@ func (s *Store) ResolveChannelIdentityBinding(ctx context.Context, channelType C
 
 func normalizeChannelConfigFromRow(row sqlc.BotChannelConfig) (ChannelConfig, error) {
 	return normalizeChannelConfigFields(
-		row.ID, row.BotID, row.ChannelType,
+		row.ID, row.TeamID, row.BotID, row.ChannelType,
 		row.Credentials, row.ExternalIdentity, row.SelfIdentity, row.Routing,
 		row.Disabled, row.VerifiedAt, row.CreatedAt, row.UpdatedAt,
 	)
@@ -515,7 +522,7 @@ func normalizeChannelConfigFromRow(row sqlc.BotChannelConfig) (ChannelConfig, er
 
 func normalizeChannelConfigFromGetRow(row sqlc.BotChannelConfig) (ChannelConfig, error) {
 	return normalizeChannelConfigFields(
-		row.ID, row.BotID, row.ChannelType,
+		row.ID, row.TeamID, row.BotID, row.ChannelType,
 		row.Credentials, row.ExternalIdentity, row.SelfIdentity, row.Routing,
 		row.Disabled, row.VerifiedAt, row.CreatedAt, row.UpdatedAt,
 	)
@@ -523,14 +530,14 @@ func normalizeChannelConfigFromGetRow(row sqlc.BotChannelConfig) (ChannelConfig,
 
 func normalizeChannelConfigFromListRow(row sqlc.BotChannelConfig) (ChannelConfig, error) {
 	return normalizeChannelConfigFields(
-		row.ID, row.BotID, row.ChannelType,
+		row.ID, row.TeamID, row.BotID, row.ChannelType,
 		row.Credentials, row.ExternalIdentity, row.SelfIdentity, row.Routing,
 		row.Disabled, row.VerifiedAt, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
 func normalizeChannelConfigFields(
-	id, botID pgtype.UUID, channelType string,
+	id, teamID, botID pgtype.UUID, channelType string,
 	credentials []byte, externalIdentity pgtype.Text, selfIdentity, routing []byte,
 	disabled bool, verifiedAt, createdAt, updatedAt pgtype.Timestamptz,
 ) (ChannelConfig, error) {
@@ -556,6 +563,7 @@ func normalizeChannelConfigFields(
 	}
 	return ChannelConfig{
 		ID:               id.String(),
+		TeamID:           teamID.String(),
 		BotID:            botID.String(),
 		ChannelType:      ChannelType(channelType),
 		Credentials:      credentialsMap,

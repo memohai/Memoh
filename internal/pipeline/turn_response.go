@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/agent/turn"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
@@ -20,7 +20,7 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 		return TurnResponseEntry{}, false
 	}
 
-	var modelMsg conversation.ModelMessage
+	var modelMsg turn.ModelMessage
 	if err := json.Unmarshal(msg.Content, &modelMsg); err != nil {
 		return TurnResponseEntry{}, false
 	}
@@ -59,7 +59,7 @@ type turnResponsePart struct {
 	ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
 }
 
-func nativeAssistantContent(msg conversation.ModelMessage) json.RawMessage {
+func nativeAssistantContent(msg turn.ModelMessage) json.RawMessage {
 	var out []map[string]any
 	// 1) Plain-string content (legacy format).
 	if len(msg.Content) > 0 {
@@ -129,7 +129,7 @@ func nativeAssistantContent(msg conversation.ModelMessage) json.RawMessage {
 	return marshalParts(out)
 }
 
-func nativeToolRoleContent(msg conversation.ModelMessage) json.RawMessage {
+func nativeToolRoleContent(msg turn.ModelMessage) json.RawMessage {
 	// Two possible persistence shapes:
 	//   a) Content is a JSON array of parts with type="tool-result".
 	//   b) Content is the tool result itself, and ToolCallID is set on the

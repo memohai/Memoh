@@ -15,13 +15,13 @@ import (
 
 type EmailBindingsHandler struct {
 	service        *email.Service
-	manager        *email.Manager
+	manager        email.Runtime
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
 }
 
-func NewEmailBindingsHandler(log *slog.Logger, service *email.Service, manager *email.Manager, botService *bots.Service, accountService *accounts.Service) *EmailBindingsHandler {
+func NewEmailBindingsHandler(log *slog.Logger, service *email.Service, manager email.Runtime, botService *bots.Service, accountService *accounts.Service) *EmailBindingsHandler {
 	return &EmailBindingsHandler{
 		service:        service,
 		manager:        manager,

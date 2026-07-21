@@ -21,14 +21,13 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/acpfeedback"
 	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
@@ -103,11 +102,11 @@ type SessionEnsurer interface {
 }
 
 type ToolApprovalRunner interface {
-	RespondToolApproval(ctx context.Context, input flow.ToolApprovalResponseInput, eventCh chan<- flow.WSStreamEvent) error
+	RespondToolApproval(ctx context.Context, input turn.ToolApprovalResponse, eventCh chan<- json.RawMessage) error
 }
 
 type UserInputRunner interface {
-	RespondUserInput(ctx context.Context, input flow.UserInputResponseInput, eventCh chan<- flow.WSStreamEvent) error
+	RespondUserInput(ctx context.Context, input turn.UserInputResponse, eventCh chan<- json.RawMessage) error
 }
 
 type PlainTextUserInputRunner interface {
@@ -146,6 +145,19 @@ type RequestedSkillResolver interface {
 	ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skillset.ResolvedSkill, error)
 }
 
+// CommandHandler is the command-control surface used by inbound channels.
+// The Server process supplies the local implementation; the standalone
+// Channel process supplies an authenticated RPC client.
+type CommandHandler interface {
+	CommandAccess(context.Context, command.ExecuteInput) (bool, error)
+	CurrentContext(context.Context, string) (command.CurrentContext, error)
+	ExecuteResult(context.Context, command.ExecuteInput) (*command.Result, error)
+	ExecuteWithInput(context.Context, command.ExecuteInput) (string, error)
+	HasCommandResource(string) bool
+	MemberRole(context.Context, string, string) (string, error)
+	ResolveLocale(context.Context, string) string
+}
+
 // SessionResult carries the minimum fields needed from a session.
 type SessionResult struct {
 	ID                    string
@@ -167,12 +179,12 @@ type NewSessionSpec struct {
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
-	runner              flow.Runner
+	turnSvc             turn.Service
 	routeResolver       RouteResolver
 	message             messagepkg.Writer
 	mediaService        mediaIngestor
 	reactor             channelReactor
-	commandHandler      *command.Handler
+	commandHandler      CommandHandler
 	registry            *channel.Registry
 	logger              *slog.Logger
 	jwtSecret           string
@@ -208,7 +220,7 @@ func NewChannelInboundProcessor(
 	registry *channel.Registry,
 	routeResolver RouteResolver,
 	messageWriter messagepkg.Writer,
-	runner flow.Runner,
+	turnSvc turn.Service,
 	channelIdentityService ChannelIdentityService,
 	policyService PolicyService,
 	jwtSecret string,
@@ -222,7 +234,7 @@ func NewChannelInboundProcessor(
 	}
 	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, policyService, "")
 	return &ChannelInboundProcessor{
-		runner:        runner,
+		turnSvc:       turnSvc,
 		routeResolver: routeResolver,
 		message:       messageWriter,
 		registry:      registry,
@@ -304,7 +316,7 @@ func (p *ChannelInboundProcessor) SetSessionEnsurer(ensurer SessionEnsurer) {
 
 // SetCommandHandler configures the slash command handler for intercepting
 // /command messages before they reach the LLM.
-func (p *ChannelInboundProcessor) SetCommandHandler(handler *command.Handler) {
+func (p *ChannelInboundProcessor) SetCommandHandler(handler CommandHandler) {
 	if p == nil {
 		return
 	}
@@ -395,7 +407,7 @@ func (p *ChannelInboundProcessor) shouldShowToolCallsInIM(ctx context.Context, b
 
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
 func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, sender channel.StreamReplySender) (retErr error) {
-	if p.runner == nil {
+	if p.turnSvc == nil {
 		return errors.New("channel inbound processor not configured")
 	}
 	if sender == nil {
@@ -713,8 +725,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
-	var requestedSkillContexts []conversation.RequestedSkillContext
-	var skillActivation *conversation.SkillActivation
+	var requestedSkillContexts []turn.RequestedSkillContext
+	var skillActivation *turn.SkillActivation
 	userMessageKind := ""
 	userVisibleText := ""
 	modelText := text
@@ -752,10 +764,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return p.sendSlashError(ctx, sender, msg, code)
 		}
 		requestedSkillContexts = skillset.RequestedSkillContexts(resolvedSkills)
-		skillActivation = conversation.NewSkillActivation(requestedSkillContexts, pendingSkillIntent.Prompt)
+		skillActivation = turn.NewSkillActivation(requestedSkillContexts, pendingSkillIntent.Prompt)
 		text = strings.TrimSpace(pendingSkillIntent.Prompt)
-		modelText = strings.TrimSpace(conversation.SkillActivationModelQuery(skillActivation))
-		userMessageKind = conversation.UserMessageKindSkillActivation
+		modelText = strings.TrimSpace(turn.SkillActivationModelQuery(skillActivation))
+		userMessageKind = turn.UserMessageKindSkillActivation
 		userVisibleText = strings.TrimSpace(pendingSkillIntent.Prompt)
 		msg.Message.Text = userVisibleText
 		if msg.Metadata == nil {
@@ -848,6 +860,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 		sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
 		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, pipelinepkg.DiscussSessionConfig{
+			TeamID:            cfg.TeamID,
 			BotID:             identity.BotID,
 			SessionID:         sessionID,
 			RouteID:           resolved.RouteID,
@@ -888,7 +901,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		if pendingSkillIntent != nil {
 			text = strings.TrimSpace(userVisibleText)
-			modelText = strings.TrimSpace(conversation.SkillActivationModelQuery(skillActivation))
+			modelText = strings.TrimSpace(turn.SkillActivationModelQuery(skillActivation))
 		} else {
 			text = strings.TrimSpace(msg.Message.PlainText())
 			modelText = text
@@ -923,7 +936,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			if pendingSkillIntent != nil {
 				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
 			}
-			headerifiedText := flow.FormatUserHeader(flow.UserMessageHeaderInput{
+			headerifiedText := turn.FormatUserHeader(turn.UserMessageHeaderInput{
 				MessageID:         strings.TrimSpace(msg.Message.ID),
 				ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
 				DisplayName:       strings.TrimSpace(identity.DisplayName),
@@ -1111,25 +1124,12 @@ startStream:
 		return err
 	}
 
-	// Mutex-protected collector for outbound asset refs. The resolver's
-	// streaming goroutine calls OutboundAssetCollector at persist time.
-	var (
-		assetMu           sync.Mutex
-		outboundAssetRefs []conversation.OutboundAssetRef
-	)
-	assetCollector := func() []conversation.OutboundAssetRef {
-		assetMu.Lock()
-		defer assetMu.Unlock()
-		result := make([]conversation.OutboundAssetRef, len(outboundAssetRefs))
-		copy(result, outboundAssetRefs)
-		return result
-	}
-
 	// Mark this route as active in the dispatcher so subsequent messages
-	// can be injected or queued. Produces the inject channel for this stream.
-	// Parallel mode (/now) skips the dispatcher entirely — it must not
-	// interfere with the active flag or drain the queue of another stream.
-	var injectCh <-chan conversation.InjectMessage
+	// can be injected or queued. The dispatcher's queue is forwarded into
+	// the run handle after StartTurn. Parallel mode (/now) skips the
+	// dispatcher entirely — it must not interfere with the active flag or
+	// drain the queue of another stream.
+	var injectCh <-chan turn.InjectMessage
 	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
 		injectCh = p.dispatcher.MarkActive(routeID)
 		defer func() {
@@ -1137,7 +1137,10 @@ startStream:
 		}()
 	}
 
-	chatReq := conversation.ChatRequest{
+	cmd := turn.StartTurnCommand{
+		SchemaVersion:             1,
+		TeamID:                    cfg.TeamID,
+		Mode:                      turn.ModeChat,
 		BotID:                     identity.BotID,
 		ChatID:                    activeChatID,
 		SessionID:                 sessionID,
@@ -1147,6 +1150,7 @@ startStream:
 		DisplayName:               identity.DisplayName,
 		RouteID:                   resolved.RouteID,
 		ChatToken:                 chatToken,
+		IdempotencyKey:            turnIdempotencyKey(msg.Channel, resolved.RouteID, sourceMessageID),
 		ExternalMessageID:         sourceMessageID,
 		ReplyTarget:               target,
 		ConversationType:          msg.Conversation.Type,
@@ -1174,20 +1178,16 @@ startStream:
 		UserMessagePersisted:      false,
 		Attachments:               attachments,
 		RequestedSkills:           requestedSkillContexts,
-		OutboundAssetCollector:    assetCollector,
 		EventID:                   eventID,
 	}
-	if injectCh != nil {
-		chatReq.InjectCh = injectCh
-	}
 	if mid, _ := msg.Metadata["model_id"].(string); strings.TrimSpace(mid) != "" {
-		chatReq.Model = strings.TrimSpace(mid)
+		cmd.Model = strings.TrimSpace(mid)
 	}
 	if re, _ := msg.Metadata["reasoning_effort"].(string); strings.TrimSpace(re) != "" {
-		chatReq.ReasoningEffort = strings.TrimSpace(re)
+		cmd.ReasoningEffort = strings.TrimSpace(re)
 	}
 	if targetID, _ := msg.Metadata["workspace_target_id"].(string); strings.TrimSpace(targetID) != "" {
-		chatReq.WorkspaceTargetID = strings.TrimSpace(targetID)
+		cmd.WorkspaceTargetID = strings.TrimSpace(targetID)
 	}
 	// Create a cancellable context so /stop can abort the stream.
 	streamCtx, streamCancel := context.WithCancel(ctx)
@@ -1197,20 +1197,97 @@ startStream:
 	p.activeStreams.Store(streamKey, streamCancel)
 	defer p.activeStreams.Delete(streamKey)
 
-	chunkCh, streamErrCh := p.runner.StreamChat(streamCtx, chatReq)
+	handle, startErr := p.turnSvc.StartTurn(streamCtx, cmd)
+	if startErr != nil {
+		if errors.Is(startErr, turn.ErrDuplicateTurn) {
+			// Platform webhook redelivery of an already-claimed message:
+			// treat as delivered, no user-visible error. The processing
+			// marker added above must still be cleared — on Feishu it is a
+			// reaction on the source message that otherwise sticks forever.
+			if p.logger != nil {
+				p.logger.Info(
+					"duplicate inbound turn dropped",
+					slog.String("channel", msg.Channel.String()),
+					slog.String("external_message_id", sourceMessageID),
+				)
+			}
+			if statusNotifier != nil {
+				if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
+					p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
+				}
+			}
+			return nil
+		}
+		if p.logger != nil {
+			p.logger.Error(
+				"start turn failed",
+				slog.String("channel", msg.Channel.String()),
+				slog.String("channel_identity_id", identity.ChannelIdentityID),
+				slog.Any("error", startErr),
+			)
+		}
+		_ = stream.Push(ctx, channel.StreamEvent{
+			Type:  channel.StreamEventError,
+			Error: startErr.Error(),
+		})
+		if statusNotifier != nil {
+			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, startErr); notifyErr != nil {
+				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
+			}
+		}
+		return startErr
+	}
+
+	// Ordinal bookkeeping plus forwarding of outbound asset refs into the
+	// running turn; the resolver attaches them at persist time.
+	assets := &assetTracker{run: handle}
+
+	// Forward queued inject messages into the running turn.
+	if injectCh != nil {
+		go func() {
+			for {
+				select {
+				case m, ok := <-injectCh:
+					if !ok {
+						return
+					}
+					if injectErr := handle.Inject(streamCtx, m); injectErr != nil {
+						// The message is lost and this forwarder stops; later
+						// queued messages surface via drainQueue at turn end.
+						// Losing this silently would contradict the 👀 receipt
+						// the user already got.
+						if p.logger != nil {
+							p.logger.Warn(
+								"inject into running turn failed, message dropped",
+								slog.String("channel", msg.Channel.String()),
+								slog.String("route_id", routeID),
+								slog.Any("error", injectErr),
+							)
+						}
+						return
+					}
+				case <-streamCtx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	chunkCh, streamErrCh := handle.Events(), handle.Errs()
 
 	var (
-		finalMessages []conversation.ModelMessage
+		finalMessages []turn.ModelMessage
 		streamErr     error
+		pushBroken    bool
 	)
 	for chunkCh != nil || streamErrCh != nil {
 		select {
-		case chunk, ok := <-chunkCh:
+		case turnEvent, ok := <-chunkCh:
 			if !ok {
 				chunkCh = nil
 				continue
 			}
-			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
+			events, messages, parseErr := mapStreamChunkToChannelEvents(turnEvent.Payload)
 			if parseErr != nil {
 				if p.logger != nil {
 					p.logger.Warn(
@@ -1230,20 +1307,21 @@ startStream:
 				if event.Type == channel.StreamEventAttachment && len(event.Attachments) > 0 {
 					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Attachments)
 					events[i].Attachments = ingested
-					assetMu.Lock()
-					outboundAssetRefs = append(outboundAssetRefs, buildAssetRefs(ingested, len(outboundAssetRefs))...)
-					assetMu.Unlock()
+					assets.add(ingested)
 				}
 				if event.Type == channel.StreamEventReaction && len(event.Reactions) > 0 {
 					p.dispatchReactions(ctx, identity.BotID, msg.Channel, target, sourceMessageID, event.Reactions)
 					continue
 				}
 				if event.Type == channel.StreamEventSpeech && len(event.Speeches) > 0 {
-					p.synthesizeAndPushVoice(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Speeches, stream, &outboundAssetRefs, &assetMu)
+					p.synthesizeAndPushVoice(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Speeches, stream, assets)
 					continue
 				}
 				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
-					streamErr = pushErr
+					if streamErr == nil {
+						streamErr = pushErr
+					}
+					pushBroken = true
 					break
 				}
 			}
@@ -1255,11 +1333,16 @@ startStream:
 				streamErrCh = nil
 				continue
 			}
-			if err != nil {
+			// A run error must not abandon events already produced before
+			// it (buffered text deltas, agent_end with the final
+			// messages): keep consuming until the event channel closes,
+			// matching the pre-split unbuffered ordering. Only a broken
+			// push transport stops consumption early.
+			if err != nil && streamErr == nil {
 				streamErr = err
 			}
 		}
-		if streamErr != nil {
+		if pushBroken {
 			break
 		}
 	}
@@ -1323,7 +1406,7 @@ startStream:
 		return nil
 	}
 
-	outputs := flow.ExtractAssistantOutputs(finalMessages)
+	outputs := turn.ExtractAssistantOutputs(finalMessages)
 	for _, output := range outputs {
 		outMessage := buildChannelMessage(output, desc.Capabilities)
 		if outMessage.IsEmpty() {
@@ -1371,6 +1454,18 @@ startStream:
 		}
 	}
 	return nil
+}
+
+func turnIdempotencyKey(channelType channel.ChannelType, routeID, externalMessageID string) string {
+	externalMessageID = strings.TrimSpace(externalMessageID)
+	if externalMessageID == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(channelType.String()),
+		strings.TrimSpace(routeID),
+		externalMessageID,
+	}, ":")
 }
 
 // sendModeConfirmation sends a lightweight acknowledgement to the user when
@@ -1447,7 +1542,7 @@ func (p *ChannelInboundProcessor) drainQueue(ctx context.Context, routeID string
 	}
 }
 
-func collectAttachmentPaths(attachments []conversation.ChatAttachment) []string {
+func collectAttachmentPaths(attachments []turn.Attachment) []string {
 	if len(attachments) == 0 {
 		return nil
 	}
@@ -1857,7 +1952,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	ident InboundIdentity,
 	msg channel.InboundMessage,
 	text string,
-	attachments []conversation.ChatAttachment,
+	attachments []turn.Attachment,
 	routeID, sessionID, eventID string,
 ) {
 	if p.message == nil {
@@ -1879,7 +1974,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		}
 	}
 
-	headerifiedText := flow.FormatUserHeader(flow.UserMessageHeaderInput{
+	headerifiedText := turn.FormatUserHeader(turn.UserMessageHeaderInput{
 		MessageID:         strings.TrimSpace(msg.Message.ID),
 		ChannelIdentityID: strings.TrimSpace(ident.ChannelIdentityID),
 		DisplayName:       strings.TrimSpace(ident.DisplayName),
@@ -1891,7 +1986,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		Time:              time.Now().UTC(),
 	}, trimmedText)
 
-	modelMsg := conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(headerifiedText)}
+	modelMsg := turn.ModelMessage{Role: "user", Content: turn.NewTextContent(headerifiedText)}
 	serialized, err := json.Marshal(modelMsg)
 	if err != nil {
 		if p.logger != nil {
@@ -1952,7 +2047,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	}
 }
 
-func buildChannelMessage(output conversation.AssistantOutput, capabilities channel.ChannelCapabilities) channel.Message {
+func buildChannelMessage(output turn.AssistantOutput, capabilities channel.ChannelCapabilities) channel.Message {
 	msg := channel.Message{}
 	if strings.TrimSpace(output.Content) != "" {
 		msg.Text = strings.TrimSpace(output.Content)
@@ -2003,7 +2098,7 @@ func buildChannelMessage(output conversation.AssistantOutput, capabilities chann
 	return msg
 }
 
-func hasNonTrivialContentPart(parts []conversation.ContentPart) bool {
+func hasNonTrivialContentPart(parts []turn.ContentPart) bool {
 	for _, part := range parts {
 		if !contentPartHasValue(part) {
 			continue
@@ -2024,7 +2119,7 @@ func hasNonTrivialContentPart(parts []conversation.ContentPart) bool {
 	return false
 }
 
-func contentPartHasValue(part conversation.ContentPart) bool {
+func contentPartHasValue(part turn.ContentPart) bool {
 	if strings.TrimSpace(part.Text) != "" {
 		return true
 	}
@@ -2037,7 +2132,7 @@ func contentPartHasValue(part conversation.ContentPart) bool {
 	return false
 }
 
-func contentPartText(part conversation.ContentPart) string {
+func contentPartText(part turn.ContentPart) string {
 	if strings.TrimSpace(part.Text) != "" {
 		return part.Text
 	}
@@ -2052,12 +2147,12 @@ func contentPartText(part conversation.ContentPart) string {
 
 // agentStreamEnvelope is the JSON shape produced by internal/agent.StreamEvent.
 type agentStreamEnvelope struct {
-	Type     string                      `json:"type"`
-	Delta    string                      `json:"delta"`
-	Error    string                      `json:"error"`
-	Message  string                      `json:"message"`
-	Data     json.RawMessage             `json:"data"`
-	Messages []conversation.ModelMessage `json:"messages"`
+	Type     string              `json:"type"`
+	Delta    string              `json:"delta"`
+	Error    string              `json:"error"`
+	Message  string              `json:"message"`
+	Data     json.RawMessage     `json:"data"`
+	Messages []turn.ModelMessage `json:"messages"`
 
 	ToolName    string          `json:"toolName"`
 	ToolCallID  string          `json:"toolCallId"`
@@ -2073,7 +2168,7 @@ type agentStreamEnvelope struct {
 	Speeches    json.RawMessage `json:"speeches"`
 }
 
-func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.StreamEvent, []conversation.ModelMessage, error) {
+func mapStreamChunkToChannelEvents(chunk json.RawMessage) ([]channel.StreamEvent, []turn.ModelMessage, error) {
 	if len(chunk) == 0 {
 		return nil, nil, nil
 	}
@@ -2081,7 +2176,7 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 	if err := json.Unmarshal(chunk, &envelope); err != nil {
 		return nil, nil, err
 	}
-	finalMessages := make([]conversation.ModelMessage, 0, len(envelope.Messages))
+	finalMessages := make([]turn.ModelMessage, 0, len(envelope.Messages))
 	finalMessages = append(finalMessages, envelope.Messages...)
 	eventType := strings.ToLower(strings.TrimSpace(envelope.Type))
 	switch eventType {
@@ -2343,7 +2438,7 @@ type sendMessageToolArgs struct {
 	Message           *channel.Message `json:"message"`
 }
 
-func collectMessageToolContext(registry *channel.Registry, messages []conversation.ModelMessage, channelType channel.ChannelType, replyTarget string) ([]string, bool) {
+func collectMessageToolContext(registry *channel.Registry, messages []turn.ModelMessage, channelType channel.ChannelType, replyTarget string) ([]string, bool) {
 	if len(messages) == 0 {
 		return nil, false
 	}
@@ -3053,17 +3148,17 @@ func channelAttachmentsToAssetRefs(attachments []channel.Attachment, role string
 	return refs
 }
 
-func mapChannelToChatAttachments(attachments []channel.Attachment) []conversation.ChatAttachment {
+func mapChannelToChatAttachments(attachments []channel.Attachment) []turn.Attachment {
 	if len(attachments) == 0 {
 		return nil
 	}
-	result := make([]conversation.ChatAttachment, 0, len(attachments))
+	result := make([]turn.Attachment, 0, len(attachments))
 	for _, att := range attachments {
 		if att.Type == channel.AttachmentAudio || att.Type == channel.AttachmentVoice {
 			continue
 		}
 		bundle := channel.BundleFromAttachment(att)
-		ca := conversation.ChatAttachmentFromBundle(bundle)
+		ca := turn.AttachmentFromBundle(bundle)
 		switch {
 		case strings.TrimSpace(bundle.ContentHash) != "" && bundle.Path != "":
 			ca.Path = bundle.Path
@@ -3097,14 +3192,32 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 
 // synthesizeAndPushVoice handles speech_delta events by synthesizing audio
 // and pushing the resulting voice attachment into the outbound stream.
+// assetTracker keeps ordinal bookkeeping for outbound asset refs and
+// forwards each batch into the running turn so the resolver can attach
+// them at persist time.
+type assetTracker struct {
+	mu   sync.Mutex
+	refs []turn.OutboundAssetRef
+	run  turn.RunHandle
+}
+
+func (t *assetTracker) add(attachments []channel.Attachment) {
+	t.mu.Lock()
+	refs := buildAssetRefs(attachments, len(t.refs))
+	t.refs = append(t.refs, refs...)
+	t.mu.Unlock()
+	if len(refs) > 0 && t.run != nil {
+		t.run.AddOutboundAssets(refs)
+	}
+}
+
 func (p *ChannelInboundProcessor) synthesizeAndPushVoice(
 	ctx context.Context,
 	botID string,
 	channelType channel.ChannelType,
 	speeches []channel.SpeechRequest,
 	stream channel.OutboundStream,
-	outboundAssetRefs *[]conversation.OutboundAssetRef,
-	assetMu *sync.Mutex,
+	assets *assetTracker,
 ) {
 	if p.speechService == nil || p.speechModelResolver == nil {
 		if p.logger != nil {
@@ -3145,9 +3258,7 @@ func (p *ChannelInboundProcessor) synthesizeAndPushVoice(
 		}
 		ingested := p.ingestOutboundAttachments(ctx, botID, channelType, voiceEvent.Attachments)
 		voiceEvent.Attachments = ingested
-		assetMu.Lock()
-		*outboundAssetRefs = append(*outboundAssetRefs, buildAssetRefs(ingested, len(*outboundAssetRefs))...)
-		assetMu.Unlock()
+		assets.add(ingested)
 		if pushErr := stream.Push(ctx, voiceEvent); pushErr != nil {
 			if p.logger != nil {
 				p.logger.Warn("push voice attachment failed", slog.String("bot_id", botID), slog.Any("error", pushErr))
@@ -3179,14 +3290,14 @@ func parseSpeechDelta(raw json.RawMessage) []channel.SpeechRequest {
 	return speeches
 }
 
-func buildAssetRefs(attachments []channel.Attachment, startOrdinal int) []conversation.OutboundAssetRef {
-	var refs []conversation.OutboundAssetRef
+func buildAssetRefs(attachments []channel.Attachment, startOrdinal int) []turn.OutboundAssetRef {
+	var refs []turn.OutboundAssetRef
 	for _, att := range attachments {
 		contentHash := strings.TrimSpace(att.ContentHash)
 		if contentHash == "" {
 			continue
 		}
-		ref := conversation.OutboundAssetRef{
+		ref := turn.OutboundAssetRef{
 			ContentHash: contentHash,
 			Role:        "attachment",
 			Ordinal:     startOrdinal + len(refs),
@@ -3451,13 +3562,13 @@ func (p *ChannelInboundProcessor) handleStartCommand(
 func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID string, invocation command.Invocation) error {
 	loc := p.localizer(ctx, identity.BotID)
 	caps := p.channelCaps(msg.Channel)
-	approvalRunner, ok := p.runner.(ToolApprovalRunner)
-	if !ok {
+	if p.turnSvc == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  strings.TrimSpace(msg.ReplyTarget),
 			Message: applyMessageFormat(channel.Message{Text: loc.T("cmd.toolApproval.unavailable")}, caps),
 		})
 	}
+	approvalRunner := ToolApprovalRunner(p.turnSvc)
 	parsed := invocation.Parsed
 	explicitID := ""
 	reason := ""
@@ -3472,7 +3583,7 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 		explicitID = actionText
 		reason = strings.TrimSpace(strings.Join(parsed.Args, " "))
 	}
-	return p.streamToolApprovalCommand(ctx, msg, sender, identity, routeID, approvalRunner, flow.ToolApprovalResponseInput{
+	return p.streamToolApprovalCommand(ctx, msg, sender, identity, routeID, approvalRunner, turn.ToolApprovalResponse{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		SessionID:              strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -3488,13 +3599,13 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID string, invocation command.Invocation) error {
 	loc := p.localizer(ctx, identity.BotID)
 	caps := p.channelCaps(msg.Channel)
-	userInputRunner, ok := p.runner.(UserInputRunner)
-	if !ok {
+	if p.turnSvc == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  strings.TrimSpace(msg.ReplyTarget),
 			Message: applyMessageFormat(channel.Message{Text: loc.T("cmd.userInput.unavailable")}, caps),
 		})
 	}
+	userInputRunner := UserInputRunner(p.turnSvc)
 	replyExternalID := ""
 	if msg.Message.Reply != nil {
 		replyExternalID = strings.TrimSpace(msg.Message.Reply.MessageID)
@@ -3513,7 +3624,7 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 	// answers after collecting every question. Prefer those over free-text
 	// parsing so multi-question replies do not depend on resolver text limits.
 	answers := userInputAnswersFromMetadata(msg.Metadata)
-	return p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, userInputRunner, flow.UserInputResponseInput{
+	return p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, userInputRunner, turn.UserInputResponse{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		SessionID:              strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -3620,19 +3731,19 @@ func splitFirstCommandField(text string) (head, tail string) {
 	return text, ""
 }
 
-func (p *ChannelInboundProcessor) streamToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, approvalRunner ToolApprovalRunner, input flow.ToolApprovalResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+func (p *ChannelInboundProcessor) streamToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, approvalRunner ToolApprovalRunner, input turn.ToolApprovalResponse) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- json.RawMessage) error {
 		return approvalRunner.RespondToolApproval(runCtx, input, eventCh)
 	})
 }
 
-func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, userInputRunner UserInputRunner, input flow.UserInputResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, userInputRunner UserInputRunner, input turn.UserInputResponse) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- json.RawMessage) error {
 		return userInputRunner.RespondUserInput(runCtx, input, eventCh)
 	})
 }
 
-type streamContinuationFunc func(context.Context, chan<- flow.WSStreamEvent) error
+type streamContinuationFunc func(context.Context, chan<- json.RawMessage) error
 
 func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, run streamContinuationFunc) error {
 	target := strings.TrimSpace(msg.ReplyTarget)
@@ -3676,7 +3787,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 		return err
 	}
 
-	eventCh := make(chan flow.WSStreamEvent, 64)
+	eventCh := make(chan json.RawMessage, 64)
 	errCh := make(chan error, 1)
 	go func() {
 		defer close(eventCh)
@@ -3684,7 +3795,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 		close(errCh)
 	}()
 
-	var finalMessages []conversation.ModelMessage
+	var finalMessages []turn.ModelMessage
 	for eventCh != nil || errCh != nil {
 		select {
 		case chunk, ok := <-eventCh:
@@ -3735,7 +3846,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 
 	sentTexts, suppressReplies := collectMessageToolContext(p.registry, finalMessages, msg.Channel, target)
 	if !suppressReplies {
-		outputs := flow.ExtractAssistantOutputs(finalMessages)
+		outputs := turn.ExtractAssistantOutputs(finalMessages)
 		for _, output := range outputs {
 			outMessage := buildChannelMessage(output, channel.ChannelCapabilities{Text: true, Markdown: true, Reply: true})
 			if outMessage.IsEmpty() {

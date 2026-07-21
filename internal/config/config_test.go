@@ -202,6 +202,31 @@ func TestLoadAppliesWebhookTunnelEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestRuntimeValidationRequiresInternalRPCSecret(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if err := cfg.ValidateServerRuntime(); err == nil || !strings.Contains(err.Error(), "shared_secret") {
+		t.Fatalf("server validation error = %v", err)
+	}
+	if err := cfg.ValidateChannelRuntime(); err == nil || !strings.Contains(err.Error(), "shared_secret") {
+		t.Fatalf("channel validation error = %v", err)
+	}
+
+	t.Setenv("MEMOH_INTERNAL_RPC_SHARED_SECRET", "test-only-secret")
+	cfg, err = Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config with secret: %v", err)
+	}
+	if err := cfg.ValidateServerRuntime(); err != nil {
+		t.Fatalf("server validation: %v", err)
+	}
+	if err := cfg.ValidateChannelRuntime(); err != nil {
+		t.Fatalf("channel validation: %v", err)
+	}
+}
+
 func TestLoadRejectsInvalidWebhookTunnelMode(t *testing.T) {
 	t.Parallel()
 

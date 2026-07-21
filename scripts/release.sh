@@ -113,17 +113,25 @@ build_archive() {
     ext=".exe"
   fi
 
-  local binary_name="memoh-server${ext}"
+  local server_binary_name="memoh-server${ext}"
+  local channel_binary_name="memoh-channel${ext}"
   local target_dir="$OUTPUT_DIR/memoh-server_${VERSION}_${TARGET_OS}_${TARGET_ARCH}"
   mkdir -p "$target_dir"
 
-  log "building binary ${TARGET_OS}/${TARGET_ARCH}"
+  log "building server and channel binaries ${TARGET_OS}/${TARGET_ARCH}"
   CGO_ENABLED=0 GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" \
     go build \
     -trimpath \
     -ldflags "-s -w -X github.com/memohai/memoh/internal/version.Version=${VERSION} -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
-    -o "$target_dir/$binary_name" \
+    -o "$target_dir/$server_binary_name" \
     "$ROOT_DIR/cmd/agent"
+
+  CGO_ENABLED=0 GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" \
+    go build \
+    -trimpath \
+    -ldflags "-s -w -X github.com/memohai/memoh/internal/version.Version=${VERSION} -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
+    -o "$target_dir/$channel_binary_name" \
+    "$ROOT_DIR/cmd/channel"
 
   if [[ "$TARGET_OS" == "windows" ]]; then
     (cd "$OUTPUT_DIR" && zip -q -r "memoh-server_${VERSION}_${TARGET_OS}_${TARGET_ARCH}.zip" "memoh-server_${VERSION}_${TARGET_OS}_${TARGET_ARCH}")

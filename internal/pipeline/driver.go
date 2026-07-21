@@ -8,38 +8,12 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
-
-	agentpkg "github.com/memohai/memoh/internal/agent"
+	agentevent "github.com/memohai/memoh/internal/agent/event"
+	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
-
-// ResolveRunConfigResult holds the output of ResolveRunConfig.
-type ResolveRunConfigResult struct {
-	RunConfig   agentpkg.RunConfig
-	ModelID     string // database UUID of the selected model
-	RuntimeType string
-}
-
-// RunConfigResolver resolves a complete agent RunConfig and persists output
-// rounds. Implemented by flow.Resolver.
-type RunConfigResolver interface {
-	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
-	InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
-	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
-}
-
-// discussStreamer abstracts the agent streaming capability for testability.
-type discussStreamer interface {
-	Stream(ctx context.Context, cfg agentpkg.RunConfig) <-chan agentpkg.StreamEvent
-}
-
-type discussRuntimeStreamer interface {
-	StreamChat(ctx context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error)
-}
 
 type DiscussCursorStore interface {
 	GetDiscussConsumedCursor(ctx context.Context, sessionID, scopeKey string) (int64, error)
@@ -54,19 +28,18 @@ type DiscussStreamBroadcaster interface {
 
 // DiscussDriverDeps holds dependencies injected into the DiscussDriver.
 type DiscussDriverDeps struct {
-	Pipeline        *Pipeline
-	EventStore      *EventStore
-	Agent           *agentpkg.Agent
-	MessageService  messagepkg.Service
-	Resolver        RunConfigResolver
-	RuntimeStreamer discussRuntimeStreamer
-	CursorStore     DiscussCursorStore
-	Broadcaster     DiscussStreamBroadcaster
-	Logger          *slog.Logger
+	Pipeline       *Pipeline
+	EventStore     *EventStore
+	Turn           turn.Service
+	MessageService messagepkg.Service
+	CursorStore    DiscussCursorStore
+	Broadcaster    DiscussStreamBroadcaster
+	Logger         *slog.Logger
 }
 
 // DiscussSessionConfig holds per-session configuration for discuss mode.
 type DiscussSessionConfig struct {
+	TeamID            string
 	BotID             string
 	SessionID         string
 	RouteID           string
@@ -109,13 +82,9 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 	}
 }
 
-// SetResolver sets the RunConfigResolver after construction (breaks DI cycles).
-func (d *DiscussDriver) SetResolver(r RunConfigResolver) {
-	d.deps.Resolver = r
-}
-
-func (d *DiscussDriver) SetRuntimeStreamer(r discussRuntimeStreamer) {
-	d.deps.RuntimeStreamer = r
+// SetTurnService sets the turn service after construction (breaks DI cycles).
+func (d *DiscussDriver) SetTurnService(svc turn.Service) {
+	d.deps.Turn = svc
 }
 
 // SetBroadcaster sets the stream broadcaster after construction so that
@@ -251,10 +220,10 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 }
 
 func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, rc RenderedContext, log *slog.Logger) {
-	d.handleReplyWithAgent(ctx, sess, rc, log, d.deps.Agent)
+	d.handleReplyWithTurn(ctx, sess, rc, log, d.deps.Turn)
 }
 
-func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussSession, rc RenderedContext, log *slog.Logger, agent discussStreamer) {
+func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSession, rc RenderedContext, log *slog.Logger, turnSvc turn.Service) {
 	cfg := d.sessionConfigSnapshot(sess)
 
 	trs := d.loadTurnResponses(ctx, cfg.SessionID)
@@ -287,191 +256,125 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		slog.Int("messages", len(composed.Messages)),
 		slog.Int("estimated_tokens", composed.EstimatedTokens))
 
-	if d.deps.Resolver == nil {
-		log.Error("discuss driver: resolver not configured")
+	if turnSvc == nil {
+		log.Error("discuss driver: turn service not configured")
 		return
-	}
-	resolved, err := d.deps.Resolver.ResolveRunConfig(ctx,
-		cfg.BotID, cfg.SessionID, cfg.ChannelIdentityID,
-		cfg.CurrentPlatform, cfg.ReplyTarget, cfg.ConversationType, cfg.SessionToken)
-	if err != nil {
-		log.Error("discuss: resolve run config failed", slog.Any("error", err))
-		return
-	}
-	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
-		isMentioned := wasRecentlyMentioned(rc, sess.lastProcessedMs)
-		// A direct/1:1 conversation is always "addressed" (matching the inbound
-		// layer's isDirectedAtBot/shouldTriggerAssistantResponse), so a DM
-		// discuss-ACP session must reply even without an explicit @-mention or
-		// reply-to. Without this, a `/new discuss codex` session in a DM would
-		// be permanently silent.
-		addressed := isMentioned || channel.IsPrivateConversationType(cfg.ConversationType)
-		consumedMs := latestRCReceivedAtMs(rc)
-		// Participation gate for external ACP runtimes. Unlike the cheap model
-		// runtime, entering the ACP path spins up Codex/Claude Code, so we must
-		// not pre-warm it for passive group chatter. Only start the runtime when
-		// the bot was actually addressed. When it is not, advance the consumed
-		// cursor without starting a runtime so the same batch is not
-		// re-evaluated; those messages remain covered as context on the next
-		// addressed turn because the reset/full-context prompt re-composes from
-		// the RC window.
-		if !addressed {
-			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
-			return
-		}
-		if d.streamDiscussACPRuntime(ctx, cfg, composed, addressed, log) {
-			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
-		}
-		return
-	}
-	runConfig := resolved.RunConfig
-
-	runConfig.Messages = contextMessagesToSDK(composed.Messages)
-	runConfig.SessionType = sessionpkg.TypeDiscuss
-	runConfig.Query = ""
-
-	// Inline image attachments from new RC segments so the model receives
-	// them as native vision input (ImagePart) on the first encounter.
-	// Subsequent turns only see the file path in the XML rendering.
-	if runConfig.SupportsImageInput && d.deps.Resolver != nil {
-		imageRefs := extractNewImageRefs(rc, sess.lastProcessedMs)
-		if len(imageRefs) > 0 {
-			imageParts := d.deps.Resolver.InlineImageAttachments(ctx, cfg.BotID, imageRefs)
-			injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
-		}
 	}
 
 	isMentioned := wasRecentlyMentioned(rc, sess.lastProcessedMs)
-	lateBinding := buildLateBindingPrompt(isMentioned)
-	runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(lateBinding))
-	runConfig = runConfig.RefreshContextFrag()
-
-	eventCh := agent.Stream(ctx, runConfig)
-
-	var finalMessages json.RawMessage
-	for event := range eventCh {
-		d.broadcastDiscussEvent(cfg.BotID, event)
-
-		switch event.Type {
-		case agentpkg.EventError:
-			log.Error("discuss stream error", slog.String("error", event.Error))
-		case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
-			finalMessages = event.Messages
-		}
-	}
-
-	if d.deps.Resolver != nil && len(finalMessages) > 0 {
-		var sdkMsgs []sdk.Message
-		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
-			if storeErr := d.deps.Resolver.StoreRound(ctx,
-				cfg.BotID, cfg.SessionID, cfg.ChannelIdentityID, cfg.CurrentPlatform,
-				sdkMsgs, resolved.ModelID,
-			); storeErr != nil {
-				log.Error("discuss: store round failed", slog.Any("error", storeErr))
-			}
-		}
-	}
-
-	// Advance the cursor to the latest RC segment actually consumed in this
-	// turn (not wall-clock time). Messages that arrive DURING LLM generation
-	// will land in a newer RC with ReceivedAtMs > this cursor and correctly
-	// trigger another round; wall-clock would wrongly mark them processed.
+	// A direct/1:1 conversation is always "addressed" (matching the inbound
+	// layer's isDirectedAtBot/shouldTriggerAssistantResponse), so a DM
+	// discuss-ACP session must reply even without an explicit @-mention or
+	// reply-to. Expensive external runtimes use this as a participation gate.
+	addressed := isMentioned || channel.IsPrivateConversationType(cfg.ConversationType)
 	consumedMs := latestRCReceivedAtMs(rc)
-	d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
-}
 
-func (d *DiscussDriver) streamDiscussACPRuntime(ctx context.Context, cfg DiscussSessionConfig, composed *ComposeContextResult, isMentioned bool, log *slog.Logger) bool {
-	if d.deps.RuntimeStreamer == nil {
-		log.Error("discuss ACP runtime: streamer not configured")
-		return false
+	msgs := make([]turn.DiscussMessage, 0, len(composed.Messages))
+	for _, m := range composed.Messages {
+		msgs = append(msgs, turn.DiscussMessage{Role: m.Role, Content: m.Content, RawContent: m.RawContent})
 	}
-	prompt := discussACPFullContextPrompt(composed.Messages, buildLateBindingPrompt(isMentioned))
-	if strings.TrimSpace(prompt) == "" {
-		return false
+	var imageRefs []turn.DiscussImageRef
+	for _, r := range extractNewImageRefs(rc, sess.lastProcessedMs) {
+		imageRefs = append(imageRefs, turn.DiscussImageRef{ContentHash: r.ContentHash, Mime: r.Mime})
 	}
-	chunks, errs := d.deps.RuntimeStreamer.StreamChat(ctx, conversation.ChatRequest{
+
+	handle, err := turnSvc.StartTurn(ctx, turn.StartTurnCommand{
+		SchemaVersion:           1,
+		TeamID:                  cfg.TeamID,
+		Mode:                    turn.ModeDiscuss,
 		BotID:                   cfg.BotID,
-		ChatID:                  cfg.BotID,
 		SessionID:               cfg.SessionID,
 		RouteID:                 cfg.RouteID,
 		SourceChannelIdentityID: cfg.ChannelIdentityID,
 		CurrentChannel:          cfg.CurrentPlatform,
 		ReplyTarget:             cfg.ReplyTarget,
 		ConversationType:        cfg.ConversationType,
-		Token:                   cfg.SessionToken,
+		ConversationName:        cfg.ConversationName,
+		SessionToken:            cfg.SessionToken,
 		ChatToken:               cfg.ChatToken,
 		ToolHTTPURL:             cfg.ToolHTTPURL,
-		Query:                   prompt,
-		RawQuery:                prompt,
-		UserMessagePersisted:    true,
-		SkipMemoryExtraction:    true,
-		ForceFreshRuntime:       true,
+		DiscussMessages:         msgs,
+		DiscussImageRefs:        imageRefs,
+		DiscussMentioned:        isMentioned,
+		DiscussAddressed:        addressed,
 	})
-	streamed := false
-	terminal := false
-	failed := false
-	for chunks != nil || errs != nil {
+	if err != nil {
+		log.Error("discuss: start turn failed", slog.Any("error", err))
+		return
+	}
+
+	var (
+		runtimeType string
+		streamed    bool
+		terminal    bool
+		failed      bool
+		skipped     bool
+	)
+	events, errsCh := handle.Events(), handle.Errs()
+	for events != nil || errsCh != nil {
 		select {
-		case chunk, ok := <-chunks:
+		case e, ok := <-events:
 			if !ok {
-				chunks = nil
+				events = nil
 				continue
 			}
-			var event agentpkg.StreamEvent
-			if err := json.Unmarshal(chunk, &event); err != nil {
-				log.Warn("discuss ACP runtime: decode stream event failed", slog.Any("error", err))
-				failed = true
-				continue
+			switch e.Kind {
+			case turn.DiscussEventRunResolved:
+				var payload turn.DiscussRunResolvedPayload
+				if json.Unmarshal(e.Payload, &payload) == nil {
+					runtimeType = payload.RuntimeType
+				}
+			case turn.DiscussEventSkipped:
+				skipped = true
+			default:
+				var se agentevent.StreamEvent
+				if decodeErr := json.Unmarshal(e.Payload, &se); decodeErr != nil {
+					log.Warn("discuss: decode stream event failed", slog.Any("error", decodeErr))
+					failed = true
+					continue
+				}
+				streamed = true
+				if se.Type == agentevent.Error {
+					failed = true
+					log.Error("discuss stream error", slog.String("error", se.Error))
+				}
+				if se.Type == agentevent.AgentEnd || se.Type == agentevent.AgentAbort {
+					terminal = true
+				}
+				d.broadcastDiscussEvent(cfg.BotID, se)
 			}
-			streamed = true
-			if event.Type == agentpkg.EventError {
-				failed = true
-			}
-			if event.Type == agentpkg.EventAgentEnd || event.Type == agentpkg.EventAgentAbort {
-				terminal = true
-			}
-			d.broadcastDiscussEvent(cfg.BotID, event)
-		case err, ok := <-errs:
+		case streamErr, ok := <-errsCh:
 			if !ok {
-				errs = nil
+				errsCh = nil
 				continue
 			}
-			if err != nil {
-				log.Error("discuss ACP runtime failed", slog.Any("error", err))
+			if streamErr != nil {
+				log.Error("discuss turn failed", slog.Any("error", streamErr))
 				failed = true
 			}
 		case <-ctx.Done():
-			log.Warn("discuss ACP runtime cancelled", slog.Any("error", ctx.Err()))
-			return false
+			log.Warn("discuss turn cancelled", slog.Any("error", ctx.Err()))
+			return
 		}
 	}
-	return streamed && terminal && !failed
-}
 
-func discussACPFullContextPrompt(messages []ContextMessage, lateBinding string) string {
-	var b strings.Builder
-	b.WriteString("You are replying in a discuss-mode conversation. The runtime is reset each turn, so use the complete context below as the source of truth.\n\n")
-	for _, msg := range messages {
-		role := strings.TrimSpace(msg.Role)
-		if role == "" {
-			role = "user"
-		}
-		content := strings.TrimSpace(msg.Content)
-		if content == "" {
-			continue
-		}
-		b.WriteString("[")
-		b.WriteString(role)
-		b.WriteString("]\n")
-		b.WriteString(content)
-		b.WriteString("\n\n")
+	if runtimeType == "" {
+		// Run config never resolved; leave the cursor untouched so the same
+		// batch retriggers on the next RC (pre-port semantics).
+		return
 	}
-	b.WriteString("Reply to the latest user-visible message when a response is appropriate.")
-	if strings.TrimSpace(lateBinding) != "" {
-		b.WriteString("\n\n")
-		b.WriteString(strings.TrimSpace(lateBinding))
+
+	// Cursor advance preserves the pre-port semantics: ACP runs advance when
+	// the participation gate skipped them or after a clean terminal stream;
+	// the cheap native runtime advances unconditionally so a failed LLM call
+	// is not endlessly re-answered.
+	if strings.TrimSpace(runtimeType) == sessionpkg.RuntimeACPAgent {
+		if skipped || (streamed && terminal && !failed) {
+			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
+		}
+		return
 	}
-	return strings.TrimSpace(b.String())
+	d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
 }
 
 // latestRCReceivedAtMs returns the maximum ReceivedAtMs across all segments
@@ -555,7 +458,7 @@ func anchorFromTRs(trs []TurnResponseEntry) int64 {
 
 // broadcastDiscussEvent forwards an agent stream event to the RouteHub so the
 // Web UI can display thinking, tool calls, and text deltas in real time.
-func (d *DiscussDriver) broadcastDiscussEvent(botID string, event agentpkg.StreamEvent) {
+func (d *DiscussDriver) broadcastDiscussEvent(botID string, event agentevent.StreamEvent) {
 	if d.deps.Broadcaster == nil {
 		return
 	}
@@ -566,33 +469,33 @@ func (d *DiscussDriver) broadcastDiscussEvent(botID string, event agentpkg.Strea
 	d.deps.Broadcaster.PublishEvent(botID, se)
 }
 
-func agentEventToChannelEvent(e agentpkg.StreamEvent) (channel.StreamEvent, bool) {
+func agentEventToChannelEvent(e agentevent.StreamEvent) (channel.StreamEvent, bool) {
 	switch e.Type {
-	case agentpkg.EventAgentStart:
+	case agentevent.AgentStart:
 		return channel.StreamEvent{Type: channel.StreamEventAgentStart}, true
-	case agentpkg.EventTextStart:
+	case agentevent.TextStart:
 		return channel.StreamEvent{Type: channel.StreamEventPhaseStart, Phase: channel.StreamPhaseText}, true
-	case agentpkg.EventTextDelta:
+	case agentevent.TextDelta:
 		return channel.StreamEvent{Type: channel.StreamEventDelta, Delta: e.Delta}, true
-	case agentpkg.EventTextEnd:
+	case agentevent.TextEnd:
 		return channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText}, true
-	case agentpkg.EventReasoningStart:
+	case agentevent.ReasoningStart:
 		return channel.StreamEvent{Type: channel.StreamEventPhaseStart, Phase: channel.StreamPhaseReasoning}, true
-	case agentpkg.EventReasoningDelta:
+	case agentevent.ReasoningDelta:
 		return channel.StreamEvent{Type: channel.StreamEventDelta, Delta: e.Delta, Phase: channel.StreamPhaseReasoning}, true
-	case agentpkg.EventReasoningEnd:
+	case agentevent.ReasoningEnd:
 		return channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseReasoning}, true
-	case agentpkg.EventToolCallStart:
+	case agentevent.ToolCallStart:
 		return channel.StreamEvent{
 			Type:     channel.StreamEventToolCallStart,
 			ToolCall: &channel.StreamToolCall{Name: e.ToolName, CallID: e.ToolCallID, Input: e.Input},
 		}, true
-	case agentpkg.EventToolCallEnd:
+	case agentevent.ToolCallEnd:
 		return channel.StreamEvent{
 			Type:     channel.StreamEventToolCallEnd,
 			ToolCall: &channel.StreamToolCall{Name: e.ToolName, CallID: e.ToolCallID, Input: e.Input, Result: e.Result},
 		}, true
-	case agentpkg.EventToolApprovalRequest:
+	case agentevent.ToolApprovalRequest:
 		return channel.StreamEvent{
 			Type: channel.StreamEventToolCallStart,
 			ToolCall: &channel.StreamToolCall{
@@ -607,7 +510,7 @@ func agentEventToChannelEvent(e agentpkg.StreamEvent) (channel.StreamEvent, bool
 				},
 			},
 		}, true
-	case agentpkg.EventUserInputRequest:
+	case agentevent.UserInputRequest:
 		userInputID := strings.TrimSpace(e.UserInputID)
 		if userInputID == "" {
 			userInputID = strings.TrimSpace(e.ApprovalID)
@@ -629,11 +532,11 @@ func agentEventToChannelEvent(e agentpkg.StreamEvent) (channel.StreamEvent, bool
 				},
 			},
 		}, true
-	case agentpkg.EventAgentEnd:
+	case agentevent.AgentEnd:
 		return channel.StreamEvent{Type: channel.StreamEventAgentEnd}, true
-	case agentpkg.EventAgentAbort:
+	case agentevent.AgentAbort:
 		return channel.StreamEvent{Type: channel.StreamEventAgentEnd}, true
-	case agentpkg.EventError:
+	case agentevent.Error:
 		return channel.StreamEvent{Type: channel.StreamEventError, Error: e.Error}, true
 	default:
 		return channel.StreamEvent{}, false
@@ -682,29 +585,6 @@ func extractNewImageRefs(rc RenderedContext, afterMs int64) []ImageAttachmentRef
 	return refs
 }
 
-// injectImagePartsIntoLastUserMessage appends ImageParts to the last user
-// message in msgs so the model receives inline vision input.
-func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePart) {
-	if len(parts) == 0 {
-		return
-	}
-	extra := make([]sdk.MessagePart, 0, len(parts))
-	for _, p := range parts {
-		if strings.TrimSpace(p.Image) != "" {
-			extra = append(extra, p)
-		}
-	}
-	if len(extra) == 0 {
-		return
-	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == sdk.MessageRoleUser {
-			msgs[i].Content = append(msgs[i].Content, extra...)
-			return
-		}
-	}
-}
-
 func wasRecentlyMentioned(rc RenderedContext, afterMs int64) bool {
 	for _, seg := range rc {
 		if seg.ReceivedAtMs > afterMs && (seg.MentionsMe || seg.RepliesToMe) {
@@ -712,53 +592,4 @@ func wasRecentlyMentioned(rc RenderedContext, afterMs int64) bool {
 		}
 	}
 	return false
-}
-
-func buildLateBindingPrompt(isMentioned bool) string {
-	now := time.Now().Format(time.RFC3339)
-	var sb strings.Builder
-	sb.WriteString("Current time: ")
-	sb.WriteString(now)
-	sb.WriteString("\n\n")
-	sb.WriteString("IMPORTANT: You MUST use the `send` tool to speak. Your text output is invisible to everyone — it is only internal monologue. ")
-	sb.WriteString("If you want to say something, you MUST call the `send` tool. Writing text without a tool call means absolute silence — no one will see it.")
-
-	if isMentioned {
-		sb.WriteString("\n\nYou are being addressed directly. You should respond by calling the `send` tool now.")
-	}
-
-	return sb.String()
-}
-
-func contextMessagesToSDK(messages []ContextMessage) []sdk.Message {
-	result := make([]sdk.Message, 0, len(messages))
-	for _, m := range messages {
-		if len(m.RawContent) > 0 {
-			raw, err := json.Marshal(struct {
-				Role    string          `json:"role"`
-				Content json.RawMessage `json:"content"`
-			}{
-				Role:    m.Role,
-				Content: m.RawContent,
-			})
-			if err == nil {
-				var msg sdk.Message
-				if json.Unmarshal(raw, &msg) == nil {
-					result = append(result, msg)
-					continue
-				}
-			}
-		}
-		switch m.Role {
-		case "user":
-			result = append(result, sdk.UserMessage(m.Content))
-		case "assistant":
-			result = append(result, sdk.AssistantMessage(m.Content))
-		case "tool":
-			result = append(result, sdk.UserMessage(m.Content))
-		default:
-			result = append(result, sdk.UserMessage(m.Content))
-		}
-	}
-	return result
 }

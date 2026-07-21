@@ -1,148 +1,83 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
+	"os"
 
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
-	"github.com/memohai/memoh/internal/acl"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/local"
+	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
+	coremodule "github.com/memohai/memoh/cmd/internal/core"
+	channelpkg "github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
-	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/channelaccess"
-	"github.com/memohai/memoh/internal/compaction"
-	"github.com/memohai/memoh/internal/conversation"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/fetchproviders"
+	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/mcp"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/message/event"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthclients"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/providertemplates"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/toolapproval"
-	"github.com/memohai/memoh/internal/userinput"
-	"github.com/memohai/memoh/internal/userruntime"
-	videopkg "github.com/memohai/memoh/internal/video"
-	"github.com/memohai/memoh/internal/webhooktunnel"
-	"github.com/memohai/memoh/internal/workspace"
 )
 
 func runServe() {
-	fx.New(options()).Run()
+	cfg, err := provideConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoh: %v\n", err)
+		os.Exit(1)
+	}
+	fx.New(optionsFor(cfg)).Run()
 }
 
-func options() fx.Option {
+// optionsFor assembles the server for one of two deployment shapes.
+// With internal_rpc.shared_secret set (docker compose), the channel
+// runtime is a separate process reached over authenticated gRPC. Without
+// it (pre-split bare-metal installs), the full channel runtime runs
+// embedded in this process so external channels, email, and webhook
+// endpoints keep working with a single binary and an unchanged config.
+func optionsFor(cfg config.Config) fx.Option {
+	if cfg.SplitChannelRuntime() {
+		return fx.Options(commonOptions(), splitOptions())
+	}
+	return fx.Options(commonOptions(), embeddedOptions())
+}
+
+func splitOptions() fx.Option {
 	return fx.Options(
+		channelmodule.ServerLocalModule(),
 		fx.Provide(
-			provideConfig,
-			boot.ProvideRuntimeConfig,
-			provideLogger,
-			provideContainerService,
-			provideOverlayProviderRegistry,
-			provideNetworkService,
-			provideNetworkController,
-			provideDBConn,
-			providePGVectorStore,
-			providePostgresStore,
-			provideDBQueries,
-			provideAccountStore,
-			provideUserRuntimeStore,
-			provideBotRemoteRuntimeBindingStore,
-			provideUserRuntimeHub,
-			userruntime.NewService,
-			workspace.NewRemoteWorkspaceService,
-			provideUserRuntimePipe,
-			provideWikiStore,
-			provideWorkspaceManager,
-			provideBridgeProvider,
-			providePluginBridgeProvider,
-			provideMemoryLLM,
-			memprovider.NewService,
-			provideMemoryProviderRegistry,
-			models.NewService,
-			bots.NewService,
-			provideACPRunner,
-			provideACPSessionPool,
-			provideACPCodexOAuthHandler,
-			provideACPClaudeCodeOAuthHandler,
-			provideAccountService,
-			acl.NewService,
-			channelaccess.NewService,
-			settings.NewService,
-			toolapproval.NewService,
-			userinput.NewService,
-			provideHooksService,
-			provideProvidersService,
-			providertemplates.NewService,
-			fetchproviders.NewService,
-			searchproviders.NewService,
-			policy.NewService,
-			mcp.NewConnectionService,
-			oauthclients.NewRegistry,
-			pluginspkg.NewService,
-			mcp.NewToolSessionContextStore,
-			conversation.NewService,
-			identities.NewService,
-			event.NewHub,
-			provideAudioRegistry,
-			audiopkg.NewService,
-			provideVideoRegistry,
-			videopkg.NewService,
-			provideAudioTempStore,
-			emailpkg.NewDBOAuthTokenStore,
-			provideEmailRegistry,
-			emailpkg.NewService,
-			emailpkg.NewOutboxService,
-			provideEmailChatGateway,
-			provideEmailTrigger,
-			emailpkg.NewManager,
-			provideRouteService,
-			provideSessionService,
-			provideMessageService,
-			provideMediaService,
-			providePipeline,
-			provideEventStore,
-			provideDiscussDriver,
-			local.NewRouteHub,
-			provideChannelRegistry,
-			channel.NewStore,
-			provideCommandHandler,
-			provideChannelRouter,
-			provideChannelManager,
-			provideChannelLifecycleService,
-			provideAgent,
-			provideChatResolver,
-			provideScheduleTriggerer,
-			provideHeartbeatSessionCreator,
-			provideScheduleSessionCreator,
-			schedule.NewService,
-			provideHeartbeatTriggerer,
-			heartbeat.NewService,
-			compaction.NewService,
-			provideContainerdHandler,
-			provideBotBackupService,
-			provideFederationGateway,
-			provideACPToolSource,
-			provideToolGatewayService,
-			provideBackgroundManager,
-			webhooktunnel.NewManager,
-			provideToolProviders,
+			provideChannelRPCConn,
+			provideRuntimeRPCClient,
+			provideChannelRuntimeClient,
+			provideChannelRuntime,
+			provideEmailRuntime,
+			provideWebhookTunnelStatus,
+			provideServerRPC,
+		),
+		fx.Invoke(startServerRPC),
+	)
+}
+
+func embeddedOptions() fx.Option {
+	return fx.Options(
+		channelmodule.EmbeddedModule(),
+		fx.Provide(
+			provideLocalWebhookTunnelStatus,
+			// The webhook surfaces the channel process owns in split mode
+			// are served from this process again, as before the split.
+			provideServerHandler(channelpkg.NewWebhookServerHandler),
+			provideServerHandler(weixin.NewQRServerHandler),
+			provideServerHandler(handlers.NewEmailWebhookHandler),
+			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
+		),
+	)
+}
+
+func commonOptions() fx.Option {
+	return fx.Options(
+		fx.Provide(provideConfig),
+		coremodule.FoundationModule(),
+		channelmodule.FoundationModule(),
+		coremodule.ServerModule(),
+		fx.Provide(
 			provideServerHandler(handlers.NewPingHandler),
 			provideServerHandler(handlers.NewWebhookTunnelHandler),
-			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
 			provideServerHandler(provideAuthHandler),
 			provideServerHandler(provideMemoryHandler),
 			provideServerHandler(provideMessageHandler),
@@ -171,8 +106,6 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewCompactionHandler),
 			provideServerHandler(handlers.NewChannelHandler),
-			provideServerHandler(channel.NewWebhookServerHandler),
-			provideServerHandler(weixin.NewQRServerHandler),
 			provideServerHandler(provideUsersHandler),
 			provideServerHandler(handlers.NewMemoryProvidersHandler),
 			provideServerHandler(handlers.NewNetworkHandler),
@@ -182,13 +115,11 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewEmailProvidersHandler),
 			provideServerHandler(handlers.NewEmailBindingsHandler),
 			provideServerHandler(handlers.NewEmailOutboxHandler),
-			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServerHandler(provideEmailOAuthHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideServerHandler(handlers.NewPluginsHandler),
 			provideServerHandler(handlers.NewBotBackupHandler),
-			provideOAuthService,
 			provideServerHandler(handlers.NewTokenUsageHandler),
 			provideServerHandler(handlers.NewSessionInfoHandler),
 			provideServerHandler(handlers.NewSupermarketHandler),
@@ -196,19 +127,6 @@ func options() fx.Option {
 			provideServer,
 		),
 		fx.Invoke(
-			injectToolProviders,
-			injectACPToolProviders,
-			configureMemoryProviderRegistry,
-			startProviderTemplateSync,
-			startScheduleService,
-			startHeartbeatService,
-			startChannelManager,
-			startEmailManager,
-			startContainerReconciliation,
-			startBackgroundTaskCleanup,
-			startWebhookTunnelListener,
-			startWebhookTunnel,
-			startAudioTempStoreCleanup,
 			startServer,
 		),
 		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {

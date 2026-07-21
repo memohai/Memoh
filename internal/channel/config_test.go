@@ -1,10 +1,13 @@
 package channel_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
+	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/team"
 )
 
 const testChannelType = channel.ChannelType("test-config")
@@ -135,5 +138,43 @@ func TestNormalizeChannelUserConfigRequiresUser(t *testing.T) {
 	_, err := reg.NormalizeUserConfig(testChannelType, map[string]any{})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
+	}
+}
+
+// configlessTestType is a synthetic configless channel (like local/web).
+const configlessTestType = channel.ChannelType("test-configless")
+
+type configlessTestAdapter struct{}
+
+func (*configlessTestAdapter) Type() channel.ChannelType { return configlessTestType }
+func (*configlessTestAdapter) Descriptor() channel.Descriptor {
+	return channel.Descriptor{Type: configlessTestType, DisplayName: "Configless", Configless: true}
+}
+
+// stubQueries is a non-nil Queries whose methods all panic: the configless
+// path must never touch the database.
+type stubQueries struct{ dbstore.Queries }
+
+// TestResolveEffectiveConfigConfiglessCarriesTeamID pins the synthetic
+// config for configless channels (web/local) to the singleton team.
+// turn.Service fails closed on an empty TeamID, so losing this field breaks
+// every REST web message and web discuss turn.
+func TestResolveEffectiveConfigConfiglessCarriesTeamID(t *testing.T) {
+	t.Parallel()
+	registry := channel.NewRegistry()
+	if err := registry.Register(&configlessTestAdapter{}); err != nil {
+		t.Fatalf("register adapter: %v", err)
+	}
+	store := channel.NewStore(stubQueries{}, registry)
+
+	cfg, err := store.ResolveEffectiveConfig(context.Background(), "bot-1", configlessTestType)
+	if err != nil {
+		t.Fatalf("resolve effective config: %v", err)
+	}
+	if cfg.TeamID != team.DefaultTeamID {
+		t.Fatalf("expected TeamID %q, got %q", team.DefaultTeamID, cfg.TeamID)
+	}
+	if cfg.BotID != "bot-1" {
+		t.Fatalf("unexpected BotID %q", cfg.BotID)
 	}
 }

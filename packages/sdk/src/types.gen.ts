@@ -780,6 +780,7 @@ export type ChannelChannelConfig = {
     self_identity?: {
         [key: string]: unknown;
     };
+    team_id?: string;
     updated_at?: string;
     verified_at?: string;
 };
@@ -10068,6 +10069,10 @@ export type DeleteBotsByIdChannelByPlatformErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type DeleteBotsByIdChannelByPlatformError = DeleteBotsByIdChannelByPlatformErrors[keyof DeleteBotsByIdChannelByPlatformErrors];
@@ -10165,6 +10170,10 @@ export type PutBotsByIdChannelByPlatformErrors = {
      * Bad Gateway
      */
     502: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PutBotsByIdChannelByPlatformError = PutBotsByIdChannelByPlatformErrors[keyof PutBotsByIdChannelByPlatformErrors];
@@ -10214,6 +10223,10 @@ export type PostBotsByIdChannelByPlatformSendErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByIdChannelByPlatformSendError = PostBotsByIdChannelByPlatformSendErrors[keyof PostBotsByIdChannelByPlatformSendErrors];
@@ -10265,6 +10278,10 @@ export type PostBotsByIdChannelByPlatformSendChatErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByIdChannelByPlatformSendChatError = PostBotsByIdChannelByPlatformSendChatErrors[keyof PostBotsByIdChannelByPlatformSendChatErrors];
@@ -10320,6 +10337,10 @@ export type PatchBotsByIdChannelByPlatformStatusErrors = {
      * Bad Gateway
      */
     502: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PatchBotsByIdChannelByPlatformStatusError = PatchBotsByIdChannelByPlatformStatusErrors[keyof PatchBotsByIdChannelByPlatformStatusErrors];
@@ -10369,6 +10390,10 @@ export type PostBotsByIdChannelByPlatformWebhookEndpointErrors = {
      * Bad Gateway
      */
     502: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByIdChannelByPlatformWebhookEndpointError = PostBotsByIdChannelByPlatformWebhookEndpointErrors[keyof PostBotsByIdChannelByPlatformWebhookEndpointErrors];

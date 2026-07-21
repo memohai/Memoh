@@ -59,8 +59,13 @@ git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com
 cd Memoh
 cp conf/app.docker.toml config.toml
 # Edit config.toml
+export MEMOH_INTERNAL_RPC_SHARED_SECRET="$(openssl rand -hex 32)"
 docker compose up -d
 ```
+
+The Compose stack runs Server and Channel as separate services. Keep the internal RPC secret private and use the same value whenever the stack is recreated.
+
+Running without Docker (or upgrading an existing bare-metal install)? Leave `internal_rpc.shared_secret` empty in `config.toml`: the server then embeds the channel runtime and keeps running as a single all-in-one process — external channels, email, and webhook endpoints included — with no `memoh-channel` process required. Setting the secret opts into the split two-process deployment.
 
 Existing setup checkouts can keep using `git pull`: the post-merge hook initializes the new
 submodule, and setup enables recursive updates for future pulls. If that hook was never installed,

@@ -26,6 +26,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/httpx"
 	"github.com/memohai/memoh/internal/identity"
+	runtimeRpc "github.com/memohai/memoh/internal/rpc/runtime"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -51,33 +52,31 @@ type createBotStreamBotEvent struct {
 
 // UsersHandler manages user/account CRUD and bot operations via REST API.
 type UsersHandler struct {
-	service          *accounts.Service
-	botService       *bots.Service
-	routeService     route.Service
-	channelStore     *channel.Store
-	channelLifecycle *channel.Lifecycle
-	channelManager   *channel.Manager
-	registry         *channel.Registry
-	acpWorkspace     botCreateWorkspace
-	acpRuntimes      acpRuntimeCloser
-	logger           *slog.Logger
+	service        *accounts.Service
+	botService     *bots.Service
+	routeService   route.Service
+	channelStore   *channel.Store
+	channelRuntime channel.Runtime
+	registry       *channel.Registry
+	acpWorkspace   botCreateWorkspace
+	acpRuntimes    acpRuntimeCloser
+	logger         *slog.Logger
 }
 
 // NewUsersHandler creates a UsersHandler with channel identity support.
-func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry, acpWorkspace botCreateWorkspace) *UsersHandler {
+func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, acpWorkspace botCreateWorkspace) *UsersHandler {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &UsersHandler{
-		service:          service,
-		botService:       botService,
-		routeService:     routeService,
-		channelStore:     channelStore,
-		channelLifecycle: channelLifecycle,
-		channelManager:   channelManager,
-		registry:         registry,
-		acpWorkspace:     acpWorkspace,
-		logger:           log.With(slog.String("handler", "users")),
+		service:        service,
+		botService:     botService,
+		routeService:   routeService,
+		channelStore:   channelStore,
+		channelRuntime: channelRuntime,
+		registry:       registry,
+		acpWorkspace:   acpWorkspace,
+		logger:         log.With(slog.String("handler", "users")),
 	}
 }
 
@@ -1164,6 +1163,7 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{id}/channel/{platform} [put].
 func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
@@ -1189,11 +1189,14 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	if req.Credentials == nil {
 		req.Credentials = map[string]any{}
 	}
-	if h.channelLifecycle == nil {
+	if h.channelRuntime == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")
 	}
-	resp, err := h.channelLifecycle.UpsertBotChannelConfig(c.Request().Context(), botID, channelType, req)
+	resp, err := h.channelRuntime.UpsertBotChannelConfig(c.Request().Context(), botID, channelType, req)
 	if err != nil {
+		if mapped := mapChannelRuntimeError(err); mapped != nil {
+			return mapped
+		}
 		status := http.StatusInternalServerError
 		if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
 			status = http.StatusBadGateway
@@ -1217,6 +1220,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{id}/channel/{platform}/status [patch].
 func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
@@ -1239,11 +1243,14 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if h.channelLifecycle == nil {
+	if h.channelRuntime == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")
 	}
-	resp, err := h.channelLifecycle.SetBotChannelStatus(c.Request().Context(), botID, channelType, req.Disabled)
+	resp, err := h.channelRuntime.SetBotChannelStatus(c.Request().Context(), botID, channelType, req.Disabled)
 	if err != nil {
+		if mapped := mapChannelRuntimeError(err); mapped != nil {
+			return mapped
+		}
 		if errors.Is(err, channel.ErrChannelConfigNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
@@ -1270,6 +1277,7 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{id}/channel/{platform}/webhook-endpoint [post].
 func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1291,11 +1299,14 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if h.channelStore == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "channel store not configured")
+	if h.channelRuntime == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "channel runtime not configured")
 	}
-	resp, err := h.channelStore.SetWebhookEndpoint(c.Request().Context(), botID, channelType, req)
+	resp, err := h.channelRuntime.SetWebhookEndpoint(c.Request().Context(), botID, channelType, req)
 	if err != nil {
+		if mapped := mapChannelRuntimeError(err); mapped != nil {
+			return mapped
+		}
 		switch {
 		case errors.Is(err, channel.ErrChannelConfigNotFound):
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
@@ -1318,6 +1329,7 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{id}/channel/{platform} [delete].
 func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1335,10 +1347,13 @@ func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if h.channelLifecycle == nil {
+	if h.channelRuntime == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")
 	}
-	if err := h.channelLifecycle.DeleteBotChannelConfig(c.Request().Context(), botID, channelType); err != nil {
+	if err := h.channelRuntime.DeleteBotChannelConfig(c.Request().Context(), botID, channelType); err != nil {
+		if mapped := mapChannelRuntimeError(err); mapped != nil {
+			return mapped
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -1356,6 +1371,7 @@ func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{id}/channel/{platform}/send [post].
 func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1369,7 +1385,7 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
 	}
-	if h.channelManager == nil {
+	if h.channelRuntime == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel manager not configured")
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
@@ -1383,7 +1399,10 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
-	if err := h.channelManager.Send(c.Request().Context(), botID, channelType, req); err != nil {
+	if err := h.channelRuntime.Send(c.Request().Context(), botID, channelType, req); err != nil {
+		if mapped := mapChannelRuntimeError(err); mapped != nil {
+			return mapped
+		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
@@ -1401,6 +1420,7 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 // @Failure 401 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{id}/channel/{platform}/send_chat [post].
 func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 	chatToken, err := auth.ChatTokenFromContext(c)
@@ -1414,7 +1434,7 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 	if chatToken.BotID != botID {
 		return echo.NewHTTPError(http.StatusForbidden, "token bot mismatch")
 	}
-	if h.channelManager == nil || h.routeService == nil {
+	if h.channelRuntime == nil || h.routeService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "services not configured")
 	}
 	route, err := h.routeService.GetByID(c.Request().Context(), chatToken.RouteID)
@@ -1436,13 +1456,23 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
-	if err := h.channelManager.Send(c.Request().Context(), botID, channelType, channel.SendRequest{
+	if err := h.channelRuntime.Send(c.Request().Context(), botID, channelType, channel.SendRequest{
 		Target:  route.ReplyTarget,
 		Message: req.Message,
 	}); err != nil {
+		if mapped := mapChannelRuntimeError(err); mapped != nil {
+			return mapped
+		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func mapChannelRuntimeError(err error) error {
+	if errors.Is(err, runtimeRpc.ErrUnavailable) {
+		return apperror.Wrap(apperror.CodeChannelRuntimeUnavailable, err, nil)
+	}
+	return nil
 }
 
 func (h *UsersHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
