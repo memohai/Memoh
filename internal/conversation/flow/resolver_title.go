@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
@@ -84,14 +86,13 @@ func (r *Resolver) maybeGenerateSessionTitle(ctx context.Context, req conversati
 		r.applyFallbackTitle(ctx, req, sessionID, userQuery)
 	}
 
-	botSettings, err := r.loadBotSettings(ctx, req.BotID)
+	titleModelID, ownerUserID, err := r.resolveTitleModel(ctx, req.BotID)
 	if err != nil {
-		r.logger.Warn("title gen: failed to load bot settings", slog.String("bot_id", req.BotID), slog.Any("error", err))
+		r.logger.Warn("title gen: failed to load owner profile", slog.String("bot_id", req.BotID), slog.Any("error", err))
 		return
 	}
-	titleModelID := strings.TrimSpace(botSettings.TitleModelID)
 	if titleModelID == "" {
-		r.logger.Debug("title gen: no title model configured", slog.String("bot_id", req.BotID))
+		r.logger.Debug("title gen: no title model configured", slog.String("bot_id", req.BotID), slog.String("owner_user_id", ownerUserID))
 		return
 	}
 
@@ -103,7 +104,7 @@ func (r *Resolver) maybeGenerateSessionTitle(ctx context.Context, req conversati
 		return
 	}
 
-	title := r.generateTitle(ctx, req.UserID, titleModel, provider, userQuery)
+	title := r.generateTitle(ctx, ownerUserID, titleModel, provider, userQuery)
 	if title == "" {
 		return
 	}
@@ -114,6 +115,29 @@ func (r *Resolver) maybeGenerateSessionTitle(ctx context.Context, req conversati
 		r.logger.Info("title gen: session title updated", slog.String("session_id", sessionID), slog.String("title", title))
 		r.publishSessionTitleUpdated(req.BotID, sessionID, title)
 	}
+}
+
+func (r *Resolver) resolveTitleModel(ctx context.Context, botID string) (modelID, ownerUserID string, err error) {
+	if r.queries == nil || r.accountService == nil {
+		return "", "", errors.New("title model profile dependencies are not configured")
+	}
+	parsedBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return "", "", err
+	}
+	bot, err := r.queries.GetBotByID(ctx, parsedBotID)
+	if err != nil {
+		return "", "", err
+	}
+	if !bot.OwnerUserID.Valid {
+		return "", "", errors.New("bot owner is not configured")
+	}
+	ownerUserID = bot.OwnerUserID.String()
+	account, err := r.accountService.Get(ctx, ownerUserID)
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(account.TitleModelID), ownerUserID, nil
 }
 
 func shouldGenerateSessionTitle(sess session.Session) bool {

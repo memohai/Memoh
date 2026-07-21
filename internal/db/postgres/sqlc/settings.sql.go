@@ -30,7 +30,6 @@ SET language = 'auto',
     chat_acp_project_mode = 'project',
     heartbeat_model_id = NULL,
     compaction_model_id = NULL,
-    title_model_id = NULL,
     image_model_id = NULL,
     search_provider_id = NULL,
     fetch_provider_id = NULL,
@@ -74,7 +73,6 @@ SELECT
   bots.chat_acp_project_mode,
   heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
-  title_models.id AS title_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -94,7 +92,6 @@ FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
-LEFT JOIN models AS title_models ON title_models.id = bots.title_model_id AND title_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
 LEFT JOIN fetch_providers ON fetch_providers.id = bots.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
@@ -124,7 +121,6 @@ type GetSettingsByBotIDRow struct {
 	ChatAcpProjectMode     string      `json:"chat_acp_project_mode"`
 	HeartbeatModelID       pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelID      pgtype.UUID `json:"compaction_model_id"`
-	TitleModelID           pgtype.UUID `json:"title_model_id"`
 	SearchProviderID       pgtype.UUID `json:"search_provider_id"`
 	FetchProviderID        pgtype.UUID `json:"fetch_provider_id"`
 	MemoryProviderID       pgtype.UUID `json:"memory_provider_id"`
@@ -164,7 +160,6 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.ChatAcpProjectMode,
 		&i.HeartbeatModelID,
 		&i.CompactionModelID,
-		&i.TitleModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,
 		&i.MemoryProviderID,
@@ -204,28 +199,27 @@ WITH updated AS (
       chat_acp_project_mode = $15,
       heartbeat_model_id = COALESCE($16::uuid, bots.heartbeat_model_id),
       compaction_model_id = COALESCE($17::uuid, bots.compaction_model_id),
-      title_model_id = COALESCE($18::uuid, bots.title_model_id),
-      search_provider_id = COALESCE($19::uuid, bots.search_provider_id),
+      search_provider_id = COALESCE($18::uuid, bots.search_provider_id),
       fetch_provider_id = CASE
-        WHEN $20::boolean THEN $21::uuid
+        WHEN $19::boolean THEN $20::uuid
         ELSE bots.fetch_provider_id
       END,
-      memory_provider_id = COALESCE($22::uuid, bots.memory_provider_id),
-      image_model_id = COALESCE($23::uuid, bots.image_model_id),
-      tts_model_id = COALESCE($24::uuid, bots.tts_model_id),
-      transcription_model_id = COALESCE($25::uuid, bots.transcription_model_id),
-      video_model_id = COALESCE($26::uuid, bots.video_model_id),
-      persist_full_tool_results = $27,
-      show_tool_calls_in_im = $28,
-      tool_approval_config = $29,
-      display_enabled = $30,
-      overlay_provider = $31,
-      overlay_enabled = $32,
-      overlay_config = $33,
-      command_ui_language = $34,
+      memory_provider_id = COALESCE($21::uuid, bots.memory_provider_id),
+      image_model_id = COALESCE($22::uuid, bots.image_model_id),
+      tts_model_id = COALESCE($23::uuid, bots.tts_model_id),
+      transcription_model_id = COALESCE($24::uuid, bots.transcription_model_id),
+      video_model_id = COALESCE($25::uuid, bots.video_model_id),
+      persist_full_tool_results = $26,
+      show_tool_calls_in_im = $27,
+      tool_approval_config = $28,
+      display_enabled = $29,
+      overlay_provider = $30,
+      overlay_enabled = $31,
+      overlay_config = $32,
+      command_ui_language = $33,
       updated_at = now()
-  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $35
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $34
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -246,7 +240,6 @@ SELECT
   updated.chat_acp_project_mode,
   heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
-  title_models.id AS title_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -266,7 +259,6 @@ FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
-LEFT JOIN models AS title_models ON title_models.id = updated.title_model_id AND title_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
 LEFT JOIN fetch_providers ON fetch_providers.id = updated.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
@@ -294,7 +286,6 @@ type UpsertBotSettingsParams struct {
 	ChatAcpProjectMode     string      `json:"chat_acp_project_mode"`
 	HeartbeatModelID       pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelID      pgtype.UUID `json:"compaction_model_id"`
-	TitleModelID           pgtype.UUID `json:"title_model_id"`
 	SearchProviderID       pgtype.UUID `json:"search_provider_id"`
 	FetchProviderIDSet     bool        `json:"fetch_provider_id_set"`
 	FetchProviderID        pgtype.UUID `json:"fetch_provider_id"`
@@ -333,7 +324,6 @@ type UpsertBotSettingsRow struct {
 	ChatAcpProjectMode     string      `json:"chat_acp_project_mode"`
 	HeartbeatModelID       pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelID      pgtype.UUID `json:"compaction_model_id"`
-	TitleModelID           pgtype.UUID `json:"title_model_id"`
 	SearchProviderID       pgtype.UUID `json:"search_provider_id"`
 	FetchProviderID        pgtype.UUID `json:"fetch_provider_id"`
 	MemoryProviderID       pgtype.UUID `json:"memory_provider_id"`
@@ -370,7 +360,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.ChatAcpProjectMode,
 		arg.HeartbeatModelID,
 		arg.CompactionModelID,
-		arg.TitleModelID,
 		arg.SearchProviderID,
 		arg.FetchProviderIDSet,
 		arg.FetchProviderID,
@@ -409,7 +398,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.ChatAcpProjectMode,
 		&i.HeartbeatModelID,
 		&i.CompactionModelID,
-		&i.TitleModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,
 		&i.MemoryProviderID,

@@ -200,7 +200,7 @@ func TestCanonicalInitContainsFinalTeamMembershipSchema(t *testing.T) {
 		 WHERE table_schema='public' AND table_name='team_members'`).Scan(&membershipColumns); err != nil {
 		t.Fatalf("read canonical membership columns: %v", err)
 	}
-	const expectedMembershipColumns = "team_id,user_id,role,is_active,data_root,metadata,created_at,updated_at"
+	const expectedMembershipColumns = "team_id,user_id,role,is_active,data_root,title_model_id,metadata,created_at,updated_at"
 	if membershipColumns != expectedMembershipColumns {
 		t.Fatalf("canonical membership columns = %q, want %q", membershipColumns, expectedMembershipColumns)
 	}

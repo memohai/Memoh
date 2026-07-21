@@ -140,12 +140,12 @@ func (h *UsersHandler) GetMe(c echo.Context) error {
 
 // UpdateMe godoc
 // @Summary Update current user profile
-// @Description Update current user display name or avatar
+// @Description Update current user profile and preferences
 // @Tags users
 // @Param payload body accounts.UpdateProfileRequest true "Profile payload"
 // @Success 200 {object} accounts.Account
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me [put].
 func (h *UsersHandler) UpdateMe(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -154,11 +154,14 @@ func (h *UsersHandler) UpdateMe(c echo.Context) error {
 	}
 	var req accounts.UpdateProfileRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Wrap(apperror.CodeProfileRequestInvalid, err, nil)
 	}
 	resp, err := h.service.UpdateProfile(c.Request().Context(), channelIdentityID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		if errors.Is(err, accounts.ErrInvalidTitleModel) {
+			return apperror.Wrap(apperror.CodeProfileTitleModelInvalid, err, nil)
+		}
+		return apperror.Wrap(apperror.CodeProfileUpdateFailed, err, nil)
 	}
 	return c.JSON(http.StatusOK, resp)
 }

@@ -21,6 +21,9 @@ const (
 	CodeProviderNameTaken               Code = "provider.name_taken"
 	CodeProviderTemplateRequestInvalid  Code = "provider_template.request_invalid"
 	CodeSearchProviderTypeConflict      Code = "search_provider.type_conflict"
+	CodeProfileRequestInvalid           Code = "profile.request_invalid"
+	CodeProfileTitleModelInvalid        Code = "profile.title_model_invalid"
+	CodeProfileUpdateFailed             Code = "profile.update_failed"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -77,6 +80,18 @@ var catalog = map[Code]Definition{
 	CodeSearchProviderTypeConflict: {
 		HTTPStatus: http.StatusConflict,
 		Detail:     "This web search provider is already configured.",
+	},
+	CodeProfileTitleModelInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The selected title model is unavailable or is not a chat model.",
+	},
+	CodeProfileRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The profile update request is invalid.",
+	},
+	CodeProfileUpdateFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The profile could not be updated.",
 	},
 }
 

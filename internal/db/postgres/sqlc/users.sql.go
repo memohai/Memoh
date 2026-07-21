@@ -50,7 +50,7 @@ WITH updated_user AS (
   FROM updated_user
   WHERE membership.team_id = public.memoh_current_team_id()
     AND membership.user_id = updated_user.id
-  RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.metadata, membership.created_at, membership.updated_at
+  RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.title_model_id, membership.metadata, membership.created_at, membership.updated_at
 )
 SELECT
   changed_user.id, changed_user.username, changed_user.email,
@@ -63,7 +63,8 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM updated_user changed_user
 JOIN updated_membership changed_membership
   ON changed_membership.user_id = changed_user.id
@@ -101,6 +102,7 @@ type CreateAccountRow struct {
 	MembershipIsActive  bool               `json:"membership_is_active"`
 	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
 	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+	TitleModelID        pgtype.UUID        `json:"title_model_id"`
 }
 
 func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (CreateAccountRow, error) {
@@ -136,6 +138,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (C
 		&i.MembershipIsActive,
 		&i.JoinedAt,
 		&i.MembershipUpdatedAt,
+		&i.TitleModelID,
 	)
 	return i, err
 }
@@ -149,7 +152,7 @@ WITH created_user AS (
   INSERT INTO team_members (team_id, user_id, is_active)
   SELECT public.memoh_current_team_id(), id, $1
   FROM created_user
-  RETURNING team_members.team_id, team_members.user_id, team_members.role, team_members.is_active, team_members.data_root, team_members.metadata, team_members.created_at, team_members.updated_at
+  RETURNING team_members.team_id, team_members.user_id, team_members.role, team_members.is_active, team_members.data_root, team_members.title_model_id, team_members.metadata, team_members.created_at, team_members.updated_at
 )
 SELECT
   changed_user.id, changed_user.username, changed_user.email,
@@ -162,7 +165,8 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM created_user changed_user
 JOIN created_membership changed_membership
   ON changed_membership.user_id = changed_user.id
@@ -193,6 +197,7 @@ type CreateUserRow struct {
 	MembershipIsActive  bool               `json:"membership_is_active"`
 	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
 	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+	TitleModelID        pgtype.UUID        `json:"title_model_id"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
@@ -218,12 +223,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		&i.MembershipIsActive,
 		&i.JoinedAt,
 		&i.MembershipUpdatedAt,
+		&i.TitleModelID,
 	)
 	return i, err
 }
 
 const getAccountByIdentity = `-- name: GetAccountByIdentity :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at, title_model_id
 FROM team_accounts
 WHERE username = $1 OR email = $1
 `
@@ -251,12 +257,13 @@ func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text
 		&i.MembershipIsActive,
 		&i.JoinedAt,
 		&i.MembershipUpdatedAt,
+		&i.TitleModelID,
 	)
 	return i, err
 }
 
 const getAccountByUserID = `-- name: GetAccountByUserID :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at FROM team_accounts WHERE id = $1
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at, title_model_id FROM team_accounts WHERE id = $1
 `
 
 func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (TeamAccount, error) {
@@ -282,6 +289,7 @@ func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (T
 		&i.MembershipIsActive,
 		&i.JoinedAt,
 		&i.MembershipUpdatedAt,
+		&i.TitleModelID,
 	)
 	return i, err
 }
@@ -316,7 +324,7 @@ func (q *Queries) GetUserByID(ctx context.Context, userID pgtype.UUID) (User, er
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at FROM team_accounts
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at, title_model_id FROM team_accounts
 WHERE username IS NOT NULL
 ORDER BY created_at DESC
 `
@@ -350,6 +358,7 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]TeamAccount, error) {
 			&i.MembershipIsActive,
 			&i.JoinedAt,
 			&i.MembershipUpdatedAt,
+			&i.TitleModelID,
 		); err != nil {
 			return nil, err
 		}
@@ -378,7 +387,7 @@ func (q *Queries) RemoveMember(ctx context.Context, userID pgtype.UUID) (pgtype.
 }
 
 const searchAccounts = `-- name: SearchAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id, principal_is_active, membership_is_active, joined_at, membership_updated_at, title_model_id
 FROM team_accounts
 WHERE username IS NOT NULL
   AND (
@@ -425,6 +434,7 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) 
 			&i.MembershipIsActive,
 			&i.JoinedAt,
 			&i.MembershipUpdatedAt,
+			&i.TitleModelID,
 		); err != nil {
 			return nil, err
 		}
@@ -444,7 +454,7 @@ WITH updated_membership AS (
       updated_at = now()
   WHERE membership.team_id = public.memoh_current_team_id()
     AND membership.user_id = $3
-  RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.metadata, membership.created_at, membership.updated_at
+  RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.title_model_id, membership.metadata, membership.created_at, membership.updated_at
 )
 SELECT
   changed_user.id, changed_user.username, changed_user.email,
@@ -457,7 +467,8 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM updated_membership changed_membership
 JOIN users changed_user ON changed_user.id = changed_membership.user_id
 `
@@ -488,6 +499,7 @@ type UpdateAccountAdminRow struct {
 	MembershipIsActive  bool               `json:"membership_is_active"`
 	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
 	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+	TitleModelID        pgtype.UUID        `json:"title_model_id"`
 }
 
 func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdminParams) (UpdateAccountAdminRow, error) {
@@ -513,6 +525,7 @@ func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdmin
 		&i.MembershipIsActive,
 		&i.JoinedAt,
 		&i.MembershipUpdatedAt,
+		&i.TitleModelID,
 	)
 	return i, err
 }
@@ -577,11 +590,17 @@ WITH updated_user AS (
         AND membership.user_id = users.id
     )
   RETURNING users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
-), current_membership AS (
-  SELECT membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.metadata, membership.created_at, membership.updated_at
-  FROM team_members membership
-  JOIN updated_user ON updated_user.id = membership.user_id
+), updated_membership AS (
+  UPDATE team_members membership
+  SET title_model_id = $6::uuid,
+      updated_at = CASE
+        WHEN membership.title_model_id IS DISTINCT FROM $6::uuid THEN now()
+        ELSE membership.updated_at
+      END
+  FROM updated_user
   WHERE membership.team_id = public.memoh_current_team_id()
+    AND membership.user_id = updated_user.id
+  RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.title_model_id, membership.metadata, membership.created_at, membership.updated_at
 )
 SELECT
   changed_user.id, changed_user.username, changed_user.email,
@@ -594,18 +613,20 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM updated_user changed_user
-JOIN current_membership changed_membership
+JOIN updated_membership changed_membership
   ON changed_membership.user_id = changed_user.id
 `
 
 type UpdateAccountProfileParams struct {
-	DisplayName pgtype.Text `json:"display_name"`
-	AvatarUrl   pgtype.Text `json:"avatar_url"`
-	Timezone    string      `json:"timezone"`
-	Metadata    []byte      `json:"metadata"`
-	UserID      pgtype.UUID `json:"user_id"`
+	DisplayName  pgtype.Text `json:"display_name"`
+	AvatarUrl    pgtype.Text `json:"avatar_url"`
+	Timezone     string      `json:"timezone"`
+	Metadata     []byte      `json:"metadata"`
+	UserID       pgtype.UUID `json:"user_id"`
+	TitleModelID pgtype.UUID `json:"title_model_id"`
 }
 
 type UpdateAccountProfileRow struct {
@@ -628,6 +649,7 @@ type UpdateAccountProfileRow struct {
 	MembershipIsActive  bool               `json:"membership_is_active"`
 	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
 	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+	TitleModelID        pgtype.UUID        `json:"title_model_id"`
 }
 
 func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountProfileParams) (UpdateAccountProfileRow, error) {
@@ -637,6 +659,7 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountPro
 		arg.Timezone,
 		arg.Metadata,
 		arg.UserID,
+		arg.TitleModelID,
 	)
 	var i UpdateAccountProfileRow
 	err := row.Scan(
@@ -659,6 +682,7 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountPro
 		&i.MembershipIsActive,
 		&i.JoinedAt,
 		&i.MembershipUpdatedAt,
+		&i.TitleModelID,
 	)
 	return i, err
 }
@@ -704,7 +728,7 @@ WITH upserted_user AS (
     is_active = EXCLUDED.is_active,
     data_root = EXCLUDED.data_root,
     updated_at = now()
-  RETURNING team_members.team_id, team_members.user_id, team_members.role, team_members.is_active, team_members.data_root, team_members.metadata, team_members.created_at, team_members.updated_at
+  RETURNING team_members.team_id, team_members.user_id, team_members.role, team_members.is_active, team_members.data_root, team_members.title_model_id, team_members.metadata, team_members.created_at, team_members.updated_at
 )
 SELECT
   changed_user.id, changed_user.username, changed_user.email,
@@ -717,7 +741,8 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM selected_user changed_user
 JOIN upserted_membership changed_membership
   ON changed_membership.user_id = changed_user.id
@@ -755,6 +780,7 @@ type UpsertAccountByUsernameRow struct {
 	MembershipIsActive  bool               `json:"membership_is_active"`
 	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
 	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+	TitleModelID        pgtype.UUID        `json:"title_model_id"`
 }
 
 func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccountByUsernameParams) (UpsertAccountByUsernameRow, error) {
@@ -790,6 +816,7 @@ func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccount
 		&i.MembershipIsActive,
 		&i.JoinedAt,
 		&i.MembershipUpdatedAt,
+		&i.TitleModelID,
 	)
 	return i, err
 }

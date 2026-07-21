@@ -1,9 +1,35 @@
 package flow
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
+
+type titleModelQueries struct {
+	dbstore.Queries
+	bot sqlc.GetBotByIDRow
+}
+
+func (q titleModelQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
+	return q.bot, nil
+}
+
+type titleModelAccountStore struct {
+	dbstore.AccountStore
+	account dbstore.AccountRecord
+}
+
+func (s titleModelAccountStore) GetByUserID(context.Context, string) (dbstore.AccountRecord, error) {
+	return s.account, nil
+}
 
 func TestFallbackSessionTitle(t *testing.T) {
 	cases := []struct {
@@ -69,5 +95,32 @@ func TestFallbackSessionTitle(t *testing.T) {
 				t.Fatalf("fallbackSessionTitle(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolveTitleModelUsesBotOwnerProfile(t *testing.T) {
+	botID, err := db.ParseUUID("11111111-1111-1111-1111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID, err := db.ParseUUID("22222222-2222-2222-2222-222222222222")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const modelID = "33333333-3333-3333-3333-333333333333"
+	accountService := accounts.NewService(nil, titleModelAccountStore{account: dbstore.AccountRecord{
+		ID: ownerID.String(), TitleModelID: modelID,
+	}})
+	resolver := &Resolver{
+		queries:        titleModelQueries{bot: sqlc.GetBotByIDRow{ID: botID, OwnerUserID: ownerID}},
+		accountService: accountService,
+	}
+
+	gotModelID, gotOwnerID, err := resolver.resolveTitleModel(context.Background(), botID.String())
+	if err != nil {
+		t.Fatalf("resolveTitleModel() error = %v", err)
+	}
+	if gotModelID != modelID || gotOwnerID != ownerID.String() {
+		t.Fatalf("resolveTitleModel() = (%q, %q), want (%q, %q)", gotModelID, gotOwnerID, modelID, ownerID.String())
 	}
 }

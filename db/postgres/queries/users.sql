@@ -20,7 +20,8 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM created_user changed_user
 JOIN created_membership changed_membership
   ON changed_membership.user_id = changed_user.id;
@@ -71,7 +72,8 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM updated_user changed_user
 JOIN updated_membership changed_membership
   ON changed_membership.user_id = changed_user.id;
@@ -130,7 +132,8 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM selected_user changed_user
 JOIN upserted_membership changed_membership
   ON changed_membership.user_id = changed_user.id;
@@ -182,11 +185,17 @@ WITH updated_user AS (
         AND membership.user_id = users.id
     )
   RETURNING users.*
-), current_membership AS (
-  SELECT membership.*
-  FROM team_members membership
-  JOIN updated_user ON updated_user.id = membership.user_id
+), updated_membership AS (
+  UPDATE team_members membership
+  SET title_model_id = sqlc.narg(title_model_id)::uuid,
+      updated_at = CASE
+        WHEN membership.title_model_id IS DISTINCT FROM sqlc.narg(title_model_id)::uuid THEN now()
+        ELSE membership.updated_at
+      END
+  FROM updated_user
   WHERE membership.team_id = public.memoh_current_team_id()
+    AND membership.user_id = updated_user.id
+  RETURNING membership.*
 )
 SELECT
   changed_user.id, changed_user.username, changed_user.email,
@@ -199,9 +208,10 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM updated_user changed_user
-JOIN current_membership changed_membership
+JOIN updated_membership changed_membership
   ON changed_membership.user_id = changed_user.id;
 
 -- name: UpdateAccountAdmin :one
@@ -225,7 +235,8 @@ SELECT
   changed_user.is_active AS principal_is_active,
   changed_membership.is_active AS membership_is_active,
   changed_membership.created_at AS joined_at,
-  changed_membership.updated_at AS membership_updated_at
+  changed_membership.updated_at AS membership_updated_at,
+  changed_membership.title_model_id
 FROM updated_membership changed_membership
 JOIN users changed_user ON changed_user.id = changed_membership.user_id;
 

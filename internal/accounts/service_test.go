@@ -10,10 +10,13 @@ import (
 )
 
 type testAccountStore struct {
-	created      dbstore.CreateAccountInput
-	record       dbstore.AccountRecord
-	getErr       error
-	adminUpdated dbstore.UpdateAccountAdminInput
+	created         dbstore.CreateAccountInput
+	record          dbstore.AccountRecord
+	getErr          error
+	adminUpdated    dbstore.UpdateAccountAdminInput
+	profileUpdated  dbstore.UpdateAccountProfileInput
+	validTitleModel bool
+	titleModelErr   error
 }
 
 func TestCreatePersistsAccountWithoutProvisioningProviderInstances(t *testing.T) {
@@ -76,8 +79,14 @@ func (s *testAccountStore) UpdateAdmin(_ context.Context, input dbstore.UpdateAc
 	return s.record, nil
 }
 
-func (*testAccountStore) UpdateProfile(context.Context, dbstore.UpdateAccountProfileInput) (dbstore.AccountRecord, error) {
-	return dbstore.AccountRecord{}, errors.New("not implemented")
+func (s *testAccountStore) UpdateProfile(_ context.Context, input dbstore.UpdateAccountProfileInput) (dbstore.AccountRecord, error) {
+	s.profileUpdated = input
+	s.record.TitleModelID = input.TitleModelID
+	return s.record, nil
+}
+
+func (s *testAccountStore) IsValidTitleModel(context.Context, string) (bool, error) {
+	return s.validTitleModel, s.titleModelErr
 }
 
 func (*testAccountStore) UpdatePassword(context.Context, dbstore.UpdateAccountPasswordInput) error {
@@ -123,5 +132,33 @@ func TestUpdateAdminLeavesMembershipStateUnspecified(t *testing.T) {
 	}
 	if store.adminUpdated.IsActive != nil {
 		t.Fatalf("role-only update supplied membership state %v", *store.adminUpdated.IsActive)
+	}
+}
+
+func TestUpdateProfileValidatesAndPersistsTitleModel(t *testing.T) {
+	modelID := "11111111-1111-1111-1111-111111111111"
+	store := &testAccountStore{
+		record:          dbstore.AccountRecord{ID: "user-1", Username: "alice", Timezone: "UTC"},
+		validTitleModel: true,
+	}
+	svc := NewService(nil, store)
+
+	account, err := svc.UpdateProfile(context.Background(), "user-1", UpdateProfileRequest{TitleModelID: &modelID})
+	if err != nil {
+		t.Fatalf("UpdateProfile() error = %v", err)
+	}
+	if store.profileUpdated.TitleModelID != modelID || account.TitleModelID != modelID {
+		t.Fatalf("title model was not persisted: input=%q account=%q", store.profileUpdated.TitleModelID, account.TitleModelID)
+	}
+}
+
+func TestUpdateProfileRejectsInvalidTitleModel(t *testing.T) {
+	modelID := "11111111-1111-1111-1111-111111111111"
+	store := &testAccountStore{record: dbstore.AccountRecord{ID: "user-1", Username: "alice", Timezone: "UTC"}}
+	svc := NewService(nil, store)
+
+	_, err := svc.UpdateProfile(context.Background(), "user-1", UpdateProfileRequest{TitleModelID: &modelID})
+	if !errors.Is(err, ErrInvalidTitleModel) {
+		t.Fatalf("UpdateProfile() error = %v, want ErrInvalidTitleModel", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -120,16 +121,32 @@ func (s *Store) UpdateProfile(ctx context.Context, input dbstore.UpdateAccountPr
 		return dbstore.AccountRecord{}, err
 	}
 	row, err := s.queries.UpdateAccountProfile(ctx, dbsqlc.UpdateAccountProfileParams{
-		UserID:      userID,
-		DisplayName: optionalText(input.DisplayName),
-		AvatarUrl:   optionalText(input.AvatarURL),
-		Timezone:    input.Timezone,
-		Metadata:    []byte(input.Metadata),
+		UserID:       userID,
+		DisplayName:  optionalText(input.DisplayName),
+		AvatarUrl:    optionalText(input.AvatarURL),
+		Timezone:     input.Timezone,
+		Metadata:     []byte(input.Metadata),
+		TitleModelID: optionalUUID(input.TitleModelID),
 	})
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)
 	}
 	return accountRecord(dbsqlc.TeamAccount(row)), nil
+}
+
+func (s *Store) IsValidTitleModel(ctx context.Context, modelID string) (bool, error) {
+	id, err := db.ParseUUID(modelID)
+	if err != nil {
+		return false, nil
+	}
+	model, err := s.queries.GetModelByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return model.Type == "chat", nil
 }
 
 func (s *Store) UpdatePassword(ctx context.Context, input dbstore.UpdateAccountPasswordInput) error {
@@ -218,5 +235,16 @@ func accountRecord(row dbsqlc.TeamAccount) dbstore.AccountRecord {
 	if row.LastLoginAt.Valid {
 		rec.LastLoginAt = row.LastLoginAt.Time
 	}
+	if row.TitleModelID.Valid {
+		rec.TitleModelID = uuid.UUID(row.TitleModelID.Bytes).String()
+	}
 	return rec
+}
+
+func optionalUUID(value string) pgtype.UUID {
+	parsed, err := db.ParseUUID(value)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return parsed
 }

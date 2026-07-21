@@ -441,7 +441,6 @@ const form = reactive<SettingsForm>({
   chat_acp_agent_id: '',
   chat_acp_project_path: '/data',
   chat_acp_project_mode: 'project',
-  title_model_id: '',
   image_model_id: '',
   search_provider_id: '',
   fetch_provider_id: '',
@@ -493,7 +492,6 @@ watch(settings, (val) => {
     form.chat_acp_agent_id = next.chat_acp_agent_id ?? ''
     form.chat_acp_project_path = next.chat_acp_project_path || '/data'
     form.chat_acp_project_mode = next.chat_acp_project_mode || 'project'
-    form.title_model_id = val.title_model_id ?? ''
     form.image_model_id = val.image_model_id ?? ''
     form.search_provider_id = val.search_provider_id ?? ''
     form.fetch_provider_id = val.fetch_provider_id ?? ''
@@ -521,7 +519,6 @@ const hasSettingsChanges = computed(() => {
     || form.chat_acp_agent_id !== ((s as SettingsForm).chat_acp_agent_id ?? '')
     || form.chat_acp_project_path !== (((s as SettingsForm).chat_acp_project_path || '/data'))
     || form.chat_acp_project_mode !== (((s as SettingsForm).chat_acp_project_mode || 'project'))
-    || form.title_model_id !== (s.title_model_id ?? '')
     || form.image_model_id !== (s.image_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
     || form.fetch_provider_id !== (s.fetch_provider_id ?? '')

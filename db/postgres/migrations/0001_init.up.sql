@@ -249,7 +249,6 @@ CREATE TABLE IF NOT EXISTS bots (
   compaction_threshold INTEGER NOT NULL DEFAULT 100000,
   compaction_ratio INTEGER NOT NULL DEFAULT 80,
   compaction_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  title_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   image_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   discuss_probe_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -1260,6 +1259,7 @@ CREATE TABLE IF NOT EXISTS public.team_members (
     role       user_role   NOT NULL DEFAULT 'member',
     is_active  BOOLEAN     NOT NULL DEFAULT true,
     data_root  TEXT,
+    title_model_id UUID,
     metadata   JSONB       NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1633,6 +1633,16 @@ BEGIN
     END LOOP;
 END
 $$;
+
+-- The title model is a per-member preference in the current team. Models are
+-- team-owned, so keep the team id in the foreign key to prevent a profile from
+-- referencing a model in another team.
+ALTER TABLE public.team_members
+    DROP CONSTRAINT IF EXISTS team_members_title_model_id_fkey,
+    ADD CONSTRAINT team_members_title_model_id_fkey
+        FOREIGN KEY (team_id, title_model_id)
+        REFERENCES public.models(team_id, id)
+        ON DELETE SET NULL (title_model_id);
 
 -- ===== Phase 3b: partial / expression unique indexes with team_id prepended =====
 DROP INDEX IF EXISTS idx_bot_channel_external_identity;
@@ -2088,7 +2098,8 @@ SELECT
     u.is_active AS principal_is_active,
     tm.is_active AS membership_is_active,
     tm.created_at AS joined_at,
-    tm.updated_at AS membership_updated_at
+    tm.updated_at AS membership_updated_at,
+    tm.title_model_id
 FROM public.team_members tm
 JOIN public.users u ON u.id = tm.user_id
 WHERE tm.team_id = public.memoh_current_team_id();

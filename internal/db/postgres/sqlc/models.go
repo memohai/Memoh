@@ -37,7 +37,6 @@ type Bot struct {
 	CompactionThreshold    int32              `json:"compaction_threshold"`
 	CompactionRatio        int32              `json:"compaction_ratio"`
 	CompactionModelID      pgtype.UUID        `json:"compaction_model_id"`
-	TitleModelID           pgtype.UUID        `json:"title_model_id"`
 	ImageModelID           pgtype.UUID        `json:"image_model_id"`
 	DiscussProbeModelID    pgtype.UUID        `json:"discuss_probe_model_id"`
 	TtsModelID             pgtype.UUID        `json:"tts_model_id"`
@@ -745,17 +744,19 @@ type TeamAccount struct {
 	MembershipIsActive  bool               `json:"membership_is_active"`
 	JoinedAt            pgtype.Timestamptz `json:"joined_at"`
 	MembershipUpdatedAt pgtype.Timestamptz `json:"membership_updated_at"`
+	TitleModelID        pgtype.UUID        `json:"title_model_id"`
 }
 
 type TeamMember struct {
-	TeamID    pgtype.UUID        `json:"team_id"`
-	UserID    pgtype.UUID        `json:"user_id"`
-	Role      string             `json:"role"`
-	IsActive  bool               `json:"is_active"`
-	DataRoot  pgtype.Text        `json:"data_root"`
-	Metadata  []byte             `json:"metadata"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	Role         string             `json:"role"`
+	IsActive     bool               `json:"is_active"`
+	DataRoot     pgtype.Text        `json:"data_root"`
+	TitleModelID pgtype.UUID        `json:"title_model_id"`
+	Metadata     []byte             `json:"metadata"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type TemplateProviderTemplate struct {

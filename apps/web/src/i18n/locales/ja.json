@@ -93,6 +93,11 @@
     "bot": {
       "name_taken": "この名前はすでに使用されています。"
     },
+    "profile": {
+      "request_invalid": "プロフィール更新リクエストが無効です。",
+      "title_model_invalid": "選択したタイトルModelは利用できないか、チャットModelではありません。",
+      "update_failed": "プロフィールを更新できませんでした。"
+    },
     "provider": {
       "name_taken": "同じ名前のプロバイダーがすでに存在します。"
     },
@@ -282,6 +287,9 @@
     "avatarUrl": "アバターURL",
     "timezone": "タイムゾーン",
     "timezonePlaceholder": "例: America/New_York",
+    "titleModel": "タイトルModel",
+    "titleModelDescription": "所有するすべてのBotのセッションタイトルをこのModelで生成します。",
+    "titleModelPlaceholder": "無効（最初のメッセージを使用）",
     "saveProfile": "変更を保存",
     "profileUpdated": "プロフィールが更新されました",
     "profileUpdateFailed": "プロフィールの更新に失敗しました",
@@ -2294,9 +2302,6 @@
       "defaultAgentDescription": "新しいローカルチャットにのみ適用されます。既存の会話では現在のAgentが引き続き使用されます。",
       "defaultAgentUnavailable": "利用できないAgent",
       "defaultAgentUnavailableDescription": "現在のデフォルトAgentは利用できません。保存する前にMemohまたは利用可能なAgentを選択してください。",
-      "titleModel": "タイトルModel",
-      "titleModelDescription": "会話に自動的にタイトルを付けるには、軽量のModelを選択してください。無効にするには空のままにします。",
-      "titleModelPlaceholder": "無効 (自動タイトルなし)",
       "searchProvider": "ウェブ検索",
       "searchProviderPlaceholder": "ウェブ検索を選択",
       "fetchProvider": "ウェブフェッチ",
