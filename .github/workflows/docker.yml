@@ -181,7 +181,8 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
           load: ${{ env.PUSH != 'true' && matrix.image == 'workspace' && matrix.platform == 'linux/amd64' }}
-          tags: memoh-ci-${{ matrix.image }}:${{ matrix.variant != '' && matrix.variant || 'default' }}
+          # A local tag is only needed by the PR smoke-test; digest pushes must not include it.
+          tags: ${{ env.PUSH != 'true' && matrix.image == 'workspace' && matrix.platform == 'linux/amd64' && 'memoh-ci-workspace:debian' || '' }}
           outputs: ${{ env.PUSH == 'true' && format('type=image,"name={0}/{1}/{2}",push-by-digest=true,name-canonical=true,push=true,compression=zstd', env.REGISTRY, github.repository_owner, matrix.image) || '' }}
           build-contexts: ${{ matrix.image == 'server' && format('gomodcache={0}/.go-cache', github.workspace) || '' }}
           build-args: |
