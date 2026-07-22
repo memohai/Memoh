@@ -141,6 +141,29 @@ func TestAgentGenerateStopsOnTerminalTextLoopAbort(t *testing.T) {
 	}
 }
 
+func TestAgentGeneratePropagatesStepCompletedFailure(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("checkpoint failed")
+	provider := &atomicMockProvider{
+		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}
+	a := New(Deps{})
+	_, err := a.Generate(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages: []sdk.Message{sdk.UserMessage("hello")},
+		Identity: SessionContext{BotID: "bot-1", SessionID: "session-1"},
+		OnStepCompleted: func(context.Context, *sdk.StepResult) error {
+			return sentinel
+		},
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Generate() error = %v, want wrapped sentinel", err)
+	}
+}
+
 func TestAgentStreamStopsOnToolLoopAbort(t *testing.T) {
 	t.Parallel()
 
@@ -354,6 +377,61 @@ func TestAgentStreamMarksRetryTextLoopAsAbort(t *testing.T) {
 	}
 }
 
+func TestAgentStreamRunsStepCompletedAfterMidStreamRetry(t *testing.T) {
+	t.Parallel()
+
+	var streamCalls atomic.Int32
+	modelProvider := &atomicMockProvider{
+		stream: func(_ context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+			call := streamCalls.Add(1)
+			ch := make(chan sdk.StreamPart, 8)
+			go func() {
+				defer close(ch)
+				ch <- &sdk.StartPart{}
+				ch <- &sdk.StartStepPart{}
+				if call == 1 {
+					ch <- &sdk.ErrorPart{Error: errors.New("api error 500")}
+					return
+				}
+				ch <- &sdk.TextStartPart{ID: "retry-step"}
+				ch <- &sdk.TextDeltaPart{ID: "retry-step", Text: "recovered"}
+				ch <- &sdk.TextEndPart{ID: "retry-step"}
+				ch <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
+				ch <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
+			}()
+			return &sdk.StreamResult{Stream: ch}, nil
+		},
+	}
+
+	retriedStepCallbacks := 0
+	var terminal StreamEvent
+	for event := range New(Deps{}).Stream(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages: []sdk.Message{sdk.UserMessage("retry callback")},
+		Identity: SessionContext{BotID: "bot-1", SessionID: "session-1"},
+		OnStepCompleted: func(_ context.Context, step *sdk.StepResult) error {
+			if step != nil && step.Text == "recovered" {
+				retriedStepCallbacks++
+			}
+			return nil
+		},
+	}) {
+		if event.IsTerminal() {
+			terminal = event
+		}
+	}
+
+	if streamCalls.Load() != 2 {
+		t.Fatalf("stream calls = %d, want initial + retry", streamCalls.Load())
+	}
+	if retriedStepCallbacks != 1 {
+		t.Fatalf("retried step completion callbacks = %d, want 1", retriedStepCallbacks)
+	}
+	if terminal.Type != EventAgentEnd {
+		t.Fatalf("terminal event = %q, want %q", terminal.Type, EventAgentEnd)
+	}
+}
+
 func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
 	t.Parallel()
 
@@ -425,6 +503,7 @@ func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
 			Identity:      SessionContext{BotID: "bot-1"},
 			LoopDetection: LoopDetectionConfig{Enabled: true},
 		},
+		nil,
 		nil,
 		nil,
 		nil,

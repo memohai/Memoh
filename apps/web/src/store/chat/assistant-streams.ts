@@ -7,6 +7,7 @@ export interface RuntimeReplacementState {
   replacedTurns: ChatMessage[]
   restoreForkAnchor: (() => void) | null
   applied: boolean
+  historyCommitted: boolean
 }
 
 export interface AssistantStream {

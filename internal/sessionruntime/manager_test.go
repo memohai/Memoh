@@ -1379,6 +1379,10 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 		t.Parallel()
 		runRuntimeManagerRejectsQueuedSteerOnAgentTerminalContract(t, suite)
 	})
+	t.Run("publishes history commit before terminal finalization", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerPublishesHistoryCommitContract(t, suite)
+	})
 	t.Run("recovers subscriber buffer overflow", func(t *testing.T) {
 		t.Parallel()
 		runRuntimeManagerSignalsSubscriberOverflowContract(t, suite)
@@ -1579,6 +1583,39 @@ func runRuntimeManagerProjectsUserInputDecisionsContract(t *testing.T, suite run
 	}
 	if calls := handlerCalls.Load(); calls != 3 {
 		t.Fatalf("command handler calls = %d, want 3", calls)
+	}
+}
+
+func runRuntimeManagerPublishesHistoryCommitContract(t *testing.T, suite runtimeBackendContractSuite) {
+	t.Helper()
+	manager := testRuntimeManager(t, suite.newBackend(t), "owner-history-commit")
+	sub, err := manager.Subscribe(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Close()
+	handle, err := startTestRunHandle(context.Background(), manager, testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1))
+	if err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{
+		Type:             agentpkg.EventHistoryCommit,
+		HistoryCommitted: true,
+	}); err != nil {
+		t.Fatalf("handle history commit: %v", err)
+	}
+	snapshot, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snapshot.CurrentRunView == nil || !snapshot.CurrentRunView.HistoryCommitted || snapshot.CurrentRunView.CanonicalReady || snapshot.CurrentRunView.Status != RunStatusRunning {
+		t.Fatalf("history-committed running snapshot = %#v", snapshot.CurrentRunView)
+	}
+	event := waitRuntimeEvent(t, sub.C, func(event Event) bool {
+		return event.Delta != nil && event.Delta.Run != nil && event.Delta.Run.HistoryCommitted != nil && *event.Delta.Run.HistoryCommitted
+	})
+	if event.Delta.Run.CanonicalReady == nil || *event.Delta.Run.CanonicalReady {
+		t.Fatalf("history commit delta = %#v, want canonical_ready=false", event.Delta)
 	}
 }
 

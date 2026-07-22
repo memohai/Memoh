@@ -144,7 +144,11 @@ type RunConfig struct {
 	// PrepareStep, recording the headerified text and the number of SDK
 	// output messages that preceded the injection. Used by the resolver
 	// to interleave injected messages at the correct position in storeRound.
-	InjectedRecorder func(headerifiedText string, insertAfter int)
+	InjectedRecorder func(headerifiedText string, imageParts []sdk.ImagePart, insertAfter int)
+
+	// OnStepCompleted runs after a complete model/tool step has been assembled.
+	// Returning an error cancels the remaining run before another model step.
+	OnStepCompleted func(context.Context, *sdk.StepResult) error
 
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step

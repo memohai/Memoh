@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -92,5 +93,68 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 	}
 	if events[3].Type != EventAgentEnd {
 		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[3])
+	}
+}
+
+func TestAgentStreamRunsStepCompletedBeforeTerminal(t *testing.T) {
+	t.Parallel()
+
+	a := New(Deps{})
+	order := make([]string, 0, 2)
+	stepValid := false
+	for event := range a.Stream(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: &agentToolPlaceholderProvider{}},
+		Messages: []sdk.Message{sdk.UserMessage("hello")},
+		Identity: SessionContext{BotID: "bot-1", SessionID: "session-1"},
+		OnStepCompleted: func(_ context.Context, step *sdk.StepResult) error {
+			stepValid = step != nil && len(step.Messages) == 1 && step.Messages[0].Role == sdk.MessageRoleAssistant
+			order = append(order, "step")
+			return nil
+		},
+	}) {
+		if event.IsTerminal() {
+			order = append(order, "terminal")
+		}
+	}
+	if !reflect.DeepEqual(order, []string{"step", "terminal"}) {
+		t.Fatalf("callback order = %#v, want step before terminal", order)
+	}
+	if !stepValid {
+		t.Fatal("completed step did not contain one assistant message")
+	}
+}
+
+func TestAgentStreamStepCompletedFailureAbortsRun(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("checkpoint failed")
+	a := New(Deps{})
+	callbackCalls := 0
+	sawCheckpointError := false
+	var terminal StreamEvent
+	for event := range a.Stream(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: &agentToolPlaceholderProvider{}},
+		Messages: []sdk.Message{sdk.UserMessage("hello")},
+		Identity: SessionContext{BotID: "bot-1", SessionID: "session-1"},
+		OnStepCompleted: func(context.Context, *sdk.StepResult) error {
+			callbackCalls++
+			return sentinel
+		},
+	}) {
+		if event.Type == EventError && event.Error == "agent step completion failed" {
+			sawCheckpointError = true
+		}
+		if event.IsTerminal() {
+			terminal = event
+		}
+	}
+	if callbackCalls != 1 {
+		t.Fatalf("step callback calls = %d, want 1", callbackCalls)
+	}
+	if terminal.Type != EventAgentAbort {
+		t.Fatalf("terminal event = %q, want %q", terminal.Type, EventAgentAbort)
+	}
+	if !sawCheckpointError {
+		t.Fatal("step completion failure did not emit an error event")
 	}
 }

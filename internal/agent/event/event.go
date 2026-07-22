@@ -9,6 +9,7 @@ type StreamEventType string
 
 const (
 	AgentStart          StreamEventType = "agent_start"
+	HistoryCommit       StreamEventType = "history_commit"
 	TextStart           StreamEventType = "text_start"
 	TextDelta           StreamEventType = "text_delta"
 	TextEnd             StreamEventType = "text_end"

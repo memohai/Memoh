@@ -68,6 +68,7 @@ type readMediaDecorationState struct {
 	pendingImages map[string]sdk.ImagePart
 	prepareCalls  int
 	injections    []readMediaInjection
+	readyMessages []sdk.Message
 }
 
 type readMediaInjection struct {
@@ -85,10 +86,46 @@ func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.pendingOrder) == 0 {
+	messages := append([]sdk.Message(nil), s.readyMessages...)
+	s.readyMessages = s.readyMessages[:0]
+	if message, ok := s.takePendingMessageLocked(); ok {
+		s.injections = append(s.injections, readMediaInjection{
+			afterStep: afterStep,
+			message:   message,
+		})
+		messages = append(messages, message)
+	}
+	if len(messages) == 0 {
 		return nil
 	}
 
+	next := *params
+	next.Messages = append(append([]sdk.Message(nil), params.Messages...), messages...)
+	return &next
+}
+
+func (s *readMediaDecorationState) completeStep(stepIndex int, step *sdk.StepResult) *sdk.StepResult {
+	if s == nil || step == nil {
+		return step
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	message, ok := s.takePendingMessageLocked()
+	if !ok {
+		return step
+	}
+	s.injections = append(s.injections, readMediaInjection{
+		afterStep: stepIndex,
+		message:   message,
+	})
+	s.readyMessages = append(s.readyMessages, message)
+
+	next := *step
+	next.Messages = append(append([]sdk.Message(nil), step.Messages...), message)
+	return &next
+}
+
+func (s *readMediaDecorationState) takePendingMessageLocked() (sdk.Message, bool) {
 	parts := make([]sdk.MessagePart, 0, len(s.pendingOrder))
 	for _, toolCallID := range s.pendingOrder {
 		image, ok := s.pendingImages[toolCallID]
@@ -101,21 +138,14 @@ func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.
 	s.pendingOrder = s.pendingOrder[:0]
 
 	if len(parts) == 0 {
-		return nil
+		return sdk.Message{}, false
 	}
 
 	message := sdk.Message{
 		Role:    sdk.MessageRoleUser,
 		Content: parts,
 	}
-	s.injections = append(s.injections, readMediaInjection{
-		afterStep: afterStep,
-		message:   message,
-	})
-
-	next := *params
-	next.Messages = append(append([]sdk.Message(nil), params.Messages...), message)
-	return &next
+	return message, true
 }
 
 func (s *readMediaDecorationState) mergeMessages(steps []sdk.StepResult, fallback []sdk.Message) []sdk.Message {

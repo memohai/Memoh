@@ -531,7 +531,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		records := make([]conversation.InjectedMessageRecord, 0)
 		injectedRecords = &records
 		var recMu sync.Mutex
-		runCfg.InjectedRecorder = func(headerifiedText string, insertAfter int) {
+		runCfg.InjectedRecorder = func(headerifiedText string, _ []sdk.ImagePart, insertAfter int) {
 			recMu.Lock()
 			*injectedRecords = append(*injectedRecords, conversation.InjectedMessageRecord{
 				HeaderifiedText: headerifiedText,

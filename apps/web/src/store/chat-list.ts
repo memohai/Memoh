@@ -477,7 +477,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionId,
     finishAssistantTurn,
     beforeReject: (stream) => {
-      if (stream.runtimeReplacement && !hasVisibleAssistantBlocks(stream.assistantTurn)) {
+      if (stream.runtimeReplacement && !stream.runtimeReplacement.historyCommitted && !hasVisibleAssistantBlocks(stream.assistantTurn)) {
         restoreRuntimeReplacement(stream)
       }
     },
@@ -1915,12 +1915,13 @@ export const useChatStore = defineStore('chat', () => {
       replacedTurns,
       restoreForkAnchor,
       applied: true,
+      historyCommitted: false,
     }
   }
 
   function restoreRuntimeReplacement(stream: PendingAssistantStream): boolean {
     const replacement = stream.runtimeReplacement
-    if (!replacement?.applied) return false
+    if (!replacement?.applied || replacement.historyCommitted) return false
     replacement.restoreForkAnchor?.()
     restoreTailFromOptimistic(
       stream.botId,
@@ -1943,14 +1944,27 @@ export const useChatStore = defineStore('chat', () => {
   ): boolean {
     const transcriptMessages = sessionTranscript(botId, targetSessionId).messages
     let assistantTurn: ChatAssistantTurn | undefined
+    let requestIndex = -1
     for (let index = transcriptMessages.length - 1; index >= 0; index--) {
       const turn = transcriptMessages[index]
-      if (turn?.role === 'assistant' && !turn.__optimistic) {
-        assistantTurn = turn
+      if (turn?.role === 'user' && turn.externalMessageId === streamId) {
+        requestIndex = index
         break
       }
     }
-    if (!assistantTurn) return false
+    if (requestIndex < 0) return false
+    for (let index = requestIndex + 1; index < transcriptMessages.length; index++) {
+      const turn = transcriptMessages[index]
+      if (turn?.role === 'assistant') {
+        assistantTurn = turn
+        break
+      }
+      if (turn?.role === 'user' && turn.externalMessageId) break
+    }
+    if (!assistantTurn) {
+      assistantTurn = sessionTranscript(botId, targetSessionId).createOptimisticAssistantTurn()
+      transcriptMessages.splice(requestIndex + 1, 0, assistantTurn)
+    }
 
     for (const message of runtimeMessages) upsertAssistantUIMessage(assistantTurn, message)
     assistantTurn.streaming = false
@@ -2160,15 +2174,19 @@ export const useChatStore = defineStore('chat', () => {
         stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn)
       }
     }
-    if (!stream && !isTerminalStream(streamId, runGeneration, bid, sid) && (isRuntimeActiveStatus(status) || runtimeMessages.length > 0 || terminalFailure || preparedReplacement)) {
+    const replacementAwaitingCommit = Boolean(operation && run.history_committed !== true)
+    if (!stream && !replacementAwaitingCommit && !isTerminalStream(streamId, runGeneration, bid, sid) && (isRuntimeActiveStatus(status) || runtimeMessages.length > 0 || terminalFailure || preparedReplacement)) {
       stream = ensureRuntimeStream(streamId, bid, sid, !operation, runGeneration, run.request_user_turn)
       if (stream) {
         markRuntimeStreamObserved(stream, run.generation ?? '')
         if (stream.runtimeGeneration) runtimeAssistantGenerations.set(stream.assistantTurn, stream.runtimeGeneration)
       }
     }
-    if (stream && preparedReplacement) {
+    if (stream && preparedReplacement && run.history_committed === true) {
       applyRuntimeReplacement(stream, preparedReplacement)
+    }
+    if (stream?.runtimeReplacement && run.history_committed === true) {
+      stream.runtimeReplacement.historyCommitted = true
     }
 
     if (stream) {
@@ -2197,13 +2215,17 @@ export const useChatStore = defineStore('chat', () => {
     if (isRuntimeTerminalStatus(status)) {
       let keepRuntimeProjection = false
       if (stream) {
+        const historyCommitted = run.history_committed === true
+        if (stream.runtimeReplacement) stream.runtimeReplacement.historyCommitted = historyCommitted
         settleApprovalResponse(streamId, status === 'completed' ? 'succeeded' : 'failed', bid, sid)
         const runtimeError = status === 'completed' ? null : runtimeStatusError(status, run.error ?? status, stream.assistantTurn, true)
         const hadVisibleRuntimeOutput = hasVisibleAssistantBlocks(stream.assistantTurn)
         const completedEmptyReplacement = status === 'completed'
+          && historyCommitted
           && !hadVisibleRuntimeOutput
           && Boolean(stream.runtimeReplacement?.applied)
         const restoredReplacement = !completedEmptyReplacement
+          && !historyCommitted
           && !hadVisibleRuntimeOutput
           && restoreRuntimeReplacement(stream)
         if (completedEmptyReplacement) {

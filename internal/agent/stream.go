@@ -14,6 +14,7 @@ type StreamEvent = event.StreamEvent
 const (
 	EventAgentStart          = event.AgentStart
 	EventStart               = event.AgentStart
+	EventHistoryCommit       = event.HistoryCommit
 	EventTextStart           = event.TextStart
 	EventTextDelta           = event.TextDelta
 	EventTextEnd             = event.TextEnd
