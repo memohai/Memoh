@@ -119,7 +119,7 @@ func startLiveBridgeContainer(t *testing.T, dataRoot string) *bridge.Client {
 		image = "memoh-toolkit-acp-bridge-live:local"
 		runCmd(t, repoRoot, 5*time.Minute,
 			"docker", "build",
-			"-f", "docker/Dockerfile.server",
+			"-f", "docker/Dockerfile.workspace",
 			"--target", "toolkit-acp-bridge-live",
 			"-t", image,
 			".",
@@ -163,7 +163,7 @@ func findRepoRoot(t *testing.T) string {
 	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			if _, err := os.Stat(filepath.Join(dir, "docker", "Dockerfile.server")); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, "docker", "Dockerfile.workspace")); err == nil {
 				return dir
 			}
 		}
@@ -235,4 +235,17 @@ func waitForBridgeExec(t *testing.T, client *bridge.Client) {
 		time.Sleep(250 * time.Millisecond)
 	}
 	t.Fatalf("bridge did not become ready: %v", lastErr)
+}
+
+func skipIfExternalCodexLimit(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "usage_limit_exceeded") ||
+		strings.Contains(message, "you've hit your usage limit") ||
+		strings.Contains(message, "insufficient_quota") {
+		t.Skipf("Codex live smoke skipped because the external Codex account/API quota is unavailable: %v", err)
+	}
 }

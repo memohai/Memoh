@@ -146,7 +146,7 @@ describe('acp-metadata', () => {
     })
   })
 
-  it('finds required setup fields and skips local/self modes', () => {
+  it('finds required setup fields and skips self mode', () => {
     const value: ACPForm = {
       agents: {
         codex: {

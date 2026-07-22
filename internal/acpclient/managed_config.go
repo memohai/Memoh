@@ -80,12 +80,6 @@ func WriteManagedACPConfig(ctx context.Context, req ManagedACPConfigRequest, get
 		}
 		return WriteCodexManagedConfigWithAuth(ctx, client, cfg)
 	case acpprofile.AgentHermesID:
-		if req.Resolved.Backend == WorkspaceBackendLocal {
-			return WriteHermesManagedConfigToLocalFS(HermesManagedConfig{
-				Managed: req.Setup.Managed,
-				Home:    req.Resolved.HermesHome,
-			})
-		}
 		client, err := requireManagedACPClient(getClient)
 		if err != nil {
 			return err

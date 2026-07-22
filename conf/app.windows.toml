@@ -44,11 +44,12 @@ driver = "postgres"
 # available for custom deployments, but its runtime paths must match the host.
 backend = "containerd"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-default_image = "debian:bookworm-slim"
+default_image = "memohai/workspace:debian"
 image_pull_policy = "if_not_present"
 # containerd snapshotter used by workspace containers.
 snapshotter = "overlayfs"
 data_root = "data"
+bridge_path = "/opt/memoh/runtime/bridge"
 
 [containerd]
 # Windows containerd usually exposes a named pipe endpoint.

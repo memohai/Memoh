@@ -21,7 +21,7 @@ winget install jdx.mise
 
 ```bash
 mise install       # Install toolchains (Go, Node, pnpm, sqlc, golangci-lint)
-mise run setup     # Install dependencies and local workspace tooling
+mise run setup     # Install dependencies and run code generation
 mise run dev       # Start the full containerized dev environment
 ```
 

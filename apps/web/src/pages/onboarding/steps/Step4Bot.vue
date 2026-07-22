@@ -6,11 +6,6 @@ import {
   Button,
   Input,
   Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Separator,
   Spinner,
   Tooltip,
@@ -19,7 +14,7 @@ import {
   TooltipTrigger,
 } from '@felinic/ui'
 import { SquarePen, CircleHelp, Bot, Copy } from 'lucide-vue-next'
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
@@ -29,13 +24,10 @@ import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useClipboard } from '@/composables/useClipboard'
-import { useCapabilitiesStore } from '@/store/capabilities'
-import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import { safeSessionSet } from '@/utils/safe-storage'
 import { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent, withACPMetadata, type ACPForm } from '@/utils/acp'
-import { canCreateLocalWorkspace } from '@/utils/desktop-runtime'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
@@ -53,12 +45,9 @@ import FooterNav from '../components/footer-nav.vue'
 const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
 const queryCache = useQueryCache()
-const capabilities = useCapabilitiesStore()
-const desktopRuntime = useDesktopRuntime()
 const { copyText } = useClipboard()
 const { visible, exiting, leave } = useStepTransition()
 
-const workspaceVisible = ref(false)
 const submitting = ref(false)
 
 const store = useBotCreateProgressStore()
@@ -100,8 +89,6 @@ const {
 } = useACPOAuth(() => oauthBotId.value)
 
 onMounted(() => {
-  void capabilities.load()
-  void desktopRuntime.load()
   acpSelection.value = readACPSelection()
   if (acpSelection.value) {
     void (async () => {
@@ -115,33 +102,12 @@ onMounted(() => {
   }
 })
 
-const allowLocalWorkspaceCreate = computed(() =>
-  canCreateLocalWorkspace({
-    serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
-    host: desktopRuntime.host.value,
-  }),
-)
-
 const form = reactive({
   display_name: '',
   avatar_url: '',
   chat_model_id: '',
   memory_provider_id: '',
-  workspace_backend: 'container',
 })
-
-watch(allowLocalWorkspaceCreate, (enabled) => {
-  if (!enabled) {
-    form.workspace_backend = 'container'
-    workspaceVisible.value = false
-    return
-  }
-  form.workspace_backend = 'local'
-  workspaceVisible.value = false
-  nextFrame(() => {
-    workspaceVisible.value = true
-  })
-}, { immediate: true })
 
 const avatarDialogOpen = ref(false)
 const avatarFallback = useAvatarInitials(() => form.display_name || '')
@@ -183,16 +149,11 @@ const { data: providerData } = useQuery({
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 
-const isLocalWorkspace = computed(() => allowLocalWorkspaceCreate.value && form.workspace_backend === 'local')
-const acpSelfRequiresLocalWorkspace = computed(() =>
-  acpAgentId.value === 'hermes' && acpSelection.value?.setupMode === 'self' && !isLocalWorkspace.value,
-)
-
 const canSubmit = computed(() => {
-  return !!form.display_name.trim() && !acpSelfRequiresLocalWorkspace.value
+  return !!form.display_name.trim()
 })
 
-const isContainerSubmitting = computed(() => submitting.value && !isLocalWorkspace.value)
+const isContainerSubmitting = computed(() => submitting.value)
 
 const ctaLabel = computed(() => {
   if (isContainerSubmitting.value) return t('onboarding.bot.preparingEnvironment')
@@ -200,9 +161,7 @@ const ctaLabel = computed(() => {
 })
 
 function buildMetadata(): Record<string, unknown> | undefined {
-  let metadata: Record<string, unknown> = isLocalWorkspace.value
-    ? { workspace: { backend: 'local' } }
-    : {}
+  let metadata: Record<string, unknown> = {}
 
   const selection = acpSelection.value
   if (selection) {
@@ -224,13 +183,6 @@ function buildMetadata(): Record<string, unknown> | undefined {
 async function handleSubmit() {
   if (!canSubmit.value || submitting.value) return
   submitting.value = true
-
-  // Ensure deployment capabilities are resolved (and the workspace-backend
-  // watcher has flushed) before reading isLocalWorkspace / building metadata,
-  // so a fast submit on desktop can't create a container bot or enter the
-  // OAuth phase the backend would reject.
-  await Promise.all([capabilities.load(), desktopRuntime.load()])
-  await nextTick()
 
   // The store drives the inline terminal reactively while we await completion.
   await store.start({
@@ -270,9 +222,8 @@ async function handleSubmit() {
 
   void queryCache.invalidateQueries({ key: getBotsQueryKey() })
 
-  // OAuth (managed token injection) is BYOK: it works for both container and
-  // local/desktop workspaces. For local the token is written to the bot-scoped
-  // managed config, so this phase runs regardless of backend.
+  // OAuth runs after the workspace is ready so the managed token can be
+  // written into the bot-scoped configuration.
   if (botId && acpSelection.value?.setupMode === 'oauth') {
     store.reset()
     enterOAuthPhase(botId)
@@ -519,76 +470,14 @@ function skipOAuth() {
               />
             </div>
 
-            <template v-if="allowLocalWorkspaceCreate">
-              <div
-                class="transition-all duration-[350ms] ease-out delay-[140ms] mt-6"
-                :class="workspaceVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-              >
-                <div class="flex flex-col gap-4">
-                  <FieldStack>
-                    <template #label>
-                      <div class="flex items-center gap-2">
-                        <Label>{{ $t('bots.workspaceBackend') }}</Label>
-                        <Tooltip>
-                          <TooltipTrigger as-child>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              class="size-5 text-muted-foreground hover:text-foreground"
-                            >
-                              <CircleHelp class="size-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent class="max-w-80 text-left leading-relaxed">
-                            {{ $t('bots.workspaceBackendHint') }}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </template>
-                    <Select v-model="form.workspace_backend">
-                      <SelectTrigger class="w-full">
-                        <SelectValue :placeholder="$t('bots.workspaceBackend')" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="container">
-                          {{ $t('bots.workspaceBackends.container') }}
-                        </SelectItem>
-                        <SelectItem value="local">
-                          {{ $t('bots.workspaceBackends.local') }}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </FieldStack>
-
-                  <HintBox
-                    v-if="isLocalWorkspace"
-                    tone="warning"
-                  >
-                    {{ $t('bots.localWorkspaceWarning') }}
-                  </HintBox>
-                </div>
-              </div>
-            </template>
-
             <HintBox
-              v-if="acpSelfRequiresLocalWorkspace"
-              tone="warning"
-              class="mt-6 transition-all duration-[350ms] ease-out delay-[180ms]"
-              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-            >
-              {{ t('onboarding.bot.acp.selfRequiresLocalWorkspace', { agent: acpAgentName }) }}
-            </HintBox>
-
-            <HintBox
-              v-if="!isLocalWorkspace && !acpSelfRequiresLocalWorkspace"
               class="mt-6 transition-all duration-[350ms] ease-out delay-[200ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
               {{ $t('bots.createBotWaitHint') }}
             </HintBox>
             <div
-              v-if="!isLocalWorkspace && (createStatus === 'creating' || createStatus === 'error') && terminalLines.length"
+              v-if="(createStatus === 'creating' || createStatus === 'error') && terminalLines.length"
               class="mt-3 transition-all duration-[350ms] ease-out delay-[220ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >

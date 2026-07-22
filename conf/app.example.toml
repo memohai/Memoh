@@ -95,14 +95,16 @@ driver = "postgres"
 # - apple: macOS Apple Container backend via socktainer.
 backend = "docker"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-default_image = "debian:bookworm-slim"
+default_image = "memohai/workspace:debian"
 # Workspace image pull policy: if_not_present, always, or never.
-# Local backends apply it before creating the workspace.
+# The selected container backend applies it before creating the workspace.
 image_pull_policy = "if_not_present"
 # containerd snapshotter name. Ignored by the Docker backend.
 snapshotter = "overlayfs"
 # Host/runtime data root for sockets, CNI state, overlay sidecars, and workspace metadata.
 data_root = "data"
+# Host path to the bridge binary mounted read-only into workspace containers.
+bridge_path = "/opt/memoh/runtime/bridge"
 # CNI paths used by containerd-backed runtime networking.
 cni_bin_dir = "/opt/cni/bin"
 cni_conf_dir = "/etc/cni/net.d"
@@ -124,8 +126,8 @@ host = ""
 
 [bridge_tls]
 # disabled: default for local/open-source deployments.
-# strict: TCP workspace bridge requires mTLS. UDS/local workspace bridges keep
-# using their local trust model. Shared Kata/CNI deployments should use strict.
+# strict: TCP workspace bridge requires mTLS. UDS workspace bridges keep using
+# their socket trust model. Shared Kata/CNI deployments should use strict.
 # Generate material with:
 #   scripts/gen-bridge-mtls.sh -instance-id <uuid> -out /opt/memoh/bridge-mtls
 mode = "disabled"
@@ -147,22 +149,6 @@ server_name = ""
 # binary_path = "/opt/homebrew/bin/socktainer"
 socket_path = ""
 binary_path = ""
-
-[local]
-# Enables local workspaces alongside the configured container backend. This is
-# intended for trusted desktop use only: there is no sandbox, and commands run
-# as the server process user on the host machine.
-enabled = false
-# Default parent used when a local bot does not provide an explicit workspace
-# path. The final default is "$HOME/.memoh/workspaces/<bot-name>".
-default_workspace_parent = "~/.memoh/workspaces"
-# Metadata for local workspace records. Leave empty to store it under
-# [container].data_root/local/containers.
-metadata_root = ""
-# When true, local workspace tools may read/write/execute using host absolute
-# paths outside the bot's default workspace. Desktop can enable this for a
-# trusted local user; server deployments should keep local disabled.
-allow_absolute_paths = true
 
 [postgres]
 host = "127.0.0.1"

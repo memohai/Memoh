@@ -2,8 +2,6 @@ package acpclient
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -133,41 +131,6 @@ func TestWriteHermesManagedConfigRejectsInvalidBaseURL(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "absolute http(s) URL") {
 			t.Fatalf("WriteHermesManagedConfig(base_url=%q) error = %v, want URL validation", baseURL, err)
 		}
-	}
-}
-
-func TestWriteHermesManagedConfigToLocalFS(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "acp", "hermes", "bot-1")
-	err := WriteHermesManagedConfigToLocalFS(HermesManagedConfig{
-		Home: home,
-		Managed: map[string]string{
-			"provider": "custom",
-			"model":    "my-model",
-			"base_url": "https://llm.example/v1",
-			"api_key":  "sk-test",
-		},
-	})
-	if err != nil {
-		t.Fatalf("WriteHermesManagedConfigToLocalFS() error = %v", err)
-	}
-	config, err := os.ReadFile(filepath.Join(home, "config.yaml")) //nolint:gosec // test path under t.TempDir.
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	if content := string(config); !strings.Contains(content, `provider: "custom:memoh-managed"`) ||
-		!strings.Contains(content, `providers:`) ||
-		!strings.Contains(content, `memoh-managed:`) ||
-		!strings.Contains(content, `base_url: "https://llm.example/v1"`) ||
-		!strings.Contains(content, `key_env: "MEMOH_HERMES_API_KEY"`) ||
-		!strings.Contains(content, `api_mode: "chat_completions"`) {
-		t.Fatalf("config content =\n%s", content)
-	}
-	env, err := os.ReadFile(filepath.Join(home, ".env")) //nolint:gosec // test path under t.TempDir.
-	if err != nil {
-		t.Fatalf("read env: %v", err)
-	}
-	if got := string(env); !strings.Contains(got, `MEMOH_HERMES_API_KEY='sk-test'`) {
-		t.Fatalf("env content =\n%s", got)
 	}
 }
 

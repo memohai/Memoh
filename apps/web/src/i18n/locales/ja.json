@@ -116,6 +116,8 @@
     },
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
+      "image_incompatible": "Workspace イメージに互換性がありません。最新の Memoh Workspace イメージを基に再構築してください。",
+      "template_bootstrap_failed": "Workspace ファイルを初期化できませんでした。Workspace を再構築してからもう一度お試しください。",
       "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
     },
     "acp": {
@@ -1693,7 +1695,7 @@
       "basicInfo": "基本情報",
       "basicInfoDesc": "名前とアバター",
       "workspace": "Workspace",
-      "workspaceDesc": "分離環境またはローカル",
+      "workspaceDesc": "分離 Workspace",
       "security": "セキュリティポリシー",
       "securityDesc": "アクセス制御",
       "model": "Model",
@@ -1721,15 +1723,6 @@
         "applyingSettings": "ModelとMemory設定の適用"
       }
     },
-    "workspaceBackend": "Workspace",
-    "workspaceBackendHint": "分離 Workspace では Bot のファイルとコマンドがローカル環境から分離されます。ローカル Workspace はこのコンピューター上で直接動作します。",
-    "workspaceBackends": {
-      "container": "分離 Workspace",
-      "local": "ローカルフォルダー"
-    },
-    "localWorkspacePath": "ローカルWorkspaceフォルダー",
-    "localWorkspacePathPlaceholder": "このコンピュータ上のフォルダを選択してください",
-    "localWorkspaceWarning": "ローカル Workspaceはホスト ユーザー権限で実行され、ホスト ファイルとコマンドへの完全なアクセス権を持ちます。",
     "editBot": "Botの編集",
     "deleteConfirm": "このBotを削除してもよろしいですか?",
     "renameSuccess": "Bot名が更新されました",
@@ -2429,7 +2422,7 @@
       "acpClaudeOAuthExchange": "Tokenの保存",
       "acpClaudeOAuthExchangeFailed": "クロードTokenの保存に失敗しました",
       "acpSelfModeHint": "を使用します。ACPWorkspace ランタイム内ですでに構成されているエージェント (既存のログインなど)。",
-      "acpHermesSelfModeHint": "このWorkspaceで構成済みの Hermes Profile を使用します。ローカルモードではホストの ~/.hermes 認証情報を共有する場合があります。Botごとに認証情報を分離するには API Key 設定を使用してください。",
+      "acpHermesSelfModeHint": "この Workspace で構成済みの Hermes Profile を使用します。Memoh で Bot の認証情報を管理する場合は API Key 設定を使用してください。",
       "acpHermesSelfModeConfirm": "自己管理の Hermes を使用",
       "acpHermesProviderPlaceholder": "Providerを選択",
       "acpHermesProviderGemini": "Gemini（Google AI Studio）",
@@ -3273,8 +3266,7 @@
         "oauthExchange": "提出する",
         "oauthSkip": "今のところスキップしてください",
         "oauthSuccess": "認可成功",
-        "oauthExchangeFailed": "認証に失敗しました。もう一度お試しください。",
-        "selfRequiresLocalWorkspace": "{agent} のセルフ管理設定にはローカルワークスペースが必要です。ワークスペースのバックエンドをローカルに切り替えるか、前の手順に戻って API Key 設定を選択してください。"
+        "oauthExchangeFailed": "認証に失敗しました。もう一度お試しください。"
       }
     },
     "im": {

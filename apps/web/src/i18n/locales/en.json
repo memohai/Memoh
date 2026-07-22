@@ -119,6 +119,8 @@
     },
     "workspace": {
       "unreachable": "The workspace could not be reached.",
+      "image_incompatible": "This workspace image is incompatible. Rebuild it from the current Memoh workspace image and try again.",
+      "template_bootstrap_failed": "The workspace files could not be initialized. Please try rebuilding the workspace.",
       "display_prepare_failed": "Display preparation failed."
     },
     "acp": {
@@ -1714,7 +1716,7 @@
       "basicInfo": "Basic Info",
       "basicInfoDesc": "Name and avatar",
       "workspace": "Workspace",
-      "workspaceDesc": "Isolated or local",
+      "workspaceDesc": "Isolated workspace",
       "security": "Security Policy",
       "securityDesc": "Access control",
       "model": "Model",
@@ -1742,15 +1744,6 @@
         "applyingSettings": "Applying model & memory settings"
       }
     },
-    "workspaceBackend": "Workspace",
-    "workspaceBackendHint": "Isolated workspaces keep bot files and commands separate. Local workspaces run directly on this computer.",
-    "workspaceBackends": {
-      "container": "Isolated",
-      "local": "Local folder"
-    },
-    "localWorkspacePath": "Local workspace folder",
-    "localWorkspacePathPlaceholder": "Choose a folder on this computer",
-    "localWorkspaceWarning": "Local workspaces run with host user permissions and have full access to host files and commands",
     "editBot": "Edit Bot",
     "deleteConfirm": "Are you sure you want to delete this bot?",
     "renameSuccess": "Bot name updated",
@@ -2441,7 +2434,7 @@
       "acpClaudeOAuthExchange": "Save Token",
       "acpClaudeOAuthExchangeFailed": "Failed to save Claude token",
       "acpSelfModeHint": "Uses the ACP agent you've already configured inside the workspace runtime (e.g. an existing login).",
-      "acpHermesSelfModeHint": "Uses the Hermes profile already configured in this workspace. In local mode this can share the host ~/.hermes credentials; use API Key setup for bot-scoped credentials.",
+      "acpHermesSelfModeHint": "Uses the Hermes profile already configured in this workspace. Use API Key setup for Memoh-managed bot credentials.",
       "acpHermesSelfModeConfirm": "Use self-managed Hermes",
       "acpHermesProviderPlaceholder": "Select a provider",
       "acpHermesProviderGemini": "Gemini (Google AI Studio)",
@@ -3308,8 +3301,7 @@
         "oauthExchange": "Submit",
         "oauthSkip": "Skip for now",
         "oauthSuccess": "Authorization successful",
-        "oauthExchangeFailed": "Authorization failed, please try again",
-        "selfRequiresLocalWorkspace": "{agent} self-managed setup requires a local workspace. Switch the workspace backend to Local, or go back and choose API Key setup."
+        "oauthExchangeFailed": "Authorization failed, please try again"
       }
     },
     "im": {

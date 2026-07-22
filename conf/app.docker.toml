@@ -56,7 +56,7 @@ image_pull_policy = "if_not_present"
 # containerd snapshotter and CNI settings for bot workspace containers.
 snapshotter = "overlayfs"
 data_root = "/opt/memoh/data"
-runtime_dir = "/opt/memoh/runtime"
+bridge_path = "/opt/memoh/runtime/bridge"
 
 ## Workspace containerd configuration
 [containerd]
@@ -70,15 +70,6 @@ runtime_type = "io.containerd.runc.v2"
 # Used only when [container].backend = "docker"; the official Compose stack
 # uses containerd above.
 host = ""
-
-[local]
-# Local workspaces are intended for trusted desktop builds, not the default
-# Docker Compose deployment. Keep disabled here because local commands run as
-# the server process user without container isolation.
-enabled = false
-default_workspace_parent = "~/.memoh/workspaces"
-metadata_root = ""
-allow_absolute_paths = false
 
 ## Postgres configuration.
 [postgres]

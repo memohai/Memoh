@@ -1505,10 +1505,8 @@ export type HandlersContextUsage = {
 export type HandlersCreateContainerRequest = {
     gpu?: HandlersContainerGpuRequest;
     image?: string;
-    local_workspace_path?: string;
     restore_data?: boolean;
     snapshotter?: string;
-    workspace_backend?: string;
 };
 
 export type HandlersCreateContainerResponse = {
@@ -1762,7 +1760,6 @@ export type HandlersModelTokenUsage = {
 export type HandlersPingResponse = {
     commit_hash?: string;
     container_backend?: string;
-    local_workspace_enabled?: boolean;
     snapshot_supported?: boolean;
     status?: string;
     version?: string;

@@ -31,7 +31,6 @@ var (
 type WorkspaceBackend string
 
 const (
-	WorkspaceBackendLocal     WorkspaceBackend = "local"
 	WorkspaceBackendContainer WorkspaceBackend = "container"
 )
 
@@ -50,10 +49,6 @@ type processOptions struct {
 	Env       []string
 	CleanEnv  bool
 	UnsetEnv  []string
-	// WorkspaceRoot is the real (host) workspace root for local backends. It is
-	// used to point Codex at a bot-scoped CODEX_HOME so BYOK credentials stay
-	// isolated from the user's real ~/.codex.
-	WorkspaceRoot string
 	// HermesHome is the bot-scoped HERMES_HOME resolved by SessionPool and
 	// reused by Runner so config writes and process startup share one path.
 	HermesHome string
@@ -177,25 +172,6 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 }
 
 func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir string, opts processOptions) ([]string, func(), error) {
-	if opts.Backend == WorkspaceBackendLocal {
-		env, err := prepareLocalProcessEnv(opts)
-		if err != nil {
-			return nil, nil, err
-		}
-		// Managed local Claude points CLAUDE_CONFIG_DIR at a workspace-scoped
-		// dir; seed it with the managed ask rule so the very first session is
-		// already governed by Memoh policy, not by an empty config falling
-		// back to CLI defaults.
-		if configDir, err := localClaudeConfigDir(opts); err != nil {
-			return nil, nil, err
-		} else if configDir != "" {
-			if err := WriteClaudeManagedConfigDir(ctx, client, configDir); err != nil {
-				return nil, nil, fmt.Errorf("prepare Claude managed config: %w", err)
-			}
-		}
-		return env, nil, nil
-	}
-
 	mode := normalizeSetupMode(opts.SetupMode)
 
 	env := withoutEnvKeys(opts.Env, "HOME", "PATH", "CODEX_HOME")
@@ -223,9 +199,8 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 		if err := client.Mkdir(ctx, homeDir); err != nil {
 			return nil, nil, fmt.Errorf("prepare ACP HOME: %w", err)
 		}
-		// Container sessions isolate via a fresh managed HOME; local sessions
-		// isolate via CLAUDE_CONFIG_DIR (see prepareLocalProcessEnv). Both end
-		// with the same managed ask rule in effect.
+		// Managed sessions isolate via a fresh HOME and start with the managed
+		// ask rule in effect.
 		if isClaudeCodeAgent(opts.AgentID) {
 			if err := WriteClaudeManagedSettings(ctx, client, homeDir); err != nil {
 				return nil, nil, fmt.Errorf("prepare Claude managed settings: %w", err)
@@ -266,74 +241,6 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 	}
 }
 
-// prepareLocalProcessEnv builds the managed env overrides for a local (desktop)
-// workspace. Local agents run as host processes that inherit the host
-// environment (the bridge appends our entries onto os.Environ), so we only add
-// the BYOK overrides and never touch HOME/PATH. Self mode keeps the host's own
-// agent login and config, but still carries the narrow runtime-isolation
-// overrides that do not affect authentication.
-func prepareLocalProcessEnv(opts processOptions) ([]string, error) {
-	mode := normalizeSetupMode(opts.SetupMode)
-	if mode == SetupModeSelf {
-		return npmCacheEnv(opts.Env), nil
-	}
-	env := append([]string(nil), opts.Env...)
-	if isCodexAgent(opts.AgentID) {
-		// Codex reads its config from $CODEX_HOME (falling back to ~/.codex).
-		// Point it at the bot-scoped managed dir written under the workspace
-		// root so BYOK credentials don't clobber the user's real ~/.codex.
-		// Without a workspace root, isolation cannot be applied safely.
-		root := strings.TrimSpace(opts.WorkspaceRoot)
-		if root == "" {
-			return nil, errors.New("local Codex BYOK requires a workspace root for CODEX_HOME isolation")
-		}
-		env = withoutEnvKeys(env, "CODEX_HOME")
-		env = append(env, "CODEX_HOME="+filepath.Join(root, ".codex"))
-	}
-	if configDir, err := localClaudeConfigDir(opts); err != nil {
-		return nil, err
-	} else if configDir != "" {
-		// Claude Code reads its user-level config from $CLAUDE_CONFIG_DIR
-		// (falling back to ~/.claude). Without the override, the host's own
-		// ~/.claude - defaultMode, hooks, MCP servers, auto-allow rules -
-		// can govern the managed session and bypass Memoh approval. Self
-		// mode keeps host config by design; managed modes require isolation.
-		env = withoutEnvKeys(env, "CLAUDE_CONFIG_DIR")
-		env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
-	}
-	if isHermesAgent(opts.AgentID) {
-		home := strings.TrimSpace(opts.HermesHome)
-		if home == "" {
-			return nil, errors.New("local Hermes BYOK requires HERMES_HOME isolation")
-		}
-		env = withoutBlockedEnvNames(env, HermesManagedUnsetEnvKeys())
-		env = append(env, "HERMES_HOME="+home)
-	}
-	if len(env) == 0 {
-		return nil, nil
-	}
-	return env, nil
-}
-
-// localClaudeConfigDir returns the workspace-scoped CLAUDE_CONFIG_DIR for a
-// managed local Claude Code session, "" when no isolation applies (other
-// agents, self mode), or an error when isolation is required but impossible.
-// The dir is named .memoh-claude (not .claude) so it can never be confused
-// with a project-level .claude directory under the same root.
-func localClaudeConfigDir(opts processOptions) (string, error) {
-	if !isClaudeCodeAgent(opts.AgentID) {
-		return "", nil
-	}
-	if normalizeSetupMode(opts.SetupMode) == SetupModeSelf {
-		return "", nil
-	}
-	root := strings.TrimSpace(opts.WorkspaceRoot)
-	if root == "" {
-		return "", errors.New("local Claude Code BYOK requires a workspace root for CLAUDE_CONFIG_DIR isolation")
-	}
-	return filepath.Join(root, ".memoh-claude"), nil
-}
-
 func normalizeSetupMode(mode SetupMode) SetupMode {
 	switch SetupMode(strings.ToLower(strings.TrimSpace(string(mode)))) {
 	case SetupModeOAuth:
@@ -348,7 +255,7 @@ func normalizeSetupMode(mode SetupMode) SetupMode {
 func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts processOptions) (string, error) {
 	command = strings.TrimSpace(command)
 	resolved, lastResult, err := resolveCommandOnce(ctx, client, command, workDir, env, opts)
-	if err != nil || resolved != "" || opts.Backend != WorkspaceBackendContainer {
+	if err != nil || resolved != "" {
 		if resolved != "" || err != nil {
 			return resolved, err
 		}
@@ -403,21 +310,16 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 	if result.ExitCode == 0 {
 		return command, result, nil
 	}
-	lastResult := result
-
-	if opts.Backend == WorkspaceBackendContainer {
-		toolkitCommand := containerToolkitBin + "/" + command
-		toolkitResult, err := checkCommand(ctx, client, "test -x "+escapeShellArg(toolkitCommand), workDir, env, opts)
-		if err != nil {
-			return "", nil, fmt.Errorf("check ACP command %q: %w", command, err)
-		}
-		lastResult = toolkitResult
-		if toolkitResult.ExitCode == 0 {
-			return toolkitCommand, toolkitResult, nil
-		}
+	toolkitCommand := containerToolkitBin + "/" + command
+	toolkitResult, err := checkCommand(ctx, client, "test -x "+escapeShellArg(toolkitCommand), workDir, env, opts)
+	if err != nil {
+		return "", nil, fmt.Errorf("check ACP command %q: %w", command, err)
+	}
+	if toolkitResult.ExitCode == 0 {
+		return toolkitCommand, toolkitResult, nil
 	}
 
-	return "", lastResult, nil
+	return "", toolkitResult, nil
 }
 
 func checkCommand(ctx context.Context, client *bridge.Client, check, workDir string, env []string, opts processOptions) (*bridge.ExecResult, error) {
@@ -428,7 +330,7 @@ func checkCommand(ctx context.Context, client *bridge.Client, check, workDir str
 	})
 }
 
-func commandNotAvailableError(command string, result *bridge.ExecResult, backend WorkspaceBackend) error {
+func commandNotAvailableError(command string, result *bridge.ExecResult, _ WorkspaceBackend) error {
 	detail := ""
 	if result != nil {
 		detail = strings.TrimSpace(result.Stderr)
@@ -438,9 +340,6 @@ func commandNotAvailableError(command string, result *bridge.ExecResult, backend
 	}
 	if detail != "" {
 		detail = ": " + detail
-	}
-	if backend == WorkspaceBackendLocal {
-		return fmt.Errorf("ACP command %q is not available to the workspace process%s. Install the ACP agent command and restart Memoh Desktop/local server so PATH is inherited", command, detail)
 	}
 	return fmt.Errorf("ACP command %q is not available in the workspace PATH or %s%s. Install it in the workspace or rebuild the Memoh workspace runtime with %s available", command, containerToolkitBin, detail, containerToolkitBin)
 }
@@ -526,16 +425,6 @@ func withoutEnvKeys(env []string, keys ...string) []string {
 		out = append(out, item)
 	}
 	return out
-}
-
-func npmCacheEnv(env []string) []string {
-	for i := len(env) - 1; i >= 0; i-- {
-		key, _, ok := strings.Cut(env[i], "=")
-		if ok && strings.EqualFold(key, "NPM_CONFIG_CACHE") {
-			return []string{env[i]}
-		}
-	}
-	return nil
 }
 
 func withoutBlockedEnvNames(env []string, blocked []string) []string {

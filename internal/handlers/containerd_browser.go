@@ -191,10 +191,6 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	if status, statusErr := h.manager.GetContainerInfo(ctx, botID); statusErr == nil &&
-		strings.EqualFold(strings.TrimSpace(status.WorkspaceBackend), bridge.WorkspaceBackendLocal) {
-		return echo.NewHTTPError(http.StatusBadRequest, "browser tab is not available for local workspaces")
-	}
 	if _, err := h.manager.NativeMCPClient(ctx, botID); err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+err.Error())
 	}

@@ -67,7 +67,7 @@ func TestLoadReadsWorkspaceFieldsFromContainerSection(t *testing.T) {
 backend = "docker"
 default_image = "alpine:3.22"
 image_pull_policy = "always"
-runtime_dir = "/opt/memoh/runtime"
+bridge_path = "/opt/memoh/runtime/bridge"
 `)
 	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -89,8 +89,8 @@ runtime_dir = "/opt/memoh/runtime"
 	if cfg.Workspace.ImagePullPolicy != "always" {
 		t.Fatalf("workspace image_pull_policy = %q", cfg.Workspace.ImagePullPolicy)
 	}
-	if cfg.Workspace.RuntimeDir != "/opt/memoh/runtime" {
-		t.Fatalf("workspace runtime_dir = %q", cfg.Workspace.RuntimeDir)
+	if cfg.Workspace.BridgePath != "/opt/memoh/runtime/bridge" {
+		t.Fatalf("workspace bridge_path = %q", cfg.Workspace.BridgePath)
 	}
 }
 
@@ -488,6 +488,9 @@ func TestLoadAppKataDevTemplate(t *testing.T) {
 	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
 		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
 	}
+	if !filepath.IsAbs(cfg.Workspace.BridgePath) {
+		t.Fatalf("workspace bridge_path = %q, want absolute path", cfg.Workspace.BridgePath)
+	}
 }
 
 func TestLoadAppKataDockerTemplate(t *testing.T) {
@@ -519,9 +522,12 @@ func TestLoadAppKataDockerTemplate(t *testing.T) {
 	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
 		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
 	}
+	if !filepath.IsAbs(cfg.Workspace.BridgePath) {
+		t.Fatalf("workspace bridge_path = %q, want absolute path", cfg.Workspace.BridgePath)
+	}
 }
 
-func TestLoadResolvesRelativeLocalPaths(t *testing.T) {
+func TestLoadResolvesRelativePaths(t *testing.T) {
 	t.Parallel()
 
 	configPath := filepath.Join(t.TempDir(), "config.toml")
@@ -532,9 +538,7 @@ driver = "postgres"
 [container]
 data_root = "data/local"
 runtime_dir = "data/runtime"
-
-[local]
-metadata_root = "data/local/containers"
+bridge_path = "data/runtime/custom-bridge"
 
 [registry]
 providers_dir = "conf/providers"
@@ -550,7 +554,7 @@ providers_dir = "conf/providers"
 	for name, path := range map[string]string{
 		"data_root":     cfg.Workspace.DataRoot,
 		"runtime_dir":   cfg.Workspace.RuntimeDir,
-		"metadata_root": cfg.Local.MetadataRoot,
+		"bridge_path":   cfg.Workspace.BridgePath,
 		"providers_dir": cfg.Registry.ProvidersPath(),
 	} {
 		if !filepath.IsAbs(path) {

@@ -226,7 +226,7 @@ src/
     ├── date-time.ts           #   Date/time formatting
     ├── date-time.test.ts      #   Date/time tests
     ├── channel-type-label.ts  #   Channel type label utilities
-    ├── bot-workspace.ts       #   Local-vs-container workspace detection helpers
+    ├── bot-workspace.ts       #   Container-vs-remote workspace detection helpers
     ├── display-snapshot.ts    #   Browser-safe display snapshot capture helpers
     ├── key-value-tags.ts      #   Tag ↔ Record conversion
     ├── key-value-tags.test.ts #   Tag conversion tests
@@ -510,7 +510,7 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 ## Workspace, Display, Browser Use, and Computer Use
 
 - The center workspace is a dockview layout managed by `store/workspace-tabs.ts`: chat / file / terminal / browser / display are dockview panels that can be tabbed together or split. The chat panel is a singleton that follows the active session; the workspace file browser lives in the left side panel (`components/sidebar/files-pane.vue`), not in the dock.
-- Terminal and file panes are normal workspace features. Display panes are container-workspace features and are hidden for trusted local bots via `utils/bot-workspace.ts` (`metadata.workspace.backend === 'local'` or API `workspace_backend === 'local'`).
+- Terminal and file panes are normal workspace features. Display panes are container-workspace features and are hidden while a bot is bound to a remote runtime.
 - `pages/home/components/display-pane.vue` connects to the workspace display service, prepares the display runtime, opens a WebRTC session, forwards keyboard/pointer input, and captures snapshots for previews. It represents a headed container desktop with a browser, not a headless automation runner.
 - `pages/bots/components/bot-desktop.vue` is the settings/runtime surface for enabling display, checking Xvnc/browser/toolkit availability, viewing live sessions, and closing display sessions.
 - Agent Browser Use (`browser_action`, `browser_observe`, `browser_remote_session`) operates the headed workspace Chrome/Chromium instance exposed by the backend display stack. Computer Use is split across `computer_observe` (accessibility snapshot via the bundled `a11y-cli` helper, or a saved-to-path screenshot) and `computer_action` (ref-driven click/type/fill with raw RFB coordinates as fallback). Do not describe these as generic headless Playwright; headless Playwright remains a separate command-line workflow inside a workspace.

@@ -36,7 +36,7 @@ function onClickCapture(event: MouseEvent) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
   event.preventDefault()
   // openBrowserAt returns false when the workspace browser is unavailable
-  // (no manage permission / local workspace / no dock) — fall back to the OS tab.
+  // (no manage permission or no dock) — fall back to the OS tab.
   if (!tabs.openBrowserAt(parsed.display)) {
     window.open(props.node.href, '_blank', 'noopener')
   }

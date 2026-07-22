@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/container"
@@ -50,12 +51,10 @@ type ContainerGPURequest struct {
 }
 
 type CreateContainerRequest struct {
-	Snapshotter        string               `json:"snapshotter,omitempty"`
-	RestoreData        bool                 `json:"restore_data,omitempty"`
-	Image              string               `json:"image,omitempty"`
-	WorkspaceBackend   string               `json:"workspace_backend,omitempty"`
-	LocalWorkspacePath string               `json:"local_workspace_path,omitempty"`
-	GPU                *ContainerGPURequest `json:"gpu,omitempty"`
+	Snapshotter string               `json:"snapshotter,omitempty"`
+	RestoreData bool                 `json:"restore_data,omitempty"`
+	Image       string               `json:"image,omitempty"`
+	GPU         *ContainerGPURequest `json:"gpu,omitempty"`
 }
 
 type CreateContainerResponse struct {
@@ -107,8 +106,33 @@ type createContainerErrorEvent struct {
 	Code      string            `json:"code"`
 	I18nKey   string            `json:"i18n_key,omitempty"`
 	Args      map[string]string `json:"args"`
+	Detail    string            `json:"detail,omitempty"`
 	Message   string            `json:"message"`
 	RequestID string            `json:"request_id,omitempty"`
+}
+
+func newWorkspaceSetupAppError(setupErr error, requestID string) (createContainerErrorEvent, bool) {
+	var code apperror.Code
+	switch {
+	case errors.Is(setupErr, workspace.ErrWorkspaceImageIncompatible):
+		code = apperror.CodeWorkspaceImageIncompatible
+	case errors.Is(setupErr, workspace.ErrWorkspaceTemplateBootstrapFailed):
+		code = apperror.CodeWorkspaceTemplateBootstrapFailed
+	default:
+		return createContainerErrorEvent{}, false
+	}
+	public, ok := apperror.PublicFrom(apperror.Wrap(code, setupErr, nil), requestID)
+	if !ok {
+		return createContainerErrorEvent{}, false
+	}
+	return createContainerErrorEvent{
+		Type:      "error",
+		Code:      string(public.Code),
+		Args:      public.Args,
+		Detail:    public.Detail,
+		Message:   public.Detail,
+		RequestID: public.RequestID,
+	}, true
 }
 
 type GetContainerResponse struct {
@@ -400,45 +424,37 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		})
 	}
 
-	workspaceBackend := strings.ToLower(strings.TrimSpace(req.WorkspaceBackend))
-	if workspaceBackend == "" {
-		workspaceBackend = "container"
-	}
-	if workspaceBackend == "local" {
-		image = "local"
-		send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: "local workspaces do not use runtime images"})
-	} else {
-		// Phase 1: Pull image with progress
-		send(createContainerPullingEvent{Type: "pulling", Image: image})
+	workspaceBackend := "container"
+	// Phase 1: Pull image with progress
+	send(createContainerPullingEvent{Type: "pulling", Image: image})
 
-		var pullDone atomic.Bool
-		prepareResult, pullErr := h.manager.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
-			Unpack:        true,
-			StorageDriver: snapshotter,
-			OnProgress: func(p ctr.PullProgress) {
-				if pullDone.Load() {
-					return
-				}
-				send(createContainerPullProgressEvent{Type: "pull_progress", Layers: p.Layers})
-			},
-		})
-		pullDone.Store(true)
-		if pullErr != nil {
-			h.logger.Error("image preparation failed",
-				slog.String("image", image), slog.Any("error", pullErr))
-			h.recordContainerSetupFailure(ctx, botID, "image_prepare", pullErr)
-			sendError("workspace_image_prepare_failed", "bots.container.createFailed", "image preparation failed: "+pullErr.Error())
-			return nil
-		}
-		if strings.TrimSpace(prepareResult.ImageRef) != "" {
-			image = prepareResult.ImageRef
-		}
-		switch prepareResult.Mode {
-		case workspace.ImagePrepareSkipped:
-			send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: prepareResult.Message})
-		case workspace.ImagePrepareDelegated:
-			send(createContainerPullStatusEvent{Type: "pull_delegated", Image: image, Message: prepareResult.Message})
-		}
+	var pullDone atomic.Bool
+	prepareResult, pullErr := h.manager.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
+		Unpack:        true,
+		StorageDriver: snapshotter,
+		OnProgress: func(p ctr.PullProgress) {
+			if pullDone.Load() {
+				return
+			}
+			send(createContainerPullProgressEvent{Type: "pull_progress", Layers: p.Layers})
+		},
+	})
+	pullDone.Store(true)
+	if pullErr != nil {
+		h.logger.Error("image preparation failed",
+			slog.String("image", image), slog.Any("error", pullErr))
+		h.recordContainerSetupFailure(ctx, botID, "image_prepare", pullErr)
+		sendError("workspace_image_prepare_failed", "bots.container.createFailed", "image preparation failed: "+pullErr.Error())
+		return nil
+	}
+	if strings.TrimSpace(prepareResult.ImageRef) != "" {
+		image = prepareResult.ImageRef
+	}
+	switch prepareResult.Mode {
+	case workspace.ImagePrepareSkipped:
+		send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: prepareResult.Message})
+	case workspace.ImagePrepareDelegated:
+		send(createContainerPullStatusEvent{Type: "pull_delegated", Image: image, Message: prepareResult.Message})
 	}
 
 	// Phase 2: Create container (image is local, should be fast)
@@ -451,23 +467,32 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		send(createContainerRestoringEvent{Type: "restoring"})
 	}
 
-	if err := h.manager.StartWithWorkspaceConfig(ctx, botID, image, gpu, workspace.WorkspaceStartConfig{
-		Backend:            workspaceBackend,
-		LocalWorkspacePath: strings.TrimSpace(req.LocalWorkspacePath),
-	}); err != nil {
+	if err := h.manager.StartWithResolvedConfig(ctx, botID, image, gpu); err != nil {
 		h.logger.Error("container start failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		h.recordContainerSetupFailure(ctx, botID, "start", err)
 		sendError("workspace_start_failed", "bots.container.createFailed", "workspace failed to start")
 		return nil
 	}
-	if workspaceBackend != "local" {
-		if err := h.manager.WaitForWorkspaceReady(ctx, botID); err != nil {
-			h.logger.Error("container bridge not ready",
-				slog.String("bot_id", botID), slog.Any("error", err))
-			sendError("workspace_not_ready", "bots.container.createFailed", "workspace runtime is not ready")
-			return nil
+	if err := h.manager.WaitForWorkspaceReady(ctx, botID); err != nil {
+		h.logger.Error("container bridge not ready",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		sendError("workspace_not_ready", "bots.container.createFailed", "workspace runtime is not ready")
+		return nil
+	}
+	if err := h.manager.InitializeNativeWorkspace(ctx, botID); err != nil {
+		h.logger.Error("workspace initialization failed",
+			slog.String("bot_id", botID),
+			slog.String("request_id", httpx.RequestID(c)),
+			slog.Any("error", err),
+		)
+		h.recordContainerSetupFailure(ctx, botID, "initialize", err)
+		if event, ok := newWorkspaceSetupAppError(err, httpx.RequestID(c)); ok {
+			send(event)
+		} else {
+			sendError("workspace_setup_failed", "bots.container.createFailed", "workspace initialization failed")
 		}
+		return nil
 	}
 	if err := h.manager.RememberWorkspaceImage(ctx, botID, image); err != nil {
 		h.logger.Warn("remember workspace image failed",

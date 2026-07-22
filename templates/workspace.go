@@ -3,13 +3,10 @@
 // heartbeat notes, and the default .memoh directory (hooks, built-in
 // skills).
 //
-// The canonical copy lives in the workspace/ subdirectory. It is consumed
-// in two ways:
-//   - docker/Dockerfile.server copies workspace/ into the runtime toolkit
-//     assembly, from which the bridge seeds /data on first boot
-//     (cmd/bridge/main.go); devenv compose files bind-mount it the same way.
-//   - Downstream distributions import this package and seed WorkspaceFS()
-//     into freshly provisioned workspaces themselves.
+// The canonical copy lives in the workspace/ subdirectory. The Server embeds
+// this package and applies it through the provider-neutral workspace bootstrap
+// filesystem. Container workspaces currently use a bridge-backed adapter;
+// providers such as E2B can use their native filesystem APIs instead.
 package templates
 
 import (
@@ -25,8 +22,8 @@ var workspaceFS embed.FS
 
 // WorkspaceFS returns the workspace bootstrap template tree, rooted at the
 // template contents (AGENTS.md, .memoh/, ...). Callers seeding a workspace
-// should skip .gitkeep placeholder files and never overwrite files that
-// already exist in the destination.
+// should skip .gitkeep placeholder files. User-owned files are create-only;
+// built-in files under .memoh/skills are managed and may be refreshed.
 func WorkspaceFS() fs.FS {
 	sub, err := fs.Sub(workspaceFS, "workspace")
 	if err != nil {

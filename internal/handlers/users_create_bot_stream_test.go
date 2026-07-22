@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
@@ -242,6 +243,55 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	if got, _ := setupError["message"].(string); !strings.Contains(got, "image pull failed") {
 		t.Fatalf("persisted message = %q, want setup failure", got)
 	}
+	if streamDB.status != bots.BotStatusReady {
+		t.Fatalf("bot status = %q, want %q", streamDB.status, bots.BotStatusReady)
+	}
+}
+
+func TestCreateBotStreamReportsStableContractErrorAndLeavesBotReady(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000108"
+	botID := "00000000-0000-0000-0000-000000000208"
+	streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
+	setupErr := errors.Join(
+		workspace.ErrWorkspaceImageIncompatible,
+		errors.New("missing /opt/memoh/toolkit/bin/node"),
+	)
+	handler := &UsersHandler{
+		logger:       slog.Default(),
+		service:      newTestCreateBotAccountService(ownerID),
+		botService:   bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		acpWorkspace: &createBotStreamWorkspace{err: setupErr},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+		"name": "incompatible-workspace-bot",
+		"display_name": "Incompatible Workspace Bot",
+		"acl_preset": "allow_all",
+		"wait_for_ready": true
+	}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(echo.HeaderAccept, "text/event-stream")
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(echo.New(), req, rec, ownerID)
+
+	if err := handler.CreateBot(ctx); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+	events := decodeSSEEvents(t, rec.Body.String())
+	last := events[len(events)-1]
+	if last["type"] != "error" {
+		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
+	}
+	if last["code"] != string(apperror.CodeWorkspaceImageIncompatible) {
+		t.Fatalf("error code = %#v, want %q", last["code"], apperror.CodeWorkspaceImageIncompatible)
+	}
+	message, _ := last["message"].(string)
+	if strings.Contains(message, "/opt/memoh") {
+		t.Fatalf("private workspace path leaked in message %q", message)
+	}
+	if streamDB.status != bots.BotStatusReady {
+		t.Fatalf("bot status = %q, want %q", streamDB.status, bots.BotStatusReady)
+	}
 }
 
 func TestCreateBotStreamReportsACPConfigWriteError(t *testing.T) {
@@ -455,11 +505,15 @@ func (createBotMissingAccountStore) GetByUserID(context.Context, string) (dbstor
 type createBotStreamDB struct {
 	ownerID           string
 	botID             string
+	status            string
 	metadata          []byte
 	persistedMetadata []byte
 }
 
-func (*createBotStreamDB) Exec(_ context.Context, _ string, _ ...interface{}) (pgconn.CommandTag, error) {
+func (d *createBotStreamDB) Exec(_ context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2") && len(args) > 1 {
+		d.status, _ = args[1].(string)
+	}
 	return pgconn.CommandTag{}, nil
 }
 

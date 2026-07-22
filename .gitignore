@@ -114,6 +114,7 @@ conf/oauth-clients.toml
 data
 _main-ref/
 .toolkit/
+.cache/memoh/
 /scripts/vendor
 design-env/
 GEMINI.md

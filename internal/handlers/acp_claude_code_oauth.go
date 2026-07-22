@@ -244,9 +244,8 @@ func (h *ACPClaudeCodeOAuthHandler) requireBotAccess(c echo.Context) (bots.Bot, 
 }
 
 func (h *ACPClaudeCodeOAuthHandler) ensureManagedWorkspace(ctx context.Context, botID string) error {
-	// Claude Code BYOK works on both container and local (desktop) workspaces:
-	// the OAuth token is persisted in bot metadata and injected via env
-	// (CLAUDE_CODE_OAUTH_TOKEN) at session start regardless of backend.
+	// The OAuth token is persisted in bot metadata and injected via
+	// CLAUDE_CODE_OAUTH_TOKEN when the workspace session starts.
 	if _, err := h.acpWorkspace.WorkspaceInfo(ctx, botID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

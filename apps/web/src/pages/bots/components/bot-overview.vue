@@ -123,11 +123,10 @@
       </SettingsSection>
 
       <!-- Runtime: the live operational state of the bot's container — the one
-           thing this page can tell the user that they can't already see. Only
-           rendered for container-backed bots; a local/desktop bot has no
-           container to monitor, so the block is absent rather than padded with
-           "not applicable" rows. Metrics auto-refresh while the container is
-           running (see the poll in script).
+           thing this page can tell the user that they can't already see. It is
+           rendered only for container-backed bots; remote runtimes are managed
+           outside this container view. Metrics auto-refresh while the container
+           is running (see the poll in script).
 
            NO outer card: wrapping three metric tiles in a SettingsSection frame
            was card-in-card — a big bordered box moated around a single row of
@@ -436,19 +435,17 @@ const memoryDesc = computed(() => {
   return t('bots.overview.memoryCount', { count: n })
 })
 
-// --- Runtime: live container state + resource metrics. Only meaningful for
-// container-backed bots; a local/desktop bot has no container. We mirror the
-// detail page's resolution exactly: fetch the container record unconditionally
-// (a local bot just 404s → null) and resolve the backend from BOTH the bot
-// metadata AND the container record's workspace_backend, since older bots don't
-// carry the backend in metadata. The metrics query (and the whole Runtime
-// block) then gate on that resolved backend. ---
+// --- Runtime: live container state + resource metrics. This is only meaningful
+// for container-backed bots. We mirror the detail page's resolution: fetch the
+// container record and resolve the backend from its workspace_backend value,
+// while legacy records without a value continue to default to container. The
+// metrics query (and the whole Runtime block) then gate on that backend. ---
 
 const { data: container, refetch: refetchContainer } = useQuery({
   key: () => ['bot-container-overview', botId.value],
   query: async () => {
-    // No throwOnError: a local/desktop bot returns 404 here, which is a normal
-    // "no container" signal, not an error to surface.
+    // No throwOnError: a missing or externally managed container record is a
+    // normal "no container" signal, not an error to surface.
     const result = await getBotsByBotIdContainer({ path: { bot_id: botId.value } })
     if (result.error !== undefined) return null
     return result.data ?? null
@@ -457,7 +454,7 @@ const { data: container, refetch: refetchContainer } = useQuery({
 })
 
 const isContainerBot = computed(
-  () => resolveBotWorkspaceBackend(bot.value?.metadata, container.value?.workspace_backend) === 'container',
+  () => resolveBotWorkspaceBackend(container.value?.workspace_backend) === 'container',
 )
 
 const { data: containerMetrics, refetch: refetchMetrics } = useQuery({

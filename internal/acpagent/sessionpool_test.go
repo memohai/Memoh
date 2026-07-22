@@ -46,7 +46,7 @@ func injectRuntime(p *SessionPool, h *runtimeHandle) {
 }
 
 func newFakeScriptPool(t *testing.T) *SessionPool {
-	pool, _ := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"}))
+	pool, _ := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-container-byok"}))
 	return pool
 }
 
@@ -67,7 +67,7 @@ func newFakeScriptPoolForBot(t *testing.T, bot bots.Bot) (*SessionPool, string) 
 	runner := acpclient.NewRunner(nil, sessionPoolWorkspace{
 		client: newSessionPoolBridgeClient(t, root),
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -326,7 +326,7 @@ func TestSessionPoolEnsureStartsRuntimeAndReportsModels(t *testing.T) {
 
 func TestSessionPoolStartRuntimeReconcilesManagedCodexAPIKeyConfig(t *testing.T) {
 	pool, root := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "api_key", map[string]any{
-		"api_key":  "sk-local-byok",
+		"api_key":  "sk-container-byok",
 		"base_url": "https://proxy.example.com/v1",
 	}))
 
@@ -353,7 +353,7 @@ func TestSessionPoolStartRuntimeReconcilesManagedCodexAPIKeyConfig(t *testing.T)
 		}
 	}
 	auth := readSessionPoolFile(t, root, ".codex", "auth.json")
-	if !strings.Contains(auth, `"OPENAI_API_KEY": "sk-local-byok"`) {
+	if !strings.Contains(auth, `"OPENAI_API_KEY": "sk-container-byok"`) {
 		t.Fatalf("Codex auth missing managed key:\n%s", auth)
 	}
 }
@@ -1484,8 +1484,8 @@ func TestSessionPoolDynamicAdapterFailureFallsBackAndBinds(t *testing.T) {
 		t.Fatalf("dynamic request env = %#v, want persistent npm cache", dynamic.Env)
 	}
 	fallback := requests[1]
-	if fallback.Command != "codex-acp" || fallback.LocalCommand != "npx" || len(fallback.LocalArgs) != 2 || fallback.LocalArgs[1] != "@agentclientprotocol/codex-acp@1.1.4" {
-		t.Fatalf("fallback request = command %q, local %q %#v", fallback.Command, fallback.LocalCommand, fallback.LocalArgs)
+	if fallback.Command != "codex-acp" {
+		t.Fatalf("fallback request = command %q", fallback.Command)
 	}
 	if startRequestEnvHas(fallback.Env, "NPM_CONFIG_CACHE", "/data/.memoh/acp/npm-cache") {
 		t.Fatalf("fallback request unexpectedly carries dynamic cache env: %#v", fallback.Env)
@@ -1648,39 +1648,18 @@ func TestSessionPoolAdapterLookupFailureDisablesDynamicLaunchForProcess(t *testi
 	}
 }
 
-func TestDynamicACPEnvUsesLocalDataRootAndReplacesExistingCache(t *testing.T) {
-	root := t.TempDir()
-	env := dynamicACPEnv([]string{"CUSTOM=1", "npm_config_cache=/old"}, bridge.WorkspaceInfo{
-		Backend:       bridge.WorkspaceBackendLocal,
-		LocalDataRoot: root,
-	}, false)
-	if !startRequestEnvHas(env, "CUSTOM", "1") {
-		t.Fatalf("dynamic env dropped existing value: %#v", env)
-	}
-	if !startRequestEnvHas(env, "NPM_CONFIG_CACHE", filepath.Join(root, "acp", "npm-cache")) {
-		t.Fatalf("dynamic env = %#v, want local data-root cache", env)
-	}
-	if startRequestEnvHas(env, "npm_config_cache", "/old") {
-		t.Fatalf("dynamic env retained stale cache: %#v", env)
-	}
-}
-
 func TestDynamicACPEnvAddsToolkitCAOnlyWhenAvailableAndUnset(t *testing.T) {
-	env := dynamicACPEnv([]string{"CUSTOM=1"}, bridge.WorkspaceInfo{
-		Backend: bridge.WorkspaceBackendContainer,
-	}, true)
+	env := dynamicACPEnv([]string{"CUSTOM=1"}, true)
 	if !startRequestEnvHas(env, "SSL_CERT_FILE", containerToolkitCABundle) {
 		t.Fatalf("dynamic env = %#v, want toolkit CA bundle", env)
 	}
 
-	env = dynamicACPEnv([]string{"SSL_CERT_FILE=/custom/ca.pem"}, bridge.WorkspaceInfo{
-		Backend: bridge.WorkspaceBackendContainer,
-	}, true)
+	env = dynamicACPEnv([]string{"SSL_CERT_FILE=/custom/ca.pem"}, true)
 	if !startRequestEnvHas(env, "SSL_CERT_FILE", "/custom/ca.pem") || startRequestEnvHas(env, "SSL_CERT_FILE", containerToolkitCABundle) {
 		t.Fatalf("dynamic env replaced explicit CA bundle: %#v", env)
 	}
 
-	env = dynamicACPEnv(nil, bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer}, false)
+	env = dynamicACPEnv(nil, false)
 	if startRequestEnvHas(env, "SSL_CERT_FILE", containerToolkitCABundle) {
 		t.Fatalf("dynamic env added missing toolkit CA bundle: %#v", env)
 	}
@@ -1936,14 +1915,14 @@ func TestSessionPoolCloseSessionCancelsActivePrompt(t *testing.T) {
 	runner := acpclient.NewRunner(nil, sessionPoolWorkspace{
 		client: newSessionPoolBridgeClient(t, root),
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
 	pool := newSessionPool(
 		nil,
 		runner,
-		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"})},
+		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-container-byok"})},
 	)
 	t.Cleanup(pool.CloseAll)
 
@@ -2005,11 +1984,11 @@ func TestSessionPoolSerializesColdStartForSameSession(t *testing.T) {
 	runner := acpclient.NewRunner(nil, sessionPoolWorkspace{
 		client: newSessionPoolBridgeClient(t, root),
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
-	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"})})
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-container-byok"})})
 	t.Cleanup(pool.CloseAll)
 
 	var wg sync.WaitGroup
@@ -2132,50 +2111,6 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		t.Fatalf("RuntimeStatus after failed start = %#v, want idle without process", got)
 	}
 
-	// Desktop BYOK: local api_key now validates managed fields just like
-	// container. Codex carries no env (it is configured via CODEX_HOME files at
-	// the process layer), so req.Env stays empty even with a key set.
-	localRunner := &recordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal, DefaultWorkDir: t.TempDir()},
-		startErr: errors.New("started"),
-	}
-	localPool := newSessionPool(nil, localRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"})})
-	_, err = localPool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               "codex",
-		ProjectPath:           "",
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("local api_key error = %v, want runner start error", err)
-	}
-	if len(localRunner.req.Env) != 0 {
-		t.Fatalf("local backend injected env: %v", localRunner.req.Env)
-	}
-	if localRunner.req.LocalCommand != "npx" || len(localRunner.req.LocalArgs) == 0 {
-		t.Fatalf("local command not passed through: %#v", localRunner.req)
-	}
-
-	// Local api_key without a key must now be rejected (BYOK requires credentials).
-	localMissingPool := newSessionPool(nil, &recordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal, DefaultWorkDir: t.TempDir()},
-		startErr: errors.New("started"),
-	}, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
-	_, err = localMissingPool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               "codex",
-		ProjectPath:           "",
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	feedback = nil
-	if !errors.As(err, &feedback) || feedback.Code != acpfeedback.CodeAgentNotConfigured || !strings.Contains(feedback.Message, "api_key required") {
-		t.Fatalf("local missing key error = %v, want api_key required validation", err)
-	}
-
 	claudeRunner := &recordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
 		startErr: errors.New("started"),
@@ -2232,8 +2167,8 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 	if err == nil || err.Error() != "started" {
 		t.Fatalf("container Hermes api_key error = %v, want runner start error", err)
 	}
-	if hermesRunner.req.Command != "hermes-acp" || hermesRunner.req.LocalCommand != "hermes-acp" {
-		t.Fatalf("Hermes command = %q local=%q", hermesRunner.req.Command, hermesRunner.req.LocalCommand)
+	if hermesRunner.req.Command != "hermes-acp" {
+		t.Fatalf("Hermes command = %q", hermesRunner.req.Command)
 	}
 	if !hermesRunner.req.CleanEnv {
 		t.Fatalf("Hermes managed CleanEnv = false, want true")
@@ -2279,53 +2214,6 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 	}
 	if defaultBackendRunner.req.Resolved == nil || defaultBackendRunner.req.Resolved.Backend != acpclient.WorkspaceBackendContainer {
 		t.Fatalf("default backend resolved context = %#v, want container backend", defaultBackendRunner.req.Resolved)
-	}
-
-	localHermesWorkDir := t.TempDir()
-	localHermesDataRoot := t.TempDir()
-	localHermesRunner := &recordingRunner{
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
-			DefaultWorkDir: localHermesWorkDir,
-			LocalDataRoot:  localHermesDataRoot,
-		},
-		startErr: errors.New("started"),
-	}
-	localHermesPool := newSessionPool(nil, localHermesRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "api_key", map[string]any{
-		"provider": "custom",
-		"model":    "my-model",
-		"base_url": "https://llm.example/v1",
-		"api_key":  "sk-local-hermes",
-	})})
-	_, err = localHermesPool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentHermesID,
-		ProjectPath:           localHermesWorkDir,
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("local Hermes api_key error = %v, want runner start error", err)
-	}
-	if localHermesRunner.req.CleanEnv {
-		t.Fatalf("local Hermes managed CleanEnv = true, want false")
-	}
-	for _, key := range []string{"HERMES_*", "MEMOH_HERMES_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "GOOGLE_API_KEY", "GOOGLE_BASE_URL", "GEMINI_API_KEY", "GEMINI_BASE_URL"} {
-		if !hasString(localHermesRunner.req.UnsetEnv, key) {
-			t.Fatalf("local Hermes UnsetEnv = %#v, missing %q", localHermesRunner.req.UnsetEnv, key)
-		}
-	}
-	wantHermesHome := filepath.Join(localHermesDataRoot, "acp", "hermes", "bot-1")
-	if localHermesRunner.req.Resolved == nil || localHermesRunner.req.Resolved.HermesHome != wantHermesHome {
-		t.Fatalf("local Hermes resolved context = %#v, want HERMES_HOME %q", localHermesRunner.req.Resolved, wantHermesHome)
-	}
-	localConfigBytes, readErr := os.ReadFile(filepath.Join(wantHermesHome, "config.yaml")) //nolint:gosec // test path is under t.TempDir.
-	if readErr != nil {
-		t.Fatalf("read local Hermes config: %v", readErr)
-	}
-	if content := string(localConfigBytes); !strings.Contains(content, `provider: "custom:memoh-managed"`) || !strings.Contains(content, `base_url: "https://llm.example/v1"`) || strings.Contains(content, "sk-local-hermes") {
-		t.Fatalf("local Hermes config content =\n%s", content)
 	}
 
 	claudeOAuthRunner := &recordingRunner{
@@ -2407,8 +2295,8 @@ func TestProfileSupportsBackend(t *testing.T) {
 	if !profileSupportsBackend(acpprofile.Profile{SupportedBackends: []string{bridge.WorkspaceBackendContainer}}, "") {
 		t.Fatal("empty backend should be treated as container")
 	}
-	if profileSupportsBackend(acpprofile.Profile{SupportedBackends: []string{bridge.WorkspaceBackendLocal}}, bridge.WorkspaceBackendContainer) {
-		t.Fatal("local-only profile should reject container backend")
+	if profileSupportsBackend(acpprofile.Profile{SupportedBackends: []string{bridge.WorkspaceBackendRemote}}, bridge.WorkspaceBackendContainer) {
+		t.Fatal("remote-only profile should reject container backend")
 	}
 }
 
@@ -2517,19 +2405,6 @@ func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 	merged := contexts.Merge(mcp.ToolSessionContext{BotID: "bot-1", SessionID: "session-1"})
 	if merged.StreamID != "" || merged.ConversationType != "" {
 		t.Fatalf("ACP context leaked into the shared store: %#v", merged)
-	}
-}
-
-func TestSessionPoolUsesRequestToolURLForLocalWorkspace(t *testing.T) {
-	pool := newSessionPool(nil, nil, nil)
-	pool.SetToolGateway(mcp.NewToolGatewayService(nil, nil))
-
-	got, err := pool.resolveToolHTTPURL("http://127.0.0.1:18080/bots/bot-1/tools", bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "http://127.0.0.1:18080/bots/bot-1/tools" {
-		t.Fatalf("local ToolHTTPURL = %q", got)
 	}
 }
 
@@ -3327,12 +3202,16 @@ func newSessionPoolBridgeClient(t *testing.T, root string) *bridge.Client {
 		grpc.MaxRecvMsgSize(16*1024*1024),
 		grpc.MaxSendMsgSize(16*1024*1024),
 	)
-	pb.RegisterContainerServiceServer(server, bridgesvc.New(bridgesvc.Options{
+	bridgeServer := bridgesvc.New(bridgesvc.Options{
 		DefaultWorkDir:    root,
 		WorkspaceRoot:     root,
 		DataMount:         config.DefaultDataMount,
 		AllowHostAbsolute: true,
-	}))
+	})
+	pb.RegisterContainerServiceServer(server, &sessionPoolBridgeServer{
+		Server: bridgeServer,
+		binDir: filepath.Join(root, "bin"),
+	})
 	go func() {
 		_ = server.Serve(listener)
 	}()
@@ -3356,6 +3235,37 @@ func newSessionPoolBridgeClient(t *testing.T, root string) *bridge.Client {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return bridge.NewClientFromConn(conn)
+}
+
+type sessionPoolBridgeServer struct {
+	*bridgesvc.Server
+	binDir string
+}
+
+func (s *sessionPoolBridgeServer) Exec(stream pb.ContainerService_ExecServer) error {
+	return s.Server.Exec(&sessionPoolExecStream{
+		ContainerService_ExecServer: stream,
+		binDir:                      s.binDir,
+	})
+}
+
+type sessionPoolExecStream struct {
+	pb.ContainerService_ExecServer
+	binDir string
+	first  bool
+}
+
+func (s *sessionPoolExecStream) Recv() (*pb.ExecInput, error) {
+	input, err := s.ContainerService_ExecServer.Recv()
+	if err != nil || s.first {
+		return input, err
+	}
+	s.first = true
+	input.Command = strings.ReplaceAll(input.Command, "/opt/memoh/toolkit/bin", s.binDir)
+	for index, item := range input.Env {
+		input.Env[index] = strings.ReplaceAll(item, "/opt/memoh/toolkit/bin", s.binDir)
+	}
+	return input, nil
 }
 
 func newCABundleStatClient(t *testing.T) (*bridge.Client, *caBundleStatServer) {

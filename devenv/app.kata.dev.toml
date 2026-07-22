@@ -35,11 +35,11 @@ driver = "postgres"
 
 [container]
 backend = "containerd"
-default_image = "debian:bookworm-slim"
+default_image = "memohai/workspace:debian"
 image_pull_policy = "if_not_present"
 snapshotter = "overlayfs"
 data_root = "/opt/memoh/data"
-runtime_dir = "/opt/memoh/runtime"
+bridge_path = "/opt/memoh/runtime/bridge"
 cni_bin_dir = "/opt/cni/bin"
 cni_conf_dir = "/etc/cni/net.d"
 

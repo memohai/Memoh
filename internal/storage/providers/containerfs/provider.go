@@ -72,27 +72,9 @@ func (p *Provider) Delete(ctx context.Context, key string) error {
 	return client.DeleteFile(ctx, containerPath, false)
 }
 
-// AccessPath returns a path in the workspace consumer's filesystem namespace.
-// Container workspaces use the stable /data mount; trusted local workspaces
-// need the corresponding absolute host path because ACP processes run directly
-// in the host namespace.
-func (p *Provider) AccessPath(ctx context.Context, key string) string {
-	botID, sub := splitRoutingKey(key)
-	if p != nil && p.clients != nil {
-		if infos, ok := p.clients.(bridge.WorkspaceInfoProvider); ok {
-			info, err := infos.WorkspaceInfo(ctx, botID)
-			if err != nil {
-				return ""
-			}
-			if info.Backend == bridge.WorkspaceBackendLocal {
-				root := strings.TrimSpace(info.DefaultWorkDir)
-				if root == "" || !filepath.IsAbs(root) {
-					return ""
-				}
-				return filepath.Join(root, containerMediaRoot, sub)
-			}
-		}
-	}
+// AccessPath returns the stable path in the workspace filesystem namespace.
+func (*Provider) AccessPath(_ context.Context, key string) string {
+	_, sub := splitRoutingKey(key)
 	return attachmentpkg.MediaAccessPath(sub)
 }
 
@@ -101,7 +83,7 @@ func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath s
 	subPath, ok := attachmentpkg.DataSubpath(containerPath)
 	if !ok {
 		if !filepath.IsAbs(strings.TrimSpace(containerPath)) {
-			return nil, fmt.Errorf("path must start with %s/ or be an absolute local workspace path", attachmentpkg.DataMountPath(""))
+			return nil, fmt.Errorf("path must start with %s/ or be an absolute workspace path", attachmentpkg.DataMountPath(""))
 		}
 		client, err := p.clients.MCPClient(ctx, botID)
 		if err != nil {

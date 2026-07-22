@@ -30,7 +30,9 @@ func (m *Manager) ContainerID(ctx context.Context, botID string) (string, error)
 		pgBotID, err := db.ParseUUID(botID)
 		if err == nil {
 			row, dbErr := m.queries.GetContainerByBotID(ctx, pgBotID)
-			if dbErr == nil && strings.TrimSpace(row.ContainerID) != "" {
+			if dbErr == nil &&
+				strings.EqualFold(strings.TrimSpace(row.WorkspaceBackend), bridge.WorkspaceBackendContainer) &&
+				strings.TrimSpace(row.ContainerID) != "" {
 				return row.ContainerID, nil
 			}
 			if dbErr != nil && !errors.Is(dbErr, pgx.ErrNoRows) {
@@ -107,9 +109,6 @@ func (m *Manager) networkAttachmentRequest(ctx context.Context, botID, container
 }
 
 func (m *Manager) ensureContainerNetworkAndGetIP(ctx context.Context, botID, containerID string) (string, error) {
-	if strings.HasPrefix(strings.TrimSpace(containerID), LocalContainerPrefix) {
-		return "127.0.0.1", nil
-	}
 	var lastErr error
 	for attempt := range 2 {
 		result, err := m.networkController.EnsureAttached(ctx, m.networkAttachmentRequest(ctx, botID, containerID))
@@ -144,9 +143,6 @@ func (m *Manager) ensureContainerNetwork(ctx context.Context, containerID, botID
 }
 
 func (m *Manager) removeContainerNetwork(ctx context.Context, botID, containerID string) error {
-	if strings.HasPrefix(strings.TrimSpace(containerID), LocalContainerPrefix) {
-		return nil
-	}
 	return m.networkController.Detach(ctx, m.networkAttachmentRequest(ctx, botID, containerID))
 }
 
@@ -194,7 +190,7 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 	return m.EnsureNativeRunning(ctx, botID)
 }
 
-// EnsureNativeRunning manages only the server-owned container/local workspace,
+// EnsureNativeRunning manages only the server-owned container workspace,
 // regardless of which target is currently Primary.
 func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
 	containerID, err := m.ContainerID(ctx, botID)
@@ -299,7 +295,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 				}
 				return &ContainerStatus{
 					ContainerID:      row.ContainerID,
-					WorkspaceBackend: workspaceBackendFromRecord(row.WorkspaceBackend, row.ContainerID),
+					WorkspaceBackend: workspaceBackendFromRecord(row.WorkspaceBackend),
 					RuntimeBackend:   runtimeBackend,
 					Image:            row.Image,
 					Status:           status,
@@ -334,7 +330,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 	}
 	return &ContainerStatus{
 		ContainerID:      info.ID,
-		WorkspaceBackend: workspaceBackendFromRecord("", info.ID),
+		WorkspaceBackend: workspaceBackendFromRecord(""),
 		RuntimeBackend:   info.Runtime.Name,
 		Image:            info.Image,
 		Status:           status,
@@ -385,13 +381,6 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 		}
 	}
 
-	workspaceCfg, err := m.botWorkspaceStartPreference(ctx, botID)
-	if err != nil {
-		m.logger.Error("setup bot container: resolve workspace backend failed",
-			slog.String("bot_id", botID),
-			slog.Any("error", err))
-		return err
-	}
 	image, err := m.resolveWorkspaceImage(ctx, botID)
 	if err != nil {
 		m.logger.Error("setup bot container: resolve image failed",
@@ -399,34 +388,29 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 			slog.Any("error", err))
 		return err
 	}
-	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
-		emit(ContainerSetupEvent{Type: "pulling", Image: image})
-		result, err := m.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
-			Unpack:        true,
-			StorageDriver: m.cfg.Snapshotter,
-			OnProgress: func(p ctr.PullProgress) {
-				emit(ContainerSetupEvent{Type: "pull_progress", Layers: p.Layers})
-			},
-		})
-		if err != nil {
-			m.logger.Error("setup bot container: prepare image failed",
-				slog.String("bot_id", botID),
-				slog.String("image", image),
-				slog.Any("error", err))
-			return err
-		}
-		if strings.TrimSpace(result.ImageRef) != "" {
-			image = result.ImageRef
-		}
-		switch result.Mode {
-		case ImagePrepareSkipped:
-			emit(ContainerSetupEvent{Type: "pull_skipped", Image: image, Message: result.Message})
-		case ImagePrepareDelegated:
-			emit(ContainerSetupEvent{Type: "pull_delegated", Image: image, Message: result.Message})
-		}
-	} else {
-		image = "local"
-		emit(ContainerSetupEvent{Type: "pull_skipped", Image: image, Message: "local workspaces do not use runtime images"})
+	emit(ContainerSetupEvent{Type: "pulling", Image: image})
+	result, err := m.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
+		Unpack:        true,
+		StorageDriver: m.cfg.Snapshotter,
+		OnProgress: func(p ctr.PullProgress) {
+			emit(ContainerSetupEvent{Type: "pull_progress", Layers: p.Layers})
+		},
+	})
+	if err != nil {
+		m.logger.Error("setup bot container: prepare image failed",
+			slog.String("bot_id", botID),
+			slog.String("image", image),
+			slog.Any("error", err))
+		return err
+	}
+	if strings.TrimSpace(result.ImageRef) != "" {
+		image = result.ImageRef
+	}
+	switch result.Mode {
+	case ImagePrepareSkipped:
+		emit(ContainerSetupEvent{Type: "pull_skipped", Image: image, Message: result.Message})
+	case ImagePrepareDelegated:
+		emit(ContainerSetupEvent{Type: "pull_delegated", Image: image, Message: result.Message})
 	}
 	gpu, err := m.resolveWorkspaceGPU(ctx, botID)
 	if err != nil {
@@ -439,35 +423,29 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 		emit(ContainerSetupEvent{Type: "restoring"})
 	}
 
-	if err := m.StartWithWorkspaceConfig(ctx, botID, image, gpu, workspaceCfg); err != nil {
+	if err := m.StartWithResolvedConfig(ctx, botID, image, gpu); err != nil {
 		m.logger.Error("setup bot container: start failed",
 			slog.String("bot_id", botID),
 			slog.Any("error", err))
 		return err
 	}
-	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
-		if err := m.WaitForWorkspaceReady(ctx, botID); err != nil {
-			m.logger.Error("setup bot container: bridge not ready",
-				slog.String("bot_id", botID),
-				slog.Any("error", err))
-			return err
-		}
+	if err := m.WaitForWorkspaceReady(ctx, botID); err != nil {
+		m.logger.Error("setup bot container: bridge not ready",
+			slog.String("bot_id", botID),
+			slog.Any("error", err))
+		return err
 	}
-	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
-		if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
-			m.logger.Warn("setup bot container: remember workspace image failed",
-				slog.String("bot_id", botID),
-				slog.String("image", image),
-				slog.Any("error", err))
-		}
+	if err := m.InitializeNativeWorkspace(ctx, botID); err != nil {
+		m.logger.Error("setup bot container: workspace initialization failed",
+			slog.String("bot_id", botID),
+			slog.Any("error", err))
+		return err
 	}
-	if workspaceCfg.Backend == bridge.WorkspaceBackendLocal && strings.TrimSpace(workspaceCfg.LocalWorkspacePath) == "" {
-		// Persist the generated default so subsequent lifecycle runs are stable.
-		if err := m.rememberWorkspaceBackend(ctx, botID, bridge.WorkspaceBackendLocal, m.defaultLocalWorkspacePath(ctx, botID)); err != nil {
-			m.logger.Warn("setup bot container: remember local workspace path failed",
-				slog.String("bot_id", botID),
-				slog.Any("error", err))
-		}
+	if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
+		m.logger.Warn("setup bot container: remember workspace image failed",
+			slog.String("bot_id", botID),
+			slog.String("image", image),
+			slog.Any("error", err))
 	}
 
 	containerID := m.resolveContainerID(ctx, botID)
@@ -476,7 +454,7 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 		Type:             "complete",
 		Image:            image,
 		ContainerID:      containerID,
-		WorkspaceBackend: workspaceBackendFromRecord(workspaceCfg.Backend, containerID),
+		WorkspaceBackend: workspaceBackendFromRecord(""),
 		Started:          true,
 		DataRestored:     hadPreservedData && !m.HasPreservedData(botID),
 		HasPreservedData: m.HasPreservedData(botID),
@@ -596,6 +574,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 			} else {
 				m.logger.Info("reconcile: container healthy",
 					slog.String("bot_id", botID), slog.String("container_id", containerID))
+				m.reconcileNativeWorkspace(ctx, botID)
 			}
 			continue
 		}
@@ -609,9 +588,46 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 			m.markContainerStopped(ctx, botID)
 		} else {
 			m.markContainerStarted(ctx, botID)
+			m.reconcileNativeWorkspace(ctx, botID)
 		}
 	}
 	m.logger.Info("reconcile: completed")
+}
+
+func (m *Manager) reconcileNativeWorkspace(ctx context.Context, botID string) {
+	if err := m.WaitForWorkspaceReady(ctx, botID); err != nil {
+		m.recordReconcileSetupFailure(ctx, botID, "reconcile_ready", err)
+		return
+	}
+	if err := m.InitializeNativeWorkspace(ctx, botID); err != nil {
+		m.recordReconcileSetupFailure(ctx, botID, "reconcile_initialize", err)
+		return
+	}
+	if m.setupDiagnostics != nil {
+		if err := m.setupDiagnostics.ClearContainerSetupFailure(ctx, botID); err != nil {
+			m.logger.Warn("reconcile: clear workspace setup diagnostic failed",
+				slog.String("bot_id", botID),
+				slog.Any("error", err),
+			)
+		}
+	}
+}
+
+func (m *Manager) recordReconcileSetupFailure(ctx context.Context, botID, phase string, setupErr error) {
+	m.logger.Warn("reconcile: workspace initialization degraded",
+		slog.String("bot_id", botID),
+		slog.String("phase", phase),
+		slog.Any("error", setupErr),
+	)
+	if m.setupDiagnostics == nil {
+		return
+	}
+	if err := m.setupDiagnostics.RecordContainerSetupFailure(ctx, botID, phase, setupErr); err != nil {
+		m.logger.Warn("reconcile: record workspace setup diagnostic failed",
+			slog.String("bot_id", botID),
+			slog.Any("error", err),
+		)
+	}
 }
 
 // RecordContainerRunning upserts a DB record marking the resolved container as running.
@@ -645,8 +661,8 @@ func (m *Manager) upsertContainerRecord(ctx context.Context, botID, containerID,
 		Status:           status,
 		Namespace:        ns,
 		AutoStart:        true,
-		ContainerPath:    m.containerRecordPath(ctx, containerID),
-		WorkspaceBackend: m.containerRecordBackend(ctx, containerID),
+		ContainerPath:    config.DefaultDataMount,
+		WorkspaceBackend: bridge.WorkspaceBackendContainer,
 	}); dbErr != nil {
 		m.logger.Error("failed to upsert container record",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
@@ -656,35 +672,12 @@ func (m *Manager) upsertContainerRecord(ctx context.Context, botID, containerID,
 	}
 }
 
-func (m *Manager) containerRecordPath(ctx context.Context, containerID string) string {
-	if info, err := m.service.GetContainer(ctx, containerID); err == nil {
-		if strings.TrimSpace(info.StorageRef.Key) != "" && strings.TrimSpace(info.StorageRef.Driver) == localRuntimeName {
-			return info.StorageRef.Key
-		}
-	}
-	return config.DefaultDataMount
-}
-
-func (m *Manager) containerRecordBackend(ctx context.Context, containerID string) string {
-	if info, err := m.service.GetContainer(ctx, containerID); err == nil {
-		if strings.TrimSpace(info.StorageRef.Driver) == localRuntimeName {
-			return bridge.WorkspaceBackendLocal
-		}
-	}
-	return workspaceBackendFromRecord("", containerID)
-}
-
-func workspaceBackendFromRecord(recordValue, containerID string) string {
+func workspaceBackendFromRecord(recordValue string) string {
 	switch strings.ToLower(strings.TrimSpace(recordValue)) {
-	case bridge.WorkspaceBackendLocal:
-		return bridge.WorkspaceBackendLocal
 	case bridge.WorkspaceBackendRemote:
 		return bridge.WorkspaceBackendRemote
 	case bridge.WorkspaceBackendContainer:
 		return bridge.WorkspaceBackendContainer
-	}
-	if strings.HasPrefix(strings.TrimSpace(containerID), LocalContainerPrefix) {
-		return bridge.WorkspaceBackendLocal
 	}
 	return bridge.WorkspaceBackendContainer
 }

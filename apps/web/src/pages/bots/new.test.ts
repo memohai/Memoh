@@ -5,12 +5,9 @@ import type { Slots } from 'vue'
 
 const mocks = vi.hoisted(() => ({
   getBotsNameAvailability: vi.fn(),
-  loadCapabilities: vi.fn(),
   routerBack: vi.fn(),
   routerPush: vi.fn(),
   startBotCreate: vi.fn(),
-  localWorkspaceEnabled: false,
-  getDesktopServerStatus: vi.fn(),
 }))
 
 function translate(key: string) {
@@ -62,19 +59,6 @@ vi.mock('@memohai/sdk', () => ({
   getMemoryProviders: vi.fn(async () => ({ data: [] })),
   getModels: vi.fn(async () => ({ data: [] })),
   getProviders: vi.fn(async () => ({ data: [] })),
-}))
-
-vi.mock('@memohai/sdk/colada', () => ({
-  getBotsQueryKey: () => ['bots'],
-}))
-
-vi.mock('@/store/capabilities', () => ({
-  useCapabilitiesStore: () => ({
-    load: mocks.loadCapabilities,
-    get localWorkspaceEnabled() {
-      return mocks.localWorkspaceEnabled
-    },
-  }),
 }))
 
 vi.mock('@/store/bot-create-progress', () => ({
@@ -152,14 +136,10 @@ vi.mock('./components/model-select.vue', () => ({ default: () => h('select') }))
 describe('bot create page', () => {
   beforeEach(() => {
     mocks.getBotsNameAvailability.mockReset()
-    mocks.loadCapabilities.mockReset()
     mocks.routerBack.mockReset()
     mocks.routerPush.mockReset()
     mocks.startBotCreate.mockReset()
-    mocks.getDesktopServerStatus.mockReset()
     mocks.getBotsNameAvailability.mockResolvedValue({ data: { available: true } })
-    mocks.localWorkspaceEnabled = false
-    delete (window as unknown as { api?: unknown }).api
     document.body.innerHTML = ''
   })
 
@@ -193,69 +173,4 @@ describe('bot create page', () => {
     root.remove()
   })
 
-  it('hides local workspace creation in desktop even when the server supports it', async () => {
-    mocks.localWorkspaceEnabled = true
-    mocks.getDesktopServerStatus.mockResolvedValue({
-      baseUrl: 'https://memoh.example.com',
-      ready: true,
-      managed: false,
-    })
-    ;(window as unknown as { api: unknown }).api = {
-      desktop: {
-        getServerStatus: mocks.getDesktopServerStatus,
-      },
-    }
-
-    const Page = (await import('./new.vue')).default
-    const root = document.createElement('div')
-    document.body.append(root)
-    const app = createApp(Page)
-    app.config.globalProperties.$t = translate
-    app.mount(root)
-    await flushPromises()
-
-    expect(root.textContent).not.toContain('bots.workspaceBackend')
-
-    const [displayInput, nameInput] = Array.from(root.querySelectorAll('input'))
-    displayInput!.value = 'Remote Bot'
-    displayInput!.dispatchEvent(new Event('input', { bubbles: true }))
-    nameInput!.value = 'remote-bot'
-    nameInput!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushPromises()
-    await flushPromises()
-
-    const submitButton = root.querySelector('button[type="submit"]') as HTMLButtonElement
-    expect(submitButton.disabled).toBe(false)
-
-    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
-    await vi.waitFor(() => {
-      expect(mocks.startBotCreate).toHaveBeenCalledTimes(1)
-    })
-
-    expect(mocks.startBotCreate.mock.calls[0]?.[0]).toMatchObject({
-      display_name: 'Remote Bot',
-      metadata: undefined,
-    })
-    expect(mocks.routerPush).toHaveBeenCalledWith({ name: 'bot-create-progress' })
-
-    app.unmount()
-    root.remove()
-  })
-
-  it('keeps browser web local workspace behavior based on server capabilities', async () => {
-    mocks.localWorkspaceEnabled = true
-
-    const Page = (await import('./new.vue')).default
-    const root = document.createElement('div')
-    document.body.append(root)
-    const app = createApp(Page)
-    app.config.globalProperties.$t = translate
-    app.mount(root)
-    await flushPromises()
-
-    expect(root.textContent).toContain('bots.workspaceBackend')
-
-    app.unmount()
-    root.remove()
-  })
 })

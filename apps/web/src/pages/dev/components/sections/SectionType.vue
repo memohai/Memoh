@@ -207,8 +207,8 @@ onMounted(measure)
             Workspace runtime
           </h3>
           <p class="text-body text-muted-foreground">
-            Each bot can run in an isolated workspace, or a trusted local workspace in
-            desktop mode — editing files, executing commands, building itself.
+            Each bot runs in an isolated workspace runtime for editing files, executing
+            commands, and building itself.
           </p>
           <span class="text-caption text-muted-foreground/60">Updated 2 minutes ago</span>
         </div>

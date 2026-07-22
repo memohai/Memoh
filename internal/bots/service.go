@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	tzutil "github.com/memohai/memoh/internal/timezone"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 // Service provides bot CRUD and membership management.
@@ -557,6 +558,7 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 	lifecycleCtx, cancel := context.WithTimeout(ctx, botLifecycleOperationTimeout)
 	defer cancel()
 
+	var setupErr error
 	if s.containerLifecycle != nil {
 		if err := s.containerLifecycle.SetupBotContainer(lifecycleCtx, botID); err != nil {
 			s.logger.Error("bot container setup failed",
@@ -568,6 +570,10 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 					slog.String("bot_id", botID),
 					slog.Any("error", recordErr),
 				)
+			}
+			if errors.Is(err, workspace.ErrWorkspaceImageIncompatible) ||
+				errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+				setupErr = err
 			}
 		} else if clearErr := s.ClearContainerSetupFailure(lifecycleCtx, botID); clearErr != nil {
 			s.logger.Warn("clear bot container setup failure failed",
@@ -584,7 +590,7 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 		)
 		return err
 	}
-	return nil
+	return setupErr
 }
 
 func (s *Service) enqueueDeleteLifecycle(ctx context.Context, botID string) {

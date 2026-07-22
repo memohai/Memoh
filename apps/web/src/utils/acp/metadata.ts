@@ -83,9 +83,8 @@ export function withACPMetadata(metadata: Record<string, unknown> | undefined, a
 }
 
 export function findMissingRequiredACPField(value: ACPForm, profiles: AcpprofilePublicProfile[]): MissingACPRequiredField | null {
-  // Validation is per-agent and already skips `self` mode below. Local/desktop
-  // BYOK (api_key / oauth) requires credentials just like container, so we no
-  // longer blanket-skip validation for local workspaces.
+  // Validation is per-agent and skips `self` mode below. Managed api_key and
+  // oauth modes apply the profile's credential requirements consistently.
   for (const profile of profiles) {
     const id = normalizeACPAgentID(profile.id)
     if (!id) continue

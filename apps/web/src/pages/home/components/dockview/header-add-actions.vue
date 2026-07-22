@@ -80,7 +80,6 @@ import {
 import type { DockviewApi, DockviewGroupPanelApi, IDockviewGroupPanel } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
 import { hasBotPermission } from '@/utils/bot-permissions'
 
 const props = defineProps<{
@@ -102,7 +101,6 @@ const currentBot = computed(() =>
 const currentPermissions = computed(() => currentBot.value?.current_user_permissions ?? [])
 const canWorkspaceExec = computed(() => hasBotPermission(currentPermissions.value, 'workspace_exec'))
 const canManage = computed(() => hasBotPermission(currentPermissions.value, 'manage'))
-const isLocalWorkspace = computed(() => isLocalWorkspaceBot(currentBot.value?.metadata))
 
 const isTerminalGroup = computed(() => {
   const panels = props.params.group.panels
@@ -116,9 +114,8 @@ const activePanelSub = props.params.api.onDidActivePanelChange(() => {
 
 onBeforeUnmount(() => activePanelSub.dispose())
 
-// Browser / desktop are container-only and need manage permission; a local
-// (trusted-host) workspace exposes neither, so its menu is terminal + split only.
-const canSplitExtras = computed(() => canManage.value && !isLocalWorkspace.value)
+// Browser / desktop actions require manage permission.
+const canSplitExtras = computed(() => canManage.value)
 
 // Splitting duplicates the active tab into a second pane. Chat keeps its stable
 // primary id for routing/title sync, but split copies use generated ids.

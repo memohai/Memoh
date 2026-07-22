@@ -1,22 +1,13 @@
-import type { HostSurface } from './desktop-runtime'
-
-export type BotWorkspaceBackend = 'container' | 'local' | 'remote' | 'unknown'
+export type BotWorkspaceBackend = 'container' | 'remote'
 
 export interface BotDetailsTabRule {
   value: string
   containerWorkspaceOnly?: boolean
-  hideForLocalWorkspace?: boolean
 }
 
 export interface BotDetailsTabPolicyContext {
-  host: HostSurface
   canManageBot: boolean
   botWorkspaceBackend: BotWorkspaceBackend
-  serverCapabilities?: {
-    localWorkspaceEnabled?: boolean
-    snapshotSupported?: boolean
-    containerBackend?: string
-  }
 }
 
 export function filterBotDetailsTabs<T extends BotDetailsTabRule>(
@@ -28,10 +19,7 @@ export function filterBotDetailsTabs<T extends BotDetailsTabRule>(
   }
 
   return tabs.filter((tab) => {
-    if (tab.hideForLocalWorkspace && context.botWorkspaceBackend === 'local') return false
-    // Container-only tabs disappear for both non-container workspace forms:
-    // local (trusted host) and remote (user's own computer).
-    if (tab.containerWorkspaceOnly && (context.botWorkspaceBackend === 'local' || context.botWorkspaceBackend === 'remote')) return false
+    if (tab.containerWorkspaceOnly && context.botWorkspaceBackend === 'remote') return false
     return true
   })
 }

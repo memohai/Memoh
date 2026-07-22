@@ -53,82 +53,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -ldflags "-s -w -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH}" \
     -o /out/bridge ./cmd/bridge
 
-# ---- Stage 3b: Build a11y-cli (AT-SPI helper, static musl) ----
-# Targets the workspace runtime, so musl-static keeps the helper portable
-# across Debian and Alpine workspace images.
-FROM rust:1.90-alpine AS a11y-cli-builder
-RUN apk add --no-cache musl-dev
-WORKDIR /work
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/work/target \
-    set -eux; \
-    cargo build --release -p a11y-cli; \
-    cp target/release/a11y-cli /out-a11y-cli
-
-# ---- Stage 4: Assemble workspace runtime + toolkit ----
-FROM alpine:latest AS toolkit-assembly
-ARG TARGETARCH
-
-RUN apk add --no-cache ca-certificates wget xz binutils
-COPY docker/toolkit/install.sh /tmp/install.sh
-COPY --from=a11y-cli-builder /out-a11y-cli /tmp/a11y-cli
-ENV MEMOH_A11Y_CLI_BINARY=/tmp/a11y-cli
-RUN /tmp/install.sh /assembly/toolkit "${TARGETARCH:-amd64}"
-
-# Add the glibc/manylinux Hermes ACP cache on top of the musl cache produced
-# above. Workspace images are often Debian-based, while the server runtime image
-# is Alpine; Hermes needs both wheel families for offline startup.
-FROM debian:bookworm-slim AS toolkit-assembly-glibc
-ARG TARGETARCH
-
-RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    binutils \
-    ca-certificates \
-    wget \
-    xz-utils \
-  && rm -rf /var/lib/apt/lists/*
-COPY docker/toolkit/install.sh /tmp/install.sh
-COPY --from=toolkit-assembly /assembly /assembly
-RUN /tmp/install.sh /assembly/toolkit "${TARGETARCH:-amd64}"
-
-# Assemble runtime directory
-FROM toolkit-assembly-glibc AS toolkit-assembly-final
-COPY --from=bridge-builder /out/bridge /assembly/bridge
-COPY templates/workspace /assembly/templates
-COPY docker/toolkit/bin /assembly/toolkit/bin
-RUN chmod +x /assembly/toolkit/bin/*
-
-# ---- Optional Stage: standalone toolkit + bridge over TCP (live ACP tests) ----
-# A glibc image (claude-agent-acp requires glibc; the wrapper refuses musl)
-# with the toolkit at the canonical /opt/memoh/toolkit and the bridge served
-# over TCP, so integration tests can drive the REAL container backend (agent
-# runs inside the container with a managed HOME) without the full
-# containerd/server stack. Built via `--target toolkit-acp-bridge-live`.
-FROM debian:bookworm-slim AS toolkit-acp-bridge-live
-# procps provides `ps`, which the live credential-redaction smoke test
-# (TestACPContainerAPIKeyCredentialNotInPSEF) needs to assert managed API keys
-# never surface in the container's process listing.
-RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates procps \
-  && rm -rf /var/lib/apt/lists/*
-COPY --from=toolkit-assembly-final /assembly/toolkit /opt/memoh/toolkit
-COPY --from=toolkit-assembly-final /assembly/bridge /usr/local/bin/bridge
-# Templates let the bridge seed /data with AGENTS.md on first boot, matching
-# real workspace containers - agents read AGENTS.md, so the live environment
-# must show them the same files production does.
-COPY --from=toolkit-assembly-final /assembly/templates /opt/memoh/templates
-RUN mkdir -p /data
-ENV BRIDGE_TCP_ADDR=":1455" \
-    PATH="/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
-WORKDIR /data
-EXPOSE 1455
-ENTRYPOINT ["/usr/local/bin/bridge"]
-
-# ---- Optional Stage 5a: glibc runtime for containerd/Kata deployments ----
+# ---- Optional Stage 4a: glibc runtime for containerd/Kata deployments ----
 # Host-installed Kata shims are commonly glibc-linked. Keep this as an explicit
 # build target so the default server image remains the Alpine runtime below.
 FROM debian:bookworm-slim AS server-kata
@@ -181,7 +106,7 @@ RUN apt-get update \
     '  ]' \
     '}' > /etc/cni/net.d/10-memoh.conflist
 
-COPY --from=toolkit-assembly-final /assembly /opt/memoh/runtime
+COPY --from=bridge-builder /out/bridge /opt/memoh/runtime/bridge
 COPY --from=server-builder /build/memoh-server /app/memoh-server
 COPY --from=server-builder /build/memoh-channel /app/memoh-channel
 COPY --from=server-builder /build/spec /app/spec
@@ -203,7 +128,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
 
 ENTRYPOINT ["/entrypoint.sh"]
 
-# ---- Stage 5: Final runtime (containerd + server + CNI) ----
+# ---- Stage 4: Final runtime (containerd + server + CNI) ----
 FROM alpine:latest
 
 WORKDIR /app
@@ -246,8 +171,9 @@ RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
       '  ]' \
       '}' > /etc/cni/net.d/10-memoh.conflist
 
-# Workspace runtime (bind-mounted into bot containers)
-COPY --from=toolkit-assembly-final /assembly /opt/memoh/runtime
+# The Server owns only the bridge executable. Workspace tools and scripts are
+# part of Dockerfile.workspace and are never mounted from this image.
+COPY --from=bridge-builder /out/bridge /opt/memoh/runtime/bridge
 
 # Server binary, spec, and provider presets
 COPY --from=server-builder /build/memoh-server /app/memoh-server

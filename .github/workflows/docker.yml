@@ -4,16 +4,10 @@ on:
   push:
     branches: [main, "v*.*"]
     tags: ["v*"]
-    paths-ignore:
-      - "**.md"
-      - "devenv/**"
   release:
     types: [published]
   pull_request:
     branches: [main, "v*.*"]
-    paths-ignore:
-      - "**.md"
-      - "devenv/**"
   workflow_dispatch:
 
 concurrency:
@@ -53,12 +47,9 @@ jobs:
               - 'go.sum'
               - 'cmd/**'
               - 'internal/**'
-              - 'crates/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
               - 'docker/Dockerfile.server'
               - 'docker/server-entrypoint.sh'
-              - 'docker/toolkit/**'
+              - 'templates/workspace/**'
               - 'conf/providers/**'
               - 'spec/**'
             web:
@@ -70,7 +61,15 @@ jobs:
               - 'docker/nginx.conf'
             workspace:
               - 'docker/Dockerfile.workspace'
+              - 'docker/workspace-contract.json'
+              - 'docker/toolkit/**'
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
               - 'scripts/desktop-install.sh'
+              - 'scripts/desktop-style.sh'
+              - 'scripts/display-apply-style.sh'
+              - 'scripts/display-prepare.sh'
   build:
     name: build ${{ matrix.image }}${{ matrix.variant != '' && format(' ({0})', matrix.variant) || '' }} ${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
     needs: detect-changes
@@ -181,6 +180,8 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
+          load: ${{ env.PUSH != 'true' && matrix.image == 'workspace' && matrix.platform == 'linux/amd64' }}
+          tags: memoh-ci-${{ matrix.image }}:${{ matrix.variant != '' && matrix.variant || 'default' }}
           outputs: ${{ env.PUSH == 'true' && format('type=image,"name={0}/{1}/{2}",push-by-digest=true,name-canonical=true,push=true,compression=zstd', env.REGISTRY, github.repository_owner, matrix.image) || '' }}
           build-contexts: ${{ matrix.image == 'server' && format('gomodcache={0}/.go-cache', github.workspace) || '' }}
           build-args: |
@@ -194,6 +195,25 @@ jobs:
           cache-to: |
             type=gha,scope=${{ steps.resolve.outputs.artifact_key }}-${{ matrix.platform }},mode=max,ignore-error=true
             ${{ env.PUSH == 'true' && format('type=registry,ref={0}/{1}/{2}:buildcache-{3}-{4},mode=max,compression=zstd,ignore-error=true', env.REGISTRY, github.repository_owner, matrix.image, steps.resolve.outputs.artifact_key, matrix.platform == 'linux/amd64' && 'amd64' || 'arm64') || '' }}
+
+      - name: Smoke-test workspace contract
+        if: steps.should-build.outputs.skip != 'true' && env.PUSH != 'true' && matrix.image == 'workspace' && matrix.platform == 'linux/amd64'
+        run: |
+          docker run --rm memoh-ci-workspace:debian sh -eux -c '
+            grep -q "\"contract_version\": 1" /opt/memoh/workspace-contract.json
+            ldd --version >/dev/null
+            node --version
+            python3 --version
+            uv --version
+            test -x /opt/memoh/toolkit/bin/codex
+            test -x /opt/memoh/toolkit/bin/codex-acp
+            test -x /opt/memoh/toolkit/bin/claude-agent-acp
+            test -x /opt/memoh/toolkit/bin/hermes-acp
+            test -x /opt/memoh/toolkit/display/bin/a11y-cli
+            sh -n /opt/memoh/scripts/display-prepare.sh
+            sh -n /opt/memoh/scripts/display-apply-style.sh
+            sh -n /opt/memoh/scripts/desktop-style.sh
+          '
 
       - name: Export digest
         if: steps.should-build.outputs.skip != 'true' && env.PUSH == 'true'

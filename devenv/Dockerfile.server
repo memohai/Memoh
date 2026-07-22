@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# Dev server image: Go + containerd + CNI.
-# Toolkit (Node.js, uv) is NOT baked in — it is volume-mounted from the host.
-# Run ./docker/toolkit/install.sh once before first use.
+# Dev server image: Go + containerd + CNI. Workspace tools come exclusively
+# from the image built by docker/Dockerfile.workspace.
 
 FROM golang:1.25-alpine
 

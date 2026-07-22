@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -128,7 +127,7 @@ func (p *SessionPool) startDynamicAdapter(
 	dynamicCtx, cancel := context.WithTimeout(startCtx, timeout)
 	defer cancel()
 	useToolkitCA := p.containerToolkitCABundleAvailable(dynamicCtx, startReq.BotID, workspaceInfo)
-	dynamicEnv := dynamicACPEnv(startReq.Env, workspaceInfo, useToolkitCA)
+	dynamicEnv := dynamicACPEnv(startReq.Env, useToolkitCA)
 	state, version, resolveErr := p.resolveDynamicAdapter(dynamicCtx, startReq.BotID, packageName, adapterLookupEnv(dynamicEnv))
 	if resolveErr != nil && startCtx.Err() != nil {
 		return nil, startCtx.Err()
@@ -146,8 +145,6 @@ func (p *SessionPool) startDynamicAdapter(
 	dynamicReq := startReq
 	dynamicReq.Command = profile.DynamicCommand
 	dynamicReq.Args = append(append([]string(nil), profile.DynamicArgs...), packageName+"@"+version)
-	dynamicReq.LocalCommand = profile.DynamicCommand
-	dynamicReq.LocalArgs = append([]string(nil), dynamicReq.Args...)
 	dynamicReq.Env = dynamicEnv
 
 	sess, err := p.runner.StartSession(dynamicCtx, dynamicReq, sink)
@@ -189,15 +186,8 @@ func (p *SessionPool) containerToolkitCABundleAvailable(ctx context.Context, bot
 	return true
 }
 
-func dynamicACPEnv(env []string, workspaceInfo bridge.WorkspaceInfo, useToolkitCA bool) []string {
+func dynamicACPEnv(env []string, useToolkitCA bool) []string {
 	cacheDir := "/data/.memoh/acp/npm-cache"
-	if strings.EqualFold(strings.TrimSpace(workspaceInfo.Backend), bridge.WorkspaceBackendLocal) {
-		localDataRoot := strings.TrimSpace(workspaceInfo.LocalDataRoot)
-		if localDataRoot == "" {
-			return append([]string(nil), env...)
-		}
-		cacheDir = filepath.Join(localDataRoot, "acp", "npm-cache")
-	}
 
 	result := replaceEnvValue(env, "NPM_CONFIG_CACHE", cacheDir)
 	if useToolkitCA && !envHasKey(result, "SSL_CERT_FILE") {

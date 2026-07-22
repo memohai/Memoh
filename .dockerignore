@@ -7,6 +7,8 @@
 *.md
 docs/
 assets/
+!templates/workspace/**/*.md
+!templates/workspace/*.md
 
 # IDE
 .vscode/
@@ -16,6 +18,8 @@ assets/
 # Dependencies
 node_modules/
 **/node_modules/
+.pnpm-store/
+.claude/
 
 # Build outputs
 dist/
@@ -23,6 +27,10 @@ dist/
 build/
 **/build/
 out/
+target/
+.cache/
+.toolkit/
+/agent
 
 # Logs
 *.log

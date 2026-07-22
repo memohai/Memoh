@@ -2145,7 +2145,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/container/display/prepare": {
             "post": {
-                "description": "Installs the workspace desktop/VNC/browser packages when needed, starts the display server, and launches the browser.",
+                "description": "Validates the image-provided desktop/VNC/browser runtime, starts the display server, and launches the browser.",
                 "produces": [
                     "text/event-stream"
                 ],
@@ -17619,16 +17619,10 @@ const docTemplate = `{
                 "image": {
                     "type": "string"
                 },
-                "local_workspace_path": {
-                    "type": "string"
-                },
                 "restore_data": {
                     "type": "boolean"
                 },
                 "snapshotter": {
-                    "type": "string"
-                },
-                "workspace_backend": {
                     "type": "string"
                 }
             }
@@ -18256,9 +18250,6 @@ const docTemplate = `{
                 },
                 "container_backend": {
                     "type": "string"
-                },
-                "local_workspace_enabled": {
-                    "type": "boolean"
                 },
                 "snapshot_supported": {
                     "type": "boolean"

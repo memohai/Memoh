@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -117,7 +115,7 @@ func TestPrepareACPWorkspaceConfigSkipsCodexOAuthConfig(t *testing.T) {
 }
 
 func TestPrepareACPWorkspaceConfigSkipsSelf(t *testing.T) {
-	handler := &UsersHandler{acpWorkspace: &usersACPConfigWorkspace{backend: bridge.WorkspaceBackendLocal}}
+	handler := &UsersHandler{acpWorkspace: &usersACPConfigWorkspace{backend: bridge.WorkspaceBackendContainer}}
 	selfBot := bots.Bot{
 		ID: "bot-1",
 		Metadata: map[string]any{
@@ -348,41 +346,6 @@ func TestACPRuntimeMetadataChangedIgnoresUnrelatedMetadata(t *testing.T) {
 	}
 }
 
-func TestPrepareACPWorkspaceConfigWritesCodexAPIKeyConfigForLocalBYOK(t *testing.T) {
-	client, recorder := newUsersACPConfigBridgeClient(t)
-	handler := &UsersHandler{
-		acpWorkspace: &usersACPConfigWorkspace{
-			backend: bridge.WorkspaceBackendLocal,
-			client:  client,
-		},
-	}
-
-	err := handler.prepareACPWorkspaceConfig(context.Background(), bots.Bot{
-		ID: "bot-1",
-		Metadata: map[string]any{
-			acpprofile.MetadataKeyACP: map[string]any{
-				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{
-						"enabled":    true,
-						"setup_mode": "api_key",
-						"managed": map[string]any{
-							"api_key": "sk-secret",
-						},
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("prepareACPWorkspaceConfig() error = %v", err)
-	}
-	// Desktop BYOK: local api_key config is written to the bot-scoped .codex dir
-	// (the bridge maps /data/.codex onto the workspace root on the local side).
-	if writes := recorder.writes(); len(writes) != 2 {
-		t.Fatalf("writes len = %d, want config.toml + auth.json: %#v", len(writes), writes)
-	}
-}
-
 func TestPrepareACPWorkspaceConfigWritesHermesManagedConfig(t *testing.T) {
 	client, recorder := newUsersACPConfigBridgeClient(t)
 	handler := &UsersHandler{
@@ -432,63 +395,9 @@ func TestPrepareACPWorkspaceConfigWritesHermesManagedConfig(t *testing.T) {
 	}
 }
 
-func TestPrepareACPWorkspaceConfigWritesHermesLocalManagedConfigToDataRoot(t *testing.T) {
-	localWorkDir := t.TempDir()
-	localDataRoot := t.TempDir()
-	handler := &UsersHandler{
-		acpWorkspace: &usersACPConfigWorkspace{
-			backend:        bridge.WorkspaceBackendLocal,
-			defaultWorkDir: localWorkDir,
-			localDataRoot:  localDataRoot,
-			mcpErr:         errors.New("local Hermes managed config should not use bridge"),
-		},
-	}
-
-	err := handler.prepareACPWorkspaceConfig(context.Background(), bots.Bot{
-		ID: "bot-1",
-		Metadata: map[string]any{
-			acpprofile.MetadataKeyACP: map[string]any{
-				"agents": map[string]any{
-					acpprofile.AgentHermesID: map[string]any{
-						"enabled":    true,
-						"setup_mode": "api_key",
-						"managed": map[string]any{
-							"provider": "custom",
-							"model":    "my-model",
-							"base_url": "https://llm.example/v1",
-							"api_key":  "sk-hermes",
-						},
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("prepareACPWorkspaceConfig() error = %v", err)
-	}
-
-	configPath := filepath.Join(localDataRoot, "acp", "hermes", "bot-1", "config.yaml")
-	configBytes, err := os.ReadFile(configPath) //nolint:gosec // test path under t.TempDir.
-	if err != nil {
-		t.Fatalf("read local Hermes config %q: %v", configPath, err)
-	}
-	if !strings.Contains(string(configBytes), `base_url: "https://llm.example/v1"`) {
-		t.Fatalf("Hermes local config content =\n%s", string(configBytes))
-	}
-	envPath := filepath.Join(localDataRoot, "acp", "hermes", "bot-1", ".env")
-	envBytes, err := os.ReadFile(envPath) //nolint:gosec // test path under t.TempDir.
-	if err != nil {
-		t.Fatalf("read local Hermes env %q: %v", envPath, err)
-	}
-	if !strings.Contains(string(envBytes), `MEMOH_HERMES_API_KEY='sk-hermes'`) {
-		t.Fatalf("Hermes local env content =\n%s", string(envBytes))
-	}
-}
-
 type usersACPConfigWorkspace struct {
 	backend        string
 	defaultWorkDir string
-	localDataRoot  string
 	client         *bridge.Client
 	mcpErr         error
 }
@@ -498,7 +407,7 @@ func (w *usersACPConfigWorkspace) WorkspaceInfo(context.Context, string) (bridge
 	if defaultWorkDir == "" {
 		defaultWorkDir = "/data"
 	}
-	return bridge.WorkspaceInfo{Backend: w.backend, DefaultWorkDir: defaultWorkDir, LocalDataRoot: w.localDataRoot}, nil
+	return bridge.WorkspaceInfo{Backend: w.backend, DefaultWorkDir: defaultWorkDir}, nil
 }
 
 func (w *usersACPConfigWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {

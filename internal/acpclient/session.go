@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -27,18 +26,16 @@ import (
 type ToolSessionContext = mcp.ToolSessionContext
 
 type StartRequest struct {
-	AgentID      string
-	BotID        string
-	ProjectPath  string
-	Command      string
-	Args         []string
-	LocalCommand string
-	LocalArgs    []string
-	Env          []string
-	CleanEnv     bool
-	UnsetEnv     []string
-	Resolved     *ResolvedSessionContext
-	SetupMode    SetupMode
+	AgentID     string
+	BotID       string
+	ProjectPath string
+	Command     string
+	Args        []string
+	Env         []string
+	CleanEnv    bool
+	UnsetEnv    []string
+	Resolved    *ResolvedSessionContext
+	SetupMode   SetupMode
 	// SessionMode, when set, is pinned via session/set_mode right after the
 	// session is created (see acpprofile.Profile.SessionModeID).
 	SessionMode string
@@ -177,10 +174,6 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}()
 	command := strings.TrimSpace(req.Command)
 	args := append([]string(nil), req.Args...)
-	if backend == WorkspaceBackendLocal && strings.TrimSpace(req.LocalCommand) != "" {
-		command = strings.TrimSpace(req.LocalCommand)
-		args = append([]string(nil), req.LocalArgs...)
-	}
 	if command == "" {
 		command = strings.TrimSpace(r.command)
 		if len(args) == 0 {
@@ -214,26 +207,17 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		} else {
 			toolHTTPStop = stop
 		}
-	} else if backend == WorkspaceBackendLocal && toolHTTPHandler != nil && toolHTTPURL != "" {
-		proxyURL, stop, err := startLocalToolHTTPProxy(lifecycleCtx, toolHTTPHandler)
-		if err != nil {
-			cancel()
-			return nil, fmt.Errorf("start Memoh tools proxy: %w", err)
-		}
-		toolHTTPURL = proxyURL
-		toolHTTPStop = stop
 	}
 
 	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
-		Backend:       backend,
-		AgentID:       req.AgentID,
-		SetupMode:     req.SetupMode,
-		Env:           req.Env,
-		CleanEnv:      req.CleanEnv,
-		UnsetEnv:      req.UnsetEnv,
-		WorkspaceRoot: root,
-		HermesHome:    resolvedHermesHome(req.Resolved),
-		NoTimeout:     true,
+		Backend:    backend,
+		AgentID:    req.AgentID,
+		SetupMode:  req.SetupMode,
+		Env:        req.Env,
+		CleanEnv:   req.CleanEnv,
+		UnsetEnv:   req.UnsetEnv,
+		HermesHome: resolvedHermesHome(req.Resolved),
+		NoTimeout:  true,
 	})
 	if err != nil {
 		if toolHTTPStop != nil {
@@ -254,7 +238,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if preflightGateway == nil {
 		preflightGateway = req.ToolGateway
 	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.env, req.CleanEnv, req.UnsetEnv, backend == WorkspaceBackendContainer, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
+	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.env, req.CleanEnv, req.UnsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
 	callbacks.logger = r.logger
 	conn := newClientConnection(callbacks, proc, proc)
 
@@ -611,44 +595,6 @@ func redactedToolHTTPURL(rawURL string) string {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String()
-}
-
-func startLocalToolHTTPProxy(ctx context.Context, handler http.Handler) (string, func(), error) {
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", nil, err
-	}
-	rawURL := "http://" + listener.Addr().String() + "/mcp"
-	guardedURL, _, guardedHandler, err := guardToolHTTPHandler(rawURL, handler)
-	if err != nil {
-		_ = listener.Close()
-		return "", nil, err
-	}
-	server := &http.Server{
-		Handler:           guardedHandler,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_ = server.Serve(listener)
-	}()
-
-	var once sync.Once
-	stop := func() {
-		once.Do(func() {
-			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			_ = server.Shutdown(shutdownCtx)
-			<-done
-		})
-	}
-	go func() {
-		<-ctx.Done()
-		stop()
-	}()
-	return guardedURL, stop, nil
 }
 
 func (s *Session) ID() string {

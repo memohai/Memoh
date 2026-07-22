@@ -265,16 +265,8 @@ func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginServi
 	return service
 }
 
-func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries, remote *workspace.RemoteWorkspaceService) (*workspace.Manager, error) {
-	localSvc := workspace.NewLocalService(log, cfg.Local, cfg.Workspace.DataRoot)
-	lc.Append(fx.Hook{
-		OnStop: func(context.Context) error {
-			localSvc.Close()
-			return nil
-		},
-	})
-	runtimeSvc := workspace.NewRuntimeRouter(service, localSvc)
-	mgr := workspace.NewManager(log, runtimeSvc, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
+func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries, remote *workspace.RemoteWorkspaceService) (*workspace.Manager, error) {
+	mgr := workspace.NewManager(log, service, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
 	mgr.SetRemoteWorkspaceService(remote)
 	tlsOpts, err := workspace.BridgeTLSRuntimeOptionsFromConfig(cfg)
 	if err != nil {
@@ -484,6 +476,7 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 }
 
 func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
+	manager.SetSetupDiagnostics(botService)
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
 	h.SetPluginService(pluginService)
 	return h

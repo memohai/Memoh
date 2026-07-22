@@ -7,6 +7,7 @@ import (
 
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -17,6 +18,20 @@ func TestCreateBotHTTPErrorMapsNameConflictToStableCode(t *testing.T) {
 	}
 	if got := apperror.ArgsOf(err)["field"]; got != "name" {
 		t.Fatalf("field arg = %q, want name", got)
+	}
+}
+
+func TestCreateBotHTTPErrorMapsWorkspaceContractFailureToStableCode(t *testing.T) {
+	cause := errors.Join(
+		workspace.ErrWorkspaceImageIncompatible,
+		errors.New("missing /opt/memoh/toolkit/bin/node"),
+	)
+	err := createBotHTTPError(cause, true)
+	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceImageIncompatible {
+		t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceImageIncompatible)
+	}
+	if got := apperror.CauseOf(err); !errors.Is(got, workspace.ErrWorkspaceImageIncompatible) {
+		t.Fatalf("cause = %v, want workspace image incompatibility", got)
 	}
 }
 
@@ -75,5 +90,34 @@ func TestDisplayPrepareStreamBreakUsesPrepareFailedCode(t *testing.T) {
 	}
 	if strings.Contains(event.Message, "stream reset") || strings.Contains(event.Detail, "stream reset") {
 		t.Fatal("private cause leaked into the stream event")
+	}
+}
+
+func TestWorkspaceSetupAppErrorKeepsContractDiagnosticPrivate(t *testing.T) {
+	cause := errors.Join(
+		workspace.ErrWorkspaceImageIncompatible,
+		errors.New("missing /opt/memoh/toolkit/bin/node"),
+	)
+	event, ok := newWorkspaceSetupAppError(cause, "req-contract")
+	if !ok {
+		t.Fatal("newWorkspaceSetupAppError() did not recognize contract error")
+	}
+	if event.Code != string(apperror.CodeWorkspaceImageIncompatible) {
+		t.Fatalf("code = %q", event.Code)
+	}
+	if event.I18nKey != "" {
+		t.Fatalf("i18n_key = %q, want empty", event.I18nKey)
+	}
+	if event.Detail != "The workspace image is incompatible with this version of Memoh." {
+		t.Fatalf("detail = %q", event.Detail)
+	}
+	if event.Message != event.Detail {
+		t.Fatalf("message = %q, detail = %q", event.Message, event.Detail)
+	}
+	if strings.Contains(event.Message, "/opt/memoh") || strings.Contains(event.Detail, "/opt/memoh") {
+		t.Fatal("private workspace path leaked into SSE event")
+	}
+	if event.RequestID != "req-contract" {
+		t.Fatalf("request_id = %q", event.RequestID)
 	}
 }

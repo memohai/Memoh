@@ -306,7 +306,6 @@ import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBackAffordance } from '@/composables/useBackOr'
 import { registerBotBreadcrumbName } from '@/lib/bot-breadcrumb'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
-import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 import NavItem from '@/components/settings-sidebar/nav-item.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'
@@ -371,7 +370,7 @@ const botId = computed(() => bot.value?.id ?? '')
 const containerInfo = ref<BotContainerInfo | null>(null)
 
 const botWorkspaceBackend = computed(() =>
-  resolveBotWorkspaceBackend(bot.value?.metadata, containerInfo.value?.workspace_backend),
+  resolveBotWorkspaceBackend(containerInfo.value?.workspace_backend),
 )
 
 const canManageBot = computed(() => {
@@ -385,7 +384,6 @@ const canManageBot = computed(() => {
 })
 
 const capabilitiesStore = useCapabilitiesStore()
-const desktopRuntime = useDesktopRuntime()
 
 const tabList = computed(() => {
   const bot_id = toValue(botId)
@@ -416,14 +414,8 @@ const tabList = computed(() => {
     params: Record<string, unknown>
   }>
   return filterBotDetailsTabs(tabs, {
-    host: desktopRuntime.host.value,
     canManageBot: canManageBot.value,
     botWorkspaceBackend: botWorkspaceBackend.value,
-    serverCapabilities: {
-      containerBackend: capabilitiesStore.containerBackend,
-      localWorkspaceEnabled: capabilitiesStore.localWorkspaceEnabled,
-      snapshotSupported: capabilitiesStore.snapshotSupported,
-    },
   })
 })
 
@@ -508,7 +500,6 @@ const activeComponent = computed(() => {
 
 onMounted(() => {
   void capabilitiesStore.load()
-  void desktopRuntime.load()
 })
 
 const queryCache = useQueryCache()

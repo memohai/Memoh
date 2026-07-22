@@ -1,0 +1,11 @@
+{
+  "contract_version": 1,
+  "platform": {
+    "os": "linux",
+    "libc": "glibc"
+  },
+  "paths": {
+    "toolkit": "/opt/memoh/toolkit",
+    "scripts": "/opt/memoh/scripts"
+  }
+}

@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/internal/logger"
-	scriptassets "github.com/memohai/memoh/scripts"
 )
 
 const (
@@ -38,7 +37,7 @@ const (
 	defaultXvncGeometry   = "1280x960"
 	xvncSocketPath        = x11SocketDir + "/X99"
 	xvncLockPath          = "/tmp/.X99-lock"
-	desktopStylePath      = "/tmp/memoh-desktop-style.sh"
+	desktopStylePath      = "/opt/memoh/scripts/desktop-style.sh"
 	defaultRFBTCPAddr     = "127.0.0.1:5999"
 	displayReadyTimeout   = 30 * time.Second
 )
@@ -563,12 +562,12 @@ func startDisplayBrowser(ctx context.Context) {
 }
 
 func startDesktopStyle(ctx context.Context) {
-	script := strings.TrimSpace(desktopStyleScript())
-	if script == "" {
-		return
-	}
-	if err := os.WriteFile(desktopStylePath, []byte(script+"\n"), 0o755); err != nil { //nolint:gosec // G306: executable script is intentionally written for this container session.
-		logger.FromContext(ctx).Warn("failed to write display desktop style script", slog.String("path", desktopStylePath), slog.Any("error", err))
+	info, err := os.Stat(desktopStylePath)
+	if err != nil || info.IsDir() {
+		logger.FromContext(ctx).Warn("display desktop style script is unavailable",
+			slog.String("path", desktopStylePath),
+			slog.Any("error", err),
+		)
 		return
 	}
 	startDisplayCommand(ctx, "desktop style", "/bin/sh", desktopStylePath)
@@ -580,13 +579,6 @@ func desktopBackgroundColor() string {
 		return "#1f2329"
 	}
 	return color
-}
-
-func desktopStyleScript() string {
-	if data, err := os.ReadFile("scripts/desktop-style.sh"); err == nil {
-		return string(data)
-	}
-	return scriptassets.DesktopStyle
 }
 
 func displayProcessRunning(_ context.Context, patterns ...string) bool {

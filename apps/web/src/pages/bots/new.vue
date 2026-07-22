@@ -118,69 +118,6 @@
 
       <Separator class="my-6" />
 
-      <!-- Workspace (conditional) -->
-      <template v-if="allowLocalWorkspaceCreate">
-        <div>
-          <h3 class="text-sm font-medium mb-4">
-            {{ $t('bots.steps.workspace') }}
-          </h3>
-          <div class="flex flex-col gap-4">
-            <div>
-              <div class="mb-2 flex items-center gap-2">
-                <Label>{{ $t('bots.workspaceBackend') }}</Label>
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      class="size-5 text-muted-foreground hover:text-foreground"
-                    >
-                      <CircleHelp class="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent class="max-w-80 text-left leading-relaxed">
-                    {{ $t('bots.workspaceBackendHint') }}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <Select v-model="form.workspace_backend">
-                <SelectTrigger class="w-full">
-                  <SelectValue :placeholder="$t('bots.workspaceBackend')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="container">
-                    {{ $t('bots.workspaceBackends.container') }}
-                  </SelectItem>
-                  <SelectItem value="local">
-                    {{ $t('bots.workspaceBackends.local') }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <template v-if="form.workspace_backend === 'local'">
-              <div>
-                <Label class="mb-2">
-                  {{ $t('bots.localWorkspacePath') }}
-                  <span class="text-destructive">*</span>
-                </Label>
-                <Input
-                  v-model="form.local_workspace_path"
-                  type="text"
-                  :placeholder="$t('bots.localWorkspacePathPlaceholder')"
-                />
-              </div>
-              <div class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground">
-                {{ $t('bots.localWorkspaceWarning') }}
-              </div>
-            </template>
-          </div>
-        </div>
-
-        <Separator class="my-6" />
-      </template>
-
       <!-- Security Policy -->
       <div>
         <h3 class="text-sm font-medium mb-4">
@@ -343,21 +280,16 @@ import {
   TooltipTrigger,
 } from '@felinic/ui'
 import { SquarePen, CircleHelp, Check, X, LoaderCircle } from 'lucide-vue-next'
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
-import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useQuery } from '@pinia/colada'
 import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability } from '@memohai/sdk'
 import type { BotsCreateBotRequest } from '@memohai/sdk'
-import { getBotsQueryKey } from '@memohai/sdk/colada'
-import { useCapabilitiesStore } from '@/store/capabilities'
-import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
-import { canCreateLocalWorkspace } from '@/utils/desktop-runtime'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import ModelSelect from './components/model-select.vue'
@@ -368,23 +300,8 @@ import BotImportPanel from './components/bot-import-panel.vue'
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
-const queryCache = useQueryCache()
-const capabilities = useCapabilitiesStore()
-const desktopRuntime = useDesktopRuntime()
 
 const mode = ref<'create' | 'import'>(route.query.mode === 'import' ? 'import' : 'create')
-
-onMounted(() => {
-  void capabilities.load()
-  void desktopRuntime.load()
-})
-
-const allowLocalWorkspaceCreate = computed(() =>
-  canCreateLocalWorkspace({
-    serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
-    host: desktopRuntime.host.value,
-  }),
-)
 
 const form = reactive({
   name: '',
@@ -394,8 +311,6 @@ const form = reactive({
   chat_model_id: '',
   memory_provider_id: '',
   timezone: emptyTimezoneValue,
-  workspace_backend: 'container',
-  local_workspace_path: '',
 })
 
 // Client-side slugify mirroring the backend rules: lowercase, dashes for
@@ -467,23 +382,6 @@ const nameStatusMessage = computed(() => {
   }
 })
 
-const localPathTouched = ref(false)
-
-watch(allowLocalWorkspaceCreate, (enabled) => {
-  if (enabled) {
-    form.workspace_backend = 'local'
-  } else {
-    form.workspace_backend = 'container'
-    form.local_workspace_path = ''
-    localPathTouched.value = false
-  }
-}, { immediate: true })
-
-watch(() => form.local_workspace_path, () => {
-  if (!allowLocalWorkspaceCreate.value || form.workspace_backend !== 'local') return
-  localPathTouched.value = true
-})
-
 const avatarDialogOpen = ref(false)
 const avatarFallback = useAvatarInitials(() => form.display_name || '')
 
@@ -530,16 +428,11 @@ const aclDescription = computed(() => {
   return opt ? t(opt.descriptionKey) : ''
 })
 
-const isLocalWorkspaceCreate = computed(() =>
-  allowLocalWorkspaceCreate.value && form.workspace_backend === 'local',
-)
-
 // Validation
 const canSubmit = computed(() => {
   if (!form.display_name.trim()) return false
   if (!form.name.trim() || nameStatus.value !== 'available') return false
   if (!form.acl_preset) return false
-  if (isLocalWorkspaceCreate.value && !form.local_workspace_path.trim()) return false
   return true
 })
 
@@ -557,14 +450,6 @@ function handleImported(botId: string) {
 }
 
 function buildCreatePayload(): BotsCreateBotRequest {
-  const metadata = isLocalWorkspaceCreate.value
-    ? {
-        workspace: {
-          backend: 'local',
-          local_workspace_path: form.local_workspace_path,
-        },
-      }
-    : undefined
   const tz = form.timezone === emptyTimezoneValue ? undefined : form.timezone || undefined
 
   return {
@@ -574,7 +459,6 @@ function buildCreatePayload(): BotsCreateBotRequest {
     timezone: tz,
     is_active: true,
     acl_preset: form.acl_preset,
-    metadata,
     wait_for_ready: true,
   }
 }
@@ -597,59 +481,15 @@ async function handleSubmit() {
   if (!canSubmit.value || isCreateFlowBlocked.value) return
   submitLoading.value = true
 
-  await Promise.all([capabilities.load(), desktopRuntime.load()])
-  await nextTick()
-  if (!canSubmit.value) {
-    submitLoading.value = false
-    return
-  }
-
   const payload = buildCreatePayload()
   const options = createStartOptions()
 
-  // Local workspaces are near-instant and not sandboxed; skip the dedicated
-  // progress route and finish inline.
-  if (isLocalWorkspaceCreate.value) {
-    await store.start(payload, options)
-    submitLoading.value = false
-    finishLocalCreate()
-    return
-  }
-
-  // Container backend: hand the live stream off to the dedicated progress route.
+  // Hand the live workspace stream off to the dedicated progress route.
   void store.start(payload, options)
   try {
     await router.push({ name: 'bot-create-progress' })
   } finally {
     submitLoading.value = false
-  }
-}
-
-function finishLocalCreate() {
-  if (store.status === 'error') {
-    const message = store.setupError ?? ''
-    if (store.errorCode === 'bot.name_taken') {
-      nameStatus.value = 'taken'
-      toast.error(t('bots.nameStatus.taken'))
-    } else {
-      toast.error(message || t('common.saveFailed'))
-    }
-    store.reset()
-    return
-  }
-
-  if (store.setupError) {
-    toast.error(store.setupError)
-  } else {
-    toast.success(t('bots.createBotSuccess'))
-  }
-  const botName = store.bot?.name ?? store.bot?.id
-  void queryCache.invalidateQueries({ key: getBotsQueryKey() })
-  store.reset()
-  if (botName) {
-    router.push({ name: 'bot-detail', params: { botName } })
-  } else {
-    router.push({ name: 'bots' })
   }
 }
 </script>

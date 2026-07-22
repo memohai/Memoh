@@ -12,12 +12,11 @@ import (
 )
 
 type PingResponse struct {
-	Status                string `json:"status"`
-	ContainerBackend      string `json:"container_backend"`
-	LocalWorkspaceEnabled bool   `json:"local_workspace_enabled"`
-	SnapshotSupported     bool   `json:"snapshot_supported"`
-	Version               string `json:"version"`
-	CommitHash            string `json:"commit_hash"`
+	Status            string `json:"status"`
+	ContainerBackend  string `json:"container_backend"`
+	SnapshotSupported bool   `json:"snapshot_supported"`
+	Version           string `json:"version"`
+	CommitHash        string `json:"commit_hash"`
 }
 
 type PingHandler struct {
@@ -46,12 +45,11 @@ func (h *PingHandler) Register(e *echo.Echo) {
 // @Router /ping [get].
 func (h *PingHandler) Ping(c echo.Context) error {
 	return c.JSON(http.StatusOK, PingResponse{
-		Status:                "ok",
-		ContainerBackend:      h.runtime.ContainerBackend,
-		LocalWorkspaceEnabled: h.cfg.Local.Enabled,
-		SnapshotSupported:     h.snapshotSupported(),
-		Version:               version.Version,
-		CommitHash:            version.ShortCommitHash(),
+		Status:            "ok",
+		ContainerBackend:  h.runtime.ContainerBackend,
+		SnapshotSupported: h.snapshotSupported(),
+		Version:           version.Version,
+		CommitHash:        version.ShortCommitHash(),
 	})
 }
 

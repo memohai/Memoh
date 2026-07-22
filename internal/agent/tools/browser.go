@@ -23,7 +23,6 @@ import (
 	displaypkg "github.com/memohai/memoh/internal/display"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/workspace/bridge"
-	scriptassets "github.com/memohai/memoh/scripts"
 )
 
 const (
@@ -609,7 +608,7 @@ func (p *BrowserProvider) ensureComputerDisplay(ctx context.Context, botID strin
 		return client, nil
 	}
 
-	result, err := client.Exec(ctx, scriptassets.DisplayPrepareCommand(), "/", computerDisplayStartupTimeout)
+	result, err := client.Exec(ctx, "/bin/sh /opt/memoh/scripts/display-prepare.sh", "/", computerDisplayStartupTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("prepare workspace desktop: %w", err)
 	}

@@ -5,7 +5,8 @@
 # the musl/glibc mismatch of the default Alpine dev server image.
 # This image is intentionally limited to runtime smoke validation and omits the
 # optional display/GStreamer stack to keep Linux/KVM iteration fast.
-# Toolkit (Node.js, uv) is NOT baked in; it is volume-mounted from the host.
+# Workspace tools come exclusively from the image built by
+# docker/Dockerfile.workspace.
 
 FROM golang:1.25-bookworm
 

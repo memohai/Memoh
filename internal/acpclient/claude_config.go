@@ -37,14 +37,6 @@ func WriteClaudeManagedSettings(ctx context.Context, client *bridge.Client, home
 	return writeClaudeSettingsDir(ctx, client, path.Join(homeDir, ".claude"))
 }
 
-// WriteClaudeManagedConfigDir writes the managed Claude Code settings into an
-// explicit CLAUDE_CONFIG_DIR (configDir/settings.json). Used for local
-// sessions, where HOME stays the host HOME and isolation comes from pointing
-// CLAUDE_CONFIG_DIR at a workspace-scoped directory.
-func WriteClaudeManagedConfigDir(ctx context.Context, client *bridge.Client, configDir string) error {
-	return writeClaudeSettingsDir(ctx, client, configDir)
-}
-
 func writeClaudeSettingsDir(ctx context.Context, client *bridge.Client, dir string) error {
 	if client == nil {
 		return errors.New("workspace bridge client is required")

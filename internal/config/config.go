@@ -41,6 +41,7 @@ const (
 	DefaultPGVectorDatabase      = "memoh_vector"
 	DefaultPGVectorSSLMode       = "disable"
 	DefaultRuntimeDir            = "/opt/memoh/runtime"
+	DefaultBridgePath            = DefaultRuntimeDir + "/bridge"
 	DefaultWorkspaceImage        = "memohai/workspace:debian"
 	DefaultBaseImage             = DefaultWorkspaceImage
 	DefaultWorkspaceMirrorImage  = "memoh.cn/memohai/workspace:debian"
@@ -69,7 +70,6 @@ type Config struct {
 	Containerd     ContainerdConfig     `toml:"containerd"`
 	Docker         DockerConfig         `toml:"docker"`
 	Apple          AppleConfig          `toml:"apple"`
-	Local          LocalConfig          `toml:"local"`
 	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
 	PGVector       PGVectorConfig       `toml:"pgvector"`
@@ -336,31 +336,6 @@ type AppleConfig struct {
 	BinaryPath string `toml:"binary_path"`
 }
 
-type LocalConfig struct {
-	Enabled                bool   `toml:"enabled"`
-	DefaultWorkspaceParent string `toml:"default_workspace_parent"`
-	MetadataRoot           string `toml:"metadata_root"`
-	AllowAbsolutePaths     bool   `toml:"allow_absolute_paths"`
-}
-
-func (c LocalConfig) WorkspaceParent() string {
-	if strings.TrimSpace(c.DefaultWorkspaceParent) != "" {
-		return absPath(expandHome(strings.TrimSpace(c.DefaultWorkspaceParent)))
-	}
-	return absPath(filepath.Join(homeDirOrDot(), ".memoh", "workspaces"))
-}
-
-func (c LocalConfig) MetadataPath(dataRoot string) string {
-	if strings.TrimSpace(c.MetadataRoot) != "" {
-		return absPath(expandHome(strings.TrimSpace(c.MetadataRoot)))
-	}
-	root := strings.TrimSpace(dataRoot)
-	if root == "" {
-		root = DefaultDataRoot
-	}
-	return filepath.Join(absPath(root), "local", "containers")
-}
-
 type WorkspaceConfig struct {
 	Registry        string `toml:"registry"`
 	DefaultImage    string `toml:"default_image"`
@@ -369,7 +344,11 @@ type WorkspaceConfig struct {
 	DataRoot        string `toml:"data_root"`
 	CNIBinaryDir    string `toml:"cni_bin_dir"`
 	CNIConfigDir    string `toml:"cni_conf_dir"`
-	RuntimeDir      string `toml:"runtime_dir"`
+	BridgePath      string `toml:"bridge_path"`
+	// RuntimeDir is accepted for one compatibility release. New deployments
+	// should configure bridge_path because the Server no longer owns a toolkit
+	// or workspace templates directory.
+	RuntimeDir string `toml:"runtime_dir"`
 }
 
 // ImageRef returns the fully qualified image reference for the base image,
@@ -392,6 +371,18 @@ func (c WorkspaceConfig) RuntimePath() string {
 		return absPath(c.RuntimeDir)
 	}
 	return DefaultRuntimeDir
+}
+
+// BridgeBinaryPath returns the host path mounted read-only into native
+// workspace containers. runtime_dir remains a compatibility fallback.
+func (c WorkspaceConfig) BridgeBinaryPath() string {
+	if strings.TrimSpace(c.BridgePath) != "" {
+		return absPath(c.BridgePath)
+	}
+	if strings.TrimSpace(c.RuntimeDir) != "" {
+		return filepath.Join(c.RuntimePath(), "bridge")
+	}
+	return DefaultBridgePath
 }
 
 func (c WorkspaceConfig) DataRootPath() string {
@@ -786,10 +777,8 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 func (cfg *Config) resolvePaths() {
 	cfg.Container.DataRoot = cfg.Container.DataRootPath()
 	cfg.Container.RuntimeDir = cfg.Container.RuntimePath()
+	cfg.Container.BridgePath = cfg.Container.BridgeBinaryPath()
 	cfg.Workspace = cfg.Container.WorkspaceConfig
-	if strings.TrimSpace(cfg.Local.MetadataRoot) != "" {
-		cfg.Local.MetadataRoot = cfg.Local.MetadataPath(cfg.Workspace.DataRoot)
-	}
 	if strings.TrimSpace(cfg.Registry.ProvidersDir) != "" {
 		cfg.Registry.ProvidersDir = cfg.Registry.ProvidersPath()
 	}
@@ -807,6 +796,7 @@ func containerHasWorkspaceFields(values map[string]any) bool {
 		"data_root",
 		"cni_bin_dir",
 		"cni_conf_dir",
+		"bridge_path",
 		"runtime_dir",
 	} {
 		if _, ok := values[key]; ok {
