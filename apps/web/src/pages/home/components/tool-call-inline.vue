@@ -302,6 +302,11 @@ const actionClass = computed(() => {
   return ''
 })
 
+// Pending approvals are answered from the composer-dock panel (see
+// composer-panel.vue), never here — this row keeps only the read-only status
+// label so history still shows which call needed one and how it ended. The
+// old inline Allow/Reject also carried raw color classes that bypassed the
+// Button variants, so nothing of it is worth keeping.
 const approvalLabel = computed(() => {
   const approval = props.block.approval
   if (!approval?.approval_id) return ''
@@ -352,5 +357,4 @@ function handleOpenInFiles() {
   if (!filePath.value || !openInFileManager) return
   openInFileManager(filePath.value, isDirPathTool(props.block.toolName))
 }
-
 </script>

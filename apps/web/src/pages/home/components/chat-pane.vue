@@ -22,9 +22,13 @@
           >
             <!-- Same horizontal rhythm as the composer below (px-4 sm:px-6
                  lg:px-10) so the input box and the message column share one
-                 width at every pane size — they must never diverge. -->
+                 width at every pane size — they must never diverge. The
+                 bottom padding tracks the dock's measured height (composer,
+                 ask_user capsule, approval panel) instead of a fixed rung, so
+                 the last message can always scroll clear of it. -->
             <div
-              class="w-full max-w-[840px] mx-auto px-4 pt-6 pb-28 space-y-6 sm:px-6 lg:px-10"
+              class="w-full max-w-[840px] mx-auto px-4 pt-6 space-y-6 sm:px-6 lg:px-10"
+              :style="{ paddingBottom: messagesBottomPad }"
             >
               <div
                 ref="loadMoreSentinel"
@@ -189,7 +193,7 @@
           v-if="!isWelcome"
           aria-hidden="true"
           class="absolute inset-x-0 bottom-0 bg-surface-editor"
-          :style="{ height: bottomMaskHeight }"
+          :style="{ height: dockMaskHeight }"
         />
         <!-- welcome: top-anchored column — the greeting and the composer's top
              edge stay pinned at pt-[38dvh], so a growing composer (multiline
@@ -323,106 +327,16 @@
                 </CommandKeyBridge>
               </Command>
             </Transition>
-            <section>
-              <Transition
-                enter-active-class="transition-all duration-150 ease-out"
-                enter-from-class="opacity-0 translate-y-1"
-                enter-to-class="opacity-100 translate-y-0"
-                leave-active-class="transition-all duration-100 ease-in"
-                leave-from-class="opacity-100 translate-y-0"
-                leave-to-class="opacity-0 translate-y-1"
-              >
-                <div
-                  v-if="pendingDecision"
-                  ref="decisionFormEl"
-                  class="w-full"
-                >
-                  <ChatUserInputForm
-                    v-if="pendingUserInput"
-                    :user-input="pendingUserInput"
-                    @focus-composer="handleUserInputFocusComposer"
-                  />
-                  <ChatToolApprovalForm
-                    v-else-if="pendingToolApprovalBlock"
-                    :block="pendingToolApprovalBlock"
-                  />
-                </div>
-              </Transition>
-              <div
-                v-if="commandPanelEvent"
-                class="mb-2 overflow-hidden rounded-lg border bg-card"
-                :class="commandPanelIsError ? 'border-destructive/30' : 'border-border'"
-              >
-                <div class="flex items-start gap-2 px-3 py-2">
-                  <CircleAlert
-                    v-if="commandPanelIsError"
-                    class="mt-0.5 size-4 shrink-0 text-destructive"
-                  />
-                  <div class="min-w-0 flex-1">
-                    <p
-                      class="truncate text-label font-medium"
-                      :class="commandPanelIsError ? 'text-destructive' : 'text-foreground'"
-                    >
-                      {{ commandPanelTitle }}
-                    </p>
-                    <p
-                      v-if="commandPanelText"
-                      class="mt-0.5 whitespace-pre-wrap break-words text-body text-muted-foreground"
-                    >
-                      {{ commandPanelText }}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    :aria-label="$t('chat.slash.dismiss')"
-                    @click="clearCurrentCommandEvent"
-                  >
-                    <X class="size-3.5" />
-                  </Button>
-                </div>
-                <Command
-                  v-if="commandResultItems.length"
-                  class="h-auto w-auto rounded-none border-0 border-t border-border bg-transparent shadow-none"
-                >
-                  <CommandKeyBridge ref="commandPanelBridge">
-                    <CommandList class="max-h-[min(20rem,45dvh)] p-1 overscroll-contain [scrollbar-gutter:stable]">
-                      <CommandGroup>
-                        <CommandItem
-                          v-for="item in commandResultItems"
-                          :key="`${item.kind || 'item'}:${item.id || item.title}`"
-                          :value="`${item.kind || 'item'}:${item.id || item.title}`"
-                          @select="selectCommandResultItem(item)"
-                        >
-                          <Sparkles
-                            v-if="item.kind === 'skill'"
-                            class="size-3.5 shrink-0 text-muted-foreground"
-                          />
-                          <List
-                            v-else
-                            class="size-3.5 shrink-0 text-muted-foreground"
-                          />
-                          <span class="min-w-0 flex-1">
-                            <span class="block truncate text-body text-foreground">{{ item.title }}</span>
-                            <span
-                              v-if="item.description"
-                              class="block truncate text-caption text-muted-foreground"
-                            >{{ item.description }}</span>
-                          </span>
-                        </CommandItem>
-                      </CommandGroup>
-                    </CommandList>
-                  </CommandKeyBridge>
-                </Command>
-              </div>
-              <div
-                v-if="composerError"
-                class="mb-2 flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-              >
-                <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-                <span class="min-w-0 break-words">{{ composerError }}</span>
-              </div>
+            <ComposerDock
+              ref="dockEl"
+              :approvals="pendingApprovals"
+              :command-panel="composerCommandPanel"
+              :error-message="composerError"
+              :pending-user-input="pendingUserInput"
+              @select-command-item="selectCommandResultItem"
+              @dismiss-command="clearCurrentCommandEvent"
+              @reveal-composer="handleDockRevealComposer"
+            >
               <!--
               Compact uses a concrete 1.75rem radius (= half the compact height:
               button 2.25rem + py-2.5 ×2 = 3.5rem), so a short composer still reads as
@@ -433,7 +347,6 @@
               it crossed half-height, then jumped the corner in one step).
             -->
               <div
-                v-show="composerVisible"
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
@@ -786,7 +699,7 @@
                   </div>
                 </div>
               </div>
-            </section>
+            </ComposerDock>
           </div>
         </div>
       </div>
@@ -800,7 +713,6 @@ import {
   Paperclip,
   Plus,
   ChevronDown,
-  CircleAlert,
   ArrowDown,
   Check,
   FolderOpen,
@@ -815,7 +727,7 @@ import {
   Server,
 } from 'lucide-vue-next'
 import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
-import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult, type ToolCallBlock } from '@/store/chat-list'
+import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
@@ -831,8 +743,8 @@ import { useChatScroll } from '../composables/useChatScroll'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
 import ChatForkDialog from './chat-fork-dialog.vue'
-import ChatUserInputForm from './chat-user-input-form.vue'
-import ChatToolApprovalForm from './chat-tool-approval-form.vue'
+import ComposerDock from './composer-dock.vue'
+import { usePendingApprovals } from '../composables/usePendingApprovals'
 import ChatScrollRail, { type ScrollRailSegment } from './chat-scroll-rail.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
@@ -975,20 +887,10 @@ const pendingUserInput = computed<UIUserInput | null>(() => (
     ? pendingDecision.value.userInput
     : null
 ))
-const pendingToolApprovalBlock = computed<ToolCallBlock | null>(() => (
-  pendingDecision.value?.kind === 'tool_approval'
-    ? pendingDecision.value.block
-    : null
-))
 
-const hasPendingToolApproval = computed(() => messages.value.some(message => (
-  message.role === 'assistant'
-  && message.messages.some(block => (
-    block.type === 'tool'
-    && block.approval?.status === 'pending'
-    && block.approval.can_approve !== false
-  ))
-)))
+const { items: pendingApprovals } = usePendingApprovals(messages)
+
+const hasPendingToolApproval = computed(() => pendingApprovals.value.length > 0)
 
 const canForkAssistant = computed(() =>
   !streaming.value
@@ -1541,6 +1443,19 @@ const commandPanelText = computed(() => commandError.value ? localizedCommandErr
 const commandResultItems = computed(() =>
   (commandResult.value?.items ?? []).filter(item => isCommandResultItemSelectable(item, commandPanelActionID.value)),
 )
+
+// Pre-digested view model for the panel's command section; the raw event and
+// the filtered items stay local because the composer keyboard arbitration
+// (Escape / arrows / Enter) reads them too.
+const composerCommandPanel = computed(() => {
+  if (!commandPanelEvent.value) return null
+  return {
+    isError: commandPanelIsError.value,
+    title: commandPanelTitle.value,
+    text: commandPanelText.value,
+    items: commandResultItems.value,
+  }
+})
 
 function selectCommandResultItem(item: CommandActionListItem) {
   const kind = item.kind?.trim().toLowerCase()
@@ -2097,7 +2012,6 @@ const {
   composerRadiusEase,
   focusTextarea,
   modelTriggerMaxWidth,
-  composerMaskHeight,
   snapComposerNext,
 } = useComposerLayout({
   inputText,
@@ -2130,24 +2044,22 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
   onDraftKeySwap: snapComposerNext,
 })
 
-// A pending ask_user or tool approval owns the composer position until it is
-// resolved. Local option-selection state must never reveal the textarea.
-const decisionFormEl = useTemplateRef<HTMLElement>('decisionFormEl')
-const composerVisible = computed(() => pendingDecision.value === null)
+// The dock owns ALL geometry/visibility orchestration (box-slot mutex,
+// backdrop-mask height) — the pane only needs two readings back from it: the
+// mask height for the full-width backdrop strip, and the dock's own height
+// for the message column's bottom padding (so the last message can always
+// scroll clear of whatever the dock currently shows — the static pb-28 this
+// replaces only ever fit the bare composer).
+const dockEl = useTemplateRef<InstanceType<typeof ComposerDock>>('dockEl')
+const { height: dockHeight } = useElementSize(() => dockEl.value?.$el ?? null)
+const dockMaskHeight = computed(() => dockEl.value?.maskHeight ?? `${COMPOSER_MASK_BELOW_PX}px`)
+const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24}px`)
 
-function handleUserInputFocusComposer() {
-  void nextTick(focusTextarea)
+// The textarea belongs to the pane, so when the dock hands the input slot
+// back (ask_user resolved or an option picked) it emits and we focus here.
+function handleDockRevealComposer(opts: { focus?: boolean }) {
+  if (opts.focus) void nextTick(focusTextarea)
 }
-
-// The bottom backdrop normally rises to the composer's vertical centre; with
-// the composer hidden that measurement collapses to 0, so mirror the same
-// half-height rule against the decision panel that stands in for it.
-const { height: decisionFormHeight } = useElementSize(decisionFormEl)
-const bottomMaskHeight = computed(() => (
-  composerVisible.value
-    ? composerMaskHeight.value
-    : `${COMPOSER_MASK_BELOW_PX + decisionFormHeight.value / 2}px`
-))
 
 watch([
   startupSendFailure,
@@ -2354,11 +2266,10 @@ function handleForkMessage(messageId: string) {
 // reka's ListboxFilter, the bridge runs the listbox in virtual-highlight mode
 // and the textarea forwards navigation keys to whichever surface is showing.
 const slashPickerBridge = ref<InstanceType<typeof CommandKeyBridge> | null>(null)
-const commandPanelBridge = ref<InstanceType<typeof CommandKeyBridge> | null>(null)
 
 function activeComposerListBridge() {
   if (slashPanelOpen.value && slashPanelHasResults.value) return slashPickerBridge.value
-  if (commandPanelEvent.value && commandResultItems.value.length) return commandPanelBridge.value
+  if (commandPanelEvent.value && commandResultItems.value.length) return dockEl.value?.commandBridge ?? null
   return null
 }
 

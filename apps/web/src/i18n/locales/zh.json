@@ -609,6 +609,22 @@
     "forwardedFrom": "转发自 {sender}",
     "replyPhoto": "图片",
     "unknownMessage": "消息",
+    "approval": {
+      "region": "审批请求",
+      "moreInQueue": "还有 {count} 项",
+      "action": {
+        "exec": "运行命令",
+        "write": "写入文件",
+        "edit": "编辑文件",
+        "applyPatch": "应用补丁",
+        "read": "读取文件",
+        "list": "列出目录内容",
+        "fallback": "运行 {tool}"
+      }
+    },
+    "panel": {
+      "regionLabel": "待处理事项"
+    },
     "tools": {
       "read": "读取",
       "write": "写入",

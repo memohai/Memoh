@@ -164,13 +164,10 @@ export function useComposerLayout(deps: ComposerLayoutDeps) {
     return Math.max(72, Math.min(MODEL_TRIGGER_MAX, inner - reserved))
   })
 
-  // The bottom mask rises only to the box's vertical centre — its widest point.
-  // pb-8 (32px) is the strip beneath the box; + half the box height reaches the
-  // centre line, which falls behind the box's full-width middle so the mask's top
-  // edge is hidden by the box itself (no visible seam, no fade). Above that line
-  // the box's rounded top is left to float over whatever is there; below it the
-  // fill hides the bottom-corner gaps and the strip beneath, so nothing bleeds out.
-  const composerMaskHeight = computed(() => `${COMPOSER_MASK_BELOW_PX + composerBoxHeight.value / 2}px`)
+  // NOTE: the bottom backdrop mask used to be derived here
+  // (composerMaskHeight). It moved to composer-dock.vue, which owns dock-wide
+  // geometry now; this composable only keeps the composer's own morph
+  // measurements (composerBoxHeight stays internal to the morph).
 
   let composerResizeObserver: ResizeObserver | null = null
   onMounted(() => {
@@ -351,7 +348,6 @@ export function useComposerLayout(deps: ComposerLayoutDeps) {
     composerRadiusEase,
     focusTextarea,
     modelTriggerMaxWidth,
-    composerMaskHeight,
     snapComposerNext,
   }
 }

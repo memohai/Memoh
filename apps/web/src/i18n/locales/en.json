@@ -609,6 +609,22 @@
     "forwardedFrom": "Forwarded from {sender}",
     "replyPhoto": "Photo",
     "unknownMessage": "message",
+    "approval": {
+      "region": "Approval request",
+      "moreInQueue": "+{count} more",
+      "action": {
+        "exec": "Run a command",
+        "write": "Write a file",
+        "edit": "Edit a file",
+        "applyPatch": "Apply a patch",
+        "read": "Read a file",
+        "list": "List directory contents",
+        "fallback": "Run {tool}"
+      }
+    },
+    "panel": {
+      "regionLabel": "Pending items"
+    },
     "tools": {
       "read": "Read",
       "write": "Write",

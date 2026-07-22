@@ -578,6 +578,22 @@
     "forwardedFrom": "{sender} から転送されました",
     "replyPhoto": "写真",
     "unknownMessage": "メッセージ",
+    "approval": {
+      "region": "承認リクエスト",
+      "moreInQueue": "あと {count} 件",
+      "action": {
+        "exec": "コマンドを実行",
+        "write": "ファイルを書き込み",
+        "edit": "ファイルを編集",
+        "applyPatch": "パッチを適用",
+        "read": "ファイルを読み込み",
+        "list": "ディレクトリの内容を一覧",
+        "fallback": "{tool} を実行"
+      }
+    },
+    "panel": {
+      "regionLabel": "保留中の項目"
+    },
     "tools": {
       "read": "読む",
       "write": "書く",
