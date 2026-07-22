@@ -55,6 +55,44 @@ func sameModelMessage(a conversation.ModelMessage, b conversation.ModelMessage) 
 		string(a.Content) == string(b.Content)
 }
 
+func historySourceMessageIDsForMessages(messages []conversation.ModelMessage, records []historyfrag.HistoryRecord) []string {
+	sourceIDs := make([]string, len(messages))
+	if len(messages) == 0 || len(records) == 0 {
+		return sourceIDs
+	}
+	positions := make(map[string][]int, len(records))
+	for i, record := range records {
+		if strings.TrimSpace(record.DBMessageID) == "" {
+			continue
+		}
+		key := modelMessageSourceKey(record.ModelMessage)
+		positions[key] = append(positions[key], i)
+	}
+	cursors := make(map[string]int, len(positions))
+	lastMatched := -1
+	for i, message := range messages {
+		key := modelMessageSourceKey(message)
+		candidates := positions[key]
+		cursor := cursors[key]
+		for cursor < len(candidates) && candidates[cursor] <= lastMatched {
+			cursor++
+		}
+		cursors[key] = cursor
+		if cursor >= len(candidates) {
+			continue
+		}
+		recordIndex := candidates[cursor]
+		cursors[key] = cursor + 1
+		lastMatched = recordIndex
+		sourceIDs[i] = strings.TrimSpace(records[recordIndex].DBMessageID)
+	}
+	return sourceIDs
+}
+
+func modelMessageSourceKey(message conversation.ModelMessage) string {
+	return strings.ToLower(strings.TrimSpace(message.Role)) + "\x00" + string(message.Content)
+}
+
 func stripToolMessagesWhenCompactionSummaryIsActive(messages []conversation.ModelMessage, records []historyfrag.HistoryRecord) []conversation.ModelMessage {
 	for _, record := range records {
 		if record.SourceKind == historyfrag.SourceCompactionLog &&

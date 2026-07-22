@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -19,6 +20,8 @@ type subagentConfigQueries struct {
 	inTx          bool
 	sessionCreate bool
 	configCreate  bool
+	contextCreate bool
+	contextJSON   []byte
 	failConfig    bool
 }
 
@@ -28,6 +31,7 @@ func (q *subagentConfigQueries) InTx(_ context.Context, fn func(dbstore.Queries)
 	if err != nil {
 		q.sessionCreate = false
 		q.configCreate = false
+		q.contextCreate = false
 	}
 	return err
 }
@@ -58,15 +62,24 @@ func (q *subagentConfigQueries) CreateSubagentConfig(_ context.Context, arg sqlc
 	q.configCreate = true
 	now := pgtype.Timestamptz{Time: time.Unix(1, 0).UTC(), Valid: true}
 	return sqlc.SubagentConfig{
-		SessionID:      arg.SessionID,
-		ModelUuid:      arg.ModelUuid,
-		ModelID:        arg.ModelID,
-		ProviderName:   arg.ProviderName,
-		Forked:         arg.Forked,
-		ParentMessages: arg.ParentMessages,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		SessionID:    arg.SessionID,
+		ModelUuid:    arg.ModelUuid,
+		ModelID:      arg.ModelID,
+		ProviderName: arg.ProviderName,
+		Forked:       arg.Forked,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}, nil
+}
+
+func (q *subagentConfigQueries) CreateSubagentForkContext(_ context.Context, arg sqlc.CreateSubagentForkContextParams) (sqlc.CreateSubagentForkContextRow, error) {
+	q.contextCreate = true
+	q.contextJSON = append(q.contextJSON[:0], arg.ContextMessages...)
+	var messages []SubagentForkContextMessage
+	if err := json.Unmarshal(arg.ContextMessages, &messages); err != nil {
+		return sqlc.CreateSubagentForkContextRow{}, err
+	}
+	return sqlc.CreateSubagentForkContextRow{InsertedCount: int64(len(messages))}, nil
 }
 
 func mustSessionUUID(raw string) pgtype.UUID {
@@ -88,20 +101,45 @@ func TestCreateSubagentPersistsSessionAndConfigInOneTransaction(t *testing.T) {
 			Title:           "worker",
 			Metadata:        map[string]any{"agent_id": "worker"},
 		},
-		ModelUUID:      "00000000-0000-0000-0000-000000000505",
-		ModelID:        "worker-model",
-		ProviderName:   "provider-a",
-		Forked:         true,
-		ParentMessages: []byte(`[{"role":"user","content":[{"type":"text","text":"hello"}]}]`),
+		ModelUUID:    "00000000-0000-0000-0000-000000000505",
+		ModelID:      "worker-model",
+		ProviderName: "provider-a",
+		Forked:       true,
+		ForkContext: []SubagentForkContextMessage{{
+			Role:    "user",
+			Message: []byte(`{"role":"user","content":[{"type":"text","text":"hello"}]}`),
+		}},
 	})
 	if err != nil {
 		t.Fatalf("CreateSubagent: %v", err)
 	}
-	if !queries.inTx || !queries.sessionCreate || !queries.configCreate {
+	if !queries.inTx || !queries.sessionCreate || !queries.configCreate || !queries.contextCreate {
 		t.Fatalf("expected transactional session+config creation: %+v", queries)
 	}
 	if session.Type != TypeSubagent || config.ModelID != "worker-model" || config.ProviderName != "provider-a" || !config.Forked {
 		t.Fatalf("unexpected created values: session=%+v config=%+v", session, config)
+	}
+}
+
+func TestCreateSubagentPersistsEmptyForkContextAsJSONArray(t *testing.T) {
+	queries := &subagentConfigQueries{}
+	svc := NewService(nil, queries, nil)
+	_, config, err := svc.CreateSubagent(context.Background(), CreateSubagentInput{
+		Session: CreateInput{
+			BotID:           "00000000-0000-0000-0000-000000000501",
+			ParentSessionID: "00000000-0000-0000-0000-000000000502",
+			Title:           "empty fork",
+		},
+		ModelUUID:    "00000000-0000-0000-0000-000000000505",
+		ModelID:      "worker-model",
+		ProviderName: "provider-a",
+		Forked:       true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubagent: %v", err)
+	}
+	if !queries.contextCreate || string(queries.contextJSON) != "[]" || !config.Forked {
+		t.Fatalf("empty fork context was not persisted: queries=%+v config=%+v", queries, config)
 	}
 }
 

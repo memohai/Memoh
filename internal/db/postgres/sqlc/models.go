@@ -691,15 +691,14 @@ type StorageProvider struct {
 }
 
 type SubagentConfig struct {
-	TeamID         pgtype.UUID        `json:"team_id"`
-	SessionID      pgtype.UUID        `json:"session_id"`
-	ModelUuid      pgtype.UUID        `json:"model_uuid"`
-	ModelID        string             `json:"model_id"`
-	ProviderName   string             `json:"provider_name"`
-	Forked         bool               `json:"forked"`
-	ParentMessages []byte             `json:"parent_messages"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
+	SessionID    pgtype.UUID        `json:"session_id"`
+	ModelUuid    pgtype.UUID        `json:"model_uuid"`
+	ModelID      string             `json:"model_id"`
+	ProviderName string             `json:"provider_name"`
+	Forked       bool               `json:"forked"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Task struct {

@@ -668,6 +668,11 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
   ON bot_history_messages(session_id, source_reply_to_message_id);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_subagent_fork_context
+  ON bot_history_messages(session_id, turn_position, turn_message_seq)
+  WHERE turn_visible = false
+    AND session_mode = 'subagent'
+    AND metadata->>'context_scope' = 'subagent_fork';
 
 CREATE OR REPLACE VIEW bot_visible_history_messages AS
 SELECT
@@ -2175,8 +2180,8 @@ SELECT set_config(
     false
 );
 
--- Managed subagents pin their selected model and may retain an invisible
--- snapshot of the parent model context for forked execution.
+-- Managed subagents pin their selected model. Forked model context is stored
+-- as scoped invisible rows in bot_history_messages.
 CREATE TABLE IF NOT EXISTS public.subagent_configs (
     team_id         UUID        NOT NULL DEFAULT public.memoh_current_team_id()
                                 REFERENCES public.teams(id) ON DELETE RESTRICT,
@@ -2185,7 +2190,6 @@ CREATE TABLE IF NOT EXISTS public.subagent_configs (
     model_id        TEXT        NOT NULL,
     provider_name   TEXT        NOT NULL,
     forked          BOOLEAN     NOT NULL DEFAULT false,
-    parent_messages JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT subagent_configs_team_session_key UNIQUE (team_id, session_id),
@@ -2194,11 +2198,7 @@ CREATE TABLE IF NOT EXISTS public.subagent_configs (
         REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
     CONSTRAINT subagent_configs_model_uuid_fkey
         FOREIGN KEY (team_id, model_uuid)
-        REFERENCES public.models(team_id, id) ON DELETE SET NULL (model_uuid),
-    CONSTRAINT subagent_configs_fork_snapshot_check CHECK (
-        (forked AND parent_messages IS NOT NULL AND jsonb_typeof(parent_messages) = 'array')
-        OR (NOT forked AND parent_messages IS NULL)
-    )
+        REFERENCES public.models(team_id, id) ON DELETE SET NULL (model_uuid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_subagent_configs_team_model

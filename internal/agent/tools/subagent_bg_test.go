@@ -79,6 +79,7 @@ type fakeAgentSessionService struct {
 	next     int
 	sessions []sessionpkg.Session
 	configs  map[string]sessionpkg.SubagentConfig
+	contexts map[string][]sessionpkg.SubagentForkContextMessage
 }
 
 func (s *fakeAgentSessionService) Create(_ context.Context, input sessionpkg.CreateInput) (sessionpkg.Session, error) {
@@ -107,20 +108,44 @@ func (s *fakeAgentSessionService) CreateSubagent(ctx context.Context, input sess
 		return sessionpkg.Session{}, sessionpkg.SubagentConfig{}, err
 	}
 	config := sessionpkg.SubagentConfig{
-		SessionID:      sess.ID,
-		ModelUUID:      input.ModelUUID,
-		ModelID:        input.ModelID,
-		ProviderName:   input.ProviderName,
-		Forked:         input.Forked,
-		ParentMessages: append(json.RawMessage(nil), input.ParentMessages...),
+		SessionID:    sess.ID,
+		ModelUUID:    input.ModelUUID,
+		ModelID:      input.ModelID,
+		ProviderName: input.ProviderName,
+		Forked:       input.Forked,
 	}
 	s.mu.Lock()
 	if s.configs == nil {
 		s.configs = make(map[string]sessionpkg.SubagentConfig)
 	}
 	s.configs[sess.ID] = config
+	if s.contexts == nil {
+		s.contexts = make(map[string][]sessionpkg.SubagentForkContextMessage)
+	}
+	for _, message := range input.ForkContext {
+		s.contexts[sess.ID] = append(s.contexts[sess.ID], sessionpkg.SubagentForkContextMessage{
+			SourceMessageID: message.SourceMessageID,
+			Role:            message.Role,
+			Message:         append(json.RawMessage(nil), message.Message...),
+		})
+	}
 	s.mu.Unlock()
 	return sess, config, nil
+}
+
+func (s *fakeAgentSessionService) ListSubagentForkContext(_ context.Context, sessionID string) ([]sessionpkg.SubagentForkContextMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	contextMessages := s.contexts[sessionID]
+	out := make([]sessionpkg.SubagentForkContextMessage, 0, len(contextMessages))
+	for _, message := range contextMessages {
+		out = append(out, sessionpkg.SubagentForkContextMessage{
+			SourceMessageID: message.SourceMessageID,
+			Role:            message.Role,
+			Message:         append(json.RawMessage(nil), message.Message...),
+		})
+	}
+	return out, nil
 }
 
 func (s *fakeAgentSessionService) GetSubagentConfig(_ context.Context, sessionID string) (sessionpkg.SubagentConfig, error) {
@@ -133,22 +158,15 @@ func (s *fakeAgentSessionService) GetSubagentConfig(_ context.Context, sessionID
 	return config, nil
 }
 
-func (s *fakeAgentSessionService) UpsertSubagentConfig(_ context.Context, config sessionpkg.SubagentConfig) (sessionpkg.SubagentConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.configs == nil {
-		s.configs = make(map[string]sessionpkg.SubagentConfig)
-	}
-	s.configs[config.SessionID] = config
-	return config, nil
-}
-
 func (s *fakeAgentSessionService) ListSubagentsByParent(_ context.Context, parentSessionID string) ([]sessionpkg.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []sessionpkg.Session
 	for _, sess := range s.sessions {
 		if sess.ParentSessionID == parentSessionID {
+			if _, ok := s.configs[sess.ID]; !ok {
+				continue
+			}
 			out = append(out, sess)
 		}
 	}

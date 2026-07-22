@@ -938,7 +938,14 @@ SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, run
 FROM bot_sessions
 WHERE team_id = public.memoh_current_team_id()
   AND parent_session_id = $1
+  AND type = 'subagent'
   AND deleted_at IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM subagent_configs config
+    WHERE config.team_id = public.memoh_current_team_id()
+      AND config.session_id = bot_sessions.id
+  )
 ORDER BY created_at DESC
 `
 

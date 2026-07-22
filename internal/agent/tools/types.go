@@ -81,14 +81,40 @@ type StreamEmitter func(ToolStreamEvent)
 // to the model. Agent steps update the snapshot before each model call; tools
 // can safely read it while sibling tool calls execute concurrently.
 type MessageSnapshot struct {
-	mu  sync.RWMutex
-	raw json.RawMessage
+	mu               sync.RWMutex
+	raw              json.RawMessage
+	sourceMessageIDs []string
 }
 
 func NewMessageSnapshot(messages []sdk.Message) *MessageSnapshot {
+	return NewMessageSnapshotWithSources(messages, nil)
+}
+
+// NewMessageSnapshotWithSources seeds a snapshot with the database message ID
+// backing each message. Runtime-only messages use an empty source ID. Later
+// Store calls preserve IDs only for unchanged messages that remain in order.
+func NewMessageSnapshotWithSources(messages []sdk.Message, sourceMessageIDs []string) *MessageSnapshot {
 	s := &MessageSnapshot{}
-	_ = s.Store(messages)
+	_ = s.storeInitial(messages, sourceMessageIDs)
 	return s
+}
+
+func (s *MessageSnapshot) storeInitial(messages []sdk.Message, sourceMessageIDs []string) error {
+	if messages == nil {
+		messages = []sdk.Message{}
+	}
+	clean := providerNeutralMessages(messages)
+	raw, err := json.Marshal(clean)
+	if err != nil {
+		return err
+	}
+	sources := make([]string, len(clean))
+	copy(sources, sourceMessageIDs)
+	s.mu.Lock()
+	s.raw = append(s.raw[:0], raw...)
+	s.sourceMessageIDs = sources
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *MessageSnapshot) Store(messages []sdk.Message) error {
@@ -98,14 +124,73 @@ func (s *MessageSnapshot) Store(messages []sdk.Message) error {
 	if messages == nil {
 		messages = []sdk.Message{}
 	}
-	raw, err := json.Marshal(providerNeutralMessages(messages))
+	clean := providerNeutralMessages(messages)
+	raw, err := json.Marshal(clean)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
+	oldMessages, decodeErr := decodeSnapshotMessages(s.raw)
+	if decodeErr != nil {
+		s.mu.Unlock()
+		return decodeErr
+	}
+	sources := retainSnapshotSources(oldMessages, s.sourceMessageIDs, clean)
 	s.raw = append(s.raw[:0], raw...)
+	s.sourceMessageIDs = sources
 	s.mu.Unlock()
 	return nil
+}
+
+func decodeSnapshotMessages(raw json.RawMessage) ([]sdk.Message, error) {
+	if len(raw) == 0 {
+		return []sdk.Message{}, nil
+	}
+	var messages []sdk.Message
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
+func retainSnapshotSources(oldMessages []sdk.Message, oldSources []string, messages []sdk.Message) []string {
+	sources := make([]string, len(messages))
+	positions := make(map[string][]int, len(oldMessages))
+	for i, message := range oldMessages {
+		key, ok := snapshotMessageKey(message)
+		if ok {
+			positions[key] = append(positions[key], i)
+		}
+	}
+	cursors := make(map[string]int, len(positions))
+	lastMatched := -1
+	for i, message := range messages {
+		key, ok := snapshotMessageKey(message)
+		if !ok {
+			continue
+		}
+		candidates := positions[key]
+		cursor := cursors[key]
+		for cursor < len(candidates) && candidates[cursor] <= lastMatched {
+			cursor++
+		}
+		cursors[key] = cursor
+		if cursor >= len(candidates) {
+			continue
+		}
+		oldIndex := candidates[cursor]
+		cursors[key] = cursor + 1
+		lastMatched = oldIndex
+		if oldIndex < len(oldSources) {
+			sources[i] = oldSources[oldIndex]
+		}
+	}
+	return sources
+}
+
+func snapshotMessageKey(message sdk.Message) (string, bool) {
+	raw, err := json.Marshal(message)
+	return string(raw), err == nil
 }
 
 func providerNeutralMessages(messages []sdk.Message) []sdk.Message {
@@ -177,6 +262,40 @@ func (s *MessageSnapshot) Messages() ([]sdk.Message, error) {
 		messages = []sdk.Message{}
 	}
 	return messages, nil
+}
+
+// Entries returns the provider-neutral messages together with any persisted
+// source message IDs retained from the resolver's initial history snapshot.
+func (s *MessageSnapshot) Entries() ([]MessageSnapshotEntry, error) {
+	if s == nil {
+		return []MessageSnapshotEntry{}, nil
+	}
+	s.mu.RLock()
+	raw := append(json.RawMessage(nil), s.raw...)
+	sources := append([]string(nil), s.sourceMessageIDs...)
+	s.mu.RUnlock()
+	messages, err := decodeSnapshotMessages(raw)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]MessageSnapshotEntry, 0, len(messages))
+	for i, message := range messages {
+		sourceMessageID := ""
+		if i < len(sources) {
+			sourceMessageID = sources[i]
+		}
+		entries = append(entries, MessageSnapshotEntry{
+			Message:         message,
+			SourceMessageID: sourceMessageID,
+		})
+	}
+	return entries, nil
+}
+
+// MessageSnapshotEntry describes one message in a forkable model context.
+type MessageSnapshotEntry struct {
+	Message         sdk.Message
+	SourceMessageID string
 }
 
 // SessionContext carries request-scoped identity for tool execution.

@@ -482,7 +482,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		headerifiedModelQuery = turnpkg.FormatUserHeader(headerInput, modelQuery)
 	}
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
-	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
+	forkMessages := nonNilModelMessages(messages)
+	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
+	runCfg.Messages = modelMessagesToSDKMessages(forkMessages)
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
@@ -1277,6 +1279,7 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 			}
 		}
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query, extra...))
+		cfg.ForkContextSourceMessageIDs = append(cfg.ForkContextSourceMessageIDs, "")
 		cfg.ContextQueryMaterialized = true
 	} else if len(cfg.InlineImages) > 0 {
 		// Pipeline path: the user query is already embedded in the RC messages,
@@ -1293,12 +1296,16 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 			for i := len(cfg.Messages) - 1; i >= 0; i-- {
 				if cfg.Messages[i].Role == sdk.MessageRoleUser {
 					cfg.Messages[i].Content = append(cfg.Messages[i].Content, imageParts...)
+					if i < len(cfg.ForkContextSourceMessageIDs) {
+						cfg.ForkContextSourceMessageIDs[i] = ""
+					}
 					injected = true
 					break
 				}
 			}
 			if !injected {
 				cfg.Messages = append(cfg.Messages, sdk.UserMessage("", imageParts...))
+				cfg.ForkContextSourceMessageIDs = append(cfg.ForkContextSourceMessageIDs, "")
 			}
 			cfg.ContextQueryMaterialized = true
 		}
