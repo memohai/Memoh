@@ -200,6 +200,7 @@ func (s *Service) streamReplacementWS(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) error {
+	req.TurnReplacementReason = reason
 	_, err := s.streamChatWSResultWithHooks(
 		ctx,
 		req,

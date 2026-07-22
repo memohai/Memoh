@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	messageevent "github.com/memohai/memoh/internal/chat/event"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	session "github.com/memohai/memoh/internal/chat/thread"
@@ -91,6 +93,153 @@ func TestReplacePersistedTurnMovesForkAnchorMetadata(t *testing.T) {
 
 type recordingEventPublisher struct {
 	events []messageevent.Event
+}
+
+type acpReplacementMessageService struct {
+	recordingMessageService
+	messages    map[string]messagepkg.Message
+	turn        messagepkg.HistoryTurn
+	replacement []string
+}
+
+func (s *acpReplacementMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	s.persisted = append(s.persisted, input)
+	id := input.Role + "-new"
+	return messagepkg.Message{
+		ID:             id,
+		BotID:          input.BotID,
+		SessionID:      input.SessionID,
+		Role:           input.Role,
+		Content:        input.Content,
+		Metadata:       input.Metadata,
+		DisplayContent: input.DisplayText,
+	}, nil
+}
+
+func (s *acpReplacementMessageService) GetByIDBySession(_ context.Context, _, messageID string) (messagepkg.Message, error) {
+	return s.messages[messageID], nil
+}
+
+func (s *acpReplacementMessageService) GetVisibleTurnByMessage(context.Context, string, string) (messagepkg.HistoryTurn, error) {
+	return s.turn, nil
+}
+
+func (s *acpReplacementMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
+	return s.turn, nil
+}
+
+func (s *acpReplacementMessageService) ReplaceTurn(_ context.Context, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason string) (messagepkg.HistoryTurn, error) {
+	s.replacement = []string{sessionID, oldTurnID, requestMessageID, assistantMessageID, reason}
+	return messagepkg.HistoryTurn{}, nil
+}
+
+func newACPReplacementResolver(messages *acpReplacementMessageService) *Service {
+	return &Service{
+		messageService: messages,
+		acpPool: &recordingACPPrompter{result: withTranscriptOutput(acpclient.PromptResult{
+			Text:       "new answer",
+			StopReason: "end_turn",
+		})},
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: acpRuntimeSessionServiceForTest("user-1"),
+		logger:         slog.New(slog.DiscardHandler),
+	}
+}
+
+func TestACPRetryReusesUserAndReplacesLatestTurn(t *testing.T) {
+	t.Parallel()
+
+	messages := &acpReplacementMessageService{
+		messages: map[string]messagepkg.Message{
+			"user-old":      {ID: "user-old", Role: "user", Content: newTextContent("original")},
+			"assistant-old": {ID: "assistant-old", Role: "assistant"},
+		},
+		turn: messagepkg.HistoryTurn{
+			ID:                 "turn-old",
+			RequestMessageID:   "user-old",
+			AssistantMessageID: "assistant-old",
+		},
+	}
+	resolver := newACPReplacementResolver(messages)
+
+	err := resolver.RetryLatestMessageWS(context.Background(), RetryLatestMessageInput{
+		BotID:                  "bot-1",
+		SessionID:              "session-1",
+		StreamID:               "stream-1",
+		MessageID:              "assistant-old",
+		ActorChannelIdentityID: "identity-1",
+		ActorUserID:            "user-1",
+	}, make(chan WSStreamEvent, 16), make(chan struct{}))
+	if err != nil {
+		t.Fatalf("RetryLatestMessageWS() error = %v", err)
+	}
+	if len(messages.persisted) != 1 || messages.persisted[0].Role != "assistant" {
+		t.Fatalf("persisted inputs = %#v, want replacement assistant only", messages.persisted)
+	}
+	if !messages.persisted[0].SkipHistoryTurn {
+		t.Fatal("retry replacement became visible before replacing the old turn")
+	}
+	wantReplacement := []string{"session-1", "turn-old", "user-old", "assistant-new", "retry"}
+	if !equalStrings(messages.replacement, wantReplacement) {
+		t.Fatalf("replacement = %#v, want %#v", messages.replacement, wantReplacement)
+	}
+	pool := resolver.acpPool.(*recordingACPPrompter)
+	if !strings.Contains(pool.input.ContextMarkdown, "## Turn Replacement") ||
+		!strings.Contains(pool.input.ContextMarkdown, "fresh answer") {
+		t.Fatalf("retry context = %q, want turn replacement notice", pool.input.ContextMarkdown)
+	}
+	if !strings.Contains(pool.input.Prompt, "original") || strings.Contains(pool.input.Prompt, "retracted") {
+		t.Fatalf("retry prompt = %q, want unmodified user text", pool.input.Prompt)
+	}
+}
+
+func TestACPEditPersistsHiddenUserAndReplacesLatestTurn(t *testing.T) {
+	t.Parallel()
+
+	messages := &acpReplacementMessageService{
+		messages: map[string]messagepkg.Message{
+			"user-old": {ID: "user-old", Role: "user", Content: newTextContent("original")},
+		},
+		turn: messagepkg.HistoryTurn{
+			ID:                 "turn-old",
+			RequestMessageID:   "user-old",
+			AssistantMessageID: "assistant-old",
+		},
+	}
+	resolver := newACPReplacementResolver(messages)
+
+	err := resolver.EditLatestMessageWS(context.Background(), EditLatestMessageInput{
+		BotID:                  "bot-1",
+		SessionID:              "session-1",
+		StreamID:               "stream-1",
+		MessageID:              "user-old",
+		Text:                   "edited",
+		ActorChannelIdentityID: "identity-1",
+		ActorUserID:            "user-1",
+	}, make(chan WSStreamEvent, 16), make(chan struct{}))
+	if err != nil {
+		t.Fatalf("EditLatestMessageWS() error = %v", err)
+	}
+	if len(messages.persisted) != 2 || messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" {
+		t.Fatalf("persisted inputs = %#v, want hidden user + assistant", messages.persisted)
+	}
+	for _, input := range messages.persisted {
+		if !input.SkipHistoryTurn {
+			t.Fatalf("%s replacement became visible before replacing the old turn", input.Role)
+		}
+	}
+	wantReplacement := []string{"session-1", "turn-old", "user-new", "assistant-new", "edit"}
+	if !equalStrings(messages.replacement, wantReplacement) {
+		t.Fatalf("replacement = %#v, want %#v", messages.replacement, wantReplacement)
+	}
+	pool := resolver.acpPool.(*recordingACPPrompter)
+	if !strings.Contains(pool.input.ContextMarkdown, "## Turn Replacement") ||
+		!strings.Contains(pool.input.ContextMarkdown, "revised") {
+		t.Fatalf("edit context = %q, want turn replacement notice", pool.input.ContextMarkdown)
+	}
+	if pool.input.Prompt != "edited" {
+		t.Fatalf("edit prompt = %q, want unmodified user text", pool.input.Prompt)
+	}
 }
 
 func (p *recordingEventPublisher) Publish(event messageevent.Event) {

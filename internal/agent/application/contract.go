@@ -53,7 +53,13 @@ type ChatRequest struct {
 	ForceFreshRuntime            bool                  `json:"-"`
 	HistoryCutoffBeforeMessageID string                `json:"-"`
 	RequiredHistoryMessageID     string                `json:"-"`
-	WorkspaceTarget              *WorkspaceTarget      `json:"-"`
+	// TurnReplacementReason marks this request as replacing the latest visible
+	// turn ("retry" or "edit"). Native chat rebuilds its context from history,
+	// so the replaced turn simply disappears; an external ACP agent keeps its
+	// own in-process context, which cannot be rewound, so the ACP path uses
+	// this to tell the agent the previous turn was retracted.
+	TurnReplacementReason string           `json:"-"`
+	WorkspaceTarget       *WorkspaceTarget `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound
 	// streaming. It is never serialized across the turn transport.

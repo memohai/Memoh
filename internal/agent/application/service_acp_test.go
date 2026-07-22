@@ -112,6 +112,9 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	if pool.input.ContextURI != acpContextURI || !strings.Contains(pool.input.ContextMarkdown, "## Current Runtime") || !strings.Contains(pool.input.ContextMarkdown, "Bot ID: bot-1") {
 		t.Fatalf("ACP context = uri %q markdown %q, want dynamic Memoh context", pool.input.ContextURI, pool.input.ContextMarkdown)
 	}
+	if strings.Contains(pool.input.ContextMarkdown, "## Turn Replacement") {
+		t.Fatalf("ACP context = %q, want no turn replacement notice on a normal send", pool.input.ContextMarkdown)
+	}
 	if len(pool.input.Images) != 1 || pool.input.Images[0].Data != "aW1hZ2U=" || pool.input.Images[0].MimeType != "image/png" {
 		t.Fatalf("ACP prompt images = %#v, want inline PNG", pool.input.Images)
 	}
@@ -973,6 +976,80 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 	}
 	if assistantMeta["stop_reason"] != "end_turn" {
 		t.Fatalf("stop_reason = %#v, want end_turn", assistantMeta["stop_reason"])
+	}
+}
+
+func TestPersistACPLeadingUserMessageReusesRetryRequest(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	req := ChatRequest{
+		BotID:                     "bot-1",
+		ThreadID:                  "session-1",
+		Query:                     "inspect the project",
+		RawQuery:                  "inspect the project",
+		ReusePersistedUserMessage: true,
+		PersistedUserMessageID:    "user-original",
+	}
+
+	got, leading := resolver.persistACPLeadingUserMessage(context.Background(), req)
+
+	if leading != nil {
+		t.Fatalf("leading user = %#v, want no duplicate persistence", leading)
+	}
+	if len(messages.persisted) != 0 {
+		t.Fatalf("persisted %d messages, want no duplicate user", len(messages.persisted))
+	}
+	if got.PersistedUserMessageID != "user-original" || !got.ReusePersistedUserMessage {
+		t.Fatalf("retry request changed = %#v", got)
+	}
+}
+
+func TestPersistACPRoundReusesRetryUserMessage(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	err := resolver.persistACPRound(
+		context.Background(),
+		ChatRequest{
+			BotID:                     "bot-1",
+			ThreadID:                  "session-1",
+			Query:                     "inspect the project",
+			ReusePersistedUserMessage: true,
+			PersistedUserMessageID:    "user-original",
+			SkipHistoryTurn:           true,
+		},
+		"codex",
+		"/data/app",
+		withTranscriptOutput(acpclient.PromptResult{
+			Text:       "done",
+			StopReason: "end_turn",
+		}),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("persistACPRound returned error: %v", err)
+	}
+	if len(messages.persisted) != 1 {
+		t.Fatalf("persisted %d messages, want replacement assistant only", len(messages.persisted))
+	}
+	assistant := messages.persisted[0]
+	if assistant.Role != "assistant" {
+		t.Fatalf("persisted role = %q, want assistant", assistant.Role)
+	}
+	if !assistant.SkipHistoryTurn {
+		t.Fatal("replacement assistant was attached to visible history before turn replacement")
+	}
+	if assistant.Metadata["acp_agent_id"] != "codex" {
+		t.Fatalf("replacement assistant metadata = %#v", assistant.Metadata)
 	}
 }
 

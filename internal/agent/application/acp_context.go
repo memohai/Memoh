@@ -33,6 +33,7 @@ type acpContextRenderInput struct {
 	Files                     []native.SystemFile
 	SystemFilesMaxBytes       int
 	PlatformIdentitiesSection string
+	TurnReplacementReason     string
 }
 
 func (s *Service) buildACPContextMarkdown(ctx context.Context, req ChatRequest, agentID, projectPath string) string {
@@ -86,6 +87,7 @@ func (s *Service) buildACPContextMarkdown(ctx context.Context, req ChatRequest, 
 		Files:                     files,
 		SystemFilesMaxBytes:       limits.SystemFilesMaxBytes,
 		PlatformIdentitiesSection: platformIdentitiesSection,
+		TurnReplacementReason:     req.TurnReplacementReason,
 	})
 }
 
@@ -102,6 +104,10 @@ func renderACPContextMarkdown(input acpContextRenderInput) string {
 	var sb strings.Builder
 	sb.WriteString("# Memoh ACP Context\n\n")
 	sb.WriteString("This virtual resource is already embedded in the current ACP prompt. It is not a workspace file and no file lookup is needed. Use it for identity, memory, user preferences, and session background. The user prompt outside this resource is the actual task.\n\n")
+
+	if notice := acpTurnReplacementNotice(input.TurnReplacementReason); notice != "" {
+		writeACPContextSection(&sb, "Turn Replacement", notice)
+	}
 
 	writeACPContextSection(&sb, "Current Runtime", acpContextMetadataLines([][2]string{
 		{"Current time", now.Format(time.RFC3339)},
@@ -152,6 +158,22 @@ func renderACPContextMarkdown(input acpContextRenderInput) string {
 		HeadLines: 1200,
 		TailLines: 300,
 	})
+}
+
+// acpTurnReplacementNotice tells the agent that the current prompt replaces
+// the latest visible turn. The agent's in-process context cannot be rewound,
+// so without this notice a retry looks like the user repeating a question the
+// agent just answered, and an edit leaves the agent free to reference a
+// question and answer the user no longer sees.
+func acpTurnReplacementNotice(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case "retry":
+		return "The user asked for a fresh answer to their previous message. Your prior answer to it has been retracted and is hidden from the conversation the user sees. Do not refer back to that answer or say you already answered; respond again from scratch."
+	case "edit":
+		return "The user revised their previous message; the current prompt supersedes it. The earlier version and your answer to it have been retracted and are hidden from the conversation the user sees. Do not refer back to them; respond to the revised prompt on its own."
+	default:
+		return ""
+	}
 }
 
 type acpContextFileSection struct {

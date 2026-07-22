@@ -311,7 +311,7 @@ func (s *Service) streamChatWSResultWithHooks(
 		if err := rejectACPWorkspaceTarget(req); err != nil {
 			return nil, err
 		}
-		return nil, s.streamACPAgentWS(ctx, req, eventCh, abortCh)
+		return nil, s.streamACPAgentWSWithHooks(ctx, req, eventCh, abortCh, preflight, postPersist)
 	}
 	var prepareErr error
 	ctx, req, prepareErr = s.prepareWorkspaceRequest(ctx, req)
