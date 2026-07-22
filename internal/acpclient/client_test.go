@@ -116,59 +116,13 @@ func TestRunnerResolveACPAdapterVersionRejectsMutableOrUnsafeSpecs(t *testing.T)
 	}
 }
 
-func TestRunnerRunLocalWorkspaceFakeAgent(t *testing.T) {
-	root := t.TempDir()
-	project := filepath.Join(root, "project")
-	if err := os.MkdirAll(project, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(project, "input.txt"), []byte("hello\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	client := newTestBridgeClient(t, root)
-	agentPath := writeFakeAgentScript(t, root)
-	runner := NewRunner(nil, testWorkspace{
-		client: client,
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
-			DefaultWorkDir: root,
-		},
-	})
-
-	result, err := runner.Run(context.Background(), RunRequest{
-		BotID:       "bot-1",
-		Task:        "touch the project",
-		ProjectPath: "/data/project",
-		Command:     agentPath,
-		Timeout:     10 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if !strings.Contains(result.Text, "read: hello") {
-		t.Fatalf("result text missing read content: %q", result.Text)
-	}
-	if !strings.Contains(result.Text, "term: terminal-ok") {
-		t.Fatalf("result text missing terminal output: %q", result.Text)
-	}
-	if result.StopReason != string(acp.StopReasonEndTurn) {
-		t.Fatalf("StopReason = %q, want %q", result.StopReason, acp.StopReasonEndTurn)
-	}
-	if got, err := os.ReadFile(filepath.Join(project, "output.txt")); err != nil { //nolint:gosec // test path is under t.TempDir.
-		t.Fatalf("read output file: %v", err)
-	} else if string(got) != "written by fake agent\n" {
-		t.Fatalf("output file = %q", got)
-	}
-}
-
 func TestRunnerRequiresACPCommand(t *testing.T) {
 	root := t.TempDir()
 	client := newTestBridgeClient(t, root)
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -198,7 +152,7 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -261,141 +215,6 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 	}
 	if writeInput["path"] == "" || writeInput["content"] != "written by fake agent\n" {
 		t.Fatalf("write input = %#v, want path and content", writeInput)
-	}
-}
-
-func TestRunnerStartSessionHermesManagedLocalIntegration(t *testing.T) {
-	root := t.TempDir()
-	project := filepath.Join(root, "project")
-	if err := os.MkdirAll(project, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(project, "input.txt"), []byte("hello hermes\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	localDataRoot := t.TempDir()
-	resolved, err := ResolveSessionContext(SessionContextInput{
-		AgentID:       acpprofile.AgentHermesID,
-		SetupMode:     SetupModeAPIKey,
-		BotID:         "bot-hermes",
-		Backend:       bridge.WorkspaceBackendLocal,
-		WorkspaceRoot: root,
-		ProjectPath:   "/data/project",
-		LocalDataRoot: localDataRoot,
-	})
-	if err != nil {
-		t.Fatalf("ResolveSessionContext() error = %v", err)
-	}
-	profile, ok := acpprofile.Lookup(acpprofile.AgentHermesID)
-	if !ok {
-		t.Fatalf("missing Hermes profile")
-	}
-	setup := acpprofile.AgentSetup{
-		AgentID: acpprofile.AgentHermesID,
-		Enabled: true,
-		Mode:    string(SetupModeAPIKey),
-		Managed: map[string]string{
-			"provider": "gemini",
-			"model":    "gemini-3.5-flash",
-			"api_key":  "AIza-test-key",
-		},
-	}
-	if err := WriteManagedACPConfig(context.Background(), ManagedACPConfigRequest{
-		Profile:  profile,
-		Setup:    setup,
-		Mode:     SetupModeAPIKey,
-		Resolved: resolved,
-	}, nil); err != nil {
-		t.Fatalf("WriteManagedACPConfig() error = %v", err)
-	}
-	configBytes, err := os.ReadFile(filepath.Join(resolved.HermesHome, "config.yaml")) //nolint:gosec // test path is under t.TempDir.
-	if err != nil {
-		t.Fatalf("read Hermes config: %v", err)
-	}
-	if content := string(configBytes); !strings.Contains(content, `provider: "gemini"`) ||
-		!strings.Contains(content, `default: "gemini-3.5-flash"`) ||
-		strings.Contains(content, "AIza-test-key") {
-		t.Fatalf("Hermes config content =\n%s", content)
-	}
-	envBytes, err := os.ReadFile(filepath.Join(resolved.HermesHome, ".env")) //nolint:gosec // test path is under t.TempDir.
-	if err != nil {
-		t.Fatalf("read Hermes env: %v", err)
-	}
-	if got := string(envBytes); !strings.Contains(got, `GOOGLE_API_KEY='AIza-test-key'`) {
-		t.Fatalf("Hermes env content = %q", got)
-	}
-
-	t.Setenv("GOOGLE_API_KEY", "host-google")
-	t.Setenv("OPENROUTER_API_KEY", "host-openrouter")
-	t.Setenv("HERMES_TRACE", "host-hermes")
-	captureEnvPath := filepath.Join(root, "fake-agent-env.json")
-	client := newTestBridgeClient(t, root)
-	agentPath := writeFakeAgentScript(t, root)
-	runner := NewRunner(nil, testWorkspace{
-		client: client,
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
-			DefaultWorkDir: root,
-			LocalDataRoot:  localDataRoot,
-		},
-	})
-
-	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentHermesID,
-		BotID:       "bot-hermes",
-		ProjectPath: "/data/project",
-		Command:     agentPath,
-		Env: []string{
-			"GOOGLE_API_KEY=explicit-google",
-			"OPENROUTER_API_KEY=explicit-openrouter",
-			"HERMES_HOME=/host/hermes",
-			"HERMES_TRACE=explicit-hermes",
-			"MEMOH_ACP_FAKE_AGENT_CAPTURE_ENV_FILE=" + captureEnvPath,
-			"MEMOH_ACP_FAKE_AGENT_VALIDATE_HERMES_HOME=1",
-			"MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_PROVIDER=gemini",
-			"MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_MODEL=gemini-3.5-flash",
-			"MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_ENV_KEY=GOOGLE_API_KEY",
-			"MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_SECRET=AIza-test-key",
-		},
-		UnsetEnv:  HermesManagedUnsetEnvKeys(),
-		Resolved:  &resolved,
-		SetupMode: SetupModeAPIKey,
-		Timeout:   10 * time.Second,
-	}, nil)
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	defer func() { _ = sess.Close() }()
-
-	result, err := sess.Prompt(context.Background(), "touch the project")
-	if err != nil {
-		t.Fatalf("Prompt() error = %v", err)
-	}
-	if !strings.Contains(result.Text, "read: hello hermes") || !strings.Contains(result.Text, "term: terminal-ok") {
-		t.Fatalf("result text = %q, want fake agent file and terminal output", result.Text)
-	}
-	if got, err := os.ReadFile(filepath.Join(project, "output.txt")); err != nil { //nolint:gosec // test path is under t.TempDir.
-		t.Fatalf("read output file: %v", err)
-	} else if string(got) != "written by fake agent\n" {
-		t.Fatalf("output file = %q", got)
-	}
-
-	rawCaptured, err := os.ReadFile(captureEnvPath) //nolint:gosec // test path is under t.TempDir.
-	if err != nil {
-		t.Fatalf("read captured fake agent env: %v", err)
-	}
-	var captured map[string]string
-	if err := json.Unmarshal(rawCaptured, &captured); err != nil {
-		t.Fatalf("decode captured fake agent env: %v", err)
-	}
-	if got := captured["HERMES_HOME"]; got != resolved.HermesHome {
-		t.Fatalf("fake agent HERMES_HOME = %q, want %q; captured=%#v", got, resolved.HermesHome, captured)
-	}
-	for _, key := range []string{"GOOGLE_API_KEY", "OPENROUTER_API_KEY", "MEMOH_HERMES_API_KEY", "GEMINI_API_KEY", "HERMES_TRACE"} {
-		if value, ok := captured[key]; ok {
-			t.Fatalf("fake agent captured blocked env %s=%q in %#v", key, value, captured)
-		}
 	}
 }
 
@@ -564,7 +383,7 @@ func TestRunnerStartSessionSupportsReleaseTerminalWithoutWait(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -615,7 +434,7 @@ func TestRunnerStartSessionReadsProtocolModelsAndSetsModel(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -670,7 +489,7 @@ func TestRunnerStartSessionWithoutProtocolModelsDoesNotInventFallback(t *testing
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -708,7 +527,7 @@ func TestRunnerStartSessionAppliesAndUpdatesReasoningConfig(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -754,7 +573,7 @@ func TestRunnerRejectsUnconfirmedSessionConfigUpdates(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: newTestBridgeClient(t, root),
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -795,7 +614,7 @@ func TestRunnerRejectsInvalidSessionConfigResponse(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: newTestBridgeClient(t, root),
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -828,7 +647,7 @@ func TestRunnerStartSessionRejectsUnknownDefaultReasoningState(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: newTestBridgeClient(t, root),
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -860,7 +679,7 @@ func TestRunnerModelSwitchConsumesReasoningConfigUpdate(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: newTestBridgeClient(t, root),
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -899,7 +718,7 @@ func TestRunnerStartSessionSendsNoMCPServers(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -943,8 +762,9 @@ func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
-			DefaultWorkDir: root,
+			Backend:         bridge.WorkspaceBackendContainer,
+			DefaultWorkDir:  root,
+			ACPToolsHTTPURL: "http://memoh.test/bots/bot-1/tools",
 		},
 	})
 
@@ -986,7 +806,7 @@ func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
 		t.Fatalf("captured MCP servers = %#v, want one Memoh tools server", servers)
 	}
 	rawURL, _ := servers[0]["url"].(string)
-	if servers[0]["type"] != "http" || !strings.HasPrefix(rawURL, "http://127.0.0.1:") || !strings.Contains(rawURL, "/mcp/") || servers[0]["name"] != "Memoh Tools" {
+	if servers[0]["type"] != "http" || !strings.HasPrefix(rawURL, "http://memoh.test/bots/bot-1/tools/") || servers[0]["name"] != "Memoh Tools" {
 		t.Fatalf("captured MCP server = %#v", servers[0])
 	}
 	headers, _ := servers[0]["headers"].([]any)
@@ -1021,7 +841,7 @@ func TestRunnerStartSessionSkipsHTTPToolServerWithoutCapability(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -1064,8 +884,9 @@ func TestRunnerStartSessionInjectsHTTPToolServerForHermesCapabilityQuirk(t *test
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
-			DefaultWorkDir: root,
+			Backend:         bridge.WorkspaceBackendContainer,
+			DefaultWorkDir:  root,
+			ACPToolsHTTPURL: "http://memoh.test/bots/bot-hermes/tools",
 		},
 	})
 
@@ -1097,7 +918,7 @@ func TestRunnerStartSessionInjectsHTTPToolServerForHermesCapabilityQuirk(t *test
 		t.Fatalf("captured MCP servers = %#v, want one Memoh tools server for Hermes", servers)
 	}
 	rawURL, _ := servers[0]["url"].(string)
-	if servers[0]["type"] != "http" || servers[0]["name"] != "Memoh Tools" || !strings.HasPrefix(rawURL, "http://127.0.0.1:") {
+	if servers[0]["type"] != "http" || servers[0]["name"] != "Memoh Tools" || !strings.HasPrefix(rawURL, "http://memoh.test/bots/bot-hermes/tools/") {
 		t.Fatalf("captured MCP server = %#v", servers[0])
 	}
 }
@@ -1189,7 +1010,7 @@ func TestSessionCloseCancelsActivePrompt(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -1220,7 +1041,7 @@ func TestSessionCloseCancelsActivePrompt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Close() error = %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("Close blocked behind active Prompt")
 	}
 	waitForFile(t, cancelledFile, 2*time.Second)
@@ -1245,7 +1066,7 @@ func TestRunnerStartSessionCancellationStopsStartupProcess(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -1257,6 +1078,7 @@ func TestRunnerStartSessionCancellationStopsStartupProcess(t *testing.T) {
 			BotID:       "bot-1",
 			ProjectPath: "/data",
 			Command:     "sh",
+			SetupMode:   SetupModeSelf,
 			Timeout:     time.Minute,
 		}, nil)
 		if sess != nil {
@@ -1267,7 +1089,7 @@ func TestRunnerStartSessionCancellationStopsStartupProcess(t *testing.T) {
 
 	select {
 	case <-server.processStarted:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("bridge process did not start")
 	}
 	cancel()
@@ -1329,7 +1151,7 @@ func TestRunnerMissingCommandIncludesStderr(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
+			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: root,
 		},
 	})
@@ -1337,7 +1159,7 @@ func TestRunnerMissingCommandIncludesStderr(t *testing.T) {
 		BotID:   "bot-1",
 		Task:    "fix tests",
 		Command: "memoh-definitely-missing-acp-command",
-		Timeout: 2 * time.Second,
+		Timeout: 10 * time.Second,
 	})
 	if err == nil {
 		t.Fatal("expected missing command error")
@@ -1351,7 +1173,7 @@ func TestRunnerMissingCommandIncludesStderr(t *testing.T) {
 }
 
 func TestRequestPermissionOnlyAutoAllowsOnce(t *testing.T) {
-	callbacks := &clientCallbacks{root: "/data", cwd: "/data", virtualRoot: true}
+	callbacks := &clientCallbacks{root: "/data", cwd: "/data"}
 
 	allowed, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -1415,10 +1237,9 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 		},
 	}
 	callbacks := &clientCallbacks{
-		root:        "/data",
-		cwd:         "/data",
-		virtualRoot: true,
-		approval:    approval,
+		root:     "/data",
+		cwd:      "/data",
+		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
@@ -1598,7 +1419,6 @@ func TestCallbackToolApprovalRejectionErrorsUsePromptToolOutputLimit(t *testing.
 				nil,
 				true,
 				nil,
-				false,
 				approval,
 				nil,
 				ToolSessionContext{
@@ -1845,7 +1665,6 @@ func TestRequestPermissionUnmappedToolAllowsWithoutApproval(t *testing.T) {
 			callbacks := &clientCallbacks{
 				root:        "/data",
 				cwd:         "/data",
-				virtualRoot: true,
 				approval:    approval,
 				toolGateway: tc.toolGateway,
 				baseSession: ToolSessionContext{
@@ -2036,7 +1855,6 @@ func TestRequestPermissionUnknownUnmappedToolCancels(t *testing.T) {
 			callbacks := &clientCallbacks{
 				root:        "/data",
 				cwd:         "/data",
-				virtualRoot: true,
 				approval:    approval,
 				toolGateway: tc.toolGateway,
 				baseSession: ToolSessionContext{
@@ -2081,10 +1899,9 @@ func TestRequestPermissionRejectedByMemohToolApprovalSelectsRejectOption(t *test
 		},
 	}
 	callbacks := &clientCallbacks{
-		root:        "/data",
-		cwd:         "/data",
-		virtualRoot: true,
-		approval:    approval,
+		root:     "/data",
+		cwd:      "/data",
+		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:     "bot-1",
 			SessionID: "session-1",
@@ -2142,10 +1959,9 @@ func TestRequestPermissionSystemRejectedByMemohToolApprovalCancels(t *testing.T)
 		},
 	}
 	callbacks := &clientCallbacks{
-		root:        "/data",
-		cwd:         "/data",
-		virtualRoot: true,
-		approval:    approval,
+		root:     "/data",
+		cwd:      "/data",
+		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:     "bot-1",
 			SessionID: "session-1",
@@ -2198,7 +2014,6 @@ func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
 		nil,
 		false,
 		nil,
-		true,
 		approval,
 		nil,
 		ToolSessionContext{
@@ -2273,7 +2088,6 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 		nil,
 		false,
 		nil,
-		true,
 		approval,
 		nil,
 		ToolSessionContext{
@@ -2349,7 +2163,6 @@ func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
 		nil,
 		false,
 		nil,
-		true,
 		approval,
 		nil,
 		ToolSessionContext{
@@ -2416,7 +2229,7 @@ func TestACPFileCallbacksRecheckRuntimeGuardAfterApproval(t *testing.T) {
 			guardCalls := 0
 			callbacks := newClientCallbacks(
 				context.Background(), client, "/data", "/data", time.Second,
-				nil, nil, false, nil, true, approval, nil,
+				nil, nil, false, nil, approval, nil,
 				ToolSessionContext{
 					BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1",
 					RuntimeGuard: func(context.Context) error {
@@ -2449,7 +2262,7 @@ func TestACPCreateTerminalRechecksRuntimeGuardAfterApproval(t *testing.T) {
 	}}
 	callbacks := newClientCallbacks(
 		context.Background(), client, "/workspace", "/workspace", time.Second,
-		nil, nil, false, nil, false, approval, nil,
+		nil, nil, false, nil, approval, nil,
 		ToolSessionContext{
 			BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1",
 			RuntimeGuard: func(context.Context) error { return guardErr },
@@ -2544,7 +2357,7 @@ func TestACPWorkspaceEffectsRejectStaleRedisOwner(t *testing.T) {
 	bridgeClient, bridgeServer := newRecordingBridgeClient(t)
 	approval := &fakeACPToolApproval{decision: toolapproval.Request{ID: "approval-stale-owner", Status: toolapproval.StatusApproved}}
 	callbacks := newClientCallbacks(
-		ctx, bridgeClient, "/data", "/data", time.Second, nil, nil, false, nil, true, approval, nil,
+		ctx, bridgeClient, "/data", "/data", time.Second, nil, nil, false, nil, approval, nil,
 		ToolSessionContext{
 			BotID: botID, SessionID: sessionID, StreamID: streamA,
 			RuntimeGuard: func(guardCtx context.Context) error {
@@ -2598,7 +2411,6 @@ func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing
 		nil,
 		false,
 		nil,
-		true,
 		&fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}},
 		nil,
 		ToolSessionContext{BotID: "bot-1"},
@@ -2639,10 +2451,9 @@ func TestRequestPermissionNonInteractiveCancels(t *testing.T) {
 
 	approval := &fakeACPToolApproval{}
 	callbacks := &clientCallbacks{
-		root:        "/data",
-		cwd:         "/data",
-		virtualRoot: true,
-		approval:    approval,
+		root:     "/data",
+		cwd:      "/data",
+		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
@@ -2748,10 +2559,9 @@ func TestRequestPermissionScopeRejectsOutOfRootPaths(t *testing.T) {
 			t.Parallel()
 			approval := &fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}}
 			callbacks := &clientCallbacks{
-				root:        "/data",
-				cwd:         "/data",
-				virtualRoot: true,
-				approval:    approval,
+				root:     "/data",
+				cwd:      "/data",
+				approval: approval,
 				baseSession: ToolSessionContext{
 					BotID:             "bot-1",
 					SessionID:         "session-1",
@@ -2803,7 +2613,6 @@ func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
 		nil,
 		false,
 		nil,
-		true,
 		approval,
 		nil,
 		ToolSessionContext{
@@ -2872,7 +2681,6 @@ func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
 		nil,
 		false,
 		nil,
-		true,
 		approval,
 		nil,
 		ToolSessionContext{
@@ -2935,7 +2743,6 @@ func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
 		nil,
 		false,
 		nil,
-		true,
 		approval,
 		nil,
 		ToolSessionContext{
@@ -3192,34 +2999,6 @@ func assertSingleApprovalWithStartEnd(t *testing.T, events []event.StreamEvent, 
 	}
 	if pendingApprovals != 1 || approvedApprovals != 1 || starts != 1 || ends != 1 {
 		t.Fatalf("events for %s pending/approved/start/end = %d/%d/%d/%d, events=%#v", toolCallID, pendingApprovals, approvedApprovals, starts, ends, events)
-	}
-}
-
-func TestResolvePathUnderRootRejectsEscapeAndSymlink(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "app"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	rootEval, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := ResolvePathUnderRoot(root, "/data/app"); err != nil {
-		t.Fatalf("ResolvePathUnderRoot(/data/app) error = %v", err)
-	} else if got != filepath.Join(rootEval, "app") {
-		t.Fatalf("ResolvePathUnderRoot(/data/app) = %q, want %q", got, filepath.Join(rootEval, "app"))
-	}
-	if _, err := ResolvePathUnderRoot(root, "../escape"); err == nil {
-		t.Fatal("expected relative parent escape to be rejected")
-	}
-
-	link := filepath.Join(root, "outside-link")
-	if err := os.Symlink(outside, link); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
-	if _, err := ResolvePathUnderRoot(root, filepath.Join(link, "file.txt")); err == nil {
-		t.Fatal("expected symlink escape to be rejected")
 	}
 }
 

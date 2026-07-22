@@ -3,10 +3,10 @@
 # files into a workspace runtime assembly.
 #
 # Usage:
-#   ./docker/toolkit/install.sh [toolkit_output_dir] [arch] [display_output_dir]
+#   ./docker/toolkit/install.sh toolkit_output_dir [arch] [display_output_dir]
 #
 # Arguments:
-#   toolkit_output_dir  Target toolkit directory (default: .toolkit)
+#   toolkit_output_dir  Required target toolkit directory
 #   arch                amd64 or arm64 (default: auto-detect from uname -m)
 #   display_output_dir  Target display directory (default: toolkit/display)
 #
@@ -36,6 +36,10 @@
 #   UV_MIRROR           Default: https://github.com/astral-sh/uv/releases/latest/download
 #   MEMOH_DISPLAY_OUTDIR
 #                       Optional override for display_output_dir.
+#   MEMOH_TOOLKIT_GLIBC_ONLY
+#                       Set to 1 for the official Debian workspace image.
+#   MEMOH_TOOLKIT_SKIP_DISPLAY
+#                       Set to 1 when the image provides display packages itself.
 #
 set -eu
 
@@ -54,7 +58,13 @@ CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.58.1}"
 HERMES_AGENT_VERSION="${HERMES_AGENT_VERSION:-0.18.2}"
 HERMES_AGENT_PACKAGE="${HERMES_AGENT_PACKAGE:-hermes-agent[acp,mcp]==$HERMES_AGENT_VERSION}"
 
-OUTDIR="${1:-.toolkit}"
+if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
+  echo "ERROR: toolkit_output_dir is required." >&2
+  echo "Usage: $0 toolkit_output_dir [arch] [display_output_dir]" >&2
+  exit 2
+fi
+
+OUTDIR="$1"
 ARCH="${2:-}"
 DISPLAY_OUTDIR="${MEMOH_DISPLAY_OUTDIR:-${3:-$OUTDIR/display}}"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -954,25 +964,34 @@ install_a11y_cli() {
   echo "         Run 'mise run a11y-cli:build' or set MEMOH_A11Y_CLI_BINARY to a Linux ELF." >&2
 }
 
-mkdir -p "$OUTDIR/node-glibc" "$OUTDIR/node-musl"
+mkdir -p "$OUTDIR/node-glibc"
 
 install_node_glibc
-install_node_musl
-install_musl_runtime_libs
 install_glibc_openssl_libs
 install_python_runtime gnu "$PYTHON_ARCH" true
-install_python_runtime musl "$PYTHON_ARCH" true
 for extra_arch in ${PYTHON_EXTRA_ARCHES:-}; do
   extra_python_arch="$(python_arch_from_toolkit_arch "$extra_arch")"
   if [ "$extra_python_arch" = "$PYTHON_ARCH" ]; then
     continue
   fi
   install_python_runtime gnu "$extra_python_arch" false
-  install_python_runtime musl "$extra_python_arch" false
 done
-
 install_pinned_npm node-glibc
-install_pinned_npm node-musl
+
+if [ "${MEMOH_TOOLKIT_GLIBC_ONLY:-0}" != "1" ]; then
+  mkdir -p "$OUTDIR/node-musl"
+  install_node_musl
+  install_musl_runtime_libs
+  install_python_runtime musl "$PYTHON_ARCH" true
+  for extra_arch in ${PYTHON_EXTRA_ARCHES:-}; do
+    extra_python_arch="$(python_arch_from_toolkit_arch "$extra_arch")"
+    if [ "$extra_python_arch" = "$PYTHON_ARCH" ]; then
+      continue
+    fi
+    install_python_runtime musl "$extra_python_arch" false
+  done
+  install_pinned_npm node-musl
+fi
 
 install_uv
 install_acp_packages
@@ -981,5 +1000,7 @@ install_toolkit_wrappers
 install_ca_bundle
 
 echo "Toolkit installed to $OUTDIR"
-install_display_bundle
-install_a11y_cli
+if [ "${MEMOH_TOOLKIT_SKIP_DISPLAY:-0}" != "1" ]; then
+  install_display_bundle
+  install_a11y_cli
+fi

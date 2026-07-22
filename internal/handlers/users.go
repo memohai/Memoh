@@ -483,6 +483,12 @@ func accountNotFound(err error) bool {
 }
 
 func createBotHTTPError(err error, ownerFromToken bool) error {
+	if errors.Is(err, workspace.ErrWorkspaceImageIncompatible) {
+		return apperror.Wrap(apperror.CodeWorkspaceImageIncompatible, err, nil)
+	}
+	if errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+		return apperror.Wrap(apperror.CodeWorkspaceTemplateBootstrapFailed, err, nil)
+	}
 	if errors.Is(err, bots.ErrOwnerUserNotFound) {
 		if ownerFromToken {
 			return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
@@ -596,6 +602,10 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 				slog.Any("error", readyErr),
 			)
 			sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed; ready status update failed")
+			return nil
+		}
+		if event, ok := newWorkspaceSetupAppError(err, httpx.RequestID(c)); ok {
+			_ = send(event)
 			return nil
 		}
 		sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed")
@@ -1007,12 +1017,9 @@ func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.B
 		if target.profile.ID == acpprofile.AgentHermesID {
 			var err error
 			resolved, err = acpclient.ResolveSessionContext(acpclient.SessionContextInput{
-				AgentID:       target.profile.ID,
-				SetupMode:     target.mode,
-				BotID:         bot.ID,
-				Backend:       workspaceInfo.Backend,
-				WorkspaceRoot: workspaceInfo.DefaultWorkDir,
-				LocalDataRoot: workspaceInfo.LocalDataRoot,
+				AgentID:   target.profile.ID,
+				SetupMode: target.mode,
+				Backend:   workspaceInfo.Backend,
 			})
 			if err != nil {
 				return err

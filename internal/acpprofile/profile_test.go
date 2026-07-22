@@ -26,15 +26,9 @@ func TestListIncludesClaudeCode(t *testing.T) {
 	if profile.ReasoningConfigID != "effort" || profile.DefaultReasoningEffort != "high" {
 		t.Fatalf("Claude Code reasoning mapping = %q / %q", profile.ReasoningConfigID, profile.DefaultReasoningEffort)
 	}
-	if len(profile.LocalArgs) != 2 || profile.LocalArgs[1] != "@agentclientprotocol/claude-agent-acp@0.58.1" {
-		t.Fatalf("Claude Code local args = %#v", profile.LocalArgs)
-	}
 	codex, ok := Lookup(AgentCodexID)
 	if !ok || codex.DefaultReasoningEffort != "medium" || codex.ReasoningConfigID != "" {
 		t.Fatalf("Codex reasoning profile = %#v", codex)
-	}
-	if len(codex.LocalArgs) != 2 || codex.LocalArgs[1] != "@agentclientprotocol/codex-acp@1.1.4" {
-		t.Fatalf("Codex local args = %#v", codex.LocalArgs)
 	}
 }
 
@@ -46,8 +40,8 @@ func TestCodexUsesControlledACPAdapterUpgradeWithPinnedFallback(t *testing.T) {
 	if profile.DynamicCommand != "npx" || len(profile.DynamicArgs) != 1 || profile.DynamicArgs[0] != "-y" || profile.DynamicPackage != "@agentclientprotocol/codex-acp" {
 		t.Fatalf("Codex dynamic launcher = %q %#v package %q", profile.DynamicCommand, profile.DynamicArgs, profile.DynamicPackage)
 	}
-	if profile.Command != "codex-acp" || profile.LocalCommand != "npx" || len(profile.LocalArgs) != 2 || profile.LocalArgs[1] != "@agentclientprotocol/codex-acp@1.1.4" {
-		t.Fatalf("Codex fallback launcher = command %q, local %q %#v", profile.Command, profile.LocalCommand, profile.LocalArgs)
+	if profile.Command != "codex-acp" {
+		t.Fatalf("Codex fallback launcher = command %q", profile.Command)
 	}
 }
 
@@ -56,8 +50,8 @@ func TestListIncludesHermes(t *testing.T) {
 	if !ok {
 		t.Fatalf("Hermes profile was not registered")
 	}
-	if profile.Command != "hermes-acp" || profile.LocalCommand != "hermes-acp" {
-		t.Fatalf("Hermes commands = %q / %q", profile.Command, profile.LocalCommand)
+	if profile.Command != "hermes-acp" {
+		t.Fatalf("Hermes command = %q", profile.Command)
 	}
 	if len(profile.ManagedFields) != 4 {
 		t.Fatalf("Hermes managed fields = %#v", profile.ManagedFields)
@@ -65,7 +59,7 @@ func TestListIncludesHermes(t *testing.T) {
 	if len(profile.SetupModes) != 2 || profile.SetupModes[0] != setupModeSelf || profile.SetupModes[1] != setupModeAPIKey {
 		t.Fatalf("Hermes setup modes = %#v", profile.SetupModes)
 	}
-	if len(profile.SupportedBackends) != 2 || profile.SupportedBackends[0] != "local" || profile.SupportedBackends[1] != "container" {
+	if len(profile.SupportedBackends) != 1 || profile.SupportedBackends[0] != "container" {
 		t.Fatalf("Hermes supported backends = %#v", profile.SupportedBackends)
 	}
 	if !ShouldForceHTTPMCPServer(AgentHermesID) {

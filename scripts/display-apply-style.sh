@@ -1,6 +1,7 @@
 #!/bin/sh
 
-style_version='__MEMOH_DISPLAY_DESKTOP_STYLE_VERSION__'
+style_version='2026-07-22.1'
+desktop_style_script="${MEMOH_DESKTOP_STYLE_SCRIPT:-/opt/memoh/scripts/desktop-style.sh}"
 style_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/memoh"
 style_marker="$style_config_dir/display-style.version"
 style_lock=/tmp/memoh-desktop-style.lock
@@ -138,34 +139,12 @@ if { [ "$mode" = "--if-needed" ] || [ "$mode" = "--ensure" ]; } && style_is_curr
   exit 0
 fi
 
-progress() { :; }
-has_cmd() { command -v "$1" >/dev/null 2>&1; }
-os_like() {
-  if [ -r /etc/os-release ]; then
-    . /etc/os-release
-    printf '%s %s\n' "${ID:-}" "${ID_LIKE:-}"
-    return
-  fi
-  printf unknown
+[ -r "$desktop_style_script" ] || {
+  echo "Workspace image contract violation: desktop style script is unavailable." >&2
+  exit 1
 }
-is_debian_like() {
-  case " $(os_like) " in
-    *" debian "*|*" ubuntu "*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-is_alpine() {
-  case " $(os_like) " in
-    *" alpine "*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-. /tmp/memoh-desktop-install.sh
-
-install_style_extras_for_current_os
 rm -f "$style_log"
-if /bin/sh /tmp/memoh-desktop-style.sh >"$style_log" 2>&1; then
+if /bin/sh "$desktop_style_script" >"$style_log" 2>&1; then
   mkdir -p "$style_config_dir"
   printf '%s\n' "$style_version" >"$style_marker"
   exit 0

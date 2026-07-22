@@ -208,7 +208,7 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 	imageDir := strings.TrimRight(p.dataMount, "/") + strings.TrimPrefix(imageGenDir, "/data")
 	if resolver, ok := p.containers.(bridge.WorkspaceInfoProvider); ok {
 		if info, err := resolver.WorkspaceInfo(ctx, botID); err == nil &&
-			(info.Backend == bridge.WorkspaceBackendLocal || info.Backend == bridge.WorkspaceBackendRemote) &&
+			info.Backend == bridge.WorkspaceBackendRemote &&
 			strings.TrimSpace(info.DefaultWorkDir) != "" {
 			imageDir = strings.TrimRight(info.DefaultWorkDir, "/") + "/generated-images"
 		}

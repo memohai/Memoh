@@ -66,6 +66,8 @@ export interface WorkspaceConfig {
   data_root: string;
   cni_bin_dir?: string;
   cni_conf_dir?: string;
+  bridge_path?: string;
+  /** @deprecated Use bridge_path. */
   runtime_dir?: string;
 }
 

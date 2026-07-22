@@ -42,18 +42,44 @@ func TestFirstHeaderValue(t *testing.T) {
 	}
 }
 
-func TestDisplayPrepareCommandInjectsInstallScript(t *testing.T) {
+func readDisplayScript(t *testing.T, name string) string {
+	t.Helper()
+	var scriptPath string
+	switch name {
+	case "desktop-install.sh":
+		scriptPath = "../../scripts/desktop-install.sh"
+	case "desktop-style.sh":
+		scriptPath = "../../scripts/desktop-style.sh"
+	case "display-apply-style.sh":
+		scriptPath = "../../scripts/display-apply-style.sh"
+	case "display-prepare.sh":
+		scriptPath = "../../scripts/display-prepare.sh"
+	default:
+		t.Fatalf("unsupported display script %q", name)
+	}
+	data, err := os.ReadFile(scriptPath) //nolint:gosec // scriptPath is selected from fixed repository paths above.
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(data)
+}
+
+func TestDisplayPrepareCommandUsesImageScripts(t *testing.T) {
 	t.Parallel()
 
-	cmd := displayPrepareCommand()
-	if !strings.Contains(cmd, "cat >/tmp/memoh-desktop-install.sh") {
-		t.Fatal("display prepare command must inject the install script")
+	if got := displayPrepareCommand(); got != "/bin/sh /opt/memoh/scripts/display-prepare.sh" {
+		t.Fatalf("displayPrepareCommand() = %q", got)
 	}
-	if !strings.Contains(cmd, "cat >/tmp/memoh-desktop-style.sh") {
-		t.Fatal("display prepare command must inject the desktop style script")
+	prepareScript := readDisplayScript(t, "display-prepare.sh")
+	styleScript := readDisplayScript(t, "desktop-style.sh")
+	installScript := readDisplayScript(t, "desktop-install.sh")
+	applyScript := readDisplayScript(t, "display-apply-style.sh")
+	cmd := strings.Join([]string{prepareScript, styleScript, installScript, applyScript}, "\n")
+	if strings.Contains(prepareScript, "cat >/tmp/memoh-") {
+		t.Fatal("display prepare must not inject scripts at runtime")
 	}
-	if !strings.Contains(cmd, ". /tmp/memoh-desktop-install.sh") {
-		t.Fatal("display prepare command must source the injected install script")
+	if strings.Contains(prepareScript, "desktop-install.sh") || strings.Contains(prepareScript, "apt-get install") || strings.Contains(prepareScript, "apk add") {
+		t.Fatal("display prepare must not install packages at runtime")
 	}
 	if !strings.Contains(cmd, "install_debian()") || !strings.Contains(cmd, "install_alpine()") {
 		t.Fatal("injected install script must define Debian and Alpine installers")
@@ -117,26 +143,27 @@ func TestDisplayPrepareCommandInjectsInstallScript(t *testing.T) {
 		strings.Contains(cmd, "write_memoh_files_icon_png") {
 		t.Fatal("injected style script must use a custom Files launcher and a WhiteSur-backed icon theme overlay")
 	}
-	if !strings.Contains(cmd, "install_style_extras_for_current_os") {
-		t.Fatal("display prepare must install styling assets even when core display packages already exist")
+	if !strings.Contains(installScript, "install_style_extras_for_current_os") {
+		t.Fatal("image build installer must include styling assets")
 	}
-	if !strings.Contains(cmd, "cat >/tmp/memoh-desktop-apply-style.sh") {
-		t.Fatal("display prepare command must inject the shared desktop style apply helper")
+	if !strings.Contains(prepareScript, "/opt/memoh/scripts/display-apply-style.sh --check") ||
+		!strings.Contains(prepareScript, "/opt/memoh/scripts/display-apply-style.sh --ensure") {
+		t.Fatal("display prepare must call the image-provided style helper")
 	}
-	if !strings.Contains(displayPrepareMainCommand, `desktop_style_current()`) ||
-		!strings.Contains(displayPrepareMainCommand, `/bin/sh /tmp/memoh-desktop-apply-style.sh --check`) {
+	if !strings.Contains(prepareScript, `desktop_style_current()`) ||
+		!strings.Contains(prepareScript, `/bin/sh /opt/memoh/scripts/display-apply-style.sh --check`) {
 		t.Fatal("display prepare readiness must include the desktop style marker")
 	}
-	if strings.Contains(displayPrepareMainCommand, `nohup /bin/sh /tmp/memoh-desktop-style.sh`) {
+	if strings.Contains(prepareScript, `nohup /bin/sh /opt/memoh/scripts/desktop-style.sh`) {
 		t.Fatal("display prepare must not apply desktop style asynchronously")
 	}
-	styleIndex := strings.Index(displayPrepareMainCommand, `progress 90 styling "Applying desktop style"`)
-	browserIndex := strings.Index(displayPrepareMainCommand, `progress 94 browser "Launching browser"`)
-	completeIndex := strings.LastIndex(displayPrepareMainCommand, "\ncomplete\nexit 0")
+	styleIndex := strings.Index(prepareScript, `progress 90 styling "Applying desktop style"`)
+	browserIndex := strings.Index(prepareScript, `progress 94 browser "Launching browser"`)
+	completeIndex := strings.LastIndex(prepareScript, "\nemit_complete\nexit 0")
 	if styleIndex < 0 || browserIndex < 0 || styleIndex > browserIndex || browserIndex > completeIndex {
 		t.Fatal("display prepare must apply desktop style synchronously before browser launch and completion")
 	}
-	if !strings.Contains(displayPrepareMainCommand, `/bin/sh /tmp/memoh-desktop-apply-style.sh --ensure`) {
+	if !strings.Contains(prepareScript, `/bin/sh /opt/memoh/scripts/display-apply-style.sh --ensure`) {
 		t.Fatal("display prepare must ensure the current style version before reporting ready")
 	}
 	if !strings.Contains(cmd, "SUDO_USER") || !strings.Contains(cmd, "sudo git unzip bash") {
@@ -161,69 +188,69 @@ func TestDisplayPrepareCommandInjectsInstallScript(t *testing.T) {
 	if !strings.Contains(cmd, "if verify_style; then\n  exit 0\nfi\nexit 1") {
 		t.Fatal("injected style script must return non-zero when style verification fails")
 	}
-	if strings.Contains(displayPrepareMainCommand, "apt-get install") || strings.Contains(displayPrepareMainCommand, "apk add") {
+	if strings.Contains(prepareScript, "apt-get install") || strings.Contains(prepareScript, "apk add") {
 		t.Fatal("package installation details should stay in scripts/desktop-install.sh")
 	}
-	if strings.Contains(displayPrepareMainCommand, "set -- $(tr") {
+	if strings.Contains(prepareScript, "set -- $(tr") {
 		t.Fatal("Xvnc process detection must not word-split shell command lines")
 	}
-	if !strings.Contains(displayPrepareMainCommand, "grep -Eq '(^|/)Xvnc$'") || !strings.Contains(displayPrepareMainCommand, "grep -Fxq ':99'") {
+	if !strings.Contains(prepareScript, "grep -Eq '(^|/)Xvnc$'") || !strings.Contains(prepareScript, "grep -Fxq ':99'") {
 		t.Fatal("Xvnc process detection must match real Xvnc processes on display :99")
 	}
-	if !strings.Contains(displayPrepareMainCommand, "grep -Eq '(^|/)(google-chrome-stable|google-chrome|chromium|chromium-browser|chrome)$'") {
+	if !strings.Contains(prepareScript, "grep -Eq '(^|/)(google-chrome-stable|google-chrome|chromium|chromium-browser|chrome)$'") {
 		t.Fatal("browser process detection must match real browser argv entries only")
 	}
-	if !strings.Contains(displayPrepareMainCommand, "grep -Eq '^--type=' && continue") {
+	if !strings.Contains(prepareScript, "grep -Eq '^--type=' && continue") {
 		t.Fatal("CDP readiness detection must ignore Chromium child processes")
 	}
-	if !strings.Contains(displayPrepareMainCommand, "start_desktop_session()") ||
-		!strings.Contains(displayPrepareMainCommand, "stop_fallback_wm") ||
-		!strings.Contains(displayPrepareMainCommand, "start_xfwm4()") ||
-		!strings.Contains(displayPrepareMainCommand, "process_pids_by_name startxfce4 xfce4-session xfdesktop") ||
-		!strings.Contains(displayPrepareMainCommand, "process_pids_by_name xfwm4") {
+	if !strings.Contains(prepareScript, "start_desktop_session()") ||
+		!strings.Contains(prepareScript, "stop_fallback_wm") ||
+		!strings.Contains(prepareScript, "start_xfwm4()") ||
+		!strings.Contains(prepareScript, "process_pids_by_name startxfce4 xfce4-session xfdesktop") ||
+		!strings.Contains(prepareScript, "process_pids_by_name xfwm4") {
 		t.Fatal("display prepare must prefer Xfce over the fallback window manager")
 	}
-	if strings.Contains(displayPrepareMainCommand, "grep -E 'xfce4-session|xfwm4|twm'") {
+	if strings.Contains(prepareScript, "grep -E 'xfce4-session|xfwm4|twm'") {
 		t.Fatal("display prepare must not treat twm as a healthy Xfce desktop session")
 	}
-	if !strings.Contains(displayPrepareMainCommand, "xsetroot -cursor_name left_ptr") {
+	if !strings.Contains(prepareScript, "xsetroot -cursor_name left_ptr") {
 		t.Fatal("display prepare must replace the default X root cursor")
 	}
-	if !strings.Contains(displayPrepareMainCommand, "SingletonLock") {
+	if !strings.Contains(prepareScript, "SingletonLock") {
 		t.Fatal("display prepare must clean stale Chromium profile locks before starting the browser")
 	}
-	if strings.Contains(displayPrepareMainCommand, "rfbunixpath") || strings.Contains(displayPrepareMainCommand, "RFB_SOCKET") {
+	if strings.Contains(prepareScript, "rfbunixpath") || strings.Contains(prepareScript, "RFB_SOCKET") {
 		t.Fatal("display prepare should use loopback TCP VNC instead of a bind-mounted Unix RFB socket")
 	}
-	if !strings.Contains(displayPrepareMainCommand, "-localhost -rfbport \"$RFB_PORT\"") {
+	if !strings.Contains(prepareScript, "-localhost -rfbport \"$RFB_PORT\"") {
 		t.Fatal("display prepare must keep VNC on container loopback")
 	}
-	if !strings.Contains(displayPrepareMainCommand, `XVNC_GEOMETRY="${MEMOH_DISPLAY_GEOMETRY:-1280x960}"`) {
+	if !strings.Contains(prepareScript, `XVNC_GEOMETRY="${MEMOH_DISPLAY_GEOMETRY:-1280x960}"`) {
 		t.Fatal("display prepare must default to the 4:3 desktop geometry")
 	}
-	if !strings.Contains(displayPrepareMainCommand, `-geometry "$XVNC_GEOMETRY"`) {
+	if !strings.Contains(prepareScript, `-geometry "$XVNC_GEOMETRY"`) {
 		t.Fatal("display prepare must pass the configured geometry to Xvnc")
 	}
 }
 
-func TestDisplayApplyStyleCommandInjectsStyleScript(t *testing.T) {
+func TestDisplayApplyStyleCommandUsesImageScripts(t *testing.T) {
 	t.Parallel()
 
-	cmd := displayApplyStyleCommand()
-	if !strings.Contains(cmd, "cat >/tmp/memoh-desktop-install.sh") {
-		t.Fatal("display style command must inject the install script for existing desktops")
+	if got := displayApplyStyleCommand(); got != "/bin/sh /opt/memoh/scripts/display-apply-style.sh --if-needed" {
+		t.Fatalf("displayApplyStyleCommand() = %q", got)
 	}
-	if !strings.Contains(cmd, "cat >/tmp/memoh-desktop-style.sh") {
-		t.Fatal("display style command must inject the desktop style script")
+	applyScript := readDisplayScript(t, "display-apply-style.sh")
+	styleScript := readDisplayScript(t, "desktop-style.sh")
+	cmd := applyScript + "\n" + styleScript
+	if strings.Contains(cmd, "cat >/tmp/memoh-") || strings.Contains(cmd, "desktop-install.sh") {
+		t.Fatal("display style apply must not inject scripts or install packages at runtime")
 	}
-	if !strings.Contains(cmd, "install_style_extras_for_current_os") {
-		t.Fatal("display style command must install missing macOS styling assets")
-	}
-	if !strings.Contains(cmd, "/bin/sh /tmp/memoh-desktop-style.sh") {
-		t.Fatal("display style command must run the desktop style script")
+	if !strings.Contains(applyScript, `desktop_style_script="${MEMOH_DESKTOP_STYLE_SCRIPT:-/opt/memoh/scripts/desktop-style.sh}"`) ||
+		!strings.Contains(applyScript, `/bin/sh "$desktop_style_script"`) {
+		t.Fatal("display style command must run the image-provided desktop style script")
 	}
 	if !strings.Contains(cmd, "style_marker=\"$style_config_dir/display-style.version\"") ||
-		!strings.Contains(cmd, "style_version='"+displayDesktopStyleVersion+"'") ||
+		!strings.Contains(cmd, "style_version='2026-07-22.1'") ||
 		!strings.Contains(cmd, "style_is_current") {
 		t.Fatal("display style command must gate retries with a versioned marker")
 	}
@@ -246,8 +273,8 @@ func TestDisplayApplyStyleCommandInjectsStyleScript(t *testing.T) {
 		!strings.Contains(cmd, `printf '%s\n' "$style_version" >"$style_marker"`) {
 		t.Fatal("display style command must persist success and print log tail on failure")
 	}
-	if !strings.Contains(cmd, `/bin/sh /tmp/memoh-desktop-apply-style.sh --if-needed`) {
-		t.Fatal("display style command must only apply style when the marker is missing or stale")
+	if !strings.Contains(applyScript, `mode="${1:---if-needed}"`) {
+		t.Fatal("display style helper must only apply style when the marker is missing or stale")
 	}
 	if !strings.Contains(cmd, "configure_plank()") || !strings.Contains(cmd, "WhiteSur-Dark") {
 		t.Fatal("display style command must include macOS-like desktop styling")
@@ -255,12 +282,8 @@ func TestDisplayApplyStyleCommandInjectsStyleScript(t *testing.T) {
 	if !strings.Contains(cmd, "configure_topbar()") || !strings.Contains(cmd, "windowck-plugin") || !strings.Contains(cmd, "appmenu") {
 		t.Fatal("display style command must include macOS-like topbar styling")
 	}
-	if !strings.Contains(cmd, "MEMOH_DISPLAY_INSTALL_ASSETS_GLOBAL") ||
-		!strings.Contains(cmd, "/usr/local/share/themes") ||
-		!strings.Contains(cmd, "/usr/local/share/icons") ||
-		!strings.Contains(cmd, "/usr/local/share/backgrounds/WhiteSur") ||
-		!strings.Contains(cmd, "/usr/local/share/plank/themes") {
-		t.Fatal("display style command must reuse image-baked desktop style assets in global paths")
+	if strings.Contains(applyScript, "apt-get install") || strings.Contains(applyScript, "apk add") {
+		t.Fatal("display style helper must rely on image-baked assets")
 	}
 	if !strings.Contains(cmd, "memoh-logo-white") || strings.Contains(cmd, "memoh-apple-symbol") {
 		t.Fatal("display style command must use the white Memoh logo for the topbar menu icon")
@@ -310,11 +333,14 @@ func TestDisplayApplyStyleCommandInjectsStyleScript(t *testing.T) {
 func TestDisplayStyleStatusCommandChecksVersionMarker(t *testing.T) {
 	t.Parallel()
 
-	cmd := displayStyleStatusCommand()
+	if got := displayStyleStatusCommand(); got != "/bin/sh /opt/memoh/scripts/display-apply-style.sh --check" {
+		t.Fatalf("displayStyleStatusCommand() = %q", got)
+	}
+	cmd := readDisplayScript(t, "display-apply-style.sh")
 	if !strings.Contains(cmd, "display-style.version") {
 		t.Fatal("style status command must check the desktop style marker")
 	}
-	if !strings.Contains(cmd, "style_version='"+displayDesktopStyleVersion+"'") {
+	if !strings.Contains(cmd, "style_version='2026-07-22.1'") {
 		t.Fatal("style status command must check the current style version")
 	}
 	if !strings.Contains(cmd, "MEMOH_DISPLAY_DESKTOP_STYLE") {
@@ -335,5 +361,15 @@ func TestWorkspaceDockerfileInstallsDisplayAssetsGlobally(t *testing.T) {
 	}
 	if !strings.Contains(dockerfile, "MEMOH_DISPLAY_INSTALL_ASSETS_GLOBAL=1") {
 		t.Fatal("workspace Dockerfile must bake static display style assets into global image paths")
+	}
+	if !strings.Contains(dockerfile, "MEMOH_TOOLKIT_GLIBC_ONLY=1") ||
+		!strings.Contains(dockerfile, "COPY --from=toolkit-builder /opt/memoh/toolkit /opt/memoh/toolkit") {
+		t.Fatal("workspace Dockerfile must own the canonical glibc toolkit")
+	}
+	if !strings.Contains(dockerfile, "COPY scripts/desktop-style.sh scripts/display-apply-style.sh scripts/display-prepare.sh /opt/memoh/scripts/") {
+		t.Fatal("workspace Dockerfile must provide immutable display scripts")
+	}
+	if !strings.Contains(dockerfile, "COPY docker/workspace-contract.json /opt/memoh/workspace-contract.json") {
+		t.Fatal("workspace Dockerfile must publish the workspace contract manifest")
 	}
 }

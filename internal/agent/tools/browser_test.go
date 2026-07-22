@@ -37,7 +37,7 @@ func (s *computerDisplayExecServer) Exec(stream pb.ContainerService_ExecServer) 
 		if !s.ready {
 			exitCode = 1
 		}
-	} else if strings.Contains(command, "/tmp/memoh-display-prepare.sh") {
+	} else if strings.Contains(command, "/opt/memoh/scripts/display-prepare.sh") {
 		s.ready = true
 	}
 	s.mu.Unlock()
@@ -92,7 +92,7 @@ func TestEnsureComputerDisplayHotStartsRuntime(t *testing.T) {
 	if len(server.commands) != 3 {
 		t.Fatalf("expected readiness probe, preparation, and verification; got %d commands", len(server.commands))
 	}
-	if !strings.Contains(server.commands[1], "/tmp/memoh-display-prepare.sh") {
+	if !strings.Contains(server.commands[1], "/opt/memoh/scripts/display-prepare.sh") {
 		t.Fatalf("expected the shared display preparation command, got: %s", server.commands[1])
 	}
 }

@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"io/fs"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -24,127 +22,11 @@ import (
 
 const (
 	defaultSocketPath = "/run/memoh/bridge.sock"
-	templateDir       = "/opt/memoh/templates"
-
-	agentsFileName         = "AGENTS.md"
-	legacyIdentityFileName = "IDENTITY.md"
-	managedSkillsDir       = ".memoh/skills"
-	templateKeepFileName   = ".gitkeep"
 )
-
-// initDataDir ensures /data exists and seeds template files on first boot.
-func initDataDir() {
-	initDataDirAt(bridgesvc.DefaultWorkDir, templateDir)
-}
-
-func initDataDirAt(dataDir, templatesDir string) {
-	if err := os.MkdirAll(dataDir, 0o750); err != nil {
-		logger.Warn("failed to create data dir", slog.Any("error", err))
-		return
-	}
-	if err := migrateLegacyIdentityFile(dataDir); err != nil {
-		logger.Warn("failed to migrate legacy identity file", slog.Any("error", err))
-		return
-	}
-
-	if err := seedTemplateDir(templatesDir, dataDir, fs.FileMode(0o644)); err != nil {
-		logger.Warn("failed to seed templates", slog.String("dir", templatesDir), slog.Any("error", err))
-	}
-}
-
-func seedTemplateDir(srcDir, dstDir string, fileMode fs.FileMode) error {
-	if _, err := os.Stat(srcDir); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	return filepath.WalkDir(srcDir, func(srcPath string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(srcDir, srcPath)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		relSlash := filepath.ToSlash(rel)
-		if shouldSkipTemplateFile(relSlash, entry) {
-			return nil
-		}
-		dstPath := templateDestinationPath(dstDir, relSlash)
-		if entry.IsDir() {
-			if isManagedSkillsPath(relSlash) {
-				return os.MkdirAll(dstPath, 0o750)
-			}
-			return nil
-		}
-		if entry.Type()&fs.ModeType != 0 {
-			return nil
-		}
-		return copyTemplateFile(srcPath, dstPath, fileMode, isManagedSkillsPath(relSlash))
-	})
-}
-
-func copyTemplateFile(srcPath, dstPath string, fileMode fs.FileMode, overwrite bool) error {
-	if !overwrite {
-		if _, err := os.Stat(dstPath); err == nil {
-			return nil
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-	}
-	data, err := os.ReadFile(srcPath) //nolint:gosec // G304: template paths are discovered under the configured templates directory.
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0o750); err != nil {
-		return err
-	}
-	return os.WriteFile(dstPath, data, fileMode) //nolint:gosec // G306: template files are intentionally readable in workspace containers.
-}
-
-func isManagedSkillsPath(rel string) bool {
-	return rel == managedSkillsDir || strings.HasPrefix(rel, managedSkillsDir+"/")
-}
-
-func templateDestinationPath(dstDir, rel string) string {
-	return filepath.Join(dstDir, filepath.FromSlash(rel))
-}
-
-func shouldSkipTemplateFile(rel string, entry fs.DirEntry) bool {
-	return !entry.IsDir() && path.Base(rel) == templateKeepFileName
-}
-
-func migrateLegacyIdentityFile(dataDir string) error {
-	agentsPath := filepath.Join(dataDir, agentsFileName)
-	if _, err := os.Stat(agentsPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-
-	identityPath := filepath.Join(dataDir, legacyIdentityFileName)
-	info, err := os.Stat(identityPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if info.IsDir() {
-		return nil
-	}
-	return os.Rename(identityPath, agentsPath)
-}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	initDataDir()
 
 	// Append toolkit to PATH so child processes (via /bin/sh -c) can find npx/uvx.
 	// Container-native tools take priority since toolkit is appended at the end.

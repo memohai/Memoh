@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -66,35 +64,6 @@ func WriteHermesManagedConfig(ctx context.Context, client *bridge.Client, cfg He
 		return fmt.Errorf("write Hermes config: %w", err)
 	}
 	if err := client.WriteFile(ctx, path.Join(home, ".env"), env); err != nil {
-		return fmt.Errorf("write Hermes env: %w", err)
-	}
-	return nil
-}
-
-func WriteHermesManagedConfigToLocalFS(cfg HermesManagedConfig) error {
-	home := strings.TrimSpace(cfg.Home)
-	if home == "" {
-		return errors.New("hermes managed config requires HERMES_HOME")
-	}
-	data, err := resolveHermesManagedConfig(cfg.Managed)
-	if err != nil {
-		return err
-	}
-	config, err := renderHermesManagedConfig(data)
-	if err != nil {
-		return fmt.Errorf("render Hermes config: %w", err)
-	}
-	env, err := renderHermesManagedEnv(data)
-	if err != nil {
-		return fmt.Errorf("render Hermes env: %w", err)
-	}
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		return fmt.Errorf("create Hermes home: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), config, 0o600); err != nil {
-		return fmt.Errorf("write Hermes config: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".env"), env, 0o600); err != nil {
 		return fmt.Errorf("write Hermes env: %w", err)
 	}
 	return nil

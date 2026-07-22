@@ -78,6 +78,7 @@ run = "pnpm --filter @memohai/icon generate"
 
 [tasks.dev]
 description = "Start development environment"
+depends = ["//:dev:workspace-image"]
 run = """
 #!/bin/bash
 set -e
@@ -86,6 +87,7 @@ docker compose -f devenv/docker-compose.yml up --build
 
 [tasks."dev:webhook-tunnel"]
 description = "Start development environment with Cloudflare Quick Tunnel for webhooks"
+depends = ["//:dev:workspace-image"]
 run = """
 #!/bin/bash
 set -e
@@ -94,6 +96,7 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.webhook-tun
 
 [tasks."dev:minify"]
 description = "Start development environment with minified services"
+depends = ["//:dev:workspace-image"]
 run = """
 #!/bin/bash
 set -e
@@ -102,6 +105,7 @@ docker compose -f devenv/docker-compose.minify.yml up --build
 
 [tasks."dev:minify:webhook-tunnel"]
 description = "Start minified development environment with Cloudflare Quick Tunnel for webhooks"
+depends = ["//:dev:workspace-image"]
 run = """
 #!/bin/bash
 set -e
@@ -110,6 +114,7 @@ docker compose -f devenv/docker-compose.minify.yml -f devenv/docker-compose.webh
 
 [tasks."dev:selinux"]
 description = "Start development environment on SELinux systems"
+depends = ["//:dev:workspace-image"]
 run = """
 #!/bin/bash
 set -e
@@ -118,6 +123,7 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml
 
 [tasks."dev:kata"]
 description = "Start Linux/KVM development environment with containerd Kata runtime"
+depends = ["//:dev:workspace-image"]
 run = """
 #!/bin/bash
 set -euo pipefail
@@ -157,14 +163,17 @@ run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata
 
 [tasks."dev:restart"]
 description = "Restart a service (usage: mise run dev:restart -- server)"
+depends = ["//:dev:workspace-image"]
 run = "docker compose -f devenv/docker-compose.yml restart $@"
 
 [tasks."dev:restart:selinux"]
 description = "Restart a service on SELinux systems (usage: mise run dev:restart:selinux -- server)"
+depends = ["//:dev:workspace-image"]
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml restart $@"
 
 [tasks."dev:restart:kata"]
 description = "Restart a service in the Linux/KVM Kata dev environment (usage: mise run dev:restart:kata -- server)"
+depends = ["//:dev:workspace-image"]
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml restart $@"
 
 [tasks."bridge:build"]
@@ -275,44 +284,13 @@ echo "a11y-cli built at target/linux/release/a11y-cli ($HOST_ARCH, musl static)"
 description = "Type-check the a11y-cli crate"
 run = "cargo check -p a11y-cli"
 
-[tasks.install-workspace-toolkit]
-description = "Install workspace toolkit"
-depends = ["//:a11y-cli:build"]
-run = """
-#!/bin/bash
-set -euo pipefail
-
-./docker/toolkit/install.sh .toolkit
-
-host_is_glibc_linux=0
-if [ "$(uname -s)" = "Linux" ] && ldd --version 2>&1 | grep -qi 'glibc\\|GNU libc'; then
-  host_is_glibc_linux=1
-fi
-
-if [ "$host_is_glibc_linux" = "1" ]; then
-  exit 0
-fi
-
-if ! command -v docker >/dev/null 2>&1; then
-  echo "warning: Docker is required to prewarm the Hermes glibc/manylinux cache on this host." >&2
-  echo "         Hermes ACP may fail to start offline in Debian workspace containers until CI or a glibc host builds the toolkit." >&2
-  exit 0
-fi
-
-hermes_agent_version="${HERMES_AGENT_VERSION:-0.18.2}"
-hermes_agent_package="${HERMES_AGENT_PACKAGE:-hermes-agent[acp,mcp]==$hermes_agent_version}"
-
-docker run --rm \
-  -e HERMES_AGENT_PACKAGE="$hermes_agent_package" \
-  -v "$PWD:/workspace" \
-  -w /workspace \
-  debian:bookworm-slim \
-  sh -lc 'set -eu; apt-get update >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates >/dev/null; UV_CACHE_DIR=.toolkit/uv-cache UV_TOOL_DIR=.toolkit/uv-tools UV_PYTHON_INSTALL_DIR=.toolkit/python .toolkit/uv tool run --from "$HERMES_AGENT_PACKAGE" hermes-acp --help >/dev/null'
-"""
-
 [tasks."docker:workspace:build"]
-description = "Build the Debian workspace image used by desktop"
-run = "docker build -f docker/Dockerfile.workspace -t memohai/workspace:debian ."
+description = "Build the canonical Debian workspace image"
+run = "docker build --target workspace -f docker/Dockerfile.workspace -t memohai/workspace:debian ."
+
+[tasks."dev:workspace-image"]
+description = "Build and export the canonical workspace image for nested dev containerd"
+run = "scripts/prepare-dev-workspace-image.sh"
 
 [tasks.lint]
 description = "Run all linters"
@@ -367,7 +345,6 @@ run = "pnpm lint:fix"
 [tasks.setup]
 description = "Setup development environment"
 depends = [
-  "//:install-workspace-toolkit",
   "//:sqlc-generate",
   "//:pnpm-install",
   "//:go-install",

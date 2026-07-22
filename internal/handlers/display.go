@@ -19,7 +19,6 @@ import (
 	"github.com/memohai/memoh/internal/httpx"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
-	scriptassets "github.com/memohai/memoh/scripts"
 )
 
 type displayInfoResponse struct {
@@ -221,10 +220,9 @@ func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 
 const (
 	displayPrepareProgressPrefix = "__MEMOH_DISPLAY_PROGRESS__"
-	displayDesktopStyleVersion   = scriptassets.DesktopStyleVersion
+	displayPrepareScriptPath     = "/opt/memoh/scripts/display-prepare.sh"
+	displayApplyStyleScriptPath  = "/opt/memoh/scripts/display-apply-style.sh"
 )
-
-var displayPrepareMainCommand = scriptassets.DisplayPrepare
 
 type displayPrepareStreamEvent struct {
 	Type      string            `json:"type"`
@@ -258,7 +256,7 @@ func newDisplayPrepareAppError(step string, err error, requestID string) display
 
 // PrepareDisplay godoc
 // @Summary Prepare workspace display dependencies
-// @Description Installs the workspace desktop/VNC/browser packages when needed, starts the display server, and launches the browser.
+// @Description Validates the image-provided desktop/VNC/browser runtime, starts the display server, and launches the browser.
 // @Tags containerd
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
@@ -470,19 +468,19 @@ func appendLimitedLine(builder *strings.Builder, line string) {
 }
 
 func displayPrepareCommand() string {
-	return scriptassets.DisplayPrepareCommand()
+	return "/bin/sh " + displayPrepareScriptPath
 }
 
 func displayApplyStyleCommand() string {
-	return scriptassets.DisplayApplyStyleCommand()
+	return "/bin/sh " + displayApplyStyleScriptPath + " --if-needed"
 }
 
 func displayStyleStatusCommand() string {
-	return scriptassets.DisplayStyleStatusCommand()
+	return "/bin/sh " + displayApplyStyleScriptPath + " --check"
 }
 
 func displayStyleLogTailCommand() string {
-	return scriptassets.DisplayStyleLogTailCommand()
+	return "tail -n 80 /tmp/memoh-desktop-style.log 2>/dev/null || true"
 }
 
 func trimDisplayLog(text string) string {

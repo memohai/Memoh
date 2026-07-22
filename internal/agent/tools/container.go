@@ -414,11 +414,7 @@ func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir string) to
 		descriptionExamples:     `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → "List files with details". For complex commands add enough context: curl -s url | jq '.data[]' → "Fetch JSON and extract data array".`,
 		delayInstruction:        "  - sleep N (N >= 2) in foreground is blocked. If you genuinely need a short delay, keep it under 2 seconds.",
 	}
-	switch {
-	case strings.EqualFold(info.Backend, bridge.WorkspaceBackendLocal):
-		workspace.locationDescription = "on the local machine"
-		workspace.absolutePathDescription = "host path"
-	case strings.EqualFold(info.Backend, bridge.WorkspaceBackendRemote):
+	if strings.EqualFold(info.Backend, bridge.WorkspaceBackendRemote) {
 		workspace.locationDescription = "on the connected remote machine"
 		workspace.absolutePathDescription = "remote workspace path"
 		if strings.EqualFold(info.OS, "win32") {

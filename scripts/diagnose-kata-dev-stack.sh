@@ -41,11 +41,9 @@ if ! curl -fsS "$BASE_URL/ping" >"$PING_JSON" 2>/dev/null; then
 fi
 
 container_backend="$(jq -r '.container_backend // "unknown"' "$PING_JSON")"
-local_workspace_enabled="$(jq -r '.local_workspace_enabled // "unknown"' "$PING_JSON")"
 snapshot_supported="$(jq -r '.snapshot_supported // "unknown"' "$PING_JSON")"
 echo "Server ping:"
 echo "  container_backend=$container_backend"
-echo "  local_workspace_enabled=$local_workspace_enabled"
 echo "  snapshot_supported=$snapshot_supported"
 
 if [ "$container_backend" != "containerd" ]; then

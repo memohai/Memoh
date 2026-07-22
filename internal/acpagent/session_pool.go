@@ -933,13 +933,10 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		return fail(err)
 	}
 	resolved, err := acpclient.ResolveSessionContext(acpclient.SessionContextInput{
-		AgentID:       h.agentID,
-		SetupMode:     mode,
-		BotID:         h.botID,
-		Backend:       workspaceInfo.Backend,
-		WorkspaceRoot: workspaceInfo.DefaultWorkDir,
-		ProjectPath:   h.projectPath,
-		LocalDataRoot: workspaceInfo.LocalDataRoot,
+		AgentID:     h.agentID,
+		SetupMode:   mode,
+		Backend:     workspaceInfo.Backend,
+		ProjectPath: h.projectPath,
 	})
 	if err != nil {
 		return fail(fmt.Errorf("resolve ACP session context: %w", err))
@@ -947,11 +944,9 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if err := p.reconcileManagedACPConfig(startCtx, h.botID, profile, setup, mode, resolved); err != nil {
 		return fail(fmt.Errorf("prepare %s managed config: %w", profile.DisplayName, err))
 	}
-	// Managed env (Claude Code BYOK tokens) is injected for every backend.
-	// Local processes inherit the host env and only get our overrides appended;
-	// managedProcessEnv returns nil for self mode and for Codex (which is
-	// configured via CODEX_HOME files instead of env), so this is safe to run
-	// for local desktop workspaces too.
+	// Managed env (Claude Code BYOK tokens) is injected for every session.
+	// managedProcessEnv returns nil for self mode and for Codex, which is
+	// configured via CODEX_HOME files instead of env.
 	var env []string
 	env, err = managedProcessEnv(profile, setup.Managed, mode)
 	if err != nil {
@@ -969,8 +964,6 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		ProjectPath:            h.projectPath,
 		Command:                profile.Command,
 		Args:                   profile.Args,
-		LocalCommand:           profile.LocalCommand,
-		LocalArgs:              profile.LocalArgs,
 		Env:                    env,
 		CleanEnv:               cleanEnv,
 		UnsetEnv:               unsetEnv,
@@ -1519,15 +1512,9 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 	}
 	mode := acpclient.SetupMode(setup.Mode)
 	if !setup.ModeSet {
-		// Legacy bots created before setup_mode was introduced have no explicit
-		// mode. For local workspaces the host already has Codex/Claude configured,
-		// so default to self (use host credentials). For container workspaces
-		// default to api_key to preserve the original validation behaviour.
-		if workspaceInfo.Backend == bridge.WorkspaceBackendLocal {
-			mode = acpclient.SetupModeSelf
-		} else {
-			mode = acpclient.SetupModeAPIKey
-		}
+		// Legacy bots created before setup_mode was introduced default to
+		// api_key to preserve the original validation behaviour.
+		mode = acpclient.SetupModeAPIKey
 	}
 	if !profileSupportsSetupMode(profile, mode) {
 		reason := fmt.Sprintf("does not support setup mode %q", mode)
@@ -1720,9 +1707,6 @@ func (p *SessionPool) resolveToolHTTPURL(inputURL string, workspaceInfo bridge.W
 		return "", nil
 	}
 	backend := strings.TrimSpace(workspaceInfo.Backend)
-	if backend == bridge.WorkspaceBackendLocal {
-		return strings.TrimSpace(inputURL), nil
-	}
 	if backend == "" || backend == bridge.WorkspaceBackendContainer {
 		return strings.TrimSpace(workspaceInfo.ACPToolsHTTPURL), nil
 	}
@@ -1747,7 +1731,7 @@ func (p *SessionPool) reconcileManagedACPConfig(ctx context.Context, botID strin
 		return nil
 	}
 	runner, hasWorkspaceClient := p.runner.(workspaceClientRunner)
-	if !hasWorkspaceClient && (profile.ID != acpprofile.AgentHermesID || resolved.Backend != acpclient.WorkspaceBackendLocal) {
+	if !hasWorkspaceClient {
 		return nil
 	}
 	return acpclient.WriteManagedACPConfig(ctx, acpclient.ManagedACPConfigRequest{

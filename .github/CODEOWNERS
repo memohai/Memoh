@@ -108,8 +108,8 @@
 /scripts/check-kata-*.sh                  @memohai/runtime
 /scripts/diagnose-kata-dev-stack.sh       @memohai/runtime
 /scripts/display-*                        @memohai/runtime
-/scripts/display.go                       @memohai/runtime
 /scripts/gen-bridge-mtls.sh                @memohai/runtime
+/scripts/prepare-dev-workspace-image.sh    @memohai/runtime
 /scripts/prepare-kata-github-runner.sh     @memohai/runtime
 /scripts/run-kata-github-e2e.sh            @memohai/runtime
 /scripts/check-patched-deps.mjs            @memohai/web

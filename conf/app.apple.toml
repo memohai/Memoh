@@ -43,10 +43,11 @@ driver = "postgres"
 # Apple backend uses socktainer and the Apple Containerization framework.
 # It is local-macOS oriented and does not support provider sidecar overlays.
 backend = "apple"
-default_image = "debian:bookworm-slim"
+default_image = "memohai/workspace:debian"
 image_pull_policy = "if_not_present"
-# Local workspace state and bridge sockets.
+# Workspace state and bridge sockets.
 data_root = "data"
+bridge_path = "/opt/memoh/runtime/bridge"
 
 [apple]
 # NOTE: Apple Container are now experimental feature and only support on macOS 26 and later.

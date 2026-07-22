@@ -119,6 +119,8 @@
     },
     "workspace": {
       "unreachable": "暂时无法连接工作区，请稍后重试。",
+      "image_incompatible": "工作区镜像与当前版本不兼容，请基于最新 Memoh Workspace 镜像重建后重试。",
+      "template_bootstrap_failed": "工作区文件初始化失败，请尝试重建工作区。",
       "display_prepare_failed": "显示环境准备失败，请稍后重试。"
     },
     "acp": {
@@ -1698,7 +1700,7 @@
       "basicInfo": "基本信息",
       "basicInfoDesc": "名称和头像",
       "workspace": "工作区",
-      "workspaceDesc": "隔离或本地",
+      "workspaceDesc": "隔离工作区",
       "security": "安全策略",
       "securityDesc": "访问控制",
       "model": "模型",
@@ -1726,15 +1728,6 @@
         "applyingSettings": "正在应用模型与记忆设置"
       }
     },
-    "workspaceBackend": "工作区",
-    "workspaceBackendHint": "隔离工作区会将 Bot 的文件和命令与本机环境隔开；本地工作区直接在这台电脑上执行。",
-    "workspaceBackends": {
-      "container": "隔离工作区",
-      "local": "本地文件夹"
-    },
-    "localWorkspacePath": "本地工作区文件夹",
-    "localWorkspacePathPlaceholder": "选择这台电脑上的文件夹",
-    "localWorkspaceWarning": "本地工作区将以宿主用户权限运行，具有操作宿主机文件与执行命令的完整权限",
     "editBot": "编辑 Bot",
     "deleteConfirm": "确定要删除这个 Bot 吗？",
     "renameSuccess": "Bot 名称已更新",
@@ -2425,7 +2418,7 @@
       "acpClaudeOAuthExchange": "保存 Token",
       "acpClaudeOAuthExchangeFailed": "保存 Claude Token 失败",
       "acpSelfModeHint": "该模式直接使用工作区运行环境里你已配置好的对应 ACP Agent（例如已登录的凭据）。",
-      "acpHermesSelfModeHint": "该模式直接使用当前工作区里已配置好的 Hermes Profile。本地模式可能共享宿主机的 ~/.hermes 凭据；如果需要按 Bot 隔离凭据，请使用 API Key 配置。",
+      "acpHermesSelfModeHint": "该模式直接使用当前工作区里已配置好的 Hermes Profile。如需由 Memoh 管理 Bot 凭据，请使用 API Key 配置。",
       "acpHermesSelfModeConfirm": "使用自行配置的 Hermes",
       "acpHermesProviderPlaceholder": "选择提供商",
       "acpHermesProviderGemini": "Gemini（Google AI Studio）",
@@ -3292,8 +3285,7 @@
         "oauthExchange": "提交",
         "oauthSkip": "稍后再说",
         "oauthSuccess": "授权成功",
-        "oauthExchangeFailed": "授权失败，请重试",
-        "selfRequiresLocalWorkspace": "{agent} 的自行配置模式需要使用本地工作区。请将工作区后端切换为本地，或返回上一步改用 API Key 配置。"
+        "oauthExchangeFailed": "授权失败，请重试"
       }
     },
     "im": {

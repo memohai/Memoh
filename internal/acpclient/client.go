@@ -63,17 +63,15 @@ type Runner struct {
 }
 
 type RunRequest struct {
-	AgentID      string
-	BotID        string
-	Task         string
-	ProjectPath  string
-	Command      string
-	Args         []string
-	LocalCommand string
-	LocalArgs    []string
-	Env          []string
-	SetupMode    SetupMode
-	Timeout      time.Duration
+	AgentID     string
+	BotID       string
+	Task        string
+	ProjectPath string
+	Command     string
+	Args        []string
+	Env         []string
+	SetupMode   SetupMode
+	Timeout     time.Duration
 }
 
 type RunResult struct {
@@ -168,16 +166,14 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	defer cancel()
 
 	sess, err := r.StartSession(runCtx, StartRequest{
-		AgentID:      req.AgentID,
-		BotID:        req.BotID,
-		ProjectPath:  req.ProjectPath,
-		Command:      req.Command,
-		Args:         req.Args,
-		LocalCommand: req.LocalCommand,
-		LocalArgs:    req.LocalArgs,
-		Env:          req.Env,
-		SetupMode:    req.SetupMode,
-		Timeout:      timeout,
+		AgentID:     req.AgentID,
+		BotID:       req.BotID,
+		ProjectPath: req.ProjectPath,
+		Command:     req.Command,
+		Args:        req.Args,
+		Env:         req.Env,
+		SetupMode:   req.SetupMode,
+		Timeout:     timeout,
 	}, nil)
 	if err != nil {
 		return RunResult{}, err
@@ -204,7 +200,6 @@ type clientCallbacks struct {
 	logger               *slog.Logger
 	root                 string
 	cwd                  string
-	virtualRoot          bool
 	approval             ToolApprovalService
 	toolGateway          *mcp.ToolGatewayService
 	baseSession          ToolSessionContext
@@ -228,7 +223,7 @@ type approvedToolGrant struct {
 	ExpiresAt  time.Time
 }
 
-func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd string, timeout time.Duration, sink EventSink, env []string, cleanEnv bool, unsetEnv []string, virtualRoot bool, approval ToolApprovalService, toolGateway *mcp.ToolGatewayService, toolSession ToolSessionContext, quirks acpprofile.ToolQuirks) *clientCallbacks {
+func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd string, timeout time.Duration, sink EventSink, env []string, cleanEnv bool, unsetEnv []string, approval ToolApprovalService, toolGateway *mcp.ToolGatewayService, toolSession ToolSessionContext, quirks acpprofile.ToolQuirks) *clientCallbacks {
 	timeoutSeconds := int32(timeout.Seconds())
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultTerminalTimeout
@@ -238,14 +233,13 @@ func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd st
 		client:      client,
 		root:        root,
 		cwd:         cwd,
-		virtualRoot: virtualRoot,
 		approval:    approval,
 		toolGateway: toolGateway,
 		baseSession: toolSession,
 		sink:        sink,
 		events:      events,
 		toolMapper:  newACPToolEventMapper(quirks),
-		terminals:   newTerminalManager(ctx, client, root, cwd, timeoutSeconds, env, cleanEnv, unsetEnv, virtualRoot, events),
+		terminals:   newTerminalManager(ctx, client, root, cwd, timeoutSeconds, env, cleanEnv, unsetEnv, events),
 		quirks:      quirks,
 	}
 }
@@ -1081,10 +1075,7 @@ func (c *clientCallbacks) WaitForTerminalExit(ctx context.Context, p acp.WaitFor
 }
 
 func (c *clientCallbacks) resolvePath(path string) (string, error) {
-	if c.virtualRoot {
-		return ResolvePathUnderVirtualRoot(c.root, path)
-	}
-	return ResolvePathUnderRoot(c.root, path)
+	return ResolvePathUnderVirtualRoot(c.root, path)
 }
 
 // scopePathKeys is the union of every RawInput key any extraction layer reads

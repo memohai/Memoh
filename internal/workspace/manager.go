@@ -27,6 +27,7 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
+	workspacetemplates "github.com/memohai/memoh/templates"
 )
 
 const (
@@ -99,13 +100,10 @@ type Manager struct {
 	grpcPool          *bridge.Pool
 	bridgeTLS         *BridgeTLSRuntimeOptions
 	remote            *RemoteWorkspaceService
+	templateBootstrap *TemplateBootstrapper
+	setupDiagnostics  WorkspaceSetupDiagnostics
 	legacyMu          sync.RWMutex
 	legacyIPs         map[string]string // botID → IP for pre-bridge containers
-}
-
-type WorkspaceStartConfig struct {
-	Backend            string
-	LocalWorkspacePath string
 }
 
 func NewManager(log *slog.Logger, service runtimeService, networkController netctl.Controller, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool, queryOverride ...dbstore.Queries) *Manager {
@@ -128,6 +126,7 @@ func NewManager(log *slog.Logger, service runtimeService, networkController netc
 		logger:            log.With(slog.String("component", "workspace")),
 		containerLocks:    make(map[string]*sync.Mutex),
 		legacyIPs:         make(map[string]string),
+		templateBootstrap: NewTemplateBootstrapper(workspacetemplates.WorkspaceFS()),
 	}
 	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
@@ -139,6 +138,17 @@ func (m *Manager) SetHookService(h *hooks.Service) {
 
 func (m *Manager) SetRemoteWorkspaceService(service *RemoteWorkspaceService) {
 	m.remote = service
+}
+
+// WorkspaceSetupDiagnostics records sanitized setup failures for Bot health
+// checks without coupling the workspace package to the bots package.
+type WorkspaceSetupDiagnostics interface {
+	RecordContainerSetupFailure(ctx context.Context, botID, phase string, setupErr error) error
+	ClearContainerSetupFailure(ctx context.Context, botID string) error
+}
+
+func (m *Manager) SetSetupDiagnostics(diagnostics WorkspaceSetupDiagnostics) {
+	m.setupDiagnostics = diagnostics
 }
 
 // SetBridgeTLS enables strict mTLS on TCP bridge dials and injects bridge-side
@@ -354,6 +364,30 @@ func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error
 	}
 }
 
+// InitializeNativeWorkspace applies server-owned bootstrap content after the
+// native workspace bridge is reachable. Remote Runtime targets intentionally do
+// not pass through this method.
+func (m *Manager) InitializeNativeWorkspace(ctx context.Context, botID string) error {
+	client, err := m.nativeMCPClient(ctx, botID)
+	if err != nil {
+		return fmt.Errorf("%w: resolve native workspace filesystem: %w", ErrWorkspaceTemplateBootstrapFailed, err)
+	}
+	if err := validateWorkspaceContract(ctx, client); err != nil {
+		return err
+	}
+	if m.templateBootstrap == nil {
+		return fmt.Errorf("%w: template bootstrapper is not configured", ErrWorkspaceTemplateBootstrapFailed)
+	}
+	if err := m.templateBootstrap.Bootstrap(
+		ctx,
+		bridgeWorkspaceFileSystem{client: client},
+		defaultWorkspaceBootstrapRoot,
+	); err != nil {
+		return fmt.Errorf("%w: %w", ErrWorkspaceTemplateBootstrapFailed, err)
+	}
+	return nil
+}
+
 func (m *Manager) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
 	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
 		target, err := m.ResolveWorkspaceTarget(ctx, botID, targetID)
@@ -475,7 +509,8 @@ func (m *Manager) Init(ctx context.Context) error {
 
 // EnsureBot creates the workspace container for a bot if it does not exist.
 // Bot data lives in the container's writable layer (snapshot), not bind mounts.
-// The Memoh runtime (bridge binary + toolkit) is injected via read-only bind mount.
+// Only the bridge binary is injected as a read-only file mount; the workspace
+// image owns its toolkit and runtime scripts.
 // If imageOverride is non-empty, it is used instead of the configured default.
 func (m *Manager) EnsureBot(ctx context.Context, botID, imageOverride string) error {
 	image := m.imageRef()
@@ -511,7 +546,7 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 		return ctr.ContainerSpec{}, err
 	}
 
-	runtimeDir := m.cfg.RuntimePath()
+	bridgePath := m.cfg.BridgeBinaryPath()
 	sockDir := m.socketDir(botID)
 	if err := os.MkdirAll(sockDir, 0o750); err != nil {
 		return ctr.ContainerSpec{}, fmt.Errorf("create socket dir: %w", err)
@@ -525,10 +560,10 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 			Options:     []string{"rbind", "ro"},
 		},
 		{
-			Destination: "/opt/memoh",
+			Destination: "/opt/memoh/bridge",
 			Type:        "bind",
-			Source:      runtimeDir,
-			Options:     []string{"rbind", "ro"},
+			Source:      bridgePath,
+			Options:     []string{"bind", "ro"},
 		},
 		{
 			Destination: "/run/memoh",
@@ -731,59 +766,6 @@ func (m *Manager) StartWithResolvedConfig(ctx context.Context, botID, image stri
 	return m.startWithResolvedConfig(ctx, botID, image, gpu)
 }
 
-func (m *Manager) StartWithWorkspaceConfig(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig, workspaceCfg WorkspaceStartConfig) error {
-	switch strings.ToLower(strings.TrimSpace(workspaceCfg.Backend)) {
-	case "", bridge.WorkspaceBackendContainer:
-		return m.StartWithResolvedConfig(ctx, botID, image, gpu)
-	case bridge.WorkspaceBackendLocal:
-		return m.startWithLocalConfig(ctx, botID, image, workspaceCfg.LocalWorkspacePath)
-	default:
-		return fmt.Errorf("unsupported workspace backend %q", workspaceCfg.Backend)
-	}
-}
-
-func (m *Manager) startWithLocalConfig(ctx context.Context, botID, image, workspacePath string) error {
-	if err := validateBotID(botID); err != nil {
-		return err
-	}
-	if checker, ok := m.service.(interface{ LocalEnabled() bool }); !ok || !checker.LocalEnabled() {
-		return ctr.ErrNotSupported
-	}
-	containerID := LocalContainerPrefix + botID
-	path := strings.TrimSpace(workspacePath)
-	if path == "" {
-		path = m.defaultLocalWorkspacePath(ctx, botID)
-	}
-	labels := map[string]string{
-		BotLabelKey:       botID,
-		WorkspaceLabelKey: WorkspaceLabelValue,
-	}
-	if strings.TrimSpace(image) == "" {
-		image = "local"
-	}
-	if _, err := m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
-		ID:              containerID,
-		ImageRef:        image,
-		ImagePullPolicy: config.ImagePullPolicyNever,
-		StorageRef:      ctr.StorageRef{Driver: localRuntimeName, Key: path, Kind: "directory"},
-		Labels:          labels,
-	}); err != nil && !ctr.IsAlreadyExists(err) {
-		return err
-	}
-	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
-		return err
-	}
-	m.upsertContainerRecord(ctx, botID, containerID, "running", image)
-	if err := m.runWorkspaceHook(context.WithoutCancel(ctx), botID, hooks.EventWorkspaceStart, map[string]any{
-		"backend": bridge.WorkspaceBackendLocal,
-		"image":   image,
-		"path":    path,
-	}); err != nil {
-		m.logWorkspaceHookError(hooks.EventWorkspaceStart, botID, err)
-	}
-	return nil
-}
-
 func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig) error {
 	containerID := m.resolveContainerID(ctx, botID)
 
@@ -891,27 +873,8 @@ func (m *Manager) imageRef() string {
 	return m.cfg.ImageRef()
 }
 
-func (m *Manager) defaultLocalWorkspacePath(ctx context.Context, botID string) string {
-	displayName := botID
-	if m.queries != nil {
-		if pgBotID, err := db.ParseUUID(botID); err == nil {
-			if row, err := m.queries.GetBotByID(ctx, pgBotID); err == nil && row.DisplayName.Valid && strings.TrimSpace(row.DisplayName.String) != "" {
-				displayName = row.DisplayName.String
-			}
-		}
-	}
-	if resolver, ok := m.service.(interface {
-		DefaultLocalWorkspacePath(string, string) string
-	}); ok {
-		if path := strings.TrimSpace(resolver.DefaultLocalWorkspacePath(botID, displayName)); path != "" {
-			return path
-		}
-	}
-	return filepath.Join(config.LocalConfig{}.WorkspaceParent(), displayName)
-}
-
 // IsLegacyContainer returns true if the container was created before the
-// bridge runtime injection architecture (uses the legacy "mcp-" prefix).
+// bridge process architecture (uses the legacy "mcp-" prefix).
 // Legacy containers are functional but unreachable from the server (they
 // use TCP gRPC instead of UDS). Users should delete and recreate them.
 func (*Manager) IsLegacyContainer(_ context.Context, containerID string) bool {

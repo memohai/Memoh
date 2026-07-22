@@ -220,12 +220,12 @@ func newLegacyRouteTestManager(t *testing.T, svc runtimeService, cfg config.Work
 
 func TestBuildWorkspaceContainerSpecInjectsBridgeTLSMaterial(t *testing.T) {
 	dataRoot := t.TempDir()
-	runtimeDir := t.TempDir()
+	bridgePath := filepath.Join(t.TempDir(), "bridge")
 	bridgeDir := t.TempDir()
 	expectedClientURI := config.ServerClientSPIFFE("instance-1")
 	m := newLegacyRouteTestManager(t, &legacyRouteTestService{}, config.WorkspaceConfig{
 		DataRoot:   dataRoot,
-		RuntimeDir: runtimeDir,
+		BridgePath: bridgePath,
 	})
 	m.SetBridgeTLS(&BridgeTLSRuntimeOptions{
 		Client:            &bridge.TLSOptions{},
@@ -238,8 +238,17 @@ func TestBuildWorkspaceContainerSpecInjectsBridgeTLSMaterial(t *testing.T) {
 		t.Fatalf("build spec: %v", err)
 	}
 
-	var foundMount bool
+	var foundMount, foundBridgeMount bool
 	for _, mount := range spec.Mounts {
+		if mount.Destination == "/opt/memoh/bridge" {
+			foundBridgeMount = true
+			if mount.Source != bridgePath {
+				t.Fatalf("bridge mount source = %q, want %q", mount.Source, bridgePath)
+			}
+			if strings.Join(mount.Options, ",") != "bind,ro" {
+				t.Fatalf("bridge mount options = %v", mount.Options)
+			}
+		}
 		if mount.Destination == bridgeMTLSMountPath {
 			foundMount = true
 			if mount.Source != bridgeDir {
@@ -252,6 +261,9 @@ func TestBuildWorkspaceContainerSpecInjectsBridgeTLSMaterial(t *testing.T) {
 	}
 	if !foundMount {
 		t.Fatalf("missing bridge TLS mount at %s", bridgeMTLSMountPath)
+	}
+	if !foundBridgeMount {
+		t.Fatal("missing read-only bridge binary mount")
 	}
 
 	env := envMap(spec.Env)
@@ -330,24 +342,6 @@ func TestWorkspaceInfoAddsACPToolsEndpointForProviderContainer(t *testing.T) {
 	}
 	if info.ACPToolsHTTPURL != ACPToolsProxyHTTPURL {
 		t.Fatalf("ACPToolsHTTPURL = %q", info.ACPToolsHTTPURL)
-	}
-}
-
-func TestWorkspaceInfoDoesNotAddACPToolsEndpointForLocalProvider(t *testing.T) {
-	svc := &workspaceInfoProviderTestService{
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
-			DefaultWorkDir: "/tmp/workspace",
-		},
-	}
-	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{DataRoot: t.TempDir()})
-
-	info, err := m.WorkspaceInfo(context.Background(), "bot-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.ACPToolsHTTPURL != "" {
-		t.Fatalf("local workspace should not receive ACP tools endpoint: %#v", info)
 	}
 }
 

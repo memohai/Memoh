@@ -211,7 +211,6 @@ declare module '@memohai/web/store/chat-list' {
 
 declare module '@memohai/web/store/capabilities' {
   export function useCapabilitiesStore(): {
-    localWorkspaceEnabled: boolean
     load: () => Promise<void>
   }
 }

@@ -128,14 +128,7 @@ func (m *Manager) GetResourceLimits(ctx context.Context, botID string) (*Resourc
 		return nil, err
 	}
 
-	workspaceCfg, err := m.botWorkspaceStartPreference(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	workspaceBackend := strings.TrimSpace(workspaceCfg.Backend)
-	if workspaceBackend == "" {
-		workspaceBackend = bridge.WorkspaceBackendContainer
-	}
+	workspaceBackend := bridge.WorkspaceBackendContainer
 
 	result := &ResourceLimitsResult{
 		Desired:          desired,
@@ -203,8 +196,6 @@ func ResourceLimitCapabilitiesFor(workspaceBackend, runtimeBackend string) Resou
 		Storage: ResourceLimitCapability{SoftLimitSupported: true},
 	}
 	switch {
-	case workspaceBackend == bridge.WorkspaceBackendLocal || runtimeBackend == localRuntimeName:
-		return caps
 	case strings.Contains(runtimeBackend, "apple"):
 		return caps
 	case workspaceBackend == "vm" || runtimeBackend == "vm":

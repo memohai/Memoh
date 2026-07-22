@@ -411,7 +411,7 @@ export const getBotsByBotIdContainerDisplay = <ThrowOnError extends boolean = fa
 /**
  * Prepare workspace display dependencies
  *
- * Installs the workspace desktop/VNC/browser packages when needed, starts the display server, and launches the browser.
+ * Validates the image-provided desktop/VNC/browser runtime, starts the display server, and launches the browser.
  */
 export const postBotsByBotIdContainerDisplayPrepare = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerDisplayPrepareData, ThrowOnError, PostBotsByBotIdContainerDisplayPrepareResponse>): Promise<ServerSentEventsResult<PostBotsByBotIdContainerDisplayPrepareResponses>> => (options.client ?? client).sse.post<PostBotsByBotIdContainerDisplayPrepareResponses, PostBotsByBotIdContainerDisplayPrepareErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/display/prepare', ...options });
 

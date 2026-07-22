@@ -24,17 +24,16 @@ const (
 )
 
 type terminalManager struct {
-	ctx         context.Context
-	client      *bridge.Client
-	root        string
-	defaultCwd  string
-	timeout     int32
-	baseEnv     []string
-	cleanEnv    bool
-	unsetEnv    []string
-	virtualRoot bool
-	events      *toolEventEmitter
-	limit       ToolOutputLimit
+	ctx        context.Context
+	client     *bridge.Client
+	root       string
+	defaultCwd string
+	timeout    int32
+	baseEnv    []string
+	cleanEnv   bool
+	unsetEnv   []string
+	events     *toolEventEmitter
+	limit      ToolOutputLimit
 
 	mu        sync.Mutex
 	nextID    int
@@ -81,7 +80,7 @@ type terminal struct {
 	onDone      func(*terminal)
 }
 
-func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaultCwd string, timeoutSeconds int32, baseEnv []string, cleanEnv bool, unsetEnv []string, virtualRoot bool, events *toolEventEmitter) *terminalManager { //nolint:contextcheck // terminal streams must live for the ACP turn, not a single RPC callback.
+func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaultCwd string, timeoutSeconds int32, baseEnv []string, cleanEnv bool, unsetEnv []string, events *toolEventEmitter) *terminalManager { //nolint:contextcheck // terminal streams must live for the ACP turn, not a single RPC callback.
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultTerminalTimeout
 	}
@@ -89,17 +88,16 @@ func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaul
 		ctx = context.Background()
 	}
 	return &terminalManager{
-		ctx:         ctx,
-		client:      client,
-		root:        root,
-		defaultCwd:  defaultCwd,
-		timeout:     timeoutSeconds,
-		baseEnv:     append([]string(nil), baseEnv...),
-		cleanEnv:    cleanEnv,
-		unsetEnv:    append([]string(nil), unsetEnv...),
-		virtualRoot: virtualRoot,
-		events:      events,
-		terminals:   map[string]*terminal{},
+		ctx:        ctx,
+		client:     client,
+		root:       root,
+		defaultCwd: defaultCwd,
+		timeout:    timeoutSeconds,
+		baseEnv:    append([]string(nil), baseEnv...),
+		cleanEnv:   cleanEnv,
+		unsetEnv:   append([]string(nil), unsetEnv...),
+		events:     events,
+		terminals:  map[string]*terminal{},
 	}
 }
 
@@ -225,10 +223,7 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 }
 
 func (m *terminalManager) resolvePath(path string) (string, error) {
-	if m.virtualRoot {
-		return ResolvePathUnderVirtualRoot(m.root, path)
-	}
-	return ResolvePathUnderRoot(m.root, path)
+	return ResolvePathUnderVirtualRoot(m.root, path)
 }
 
 func (m *terminalManager) KillTerminal(_ context.Context, p acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {

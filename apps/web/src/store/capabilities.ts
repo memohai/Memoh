@@ -4,7 +4,6 @@ import { getPing } from '@memohai/sdk'
 
 export const useCapabilitiesStore = defineStore('capabilities', () => {
   const containerBackend = ref('containerd')
-  const localWorkspaceEnabled = ref(false)
   const snapshotSupported = ref(true)
   const serverVersion = ref('')
   const commitHash = ref('')
@@ -16,7 +15,6 @@ export const useCapabilitiesStore = defineStore('capabilities', () => {
       const { data } = await getPing()
       if (data) {
         containerBackend.value = data.container_backend ?? 'containerd'
-        localWorkspaceEnabled.value = data.local_workspace_enabled === true
         snapshotSupported.value = data.snapshot_supported !== false
         serverVersion.value = data.version ?? ''
         commitHash.value = data.commit_hash ?? ''
@@ -27,5 +25,5 @@ export const useCapabilitiesStore = defineStore('capabilities', () => {
     loaded.value = true
   }
 
-  return { containerBackend, localWorkspaceEnabled, snapshotSupported, serverVersion, commitHash, loaded, load }
+  return { containerBackend, snapshotSupported, serverVersion, commitHash, loaded, load }
 })

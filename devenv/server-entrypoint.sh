@@ -1,14 +1,6 @@
 #!/bin/sh
 set -e
 
-# Toolkit is volume-mounted from the host (.toolkit/).
-# If missing, the user forgot to run the install script.
-if [ ! -d /opt/memoh/runtime/toolkit/node-glibc ]; then
-  echo "ERROR: Toolkit not found at /opt/memoh/runtime/toolkit/." >&2
-  echo "       Run ./docker/toolkit/install.sh before starting the dev environment." >&2
-  exit 1
-fi
-
 DEV_TZ="${TZ:-UTC}"
 if [ ! -f "/usr/share/zoneinfo/$DEV_TZ" ]; then
   echo "WARN: timezone '$DEV_TZ' not found, falling back to UTC." >&2
@@ -44,7 +36,7 @@ containerd &
 CONTAINERD_PID=$!
 
 echo "Waiting for containerd..."
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   if ctr version >/dev/null 2>&1; then
     break
   fi
@@ -56,6 +48,17 @@ if ! ctr version >/dev/null 2>&1; then
   exit 1
 fi
 echo "containerd is running (pid $CONTAINERD_PID)"
+
+workspace_image_archive=/opt/memoh/dev-images/workspace-debian.tar
+if [ ! -r "$workspace_image_archive" ]; then
+  echo "ERROR: Development workspace image archive is missing: $workspace_image_archive" >&2
+  echo "       Run 'mise run dev:workspace-image' before starting the development server." >&2
+  exit 1
+fi
+
+echo "Importing development workspace image..."
+ctr --namespace "${MEMOH_CONTAINERD_NAMESPACE:-default}" images import "$workspace_image_archive"
+echo "Development workspace image is ready."
 
 # Build bridge binary into runtime directory (first boot)
 echo "Building bridge binary..."

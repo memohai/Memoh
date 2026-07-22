@@ -9,7 +9,7 @@ progress() {
   message="$*"
   printf '%s{"type":"progress","percent":%s,"step":"%s","message":"%s"}\n' "$prefix" "$percent" "$step" "$message"
 }
-complete() {
+emit_complete() {
   printf '%s{"type":"complete","percent":100,"step":"complete","message":"Display is ready"}\n' "$prefix"
 }
 has_cmd() {
@@ -37,42 +37,6 @@ find_browser() {
 }
 has_desktop() {
   has_cmd startxfce4 || has_cmd xfce4-session || has_cmd xfwm4 || [ -x /opt/memoh/toolkit/display/bin/twm ]
-}
-has_toolkit() {
-  [ -x /opt/memoh/toolkit/display/bin/Xvnc ] || [ -x /opt/memoh/toolkit/display/bin/twm ]
-}
-needs_install() {
-  find_xvnc >/dev/null 2>&1 && find_browser >/dev/null 2>&1 && has_desktop
-}
-os_id() {
-  if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    printf '%s\n' "${ID:-unknown}"
-    return
-  fi
-  printf unknown
-}
-os_like() {
-  if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    printf '%s %s\n' "${ID:-}" "${ID_LIKE:-}"
-    return
-  fi
-  printf unknown
-}
-is_debian_like() {
-  case " $(os_like) " in
-    *" debian "*|*" ubuntu "*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-is_alpine() {
-  case " $(os_like) " in
-    *" alpine "*) return 0 ;;
-    *) return 1 ;;
-  esac
 }
 RFB_PORT=5999
 XVNC_GEOMETRY="${MEMOH_DISPLAY_GEOMETRY:-1280x960}"
@@ -215,13 +179,11 @@ display_socket_ready() {
   xvnc_running && [ -S "$X_SOCKET" ] && awk -v port="$(printf '%04X' "$RFB_PORT")" 'toupper($2) ~ ":" port "$" && $4 == "0A" { found = 1 } END { exit found ? 0 : 1 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null
 }
 desktop_style_current() {
-  /bin/sh /tmp/memoh-desktop-apply-style.sh --check >/dev/null 2>&1
+  /bin/sh /opt/memoh/scripts/display-apply-style.sh --check >/dev/null 2>&1
 }
 display_ready() {
   display_socket_ready && find_browser >/dev/null 2>&1 && has_desktop && desktop_style_current
 }
-
-. /tmp/memoh-desktop-install.sh
 
 prepare_lock=/tmp/memoh-display-prepare.lock
 if mkdir "$prepare_lock" 2>/dev/null; then
@@ -231,42 +193,28 @@ else
   wait_i=0
   while [ -d "$prepare_lock" ] && [ "$wait_i" -lt 180 ]; do
     if display_ready; then
-      complete
+      emit_complete
       exit 0
     fi
     sleep 1
     wait_i=$((wait_i + 1))
   done
   if display_ready; then
-    complete
+    emit_complete
     exit 0
   fi
   echo "Another desktop preparation is still running." >&2
   exit 1
 fi
 
-progress 10 checking "Checking display toolkit"
-if ! has_toolkit; then
-  progress 14 toolkit "Workspace display toolkit is not installed"
-fi
-
-if needs_install; then
-  progress 18 checking "Display packages already installed"
-else
-  if is_debian_like; then
-    install_debian
-  elif is_alpine; then
-    install_alpine
-  else
-    echo "Unsupported workspace OS: $(os_id). Install the Memoh workspace toolkit, or use a Debian/Ubuntu/Alpine image for automatic desktop preparation." >&2
-    exit 1
-  fi
-fi
+progress 10 checking "Checking display runtime"
 
 XVNC="$(find_xvnc || true)"
 BROWSER="$(find_browser || true)"
-[ -n "$XVNC" ] || { echo "Xvnc is still unavailable after installation. Install the Memoh workspace toolkit or a TigerVNC package." >&2; exit 1; }
-[ -n "$BROWSER" ] || { echo "Chrome or Chromium is still unavailable after installation." >&2; exit 1; }
+[ -n "$XVNC" ] || { echo "Workspace image contract violation: Xvnc is unavailable." >&2; exit 1; }
+[ -n "$BROWSER" ] || { echo "Workspace image contract violation: Chrome or Chromium is unavailable." >&2; exit 1; }
+has_desktop || { echo "Workspace image contract violation: desktop session runtime is unavailable." >&2; exit 1; }
+progress 18 checking "Display runtime is available"
 
 export DISPLAY=:99
 mkdir -p /run/memoh /tmp/.X11-unix
@@ -331,7 +279,7 @@ fi
 start_desktop_session
 
 progress 90 styling "Applying desktop style"
-/bin/sh /tmp/memoh-desktop-apply-style.sh --ensure
+/bin/sh /opt/memoh/scripts/display-apply-style.sh --ensure
 
 progress 94 browser "Launching browser"
 if ! browser_cdp_running; then
@@ -342,5 +290,5 @@ if ! browser_cdp_running; then
   GTK_A11Y=1 nohup "$BROWSER" --no-sandbox --disable-dev-shm-usage --disable-gpu --no-first-run --no-default-browser-check --force-renderer-accessibility --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --remote-allow-origins='*' --user-data-dir=/tmp/memoh-display-browser about:blank >/tmp/memoh-browser.log 2>&1 &
 fi
 
-complete
+emit_complete
 exit 0

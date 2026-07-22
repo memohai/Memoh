@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Memoh is a multi-member, structured long-memory AI agent platform with isolated workspace runtimes. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), DingTalk, WeChat, Matrix, Email, and more. Each bot can use an independent container workspace, or trusted local workspace support when explicitly enabled on the server, allowing it to edit files, execute commands, run tools, and build itself while keeping runtime ownership explicit.
+Memoh is a multi-member, structured long-memory AI agent platform with isolated workspace runtimes. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), DingTalk, WeChat, Matrix, Email, and more. Each bot can use an independent container workspace to edit files, execute commands, run tools, and build itself while keeping runtime ownership explicit.
 
 The public documentation site is maintained separately in `memohai/memoh-docs`.
 
@@ -21,7 +21,7 @@ The native desktop client is a separate distribution boundary for Memoh Cloud or
 Infrastructure dependencies:
 - **PostgreSQL** — Relational data storage
 - **Qdrant** — Vector database for memory semantic search
-- **Workspace runtime** — Isolated containers per bot via Docker, containerd v2, or Apple Virtualization, plus trusted local workspaces when server configuration enables them
+- **Workspace runtime** — Isolated containers per bot via Docker, containerd v2, or Apple Virtualization
 
 ## Tech Stack
 
@@ -33,7 +33,7 @@ Infrastructure dependencies:
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)
 - **MCP**: modelcontextprotocol/go-sdk
-- **Containers / Workspaces**: Docker / containerd v2 / Apple Virtualization adapters, plus trusted local workspace routing
+- **Containers / Workspaces**: Docker / containerd v2 / Apple Virtualization adapters
 
 ### Frontend (TypeScript)
 - **Framework**: Vue 3 (Composition API)
@@ -275,7 +275,7 @@ Bot persona templates (not developer guides):
 | `mise run dev:down` | Stop the dev environment |
 | `mise run dev:logs` | View dev environment logs |
 | `mise run dev:restart` | Restart a service (e.g. `-- server`) |
-| `mise run setup` | Install dependencies + workspace toolkit |
+| `mise run setup` | Install project dependencies and run code generation |
 | `mise run sqlc-generate` | Regenerate PostgreSQL sqlc code after modifying SQL files |
 | `mise run swagger-generate` | Generate Swagger documentation |
 | `mise run sdk-generate` | Generate TypeScript SDK (depends on swagger-generate) |
@@ -292,7 +292,7 @@ Bot persona templates (not developer guides):
 | `mise run lint:fix` | Run all linters with auto-fix |
 | `mise run release` | Release new version (bumpp) |
 | `mise run install-socktainer` | Install socktainer (macOS container backend) |
-| `mise run install-workspace-toolkit` | Install workspace toolkit (bridge binary etc.) |
+| `mise run dev:workspace-image` | Build and export the canonical workspace image for development |
 
 ### Dev Component Wall & UI Contract Guard
 
@@ -378,12 +378,12 @@ PostgreSQL migrations live in `db/postgres/migrations/`:
 
 ### Container / Workspace Management
 
-- Each bot can have an isolated **workspace container** for file editing, command execution, MCP tool hosting, and optional headed browser/desktop display sessions. Trusted local workspaces can run directly on the host when the server enables them.
-- Container workspaces communicate with the host via a **gRPC bridge** over Unix Domain Sockets (UDS), not TCP. Local workspaces are routed through the same higher-level workspace interfaces but skip container isolation.
-- The bridge binary (`cmd/bridge/`) runs inside each container, mounting runtime binaries from `$WORKSPACE_RUNTIME_DIR` and UDS sockets from `/run/memoh/`. When display is enabled it can supervise Xvnc and a headed Chrome/Chromium process with CDP on port `9222`; the web UI then exposes a Display pane backed by screenshots/WebRTC/input forwarding. Treat VNC as the container desktop transport, not as the whole browser automation feature.
-- Container images are standard base images (debian, alpine, ubuntu, etc.) — no dedicated MCP Docker image needed.
-- `internal/workspace/` manages workspace lifecycle (create, start, stop, reconcile), maintains a bridge gRPC connection pool for container runtimes, and uses `RuntimeRouter` to combine container backends with local workspaces when enabled.
-- `internal/container/` provides the container runtime abstraction layer and adapter subpackages (`docker`, `containerd`, `apple`). Snapshot/storage semantics differ by backend; do not assume containerd-style snapshot lineage for Docker, local, or archive-backed flows.
+- Each bot can have an isolated **workspace container** for file editing, command execution, MCP tool hosting, and optional headed browser/desktop display sessions.
+- Container workspaces communicate with the host via a **gRPC bridge** over Unix Domain Sockets (UDS), not TCP.
+- The bridge binary (`cmd/bridge/`) runs inside each container as a read-only file mount, with UDS sockets under `/run/memoh/`. Toolkit binaries, display dependencies, and runtime scripts come from the versioned workspace image contract. When display is enabled the bridge can supervise Xvnc and a headed Chrome/Chromium process with CDP on port `9222`; the web UI then exposes a Display pane backed by screenshots/WebRTC/input forwarding. Treat VNC as the container desktop transport, not as the whole browser automation feature.
+- The canonical workspace image is built from `docker/Dockerfile.workspace`. Compatible custom/provider images must expose the same `/opt/memoh/workspace-contract.json`, toolkit, and script paths.
+- `internal/workspace/` manages workspace lifecycle (create, start, stop, reconcile) and maintains a bridge gRPC connection pool for container runtimes.
+- `internal/container/` provides the container runtime abstraction layer and adapter subpackages (`docker`, `containerd`, `apple`). Snapshot/storage semantics differ by backend; do not assume containerd-style snapshot lineage for Docker or archive-backed flows.
 - SSE-based progress feedback is provided during container image pull and creation.
 
 ### Recent Major Subsystems
@@ -468,9 +468,8 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[admin]` — Admin account credentials
 - `[auth]` — JWT authentication settings
 - `[database]` — Database backend selection (`postgres`)
-- `[container]` — Workspace container backend selection (`docker`, `containerd`, `apple`) and common workspace image/data/runtime/CNI settings
+- `[container]` — Workspace container backend selection (`docker`, `containerd`, `apple`) and common workspace image/data/bridge/CNI settings
 - `[containerd]` / `[docker]` / `[apple]` — Backend-specific runtime configuration
-- `[local]` — Trusted local workspace support when explicitly enabled (not container-isolated)
 - `[postgres]` — PostgreSQL connection
 - `[qdrant]` — Qdrant vector database connection
 - `[sparse]` — Sparse (BM25) search service connection

@@ -182,8 +182,8 @@ const primitiveRungs = [
           </BackendCard>
 
           <BackendCard
-            name="Local Runtime"
-            subtitle="Trusted desktop workspace"
+            name="Remote Runtime"
+            subtitle="Connected computer workspace"
           >
             <template #leading>
               <span class="flex size-9 items-center justify-center rounded-full bg-muted text-foreground">

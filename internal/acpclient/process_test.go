@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net"
-	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -26,29 +24,6 @@ func TestBuildShellCommandQuotesCommandAndArgs(t *testing.T) {
 	want := `codex-acp --flag 'value with spaces' 'it'\''s' '$HOME'`
 	if got != want {
 		t.Fatalf("buildShellCommand() = %q, want %q", got, want)
-	}
-}
-
-func TestPrepareProcessEnvLocalPassThrough(t *testing.T) {
-	client, server := newRecordingBridgeClient(t)
-	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
-		Backend: WorkspaceBackendLocal,
-		Env:     []string{"CUSTOM_FLAG=enabled"},
-	})
-	if err != nil {
-		t.Fatalf("prepareProcessEnv() error = %v", err)
-	}
-	// Local processes inherit the host env and get our managed overrides
-	// appended; HOME/PATH are never touched so the host toolchain keeps working.
-	assertEnvHas(t, env, "CUSTOM_FLAG=enabled")
-	if envHasKey(env, "HOME") || envHasKey(env, "PATH") {
-		t.Fatalf("local env must not override HOME/PATH: %v", env)
-	}
-	if cleanup != nil {
-		t.Fatalf("local cleanup should be nil")
-	}
-	if got := len(server.records()); got != 0 {
-		t.Fatalf("local backend executed %d bridge commands, want 0", got)
 	}
 }
 
@@ -100,168 +75,6 @@ func TestPrepareProcessEnvContainerCodexWritesNoClaudeSettings(t *testing.T) {
 		if strings.HasSuffix(write.Path, "/.claude/settings.json") {
 			t.Fatalf("Codex setup unexpectedly wrote Claude settings: %#v", server.writes())
 		}
-	}
-}
-
-func TestPrepareProcessEnvLocalSelfHasNoOverrides(t *testing.T) {
-	client, _ := newRecordingBridgeClient(t)
-	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
-		Backend:       WorkspaceBackendLocal,
-		AgentID:       "codex",
-		SetupMode:     SetupModeSelf,
-		WorkspaceRoot: "/home/user/ws",
-	})
-	if err != nil {
-		t.Fatalf("prepareProcessEnv() error = %v", err)
-	}
-	if env != nil {
-		t.Fatalf("local self env = %v, want nil (host login is used as-is)", env)
-	}
-	if cleanup != nil {
-		t.Fatalf("local cleanup should be nil")
-	}
-}
-
-func TestPrepareProcessEnvLocalSelfPreservesNPMCacheOnly(t *testing.T) {
-	client, _ := newRecordingBridgeClient(t)
-	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
-		Backend:       WorkspaceBackendLocal,
-		AgentID:       "codex",
-		SetupMode:     SetupModeSelf,
-		WorkspaceRoot: "/home/user/ws",
-		Env: []string{
-			"NPM_CONFIG_CACHE=/memoh/acp/npm-cache",
-			"OPENAI_API_KEY=sk-should-not-pass",
-			"CODEX_HOME=/managed/codex",
-			"CUSTOM_FLAG=should-not-pass",
-		},
-	})
-	if err != nil {
-		t.Fatalf("prepareProcessEnv() error = %v", err)
-	}
-	if cleanup != nil {
-		t.Fatalf("local cleanup should be nil")
-	}
-	if got := envValue(env, "NPM_CONFIG_CACHE"); got != "/memoh/acp/npm-cache" {
-		t.Fatalf("local self NPM_CONFIG_CACHE = %q, env=%v", got, env)
-	}
-	for _, key := range []string{"OPENAI_API_KEY", "CODEX_HOME", "CUSTOM_FLAG"} {
-		if envHasKey(env, key) {
-			t.Fatalf("local self env unexpectedly preserved %s: %v", key, env)
-		}
-	}
-}
-
-func TestPrepareProcessEnvLocalCodexSetsScopedCodexHome(t *testing.T) {
-	client, _ := newRecordingBridgeClient(t)
-	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
-		Backend:       WorkspaceBackendLocal,
-		AgentID:       "codex",
-		SetupMode:     SetupModeOAuth,
-		WorkspaceRoot: "/home/user/ws",
-	})
-	if err != nil {
-		t.Fatalf("prepareProcessEnv() error = %v", err)
-	}
-	if cleanup != nil {
-		t.Fatalf("local cleanup should be nil")
-	}
-	if got := envValue(env, "CODEX_HOME"); got != "/home/user/ws/.codex" {
-		t.Fatalf("local Codex CODEX_HOME = %q, want %q", got, "/home/user/ws/.codex")
-	}
-	if envHasKey(env, "HOME") {
-		t.Fatalf("local Codex must not override HOME: %v", env)
-	}
-}
-
-func TestPrepareProcessEnvLocalCodexRequiresWorkspaceRoot(t *testing.T) {
-	client, _ := newRecordingBridgeClient(t)
-	// Without a workspace root, BYOK Codex cannot isolate CODEX_HOME.
-	_, _, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
-		Backend:   WorkspaceBackendLocal,
-		AgentID:   "codex",
-		SetupMode: SetupModeOAuth,
-	})
-	if err == nil {
-		t.Fatalf("prepareProcessEnv() error = nil, want error for empty WorkspaceRoot")
-	}
-}
-
-// TestPrepareProcessEnvLocalClaudeSetsScopedConfigDir pins the local Claude
-// isolation for managed modes.
-func TestPrepareProcessEnvLocalClaudeSetsScopedConfigDir(t *testing.T) {
-	client, server := newRecordingBridgeClient(t)
-	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
-		Backend:       WorkspaceBackendLocal,
-		AgentID:       "claude-code",
-		SetupMode:     SetupModeAPIKey,
-		Env:           []string{"ANTHROPIC_API_KEY=sk-test", "CLAUDE_CONFIG_DIR=/home/user/.claude"},
-		WorkspaceRoot: "/home/user/ws",
-	})
-	if err != nil {
-		t.Fatalf("prepareProcessEnv() error = %v", err)
-	}
-	if cleanup != nil {
-		t.Fatalf("local cleanup should be nil")
-	}
-	wantDir := filepath.Join("/home/user/ws", ".memoh-claude")
-	if got := envValue(env, "CLAUDE_CONFIG_DIR"); got != wantDir {
-		t.Fatalf("local Claude CLAUDE_CONFIG_DIR = %q, want %q", got, wantDir)
-	}
-	if envHasKeyValue(env, "CLAUDE_CONFIG_DIR", "/home/user/.claude") {
-		t.Fatalf("host CLAUDE_CONFIG_DIR must be replaced, not kept: %v", env)
-	}
-	if envHasKey(env, "HOME") {
-		t.Fatalf("local Claude must not override HOME: %v", env)
-	}
-	// The isolated dir is seeded before the first session starts.
-	writes := server.writes()
-	if len(writes) != 1 || writes[0].Path != path.Join(wantDir, "settings.json") {
-		t.Fatalf("managed config writes = %#v, want settings.json under %q", writes, wantDir)
-	}
-	if !strings.Contains(string(writes[0].Content), `"ask"`) {
-		t.Fatalf("managed settings content = %s, want ask rule", writes[0].Content)
-	}
-}
-
-func TestPrepareProcessEnvLocalClaudeRequiresWorkspaceRoot(t *testing.T) {
-	client, _ := newRecordingBridgeClient(t)
-	// Without a workspace root, managed local Claude cannot isolate
-	// CLAUDE_CONFIG_DIR.
-	_, _, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
-		Backend:   WorkspaceBackendLocal,
-		AgentID:   "claude-code",
-		SetupMode: SetupModeOAuth,
-	})
-	if err == nil {
-		t.Fatalf("prepareProcessEnv() error = nil, want error for empty WorkspaceRoot")
-	}
-	if !strings.Contains(err.Error(), "CLAUDE_CONFIG_DIR") {
-		t.Fatalf("error = %v, want CLAUDE_CONFIG_DIR isolation error", err)
-	}
-}
-
-func TestPrepareProcessEnvLocalClaudeSelfKeepsHostConfig(t *testing.T) {
-	client, server := newRecordingBridgeClient(t)
-	// Self mode means "use the host's own Claude login and configuration";
-	// no override, no managed settings write.
-	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
-		Backend:       WorkspaceBackendLocal,
-		AgentID:       "claude-code",
-		SetupMode:     SetupModeSelf,
-		WorkspaceRoot: "/home/user/ws",
-	})
-	if err != nil {
-		t.Fatalf("prepareProcessEnv() error = %v", err)
-	}
-	if cleanup != nil {
-		t.Fatalf("local cleanup should be nil")
-	}
-	if env != nil {
-		t.Fatalf("local self env = %v, want nil (host config used as-is)", env)
-	}
-	if writes := server.writes(); len(writes) != 0 {
-		t.Fatalf("self mode writes = %#v, want none", writes)
 	}
 }
 
@@ -440,44 +253,6 @@ func TestPrepareProcessEnvContainerHermesManagedRequiresHermesHome(t *testing.T)
 	}
 }
 
-func TestPrepareProcessEnvLocalHermesManagedRequiresHermesHome(t *testing.T) {
-	client, _ := newRecordingBridgeClient(t)
-	_, _, err := prepareProcessEnv(context.Background(), client, "/workspace", processOptions{
-		Backend:   WorkspaceBackendLocal,
-		AgentID:   "hermes",
-		SetupMode: SetupModeAPIKey,
-	})
-	if err == nil || !strings.Contains(err.Error(), "HERMES_HOME") {
-		t.Fatalf("prepareProcessEnv() error = %v, want HERMES_HOME isolation error", err)
-	}
-}
-
-func TestPrepareProcessEnvLocalHermesManagedFiltersHostKeys(t *testing.T) {
-	client, _ := newRecordingBridgeClient(t)
-	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/workspace", processOptions{
-		Backend:    WorkspaceBackendLocal,
-		AgentID:    "hermes",
-		SetupMode:  SetupModeAPIKey,
-		Env:        []string{"HERMES_HOME=/host/hermes", "MEMOH_HERMES_API_KEY=sk-host-memoh", "OPENAI_API_KEY=sk-host", "OPENAI_BASE_URL=https://host-openai.example/v1", "OPENROUTER_BASE_URL=https://host-router.example/api", "CUSTOM_FLAG=1"},
-		HermesHome: "/memoh/local/acp/hermes/bot-1",
-	})
-	if err != nil {
-		t.Fatalf("prepareProcessEnv() error = %v", err)
-	}
-	if cleanup != nil {
-		t.Fatalf("local Hermes managed cleanup should be nil")
-	}
-	if got := envValue(env, "HERMES_HOME"); got != "/memoh/local/acp/hermes/bot-1" {
-		t.Fatalf("HERMES_HOME = %q, env=%v", got, env)
-	}
-	if envHasKey(env, "MEMOH_HERMES_API_KEY") || envHasKey(env, "OPENAI_API_KEY") || envHasKey(env, "OPENAI_BASE_URL") || envHasKey(env, "OPENROUTER_BASE_URL") {
-		t.Fatalf("host provider env leaked into local env: %v", env)
-	}
-	if !envHasKeyValue(env, "CUSTOM_FLAG", "1") {
-		t.Fatalf("custom env was not preserved: %v", env)
-	}
-}
-
 func TestStartBridgeProcessHermesManagedPassesCleanEnvControls(t *testing.T) {
 	client, server := newRecordingBridgeClient(t)
 	proc, err := startBridgeProcess(context.Background(), client, "hermes-acp", nil, "/data", time.Minute, processOptions{
@@ -516,7 +291,6 @@ func TestCreateTerminalFiltersBlockedHermesEnv(t *testing.T) {
 		[]string{"HERMES_HOME=/data/.memoh-hermes"},
 		true,
 		HermesManagedUnsetEnvKeys(),
-		false,
 		nil,
 	)
 	term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
@@ -550,42 +324,6 @@ func TestCreateTerminalFiltersBlockedHermesEnv(t *testing.T) {
 	}
 	if envHasKey(record.Env, "MEMOH_HERMES_API_KEY") || envHasKey(record.Env, "OPENAI_API_KEY") || envHasKey(record.Env, "OPENROUTER_API_KEY") {
 		t.Fatalf("terminal env leaked provider key: %#v", record.Env)
-	}
-	for _, key := range []string{"HERMES_*", "MEMOH_HERMES_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "GOOGLE_API_KEY", "GOOGLE_BASE_URL", "GEMINI_API_KEY", "GEMINI_BASE_URL"} {
-		if !hasString(record.UnsetEnv, key) {
-			t.Fatalf("terminal UnsetEnv = %#v, missing %q", record.UnsetEnv, key)
-		}
-	}
-}
-
-func TestCreateTerminalPassesUnsetEnvWithoutCleanEnv(t *testing.T) {
-	client, server := newRecordingBridgeClient(t)
-	manager := newTerminalManager(
-		context.Background(),
-		client,
-		"/workspace",
-		"/workspace",
-		7,
-		[]string{"HERMES_HOME=/memoh/local/acp/hermes/bot-1"},
-		false,
-		HermesManagedUnsetEnvKeys(),
-		false,
-		nil,
-	)
-	term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{Command: "env"}, nil, terminalRuntimeScope{})
-	if err != nil {
-		t.Fatalf("CreateTerminal() error = %v", err)
-	}
-	if _, err := manager.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
-		t.Fatalf("WaitForTerminalExit() error = %v", err)
-	}
-	server.waitForRecordWithTimeout(t, 7, time.Second)
-	record, ok := findRecordWithTimeout(server.records(), 7)
-	if !ok {
-		t.Fatalf("missing terminal exec record: %#v", server.records())
-	}
-	if record.CleanEnv {
-		t.Fatalf("terminal CleanEnv = true, want false for local managed env")
 	}
 	for _, key := range []string{"HERMES_*", "MEMOH_HERMES_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "GOOGLE_API_KEY", "GOOGLE_BASE_URL", "GEMINI_API_KEY", "GEMINI_BASE_URL"} {
 		if !hasString(record.UnsetEnv, key) {

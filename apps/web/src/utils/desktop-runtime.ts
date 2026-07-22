@@ -12,11 +12,6 @@ export interface DesktopApiBridge {
   }
 }
 
-export interface LocalWorkspaceCreatePolicyInput {
-  serverLocalWorkspaceEnabled: boolean
-  host: HostSurface
-}
-
 export function desktopApiBridge(): DesktopApiBridge | null {
   if (typeof window === 'undefined') return null
   const bridge = (window as unknown as { api?: DesktopApiBridge }).api
@@ -26,9 +21,4 @@ export function desktopApiBridge(): DesktopApiBridge | null {
 export function hostSurface(): HostSurface {
   const bridge = desktopApiBridge()
   return typeof bridge?.desktop?.getServerStatus === 'function' ? 'desktop' : 'web'
-}
-
-export function canCreateLocalWorkspace(input: LocalWorkspaceCreatePolicyInput): boolean {
-  if (!input.serverLocalWorkspaceEnabled) return false
-  return input.host === 'web'
 }

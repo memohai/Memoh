@@ -11,28 +11,30 @@ import (
 type Code string
 
 const (
-	CodeBotNameTaken                    Code = "bot.name_taken"
-	CodeChannelRuntimeUnavailable       Code = "channel.runtime_unavailable"
-	CodeWorkspaceUnreachable            Code = "workspace.unreachable"
-	CodeWorkspaceDisplayPrepareFailed   Code = "workspace.display_prepare_failed"
-	CodeProviderTemplateNotFound        Code = "provider_template.not_found"
-	CodeProviderTemplateDomainInvalid   Code = "provider_template.domain_invalid"
-	CodeProviderTemplateDomainMismatch  Code = "provider_template.domain_mismatch"
-	CodeProviderTemplateOperationFailed Code = "provider_template.operation_failed"
-	CodeProviderNameTaken               Code = "provider.name_taken"
-	CodeProviderTemplateRequestInvalid  Code = "provider_template.request_invalid"
-	CodeSearchProviderTypeConflict      Code = "search_provider.type_conflict"
-	CodeProfileRequestInvalid           Code = "profile.request_invalid"
-	CodeProfileTitleModelInvalid        Code = "profile.title_model_invalid"
-	CodeProfileUpdateFailed             Code = "profile.update_failed"
-	CodeACPRuntimeNotFound              Code = "acp.runtime_not_found"
-	CodeACPModelSelectionUnsupported    Code = "acp.model_selection_unsupported"
-	CodeACPModelIDRequired              Code = "acp.model_id_required"
-	CodeACPModelUnavailable             Code = "acp.model_unavailable"
-	CodeACPReasoningUnsupported         Code = "acp.reasoning_selection_unsupported"
-	CodeACPReasoningEffortRequired      Code = "acp.reasoning_effort_required"
-	CodeACPReasoningUnavailable         Code = "acp.reasoning_effort_unavailable"
-	CodeACPConfigUpdateFailed           Code = "acp.config_update_failed"
+	CodeBotNameTaken                     Code = "bot.name_taken"
+	CodeChannelRuntimeUnavailable        Code = "channel.runtime_unavailable"
+	CodeWorkspaceUnreachable             Code = "workspace.unreachable"
+	CodeWorkspaceImageIncompatible       Code = "workspace.image_incompatible"
+	CodeWorkspaceTemplateBootstrapFailed Code = "workspace.template_bootstrap_failed"
+	CodeWorkspaceDisplayPrepareFailed    Code = "workspace.display_prepare_failed"
+	CodeProviderTemplateNotFound         Code = "provider_template.not_found"
+	CodeProviderTemplateDomainInvalid    Code = "provider_template.domain_invalid"
+	CodeProviderTemplateDomainMismatch   Code = "provider_template.domain_mismatch"
+	CodeProviderTemplateOperationFailed  Code = "provider_template.operation_failed"
+	CodeProviderNameTaken                Code = "provider.name_taken"
+	CodeProviderTemplateRequestInvalid   Code = "provider_template.request_invalid"
+	CodeSearchProviderTypeConflict       Code = "search_provider.type_conflict"
+	CodeProfileRequestInvalid            Code = "profile.request_invalid"
+	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
+	CodeProfileUpdateFailed              Code = "profile.update_failed"
+	CodeACPRuntimeNotFound               Code = "acp.runtime_not_found"
+	CodeACPModelSelectionUnsupported     Code = "acp.model_selection_unsupported"
+	CodeACPModelIDRequired               Code = "acp.model_id_required"
+	CodeACPModelUnavailable              Code = "acp.model_unavailable"
+	CodeACPReasoningUnsupported          Code = "acp.reasoning_selection_unsupported"
+	CodeACPReasoningEffortRequired       Code = "acp.reasoning_effort_required"
+	CodeACPReasoningUnavailable          Code = "acp.reasoning_effort_unavailable"
+	CodeACPConfigUpdateFailed            Code = "acp.config_update_failed"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -59,6 +61,14 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The workspace could not be reached.",
+	},
+	CodeWorkspaceImageIncompatible: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "The workspace image is incompatible with this version of Memoh.",
+	},
+	CodeWorkspaceTemplateBootstrapFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The workspace files could not be initialized.",
 	},
 	// Distinct from workspace.unreachable: preparation started but broke
 	// mid-flight, so "could not be reached" would mislead the user.

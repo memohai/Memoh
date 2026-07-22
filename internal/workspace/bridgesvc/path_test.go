@@ -12,7 +12,7 @@ import (
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
-func TestLocalPathResolverMapsDataMountToWorkspaceRoot(t *testing.T) {
+func TestPathResolverMapsDataMountToWorkspaceRoot(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -39,7 +39,7 @@ func TestLocalPathResolverMapsDataMountToWorkspaceRoot(t *testing.T) {
 	}
 }
 
-func TestLocalPathResolverAllowsHostAbsolutePath(t *testing.T) {
+func TestPathResolverAllowsHostAbsolutePath(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()

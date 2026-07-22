@@ -29,16 +29,13 @@ type Profile struct {
 	// launcher whose version can be refreshed independently of Memoh. The
 	// session pool resolves the dist-tag once per bot for the lifetime of the
 	// server process, launches the resulting exact package version, and falls
-	// back to Command/Args (or
-	// LocalCommand/LocalArgs) when lookup or startup fails. DynamicArgs are the
+	// back to Command/Args when lookup or startup fails. DynamicArgs are the
 	// arguments inserted before the exact package spec.
 	DynamicCommand string
 	DynamicArgs    []string
 	DynamicPackage string
 	Command        string
 	Args           []string
-	LocalCommand   string
-	LocalArgs      []string
 	// SessionModeID, when set, is the ACP session mode Memoh pins right after
 	// session/new so tool permissions flow through ACP regardless of ambient
 	// agent-side configuration (e.g. a host ~/.claude/settings.json).
@@ -104,8 +101,8 @@ type AgentSetup struct {
 
 // MissingRequiredManagedField returns the first profile field required for the
 // selected setup mode that has not been configured. It mirrors the frontend
-// lightweight validation and intentionally does not inspect workspace-local
-// OAuth/token files; runtime readiness owns those checks.
+// lightweight validation and intentionally does not inspect OAuth/token files
+// inside the workspace; runtime readiness owns those checks.
 func MissingRequiredManagedField(profile Profile, setup AgentSetup) (ManagedField, bool) {
 	mode := normalizeSetupMode(setup.Mode, setup.Managed)
 	if mode == setupModeSelf {
@@ -160,8 +157,7 @@ func MissingRequiredManagedField(profile Profile, setup AgentSetup) (ManagedFiel
 
 // MissingRequiredManagedFieldForPreflight applies only the checks that can be
 // decided without a workspace backend. Legacy metadata with no explicit
-// setup_mode is resolved by the runtime pool because local workspaces default to
-// self while container workspaces default to api_key.
+// setup_mode is resolved by the runtime pool because legacy metadata may omit it.
 func MissingRequiredManagedFieldForPreflight(profile Profile, setup AgentSetup) (ManagedField, bool) {
 	if !setup.ModeSet {
 		return ManagedField{}, false
@@ -213,12 +209,7 @@ func codexProfile() Profile {
 		},
 		DynamicPackage:         "@agentclientprotocol/codex-acp",
 		Command:                "codex-acp",
-		LocalCommand:           "npx",
 		DefaultReasoningEffort: "medium",
-		LocalArgs: []string{
-			"-y",
-			"@agentclientprotocol/codex-acp@1.1.4",
-		},
 		ManagedFields: []ManagedField{
 			{
 				ID:          "api_key",
@@ -236,7 +227,7 @@ func codexProfile() Profile {
 				Help:        "Optional Codex provider base URL.",
 			},
 		},
-		SupportedBackends: []string{"local", "container"},
+		SupportedBackends: []string{"container"},
 		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
 	}
 }
@@ -261,13 +252,6 @@ func claudeCodeProfile() Profile {
 		// older/custom adapters that omit ACP's thought_level category.
 		ReasoningConfigID:      "effort",
 		DefaultReasoningEffort: "high",
-		LocalCommand:           "npx",
-		LocalArgs: []string{
-			"-y",
-			// Keep this aligned with docker/toolkit/install.sh. Version 0.59.0
-			// regresses session startup and model switching (upstream #880).
-			"@agentclientprotocol/claude-agent-acp@0.58.1",
-		},
 		ManagedFields: []ManagedField{
 			{
 				ID:          "api_key",
@@ -295,18 +279,17 @@ func claudeCodeProfile() Profile {
 				Help:        "Used by OAuth setup to authenticate Claude Code.",
 			},
 		},
-		SupportedBackends: []string{"local", "container"},
+		SupportedBackends: []string{"container"},
 		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
 	}
 }
 
 func hermesProfile() Profile {
 	return Profile{
-		ID:           AgentHermesID,
-		DisplayName:  AgentHermesName,
-		Description:  "Hermes Agent ACP adapter",
-		Command:      "hermes-acp",
-		LocalCommand: "hermes-acp",
+		ID:          AgentHermesID,
+		DisplayName: AgentHermesName,
+		Description: "Hermes Agent ACP adapter",
+		Command:     "hermes-acp",
 		ToolQuirks: &ToolQuirks{
 			WriteTitleKeywords: []string{"write", "write file", "create", "create file", "new file"},
 			GenericExecTitles: []string{
@@ -350,7 +333,7 @@ func hermesProfile() Profile {
 				Help:        "Written to the bot-scoped Hermes .env file.",
 			},
 		},
-		SupportedBackends: []string{"local", "container"},
+		SupportedBackends: []string{"container"},
 		SetupModes:        []string{setupModeSelf, setupModeAPIKey},
 	}
 }
