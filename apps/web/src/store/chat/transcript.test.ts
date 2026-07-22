@@ -231,6 +231,26 @@ describe('chat transcript controller', () => {
     expect(transcript.messages).toHaveLength(1)
   })
 
+  it('keeps the canonical user as retry target when an aborted turn has no assistant row', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([rawUser('user-aborted')], 'session-1')
+    const failed = assistant('assistant-local')
+    transcript.appendToView(failed)
+    transcript.appendAssistantError(failed, 'session-1', 'Response stopped', false, {
+      streamId: 'stream-aborted',
+      generation: 'generation-aborted',
+    })
+
+    expect(failed.retryTargetId).toBe('user-aborted')
+    transcript.replaceMessages([rawUser('user-aborted')], 'session-1')
+
+    const replayed = transcript.messages.find((turn): turn is ChatAssistantTurn => turn.role === 'assistant')
+    expect(replayed).toMatchObject({
+      __ephemeral: true,
+      retryTargetId: 'user-aborted',
+    })
+  })
+
   it('keeps identical runtime errors distinct by stream generation across refreshes', () => {
     const { transcript } = makeTranscript()
     const userA = { ...rawUser('user-a', 'same prompt'), external_message_id: 'stream-reused' }

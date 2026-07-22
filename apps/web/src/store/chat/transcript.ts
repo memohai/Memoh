@@ -321,6 +321,7 @@ export function createTranscriptController({
       timestamp,
       streaming: false,
       __ephemeral: true,
+      retryTargetId: error.userServerId?.trim() || undefined,
     }
     associateRuntimeError(turn, error)
     return turn
@@ -940,6 +941,8 @@ export function createTranscriptController({
     }
     const anchorUser = findUserTurnBeforeAssistant(assistantTurn)
     const externalMessageId = anchorUser?.externalMessageId?.trim() || undefined
+    const anchorUserServerId = anchorUser?.serverId?.trim()
+      || (anchorUser && !anchorUser.__optimistic ? anchorUser.id.trim() : '')
     const anchorIndex = anchorUser ? messages.indexOf(anchorUser) : -1
     const externalMessageOrdinal = externalMessageId && anchorIndex >= 0
       ? messages.slice(0, anchorIndex + 1).filter(turn =>
@@ -950,12 +953,15 @@ export function createTranscriptController({
       timestamp: new Date().toISOString(),
       userText: anchorUser?.text.trim() || undefined,
       userId: anchorUser?.id.trim() || undefined,
-      userServerId: anchorUser?.serverId?.trim() || undefined,
+      userServerId: anchorUserServerId || undefined,
       externalMessageId,
       externalMessageOrdinal,
       standalone,
       runtimeStreamId: identity?.streamId.trim() || undefined,
       runtimeGeneration: identity?.generation.trim() || undefined,
+    }
+    if (!hasVisibleAssistantBlocks(assistantTurn)) {
+      assistantTurn.retryTargetId = error.userServerId
     }
     ephemeralAssistantErrors.set(sid, [...current, error].slice(-5))
     associateRuntimeError(assistantTurn, error)

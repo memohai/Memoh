@@ -373,6 +373,36 @@ describe('session runtime reducer', () => {
     })
   })
 
+  it('applies stable runtime error codes together with their safe fallback', () => {
+    const snapshot = runningSnapshot(1)
+    const result = reduceSessionRuntimeDelta({ snapshot, seq: 1 }, {
+      type: 'runtime_delta',
+      stream_id: 'stream-1',
+      seq: 2,
+      delta: {
+        run: {
+          stream_id: 'stream-1',
+          status: 'errored',
+          error_code: 'session_runtime.run_failed',
+          error: 'The agent run failed.',
+        },
+      },
+    }, 'bot-1', 'session-1')
+
+    expect(result).toMatchObject({
+      kind: 'applied',
+      state: {
+        snapshot: {
+          current_run_view: {
+            status: 'errored',
+            error_code: 'session_runtime.run_failed',
+            error: 'The agent run failed.',
+          },
+        },
+      },
+    })
+  })
+
   it('uses structural sharing without mutating the previous snapshot', () => {
     const snapshot = runningSnapshot(1)
     snapshot.current_run_view!.messages = [

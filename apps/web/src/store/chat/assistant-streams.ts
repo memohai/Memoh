@@ -4,6 +4,7 @@ import type { ChatAssistantTurn, ChatMessage, ChatUserTurn } from './types'
 export interface RuntimeReplacementState {
   kind: 'retry' | 'edit'
   optimisticUserTurn: ChatUserTurn | null
+  retryRequestTurn: ChatUserTurn | null
   replacedTurns: ChatMessage[]
   restoreForkAnchor: (() => void) | null
   applied: boolean

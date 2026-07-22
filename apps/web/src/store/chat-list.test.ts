@@ -4085,13 +4085,26 @@ describe('chat-list store', () => {
       messages: [{ type: 'text', content: 'old answer' }],
     })
 
-    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+    const admitted = runtimeReplacementSnapshot(lastStreamId, {
       kind: 'retry',
       replace_from_message_id: 'assistant-old',
-    }, [{ id: 0, type: 'text', content: 'new answer partial' }]))
+    }, [{ id: 0, type: 'text', content: 'new answer partial' }])
+    if (admitted.type !== 'runtime_snapshot' || !admitted.snapshot.current_run_view) {
+      throw new Error('expected runtime retry snapshot')
+    }
+    admitted.snapshot.current_run_view.request_user_turn = {
+      id: 'user-retry-canonical',
+      role: 'user',
+      text: 'hello',
+      timestamp: '2026-05-17T08:00:02.000Z',
+      platform: 'local',
+      external_message_id: lastStreamId,
+    }
+    streamHandler?.(admitted)
 
     expect(store.messages.map(message => message.id)).not.toContain('assistant-old')
     expect(store.messages.map(message => message.role)).toEqual(['user', 'assistant'])
+    expect(store.messages[0]?.serverId ?? store.messages[0]?.id).toBe('user-retry-canonical')
     expect(store.messages[1]).toMatchObject({
       role: 'assistant',
       streaming: true,
@@ -4101,11 +4114,12 @@ describe('chat-list store', () => {
 
     api.fetchMessagesUI.mockResolvedValueOnce([
       {
-        id: 'user-1',
+        id: 'user-retry-canonical',
         role: 'user',
         text: 'hello',
         attachments: [],
-        timestamp: '2026-05-17T08:00:00.000Z',
+        timestamp: '2026-05-17T08:00:02.000Z',
+        external_message_id: lastStreamId,
       },
       {
         id: 'assistant-new',
@@ -4115,14 +4129,20 @@ describe('chat-list store', () => {
         streaming: false,
       },
     ])
-    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+    const completed = runtimeReplacementSnapshot(lastStreamId, {
       kind: 'retry',
       replace_from_message_id: 'assistant-old',
-    }, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11))
+    }, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11)
+    if (completed.type !== 'runtime_snapshot' || !completed.snapshot.current_run_view) {
+      throw new Error('expected completed runtime retry snapshot')
+    }
+    completed.snapshot.current_run_view.request_user_turn = admitted.snapshot.current_run_view.request_user_turn
+    streamHandler?.(completed)
     await retry
     await flushPromises()
 
     expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-new'])
+    expect(store.messages[0]?.serverId ?? store.messages[0]?.id).toBe('user-retry-canonical')
   })
 
   it('keeps an initiating retry pending until runtime admission arrives', async () => {
@@ -8032,13 +8052,13 @@ describe('chat-list store', () => {
     expect(result).toMatchObject({
       ok: false,
       stage: 'stream',
-      error: 'runtime interrupted',
+      error: 'The Agent run failed. Please try again.',
     })
     const assistant = store.messages.find(turn => turn.role === 'assistant')
     expect(assistant?.role).toBe('assistant')
     if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
     expect(assistant.messages.some(block => block.type === 'text' && block.content === 'partial output')).toBe(true)
-    expect(assistant.messages.some(block => block.type === 'error' && block.content === 'runtime interrupted')).toBe(true)
+    expect(assistant.messages.some(block => block.type === 'error' && block.content === 'The Agent run failed. Please try again.')).toBe(true)
   })
 
   it('does not let stale active-run events for another session pollute the visible transcript', async () => {
@@ -8908,7 +8928,7 @@ describe('chat-list store', () => {
     await expect(send).resolves.toMatchObject({ ok: true })
   })
 
-  it('projects the same retry operation in two independently subscribed stores', async () => {
+  it('replaces the superseded retry request in two passive stores when a system turn precedes the assistant', async () => {
     const handlers: UIStreamEventHandler[] = []
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
       handlers.push(onStreamEvent)
@@ -8930,6 +8950,13 @@ describe('chat-list store', () => {
     api.fetchMessagesUI.mockResolvedValue([
       { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
       {
+        id: 'system-1',
+        role: 'system',
+        kind: 'background_task',
+        background_task: { task_id: 'task-1', status: 'completed' },
+        timestamp: '2026-07-12T00:00:00.500Z',
+      },
+      {
         id: 'assistant-old',
         role: 'assistant',
         messages: [{ id: 0, type: 'text', content: 'old answer' }],
@@ -8947,6 +8974,17 @@ describe('chat-list store', () => {
     const retryOperation = replacementOperationsContractFixture.retry_snapshot.snapshot.current_run_view?.operation
     if (!retryOperation) throw new Error('missing generated retry operation fixture')
     const event = runtimeReplacementSnapshot('stream-shared-retry', retryOperation, [{ id: 0, type: 'text', content: 'shared partial' }])
+    if (event.type !== 'runtime_snapshot' || !event.snapshot.current_run_view) {
+      throw new Error('expected committed retry snapshot')
+    }
+    event.snapshot.current_run_view.request_user_turn = {
+      id: 'user-retry-canonical',
+      role: 'user',
+      text: 'hello',
+      timestamp: '2026-07-12T00:00:02.000Z',
+      platform: 'local',
+      external_message_id: 'stream-shared-retry',
+    }
     for (const handler of handlers) handler(structuredClone(event))
 
     const project = (store: ReturnType<typeof useChatStore>) => store.messages.map((turn) => {
@@ -8963,20 +9001,30 @@ describe('chat-list store', () => {
     expect(project(first)).toEqual(project(second))
     expect(project(first)).toEqual([
       { role: 'user', text: 'hello' },
+      { role: 'system' },
       {
         role: 'assistant',
         streaming: true,
         blocks: [{ type: 'text', content: 'shared partial' }],
       },
     ])
+    for (const store of [first, second]) {
+      const users = store.messages.filter(turn => turn.role === 'user')
+      expect(users).toHaveLength(1)
+      expect(users[0]?.serverId).toBe('user-retry-canonical')
+    }
 
     const replay = runtimeReplacementSnapshot('stream-shared-retry', {
       kind: 'retry',
       replace_from_message_id: 'assistant-old',
     }, [{ id: 0, type: 'text', content: 'shared partial updated' }], 'running', 11)
+    if (replay.type !== 'runtime_snapshot' || !replay.snapshot.current_run_view) {
+      throw new Error('expected retry replay snapshot')
+    }
+    replay.snapshot.current_run_view.request_user_turn = event.snapshot.current_run_view.request_user_turn
     for (const handler of handlers) handler(structuredClone(replay))
-    expect(first.messages).toHaveLength(2)
-    expect(second.messages).toHaveLength(2)
+    expect(first.messages).toHaveLength(3)
+    expect(second.messages).toHaveLength(3)
     expect(project(first)).toEqual(project(second))
   })
 
@@ -10559,6 +10607,211 @@ describe('chat-list store', () => {
     expect(store.streaming).toBe(true)
   })
 
+  it('keeps rendering runtime deltas when refresh hydrates a committed user-only turn', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const history = deferred<UITurn[]>()
+    api.fetchMessagesUI.mockImplementationOnce(() => history.promise)
+    const store = useChatStore()
+    const selection = store.selectBot('bot-1')
+    await vi.waitFor(() => {
+      expect(streamHandler).not.toBeNull()
+      expect(store.sessionId).toBe('session-1')
+    })
+
+    const streamId = 'stream-committed-before-output'
+    const requestTurn = {
+      id: 'canonical-user',
+      role: 'user' as const,
+      text: 'inspect the workspace',
+      timestamp: '2026-07-14T00:01:00Z',
+      platform: 'local',
+      external_message_id: streamId,
+    }
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 1, '', requestTurn, true),
+    } as UIStreamEvent)
+
+    history.resolve([{
+      id: 'canonical-user',
+      role: 'user',
+      text: requestTurn.text,
+      attachments: [],
+      timestamp: requestTurn.timestamp,
+      external_message_id: streamId,
+    }])
+    await selection
+    await flushPromises()
+
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      epoch: 'epoch-session-1',
+      seq: 2,
+      delta: { message_appends: [{ id: 0, type: 'reasoning', content: 'Checking files' }] },
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      epoch: 'epoch-session-1',
+      seq: 3,
+      delta: { message_appends: [{ id: 1, type: 'text', content: 'Found the relevant code.' }] },
+    } as UIStreamEvent)
+
+    expect(store.messages.map((turn) => {
+      if (turn.role === 'user') return turn.text
+      if (turn.role === 'assistant') return turn.messages.map(block => block.content)
+      return turn.role
+    })).toEqual([
+      'inspect the workspace',
+      ['Checking files', 'Found the relevant code.'],
+    ])
+    expect(store.messages.at(-1)).toMatchObject({ role: 'assistant', streaming: true })
+  })
+
+  it('replaces a persisted completed-step assistant with the active runtime projection after refresh', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const history = deferred<UITurn[]>()
+    api.fetchMessagesUI.mockImplementationOnce(() => history.promise)
+    const store = useChatStore()
+    const selection = store.selectBot('bot-1')
+    await vi.waitFor(() => {
+      expect(streamHandler).not.toBeNull()
+      expect(store.sessionId).toBe('session-1')
+    })
+
+    const streamId = 'stream-between-completed-steps'
+    const requestTurn = {
+      id: 'canonical-step-user',
+      role: 'user' as const,
+      text: 'run several steps',
+      timestamp: '2026-07-14T00:02:00Z',
+      platform: 'local',
+      external_message_id: streamId,
+    }
+    const runtime = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'First step complete.' } } as UIStreamEvent,
+      { type: 'message', data: { id: 1, type: 'reasoning', content: 'Working on step two' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 1, '', requestTurn, true)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      seq: 1,
+      snapshot: runtime,
+    } as UIStreamEvent)
+
+    history.resolve([
+      {
+        id: 'canonical-step-user',
+        role: 'user',
+        text: requestTurn.text,
+        attachments: [],
+        timestamp: requestTurn.timestamp,
+        external_message_id: streamId,
+      },
+      {
+        id: 'persisted-step-assistant',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'First step complete.' }],
+        timestamp: '2026-07-14T00:02:05Z',
+      },
+    ])
+    await selection
+    await flushPromises()
+
+    const assistants = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]).toMatchObject({
+      streaming: true,
+      messages: [
+        { type: 'text', content: 'First step complete.' },
+        { type: 'reasoning', content: 'Working on step two' },
+      ],
+    })
+  })
+
+  it('projects a committed retry on a fresh passive client without the superseded target', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const streamId = 'stream-passive-committed-retry'
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'retry-canonical-user',
+        role: 'user',
+        text: 'retry this prompt',
+        attachments: [],
+        timestamp: '2026-07-14T00:03:00Z',
+        external_message_id: streamId,
+      },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    api.fetchMessagesUI.mockClear()
+
+    const event = runtimeReplacementSnapshot(
+      streamId,
+      { kind: 'retry', replace_from_message_id: 'superseded-assistant' },
+      [{ id: 0, type: 'reasoning', content: 'Retry is running' }],
+      'running',
+      1,
+      'session-1',
+      false,
+      true,
+    )
+    if (event.type !== 'runtime_snapshot' || !event.snapshot.current_run_view) {
+      throw new Error('expected runtime retry snapshot')
+    }
+    event.snapshot.current_run_view.request_user_turn = {
+      id: 'retry-canonical-user',
+      role: 'user',
+      text: 'retry this prompt',
+      timestamp: '2026-07-14T00:03:00Z',
+      platform: 'local',
+      external_message_id: streamId,
+    }
+    streamHandler?.(event)
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      epoch: 'epoch-session-1',
+      seq: 2,
+      delta: { message_appends: [{ id: 1, type: 'text', content: ' and receiving deltas' }] },
+    } as UIStreamEvent)
+
+    expect(api.fetchMessagesUI).not.toHaveBeenCalled()
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages[0]).toMatchObject({ role: 'user', id: 'retry-canonical-user' })
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+      messages: [
+        { type: 'reasoning', content: 'Retry is running' },
+        { type: 'text', content: ' and receiving deltas' },
+      ],
+    })
+  })
+
   it('fetches fresh history after a completed snapshot races an older hydration', async () => {
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
@@ -10768,7 +11021,7 @@ describe('chat-list store', () => {
     if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
     expect(assistant.streaming).toBe(false)
     expect(assistant.messages.some(block => block.type === 'text' && block.content === 'partial output')).toBe(true)
-    expect(assistant.messages.some(block => block.type === 'error' && block.content === 'runtime interrupted')).toBe(true)
+    expect(assistant.messages.some(block => block.type === 'error' && block.content === 'The Agent run failed. Please try again.')).toBe(true)
     expect(api.fetchMessagesUI).toHaveBeenCalledTimes(refreshCallsBefore)
   })
 
@@ -11581,7 +11834,7 @@ describe('chat-list store', () => {
     expect(assistant).toMatchObject({ role: 'assistant', streaming: false })
     if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
     expect(assistant.messages.find(block => block.type === 'text')).toMatchObject({ content: 'partial output' })
-    expect(assistant.messages.find(block => block.type === 'error')).toMatchObject({ content: 'runtime interrupted' })
+    expect(assistant.messages.find(block => block.type === 'error')).toMatchObject({ content: 'The Agent run failed. Please try again.' })
   })
 
   it('waits for a checkpoint after a runtime delta gap and ignores delayed deltas', async () => {
@@ -12162,15 +12415,43 @@ describe('chat-list store', () => {
     expect(abortedWSStreams).toContain(streamId)
     expect(store.streaming).toBe(true)
 
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'user-aborted-server',
+      role: 'user',
+      text: 'abort before admission',
+      attachments: [],
+      timestamp: '2026-07-22T00:00:00.000Z',
+      external_message_id: streamId,
+    }])
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
       session_id: 'session-1',
       seq: 1,
-      snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'aborted', 1),
+      snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'aborted', 1, '', {
+        id: 'user-aborted-server',
+        role: 'user',
+        text: 'abort before admission',
+        timestamp: '2026-07-22T00:00:00.000Z',
+        platform: 'local',
+        external_message_id: streamId,
+      }, true, true),
     } as UIStreamEvent)
     await expect(send).resolves.toMatchObject({ ok: false })
-    expect(store.streaming).toBe(false)
+    await vi.waitFor(() => {
+      expect(store.streaming).toBe(false)
+      expect(store.messages.find(turn => turn.role === 'assistant')).toMatchObject({
+        retryTargetId: 'user-aborted-server',
+      })
+    })
+
+    sendEvents = [{ type: 'error', message: 'retry rejected for test cleanup' } as UIStreamEvent]
+    await expect(store.retryLatestAssistant('user-aborted-server')).resolves.toMatchObject({ ok: false })
+    expect(sentWSMessages.at(-1)).toMatchObject({
+      type: 'retry_message',
+      session_id: 'session-1',
+      message_id: 'user-aborted-server',
+    })
   })
 
   it('isolates the same runtime stream id across two sessions', async () => {

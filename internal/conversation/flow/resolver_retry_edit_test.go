@@ -255,6 +255,63 @@ func TestPrepareRetryLatestMessageWSUsesCanonicalAssistantTurnAnchor(t *testing.
 	if prepared.OldTurnID != "turn-old" || prepared.RequestMessageID != "user-request" {
 		t.Fatalf("prepared replacement = %#v", prepared)
 	}
+	if prepared.Request.ExternalMessageID != "stream-retry" {
+		t.Fatalf("retry external message id = %q, want stream-retry", prepared.Request.ExternalMessageID)
+	}
+}
+
+func TestPrepareRetryLatestMessageWSAcceptsInterruptedUserOnlyTurn(t *testing.T) {
+	t.Parallel()
+
+	messages := &replacementPreparationMessageService{
+		messages: map[string]messagepkg.Message{
+			"user-request": {ID: "user-request", Role: "user", DisplayContent: "original prompt"},
+		},
+		turn: messagepkg.HistoryTurn{
+			ID:               "turn-interrupted",
+			RequestMessageID: "user-request",
+		},
+	}
+	resolver := &Resolver{messageService: messages}
+	prepared, err := resolver.PrepareRetryLatestMessageWS(context.Background(), RetryLatestMessageInput{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		StreamID:  "stream-retry",
+		MessageID: "user-request",
+	})
+	if err != nil {
+		t.Fatalf("prepare user-only retry: %v", err)
+	}
+	if prepared.OldTurnID != "turn-interrupted" || prepared.RequestMessageID != "user-request" {
+		t.Fatalf("prepared replacement = %#v", prepared)
+	}
+	if prepared.Operation.Kind != "retry" || prepared.Operation.ReplaceFromMessageID != "user-request" {
+		t.Fatalf("operation = %#v", prepared.Operation)
+	}
+}
+
+func TestPrepareRetryLatestMessageWSRejectsUserTargetWhenTurnHasAssistant(t *testing.T) {
+	t.Parallel()
+
+	messages := &replacementPreparationMessageService{
+		messages: map[string]messagepkg.Message{
+			"user-request": {ID: "user-request", Role: "user", DisplayContent: "original prompt"},
+		},
+		turn: messagepkg.HistoryTurn{
+			ID:                 "turn-completed",
+			RequestMessageID:   "user-request",
+			AssistantMessageID: "assistant-response",
+		},
+	}
+	resolver := &Resolver{messageService: messages}
+	if _, err := resolver.PrepareRetryLatestMessageWS(context.Background(), RetryLatestMessageInput{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		StreamID:  "stream-retry",
+		MessageID: "user-request",
+	}); err == nil {
+		t.Fatal("user target for a turn with an assistant was accepted")
+	}
 }
 
 func TestPrepareEditLatestMessageWSBuildsCanonicalReplacementUserTurn(t *testing.T) {
@@ -284,6 +341,9 @@ func TestPrepareEditLatestMessageWSBuildsCanonicalReplacementUserTurn(t *testing
 	}
 	if prepared.Operation.Kind != "edit" || prepared.Operation.ReplaceFromMessageID != "user-request" {
 		t.Fatalf("operation = %#v", prepared.Operation)
+	}
+	if prepared.Request.ExternalMessageID != "stream-edit" {
+		t.Fatalf("edit external message id = %q, want stream-edit", prepared.Request.ExternalMessageID)
 	}
 	turn := prepared.Operation.ReplacementUserTurn
 	if turn == nil || turn.Role != "user" || turn.Text != "edited prompt" || turn.Platform != "local" {

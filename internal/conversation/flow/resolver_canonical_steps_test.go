@@ -90,6 +90,9 @@ func TestCanonicalStepPersistenceStartsReplacementAndDoesNotDuplicateTerminalSte
 	if state == nil {
 		t.Fatal("canonical persistence state is nil")
 	}
+	if got := state.requestMessageID(); got != "request-new" {
+		t.Fatalf("canonical request message id = %q, want request-new", got)
+	}
 	if len(messages.starts) != 1 || messages.starts[0].Replacement == nil {
 		t.Fatalf("canonical starts = %#v", messages.starts)
 	}

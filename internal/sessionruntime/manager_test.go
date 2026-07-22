@@ -1594,13 +1594,20 @@ func runRuntimeManagerPublishesHistoryCommitContract(t *testing.T, suite runtime
 		t.Fatalf("subscribe: %v", err)
 	}
 	defer sub.Close()
-	handle, err := startTestRunHandle(context.Background(), manager, testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1))
+	handle, err := manager.StartRunWithOptions(context.Background(), RunStartOptions{
+		BotID: testBotID, SessionID: testSessionID, StreamID: testStreamID,
+		Admission: RunAdmissionView{RequestUserTurn: &conversation.UITurn{
+			Role: "user", Text: "committed request", ExternalMessageID: testStreamID,
+		}},
+		AbortCh: make(chan struct{}, 1), Cancel: func() {}, InjectCh: make(chan conversation.InjectMessage, 1),
+	})
 	if err != nil {
 		t.Fatalf("start run: %v", err)
 	}
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{
-		Type:             agentpkg.EventHistoryCommit,
-		HistoryCommitted: true,
+		Type:                    agentpkg.EventHistoryCommit,
+		HistoryCommitted:        true,
+		HistoryRequestMessageID: "request-message-id",
 	}); err != nil {
 		t.Fatalf("handle history commit: %v", err)
 	}
@@ -1608,14 +1615,14 @@ func runRuntimeManagerPublishesHistoryCommitContract(t *testing.T, suite runtime
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if snapshot.CurrentRunView == nil || !snapshot.CurrentRunView.HistoryCommitted || snapshot.CurrentRunView.CanonicalReady || snapshot.CurrentRunView.Status != RunStatusRunning {
+	if snapshot.CurrentRunView == nil || !snapshot.CurrentRunView.HistoryCommitted || snapshot.CurrentRunView.CanonicalReady || snapshot.CurrentRunView.Status != RunStatusRunning || snapshot.CurrentRunView.RequestUserTurn == nil || snapshot.CurrentRunView.RequestUserTurn.ID != "request-message-id" {
 		t.Fatalf("history-committed running snapshot = %#v", snapshot.CurrentRunView)
 	}
 	event := waitRuntimeEvent(t, sub.C, func(event Event) bool {
-		return event.Delta != nil && event.Delta.Run != nil && event.Delta.Run.HistoryCommitted != nil && *event.Delta.Run.HistoryCommitted
+		return event.Delta != nil && event.Delta.CurrentRunView != nil && event.Delta.CurrentRunView.HistoryCommitted
 	})
-	if event.Delta.Run.CanonicalReady == nil || *event.Delta.Run.CanonicalReady {
-		t.Fatalf("history commit delta = %#v, want canonical_ready=false", event.Delta)
+	if event.Delta.CurrentRunView.CanonicalReady || event.Delta.CurrentRunView.RequestUserTurn == nil || event.Delta.CurrentRunView.RequestUserTurn.ID != "request-message-id" {
+		t.Fatalf("history commit delta = %#v, want canonical request identity and canonical_ready=false", event.Delta)
 	}
 }
 

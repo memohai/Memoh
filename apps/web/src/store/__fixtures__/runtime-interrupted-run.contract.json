@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "scenario": "interrupted_run",
   "runtime_snapshot": {
     "bot_id": "bot-1",
@@ -10,7 +10,8 @@
       "bot_id": "bot-1",
       "current_run_view": {
         "canonical_ready": false,
-        "error": "runtime interrupted",
+        "error": "The agent run failed.",
+        "error_code": "session_runtime.run_failed",
         "generation": "generation-stream-interrupted",
         "messages": [
           {
@@ -109,7 +110,8 @@
       "bot_id": "bot-1",
       "delta": {
         "run": {
-          "error": "runtime interrupted",
+          "error": "The agent run failed.",
+          "error_code": "session_runtime.run_failed",
           "stream_id": "stream-interrupted",
           "updated_at": "2026-07-10T00:00:10Z"
         }
@@ -126,7 +128,8 @@
       "delta": {
         "run": {
           "canonical_ready": false,
-          "error": "runtime interrupted",
+          "error": "The agent run failed.",
+          "error_code": "session_runtime.run_failed",
           "history_committed": false,
           "status": "errored",
           "stream_id": "stream-interrupted",

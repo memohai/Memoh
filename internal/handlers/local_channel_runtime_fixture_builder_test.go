@@ -556,7 +556,7 @@ func buildInterruptedRunContractFixture(t *testing.T) runtimeContractFixture {
 	snapshotEvent, stream := buildRuntimeContractSnapshot(t, runtimeFixtureInterruptedID, interruptedRunAgentContractScript())
 	_, abortStream := buildRuntimeContractSnapshot(t, runtimeFixtureInterruptedID, committedAbortAgentContractScript())
 	return runtimeContractFixture{
-		Version:            5,
+		Version:            6,
 		Scenario:           "interrupted_run",
 		RuntimeSnapshot:    snapshotEvent,
 		RuntimeStream:      stream,

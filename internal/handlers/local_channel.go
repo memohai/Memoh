@@ -2657,7 +2657,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if err := h.resolver.ValidatePreparedReplacementWS(ctx, prepared); err != nil {
 					return sessionruntime.RunAdmissionView{}, err
 				}
-				return sessionruntime.RunAdmissionView{Operation: runtimeOperationFromPreparedReplacement(prepared)}, nil
+				return sessionruntime.RunAdmissionView{
+					RequestUserTurn: flow.RuntimeRequestUserTurn(prepared.Request, time.Now().UTC()),
+					Operation:       runtimeOperationFromPreparedReplacement(prepared),
+				}, nil
 			},
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}, _ <-chan conversation.InjectMessage) error {
 					return h.resolver.StreamPreparedReplacementWS(ctx, prepared, eventCh, abortCh)
@@ -2747,7 +2750,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if attachmentErr != nil {
 					return sessionruntime.RunAdmissionView{}, attachmentErr
 				}
-				return sessionruntime.RunAdmissionView{Operation: runtimeOperationFromPreparedReplacement(prepared)}, nil
+				return sessionruntime.RunAdmissionView{
+					RequestUserTurn: flow.RuntimeRequestUserTurn(prepared.Request, time.Now().UTC()),
+					Operation:       runtimeOperationFromPreparedReplacement(prepared),
+				}, nil
 			},
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}, _ <-chan conversation.InjectMessage) error {
 					return h.resolver.StreamPreparedReplacementWS(ctx, prepared, eventCh, abortCh)

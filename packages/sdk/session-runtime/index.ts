@@ -39,6 +39,7 @@ export interface SessionRuntimeDelta {
 export interface SessionRuntimeRunPatch {
   stream_id: string
   status?: string
+  error_code?: string
   error?: string
   history_committed?: boolean
   canonical_ready?: boolean
@@ -185,7 +186,9 @@ function isRuntimeRunStatus(value: unknown): boolean {
 function isRuntimeSteer(value: unknown): boolean {
   return value === undefined || (isRecord(value)
     && typeof value.id === 'string'
-    && isRuntimeSteerStatus(value.status))
+    && isRuntimeSteerStatus(value.status)
+    && isOptionalString(value.error_code)
+    && isOptionalString(value.error))
 }
 
 function isRuntimeSteerStatus(value: unknown): boolean {
@@ -238,6 +241,8 @@ function isCurrentRunView(value: unknown): boolean {
     && isRuntimeRunStatus(value.status)
     && (value.history_committed === undefined || typeof value.history_committed === 'boolean')
     && (value.canonical_ready === undefined || typeof value.canonical_ready === 'boolean')
+    && isOptionalString(value.error_code)
+    && isOptionalString(value.error)
     && (value.messages === undefined || (Array.isArray(value.messages) && value.messages.every(isRuntimeMessage)))
     && (value.operation === undefined || isRuntimeOperation(value.operation))
     && (value.request_user_turn === undefined || isRuntimeTurn(value.request_user_turn))
@@ -259,6 +264,7 @@ function isRunPatch(value: unknown): boolean {
     && typeof value.stream_id === 'string'
     && value.stream_id.trim() !== ''
     && (value.status === undefined || isRuntimeRunStatus(value.status))
+    && isOptionalString(value.error_code)
     && isOptionalString(value.error)
     && (value.history_committed === undefined || typeof value.history_committed === 'boolean')
     && (value.canonical_ready === undefined || typeof value.canonical_ready === 'boolean')
@@ -475,6 +481,7 @@ export function reduceSessionRuntimeDelta(
   const patch = delta.run
   if (patch) {
     if ('status' in patch) run.status = patch.status
+    if ('error_code' in patch) run.error_code = patch.error_code
     if ('error' in patch) run.error = patch.error
     if ('history_committed' in patch) run.history_committed = patch.history_committed
     if ('canonical_ready' in patch) run.canonical_ready = patch.canonical_ready

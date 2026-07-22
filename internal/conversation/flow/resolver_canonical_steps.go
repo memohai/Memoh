@@ -238,3 +238,10 @@ func (s *canonicalStepPersistenceState) hasAssistant() bool {
 	defer s.mu.Unlock()
 	return s.assistantStored
 }
+
+func (s *canonicalStepPersistenceState) requestMessageID() string {
+	if s == nil {
+		return ""
+	}
+	return s.turn.RequestMessageID
+}

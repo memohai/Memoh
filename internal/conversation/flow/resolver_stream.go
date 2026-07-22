@@ -513,7 +513,11 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 		return nil, err
 	}
 	if canonicalSteps != nil {
-		committed := agentpkg.StreamEvent{Type: agentpkg.EventHistoryCommit, HistoryCommitted: true}
+		committed := agentpkg.StreamEvent{
+			Type:                    agentpkg.EventHistoryCommit,
+			HistoryCommitted:        true,
+			HistoryRequestMessageID: canonicalSteps.requestMessageID(),
+		}
 		data, marshalErr := json.Marshal(committed)
 		if marshalErr != nil {
 			return nil, fmt.Errorf("marshal canonical history commit: %w", marshalErr)

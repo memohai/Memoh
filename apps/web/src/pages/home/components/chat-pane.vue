@@ -903,7 +903,10 @@ const latestRetryableAssistantId = computed(() => {
   if (streaming.value || loadingMessages.value || activeChatReadOnly.value) return ''
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const message = messages.value[i]
-    if (message?.role === 'assistant' && !message.streaming && !message.__optimistic && !message.__ephemeral) {
+    if (message?.role === 'assistant' && !message.streaming && (
+      message.retryTargetId?.trim()
+      || (!message.__optimistic && !message.__ephemeral)
+    )) {
       return (message.serverId ?? message.id).trim()
     }
   }

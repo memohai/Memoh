@@ -182,6 +182,7 @@ interface PreparedRuntimeReplacement {
   kind: 'retry' | 'edit'
   target: ChatMessage
   optimisticUserTurn: ChatUserTurn | null
+  retryRequestTurn: ChatUserTurn | null
 }
 
 type PendingAssistantStream = AssistantStream
@@ -1410,6 +1411,12 @@ export const useChatStore = defineStore('chat', () => {
     return new StreamFailureError(message || 'runtime interrupted', stage)
   }
 
+  function runtimeRunErrorMessage(run: NonNullable<SessionruntimeSnapshot['current_run_view']>, status: string): string {
+    const fallback = run.error?.trim() || status || 'runtime interrupted'
+    if (!run.error_code?.trim()) return fallback
+    return resolveApiErrorMessage({ code: run.error_code, message: run.error }, fallback)
+  }
+
   function runtimeInactiveError(assistantTurn: ChatAssistantTurn): Error {
     const stage: SendMessageStage = hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup'
     return new StreamFailureError('runtime state is no longer active', stage)
@@ -1593,6 +1600,7 @@ export const useChatStore = defineStore('chat', () => {
     canonical: ChatUserTurn,
     runtimeGeneration: string,
   ): boolean {
+    if (canonical.serverId && (existing.serverId === canonical.serverId || existing.id === canonical.serverId)) return true
     const projectionGeneration = runtimeUserGenerations.get(existing)?.trim() ?? ''
     if (projectionGeneration) return runtimeProjectionGenerationMatches(projectionGeneration, runtimeGeneration)
       && sameRuntimeRequestTurn(existing, canonical)
@@ -1848,14 +1856,34 @@ export const useChatStore = defineStore('chat', () => {
     if (!canonical) return
 
     const transcriptMessages = sessionTranscript(stream.botId, stream.sessionId).messages
-    const existing = transcriptMessages.find((message): message is ChatUserTurn => message.role === 'user'
+    const matching = transcriptMessages.filter((message): message is ChatUserTurn => message.role === 'user'
       && runtimeUserTurnMatches(message, canonical, stream.runtimeGeneration))
+    let existing = matching.find(message => !message.__optimistic) ?? matching[0]
+    let reusesSupersededRetryRequest = false
+    if (!existing && stream.runtimeReplacement?.kind === 'retry' && stream.runtimeReplacement.applied) {
+      const retryRequest = stream.runtimeReplacement.retryRequestTurn
+      if (retryRequest && transcriptMessages.includes(retryRequest)) {
+        existing = retryRequest
+        reusesSupersededRetryRequest = true
+      }
+    }
     if (existing) {
       const id = existing.id
-      const serverId = existing.serverId ?? canonical.serverId
+      const serverId = reusesSupersededRetryRequest
+        ? canonical.serverId ?? existing.serverId
+        : existing.serverId ?? canonical.serverId
       const isSelf = existing.isSelf || canonical.isSelf
       Object.assign(existing, canonical, { id, serverId, isSelf, __optimistic: true })
       if (stream.runtimeGeneration) runtimeUserGenerations.set(existing, stream.runtimeGeneration)
+
+      for (let index = transcriptMessages.length - 1; index >= 0; index -= 1) {
+        const message = transcriptMessages[index]
+        if (message === existing || message?.role !== 'user' || !message.__optimistic) continue
+        if (message.externalMessageId !== stream.streamId) continue
+        const generation = runtimeUserGenerations.get(message)?.trim() ?? ''
+        if (stream.runtimeGeneration && generation !== stream.runtimeGeneration) continue
+        transcriptMessages.splice(index, 1)
+      }
       return
     }
 
@@ -1878,15 +1906,28 @@ export const useChatStore = defineStore('chat', () => {
     if (kind !== 'retry' && kind !== 'edit') return null
     const replaceFrom = (operation.replace_from_message_id ?? '').trim()
     if (!replaceFrom) return null
-    const target = sessionTranscript(botId, targetSessionId).findTurnByServerId(replaceFrom)
-    if (!target || (kind === 'retry' && target.role !== 'assistant') || (kind === 'edit' && target.role !== 'user')) {
+    const transcript = sessionTranscript(botId, targetSessionId)
+    const target = transcript.findTurnByServerId(replaceFrom)
+    if (!target || (kind === 'retry' && target.role !== 'assistant' && target.role !== 'user') || (kind === 'edit' && target.role !== 'user')) {
       return null
     }
     const optimisticUserTurn = kind === 'edit'
       ? normalizeRuntimeUserTurn(operation.replacement_user_turn, streamId, runtimeGeneration, botId, targetSessionId)
       : null
     if (kind === 'edit' && !optimisticUserTurn) return null
-    return { kind, target, optimisticUserTurn }
+    const targetIndex = transcript.messages.indexOf(target)
+    let retryRequestTurn: ChatUserTurn | null = null
+    if (kind === 'retry' && target.role === 'user') {
+      retryRequestTurn = target
+    } else if (kind === 'retry') {
+      for (let index = targetIndex - 1; index >= 0; index -= 1) {
+        const candidate = transcript.messages[index]
+        if (candidate?.role !== 'user') continue
+        retryRequestTurn = candidate
+        break
+      }
+    }
+    return { kind, target, optimisticUserTurn, retryRequestTurn }
   }
 
   function applyRuntimeReplacement(stream: PendingAssistantStream, prepared: PreparedRuntimeReplacement) {
@@ -1904,6 +1945,7 @@ export const useChatStore = defineStore('chat', () => {
     if (existing) {
       existing.kind = prepared.kind
       existing.optimisticUserTurn = prepared.optimisticUserTurn
+      existing.retryRequestTurn = prepared.retryRequestTurn
       existing.replacedTurns = replacedTurns
       existing.restoreForkAnchor = restoreForkAnchor
       existing.applied = true
@@ -1912,6 +1954,7 @@ export const useChatStore = defineStore('chat', () => {
     stream.runtimeReplacement = {
       kind: prepared.kind,
       optimisticUserTurn: prepared.optimisticUserTurn,
+      retryRequestTurn: prepared.retryRequestTurn,
       replacedTurns,
       restoreForkAnchor,
       applied: true,
@@ -2088,7 +2131,7 @@ export const useChatStore = defineStore('chat', () => {
       .filter((message): message is UIMessage => message !== null)
     const terminalFailure = isRuntimeTerminalStatus(status) && status !== 'completed'
     const terminalErrorMessage = terminalFailure
-      ? runtimeStatusError(status, run.error ?? status).message
+      ? runtimeStatusError(status, runtimeRunErrorMessage(run, status)).message
       : ''
     if (replayTerminalProjection && terminalFailure) {
       const errorIdentity = runtimeAssistantErrorIdentityFor(streamId, runGeneration, bid, sid)
@@ -2128,9 +2171,17 @@ export const useChatStore = defineStore('chat', () => {
       stream.runtimeReplacement = undefined
     }
     let preparedReplacement: PreparedRuntimeReplacement | null = null
+    // A fresh client can project a committed replacement from its canonical
+    // request turn without hydrating the superseded target. A client that still
+    // has that target must nevertheless replace its local tail below.
+    const canProjectCommittedReplacementWithoutTarget = Boolean(
+      operation
+      && run.history_committed === true
+      && run.request_user_turn?.id?.trim(),
+    )
     if (operation && !stream?.runtimeReplacement?.applied) {
       preparedReplacement = prepareRuntimeReplacement(bid, sid, operation, streamId, runGeneration)
-      if (!preparedReplacement) {
+      if (!preparedReplacement && !canProjectCommittedReplacementWithoutTarget) {
         if (!stream && isRuntimeActiveStatus(status) && !isTerminalStream(streamId, runGeneration, bid, sid)) {
           stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn)
         }
@@ -2151,7 +2202,7 @@ export const useChatStore = defineStore('chat', () => {
           streamId,
           sid,
           status,
-          run.error ?? status,
+          runtimeRunErrorMessage(run, status),
           runtimeMessages,
         )) {
           loading.value = isSessionStreaming(bid, sid)
@@ -2166,7 +2217,7 @@ export const useChatStore = defineStore('chat', () => {
         loading.value = isRuntimeActiveStatus(status) || isSessionStreaming(bid, sid)
         return
       }
-      if (!stream && isTerminalStream(streamId, runGeneration, bid, sid)) {
+      if (preparedReplacement && !stream && isTerminalStream(streamId, runGeneration, bid, sid)) {
         if (status === 'completed' || runtimeMessages.length === 0) {
           loading.value = isSessionStreaming(bid, sid)
           return
@@ -2218,7 +2269,7 @@ export const useChatStore = defineStore('chat', () => {
         const historyCommitted = run.history_committed === true
         if (stream.runtimeReplacement) stream.runtimeReplacement.historyCommitted = historyCommitted
         settleApprovalResponse(streamId, status === 'completed' ? 'succeeded' : 'failed', bid, sid)
-        const runtimeError = status === 'completed' ? null : runtimeStatusError(status, run.error ?? status, stream.assistantTurn, true)
+        const runtimeError = status === 'completed' ? null : runtimeStatusError(status, runtimeRunErrorMessage(run, status), stream.assistantTurn, true)
         const hadVisibleRuntimeOutput = hasVisibleAssistantBlocks(stream.assistantTurn)
         const completedEmptyReplacement = status === 'completed'
           && historyCommitted
@@ -2263,6 +2314,11 @@ export const useChatStore = defineStore('chat', () => {
     }
     const requestIndex = runtimeRequestIndexForStream(stream)
     if (requestIndex >= 0) {
+      const hydratedAssistant = transcriptMessages[requestIndex + 1]
+      if (hydratedAssistant?.role === 'assistant') {
+        transcriptMessages.splice(requestIndex + 1, 1, stream.assistantTurn)
+        return
+      }
       transcriptMessages.splice(requestIndex + 1, 0, stream.assistantTurn)
       return
     }
@@ -4559,7 +4615,10 @@ export const useChatStore = defineStore('chat', () => {
     if (!bid || !sid || !targetID || chatReadOnlyFor(viewTarget)) return { ok: false, stage: 'startup' }
     if (isChatViewStreaming(viewTarget) || transcript.loadingMessages.value) return { ok: false, stage: 'startup' }
     const target = transcript.findTurnByServerId(targetID)
-    if (!target || !transcript.isLatestVisibleAssistantTurn(target)) return { ok: false, stage: 'startup' }
+    const retryableTarget = target?.role === 'assistant'
+      ? transcript.isLatestVisibleAssistantTurn(target)
+      : target?.role === 'user' && transcript.isLatestVisibleUserTurn(target)
+    if (!retryableTarget) return { ok: false, stage: 'startup' }
 
     const streamId = createStreamId()
     const assistantTurn = transcript.createOptimisticAssistantTurn()

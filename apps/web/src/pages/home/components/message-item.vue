@@ -501,7 +501,9 @@ const editDraft = ref('')
 const editSubmitting = ref(false)
 
 function handleRetry() {
-  const messageId = (props.message.serverId ?? props.message.id).trim()
+  const messageId = props.message.role === 'assistant'
+    ? (props.message.retryTargetId ?? props.message.serverId ?? props.message.id).trim()
+    : (props.message.serverId ?? props.message.id).trim()
   if (messageId) props.onRetryMessage?.(messageId)
 }
 
