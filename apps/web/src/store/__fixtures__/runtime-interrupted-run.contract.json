@@ -208,6 +208,7 @@
         "run": {
           "canonical_ready": true,
           "error": "",
+          "history_assistant_message_id": "assistant-runtime-interrupted",
           "history_committed": true,
           "status": "aborted",
           "stream_id": "stream-interrupted",

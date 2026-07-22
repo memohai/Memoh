@@ -1845,7 +1845,7 @@ export const useChatStore = defineStore('chat', () => {
     return normalized
   }
 
-  function applyRuntimeRequestUserTurn(stream: PendingAssistantStream, turn: ConversationUiTurn | undefined) {
+  function applyRuntimeRequestUserTurn(stream: PendingAssistantStream, turn: ConversationUiTurn | undefined): ChatUserTurn | null {
     const canonical = normalizeRuntimeUserTurn(
       turn,
       stream.streamId,
@@ -1853,7 +1853,7 @@ export const useChatStore = defineStore('chat', () => {
       stream.botId,
       stream.sessionId,
     )
-    if (!canonical) return
+    if (!canonical) return null
 
     const transcriptMessages = sessionTranscript(stream.botId, stream.sessionId).messages
     const matching = transcriptMessages.filter((message): message is ChatUserTurn => message.role === 'user'
@@ -1884,15 +1884,16 @@ export const useChatStore = defineStore('chat', () => {
         if (stream.runtimeGeneration && generation !== stream.runtimeGeneration) continue
         transcriptMessages.splice(index, 1)
       }
-      return
+      return existing
     }
 
     const assistantIndex = transcriptMessages.indexOf(stream.assistantTurn)
     if (assistantIndex >= 0) {
       transcriptMessages.splice(assistantIndex, 0, canonical)
-      return
+      return canonical
     }
     appendTurnToSession(stream.botId, stream.sessionId, canonical)
+    return canonical
   }
 
   function prepareRuntimeReplacement(
@@ -2240,8 +2241,21 @@ export const useChatStore = defineStore('chat', () => {
       stream.runtimeReplacement.historyCommitted = true
     }
 
-    if (stream) {
-      applyRuntimeRequestUserTurn(stream, run.request_user_turn)
+    const uncommittedEmptyReplacement = Boolean(
+      operation
+      && run.history_committed !== true
+      && runtimeMessages.length === 0,
+    )
+    if (stream && !uncommittedEmptyReplacement) {
+      const requestTurn = applyRuntimeRequestUserTurn(stream, run.request_user_turn)
+      if (run.history_committed === true) {
+        if (requestTurn?.serverId) requestTurn.__optimistic = false
+        const assistantMessageId = (run.history_assistant_message_id ?? '').trim()
+        if (assistantMessageId) {
+          stream.assistantTurn.serverId = assistantMessageId
+          stream.assistantTurn.__optimistic = false
+        }
+      }
       reattachRuntimeAssistantTurn(stream)
       if (authoritativeSnapshot) {
         stream.runtimeMessageIds = replaceAssistantUIMessageSnapshot(
@@ -2290,7 +2304,7 @@ export const useChatStore = defineStore('chat', () => {
           if (!runtimeError) return
           rejectAssistantStream(streamId, runtimeError, bid, sid)
           const restoredAbort = restoredReplacement && runtimeError instanceof RuntimeAbortError
-          if (!restoredAbort && (runtimeError instanceof RuntimeAbortError || !hadVisibleRuntimeOutput)) {
+          if (!uncommittedEmptyReplacement && !restoredAbort && (runtimeError instanceof RuntimeAbortError || !hadVisibleRuntimeOutput)) {
             projectRuntimeTerminalError(stream, bid, sid, runtimeError.message)
           }
         }

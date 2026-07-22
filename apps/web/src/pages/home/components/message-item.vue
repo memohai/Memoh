@@ -652,7 +652,6 @@ const canSubmitEdit = computed(() =>
   props.message.role === 'user'
   && props.canEditLatestUser === true
   && editDraft.value.trim().length > 0
-  && editDraft.value.trim() !== cleanCurrentUserText.value.trim()
   && !editSubmitting.value,
 )
 

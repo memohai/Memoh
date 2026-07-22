@@ -138,6 +138,7 @@ type CurrentRunView struct {
 	Messages            []conversation.UIMessage `json:"messages"`
 	RequestUserTurn     *conversation.UITurn     `json:"request_user_turn,omitempty"`
 	HistoryCommitted    bool                     `json:"history_committed,omitempty"`
+	HistoryAssistantID  string                   `json:"history_assistant_message_id,omitempty"`
 	CanonicalReady      bool                     `json:"canonical_ready"`
 	ErrorCode           string                   `json:"error_code,omitempty"`
 	Error               string                   `json:"error,omitempty"`
@@ -215,6 +216,7 @@ type CurrentRunPatch struct {
 	ErrorCode           *string     `json:"error_code,omitempty"`
 	Error               *string     `json:"error,omitempty"`
 	HistoryCommitted    *bool       `json:"history_committed,omitempty"`
+	HistoryAssistantID  *string     `json:"history_assistant_message_id,omitempty"`
 	CanonicalReady      *bool       `json:"canonical_ready,omitempty"`
 	Steer               *SteerState `json:"steer,omitempty"`
 	UpdatedAt           *time.Time  `json:"updated_at,omitempty"`

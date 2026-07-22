@@ -55,6 +55,7 @@ type StreamEvent struct {
 	Usage                   json.RawMessage  `json:"usage,omitempty"`
 	HistoryCommitted        bool             `json:"history_committed,omitempty"`
 	HistoryRequestMessageID string           `json:"history_request_message_id,omitempty"`
+	HistoryAssistantID      string           `json:"history_assistant_message_id,omitempty"`
 	Reasoning               []string         `json:"reasoning,omitempty"`
 	Error                   string           `json:"error,omitempty"`
 	Attempt                 int              `json:"attempt,omitempty"`

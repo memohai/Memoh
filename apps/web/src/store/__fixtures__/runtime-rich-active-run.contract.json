@@ -383,6 +383,7 @@
         "run": {
           "canonical_ready": true,
           "error": "",
+          "history_assistant_message_id": "assistant-runtime-rich",
           "history_committed": true,
           "status": "completed",
           "stream_id": "stream-rich",

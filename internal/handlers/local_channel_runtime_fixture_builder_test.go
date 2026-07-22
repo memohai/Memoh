@@ -31,7 +31,7 @@ func committedAbortAgentContractScript() []agentpkg.StreamEvent {
 	return []agentpkg.StreamEvent{
 		{Type: agentpkg.EventAgentStart},
 		{Type: agentpkg.EventTextDelta, Delta: "partial output"},
-		{Type: agentpkg.EventAgentAbort, HistoryCommitted: true},
+		{Type: agentpkg.EventAgentAbort, HistoryCommitted: true, HistoryAssistantID: "assistant-runtime-interrupted"},
 	}
 }
 

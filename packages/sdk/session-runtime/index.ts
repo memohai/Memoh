@@ -42,6 +42,7 @@ export interface SessionRuntimeRunPatch {
   error_code?: string
   error?: string
   history_committed?: boolean
+  history_assistant_message_id?: string
   canonical_ready?: boolean
   steer?: SessionruntimeSteerState
   updated_at?: string
@@ -240,6 +241,7 @@ function isCurrentRunView(value: unknown): boolean {
     && value.generation.trim() !== ''
     && isRuntimeRunStatus(value.status)
     && (value.history_committed === undefined || typeof value.history_committed === 'boolean')
+    && isOptionalString(value.history_assistant_message_id)
     && (value.canonical_ready === undefined || typeof value.canonical_ready === 'boolean')
     && isOptionalString(value.error_code)
     && isOptionalString(value.error)
@@ -267,6 +269,7 @@ function isRunPatch(value: unknown): boolean {
     && isOptionalString(value.error_code)
     && isOptionalString(value.error)
     && (value.history_committed === undefined || typeof value.history_committed === 'boolean')
+    && isOptionalString(value.history_assistant_message_id)
     && (value.canonical_ready === undefined || typeof value.canonical_ready === 'boolean')
     && isOptionalString(value.updated_at)
     && isOptionalString(value.owner_lease_expires_at)
@@ -484,6 +487,7 @@ export function reduceSessionRuntimeDelta(
     if ('error_code' in patch) run.error_code = patch.error_code
     if ('error' in patch) run.error = patch.error
     if ('history_committed' in patch) run.history_committed = patch.history_committed
+    if ('history_assistant_message_id' in patch) run.history_assistant_message_id = patch.history_assistant_message_id
     if ('canonical_ready' in patch) run.canonical_ready = patch.canonical_ready
     if ('steer' in patch) run.steer = patch.steer ? structuredClone(patch.steer) : patch.steer
     if ('updated_at' in patch) run.updated_at = patch.updated_at

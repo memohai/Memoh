@@ -245,3 +245,12 @@ func (s *canonicalStepPersistenceState) requestMessageID() string {
 	}
 	return s.turn.RequestMessageID
 }
+
+func (s *canonicalStepPersistenceState) assistantMessageID() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return firstPersistedAssistantMessageID(s.persisted)
+}

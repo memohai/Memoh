@@ -195,7 +195,7 @@ func richActiveRunAgentContractScript() []agentpkg.StreamEvent {
 				},
 			},
 		},
-		{Type: agentpkg.EventAgentEnd, HistoryCommitted: true},
+		{Type: agentpkg.EventAgentEnd, HistoryCommitted: true, HistoryAssistantID: "assistant-runtime-rich"},
 	}
 }
 

@@ -790,12 +790,13 @@ func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, messa
 }
 
 type runFinalization struct {
-	Status           string
-	ErrorCode        string
-	Error            string
-	Messages         []conversation.UIMessage
-	HistoryCommitted bool
-	CanonicalReady   bool
+	Status             string
+	ErrorCode          string
+	Error              string
+	Messages           []conversation.UIMessage
+	HistoryCommitted   bool
+	HistoryAssistantID string
+	CanonicalReady     bool
 }
 
 func (m *Manager) FinalizeAgentEvent(ctx context.Context, handle RunHandle, event agentpkg.StreamEvent, canonicalReady bool, finalizationError string) ([]conversation.UIMessage, error) {
@@ -829,11 +830,12 @@ func (m *Manager) FinalizeAgentEvent(ctx context.Context, handle RunHandle, even
 		status = RunStatusErrored
 	}
 	outcome := runFinalization{
-		Status:           status,
-		Error:            finalizationError,
-		Messages:         messages,
-		HistoryCommitted: event.HistoryCommitted,
-		CanonicalReady:   canonicalReady && event.HistoryCommitted,
+		Status:             status,
+		Error:              finalizationError,
+		Messages:           messages,
+		HistoryCommitted:   event.HistoryCommitted,
+		HistoryAssistantID: strings.TrimSpace(event.HistoryAssistantID),
+		CanonicalReady:     canonicalReady && event.HistoryCommitted,
 	}
 	if err := m.finalizeRun(ctx, handle, outcome, true); err != nil {
 		return messages, err
@@ -939,6 +941,9 @@ func (m *Manager) finalizeRunState(ctx context.Context, handle RunHandle, outcom
 		run.Status = finalStatus
 		run.UpdatedAt = now
 		run.HistoryCommitted = run.HistoryCommitted || outcome.HistoryCommitted
+		if outcome.HistoryCommitted && strings.TrimSpace(outcome.HistoryAssistantID) != "" {
+			run.HistoryAssistantID = strings.TrimSpace(outcome.HistoryAssistantID)
+		}
 		run.CanonicalReady = run.CanonicalReady || outcome.CanonicalReady
 		switch {
 		case outcome.Error != "":
@@ -971,6 +976,9 @@ func (m *Manager) finalizationCommitted(ctx context.Context, handle RunHandle, o
 		return false, nil
 	}
 	if outcome.HistoryCommitted && !run.HistoryCommitted {
+		return false, nil
+	}
+	if outcome.HistoryAssistantID != "" && run.HistoryAssistantID != outcome.HistoryAssistantID {
 		return false, nil
 	}
 	if outcome.CanonicalReady && !run.CanonicalReady {

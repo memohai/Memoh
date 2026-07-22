@@ -583,6 +583,8 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 					canonicalFinalized = true
 				}
 				persistedMessages, event.HistoryCommitted = canonicalSteps.result()
+				event.HistoryRequestMessageID = canonicalSteps.requestMessageID()
+				event.HistoryAssistantID = canonicalSteps.assistantMessageID()
 				stored = true
 				data, err = json.Marshal(event)
 				if err != nil {
@@ -604,6 +606,7 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 				}
 				if len(persistedMessages) > 0 {
 					event.HistoryCommitted = true
+					event.HistoryAssistantID = firstPersistedAssistantMessageID(persistedMessages)
 					data, err = json.Marshal(event)
 					if err != nil {
 						return persistedMessages, fmt.Errorf("marshal terminal agent result: %w", err)
@@ -678,6 +681,15 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 	}
 
 	return persistedMessages, nil
+}
+
+func firstPersistedAssistantMessageID(messages []messagepkg.Message) string {
+	for _, message := range messages {
+		if strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
+			return strings.TrimSpace(message.ID)
+		}
+	}
+	return ""
 }
 
 func (r *Resolver) finalizeCanonicalStepPersistence(

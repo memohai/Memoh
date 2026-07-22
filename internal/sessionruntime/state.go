@@ -59,6 +59,10 @@ func runtimeRunPatch(snapshot Snapshot, status, runError, steer, lease bool) Run
 		patch.Status = &value
 		historyCommitted := run.HistoryCommitted
 		patch.HistoryCommitted = &historyCommitted
+		if run.HistoryAssistantID != "" {
+			value := run.HistoryAssistantID
+			patch.HistoryAssistantID = &value
+		}
 		canonicalReady := run.CanonicalReady
 		patch.CanonicalReady = &canonicalReady
 	}

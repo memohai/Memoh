@@ -2792,6 +2792,7 @@ export type SessionruntimeCurrentRunView = {
     error?: string;
     error_code?: string;
     generation: string;
+    history_assistant_message_id?: string;
     history_committed?: boolean;
     messages?: Array<ConversationUiMessage>;
     operation?: SessionruntimeRunOperationView;

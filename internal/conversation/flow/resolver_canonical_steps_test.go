@@ -125,4 +125,7 @@ func TestCanonicalStepPersistenceStartsReplacementAndDoesNotDuplicateTerminalSte
 	if !committed || len(persisted) != 3 {
 		t.Fatalf("canonical result = (%d, %v), want (3, true)", len(persisted), committed)
 	}
+	if got := state.assistantMessageID(); got != "step-2" {
+		t.Fatalf("canonical assistant message id = %q, want step-2", got)
+	}
 }

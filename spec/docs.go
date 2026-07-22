@@ -20875,6 +20875,9 @@ const docTemplate = `{
                 "generation": {
                     "type": "string"
                 },
+                "history_assistant_message_id": {
+                    "type": "string"
+                },
                 "history_committed": {
                     "type": "boolean"
                 },
