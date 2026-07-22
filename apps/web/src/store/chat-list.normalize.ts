@@ -119,12 +119,34 @@ export function skillActivationTextFromRaw(text: string, activation: UISkillActi
 }
 
 export function sortChatMessages(items: ChatMessage[]): ChatMessage[] {
-  return [...items].sort((a, b) => {
-    const at = Date.parse(a.timestamp)
-    const bt = Date.parse(b.timestamp)
-    if (!Number.isNaN(at) && !Number.isNaN(bt) && at !== bt) return at - bt
-    return a.id.localeCompare(b.id)
+  const hasCoordinates = (item: ChatMessage) => Number.isSafeInteger(item.turnPosition)
+    && Number.isSafeInteger(item.turnMessageSeq)
+  const ordered = items.filter(hasCoordinates).sort((a, b) => {
+    const position = a.turnPosition! - b.turnPosition!
+    if (position !== 0) return position
+    const sequence = a.turnMessageSeq! - b.turnMessageSeq!
+    return sequence !== 0 ? sequence : a.id.localeCompare(b.id)
   })
+  if (ordered.length === 0) return [...items]
+
+  // Client-only items have no durable coordinate. Keep each one in the same
+  // slot between durable rows that it already occupied; timestamp comparison
+  // would mix two unrelated ordering domains and can create comparator cycles.
+  const slots = Array.from({ length: ordered.length + 1 }, () => [] as ChatMessage[])
+  let durableBefore = 0
+  for (const item of items) {
+    if (hasCoordinates(item)) {
+      durableBefore += 1
+      continue
+    }
+    slots[Math.min(durableBefore, ordered.length)]!.push(item)
+  }
+
+  const result: ChatMessage[] = [...slots[0]!]
+  for (let index = 0; index < ordered.length; index += 1) {
+    result.push(ordered[index]!, ...slots[index + 1]!)
+  }
+  return result
 }
 
 // Optimistic turns set `__optimistic: true` at construction
@@ -135,25 +157,22 @@ export function isOptimisticTurn(turn: ChatMessage): boolean {
   return turn.__optimistic === true
 }
 
-export const SAME_TURN_TIMESTAMP_TOLERANCE_MS = 5_000
-
-export function isSameLogicalTurn(local: ChatMessage, incoming: ChatMessage): boolean {
+export function hasSameTurnIdentity(local: ChatMessage, incoming: ChatMessage): boolean {
   if (local.role !== incoming.role) return false
+  const localServerId = serverMessageId(local)
+  const incomingServerId = serverMessageId(incoming)
+  if (localServerId && incomingServerId && localServerId === incomingServerId) return true
+  if (
+    local.turnPosition !== undefined
+    && incoming.turnPosition !== undefined
+    && local.turnMessageSeq !== undefined
+    && incoming.turnMessageSeq !== undefined
+  ) {
+    return local.turnPosition === incoming.turnPosition && local.turnMessageSeq === incoming.turnMessageSeq
+  }
   const localExt = (local as { externalMessageId?: string }).externalMessageId
   const incomingExt = (incoming as { externalMessageId?: string }).externalMessageId
-  if (localExt && incomingExt) return localExt === incomingExt
-  if (local.role === 'user' && incoming.role === 'user') {
-    if (local.text.trim() !== incoming.text.trim()) return false
-  } else if (local.role === 'assistant' && incoming.role === 'assistant') {
-    // Assistant turns rarely overlap as optimistic + server in this path
-    // because optimistic assistants stay attached to a live stream; bail
-    // out conservatively rather than guessing on opaque content blocks.
-    return false
-  } else {
-    return false
-  }
-  const dt = Math.abs(new Date(local.timestamp).getTime() - new Date(incoming.timestamp).getTime())
-  return Number.isFinite(dt) && dt <= SAME_TURN_TIMESTAMP_TOLERANCE_MS
+  return Boolean(localExt && incomingExt && localExt === incomingExt)
 }
 
 export function createStreamId(): string {

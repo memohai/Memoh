@@ -2,7 +2,6 @@ package sessionruntime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -287,6 +286,9 @@ func cloneUIMessages(messages []conversation.UIMessage) ([]conversation.UIMessag
 				}
 			}
 		}
+		if len(message.RowIdentities) > 0 {
+			message.RowIdentities = append([]conversation.UIRowIdentity(nil), message.RowIdentities...)
+		}
 		if err := cloneJSON(messages[i].Attachments, &message.Attachments); err != nil {
 			return nil, err
 		}
@@ -361,11 +363,7 @@ func cloneEvent(event Event) (Event, error) {
 }
 
 func cloneJSON(in, out any) error {
-	data, err := json.Marshal(in)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, out)
+	return cloneRuntimeJSON(in, out)
 }
 
 func contextError(ctx context.Context) error {

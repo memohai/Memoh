@@ -51,6 +51,72 @@ RETURNING
   display_text,
   created_at;
 
+-- name: CreateReservedMessage :one
+INSERT INTO bot_history_messages (
+  id,
+  bot_id,
+  session_id,
+  sender_channel_identity_id,
+  sender_account_user_id,
+  source_message_id,
+  source_reply_to_message_id,
+  role,
+  content,
+  metadata,
+  usage,
+  session_mode,
+  runtime_type,
+  model_id,
+  event_id,
+  display_text,
+  turn_id,
+  turn_position,
+  turn_message_seq,
+  turn_visible
+)
+VALUES (
+  sqlc.arg(message_id),
+  sqlc.arg(bot_id),
+  sqlc.arg(session_id),
+  sqlc.narg(sender_channel_identity_id)::uuid,
+  sqlc.narg(sender_user_id)::uuid,
+  sqlc.narg(external_message_id)::text,
+  sqlc.narg(source_reply_to_message_id)::text,
+  sqlc.arg(role),
+  sqlc.arg(content),
+  sqlc.arg(metadata),
+  sqlc.arg(usage),
+  sqlc.arg(session_mode),
+  sqlc.arg(runtime_type),
+  sqlc.narg(model_id)::uuid,
+  sqlc.narg(event_id)::uuid,
+  sqlc.narg(display_text)::text,
+  sqlc.arg(turn_id),
+  sqlc.arg(turn_position),
+  sqlc.arg(turn_message_seq),
+  sqlc.arg(turn_visible)
+)
+RETURNING
+  id,
+  bot_id,
+  session_id,
+  sender_channel_identity_id,
+  sender_account_user_id AS sender_user_id,
+  source_message_id AS external_message_id,
+  source_reply_to_message_id,
+  role,
+  content,
+  metadata,
+  usage,
+  session_mode,
+  runtime_type,
+  event_id,
+  display_text,
+  turn_id,
+  turn_position,
+  turn_message_seq,
+  created_at;
+
 -- name: CreateMessageWithTurn :one
 WITH target AS (
   SELECT
@@ -188,10 +254,16 @@ inserted_message AS (
   FROM next_position
   RETURNING
     id,
+    turn_id,
+    turn_position,
+    turn_message_seq,
     created_at
 )
 SELECT
   inserted_message.id,
+  inserted_message.turn_id,
+  inserted_message.turn_position,
+  inserted_message.turn_message_seq,
   inserted_message.created_at
 FROM inserted_message;
 
@@ -402,11 +474,16 @@ inserted AS (
   FROM target
   RETURNING
     id,
-    role,
+    turn_id,
+    turn_position,
+    turn_message_seq,
     created_at
 )
 SELECT
   inserted.id,
+  inserted.turn_id,
+  inserted.turn_position,
+  inserted.turn_message_seq,
   inserted.created_at
 FROM inserted
 JOIN target ON true;
@@ -917,6 +994,47 @@ WHERE m.team_id = public.memoh_current_team_id() AND m.id = sqlc.arg(message_id)
   AND m.turn_id IS NULL
 RETURNING m.id;
 
+-- name: AppendMessageToCanonicalHistoryTurn :one
+WITH target AS (
+  SELECT request.turn_id, request.session_id, request.turn_position
+  FROM bot_history_messages request
+  WHERE request.team_id = public.memoh_current_team_id()
+    AND request.session_id = sqlc.arg(session_id)
+    AND request.id = sqlc.arg(request_message_id)
+    AND request.turn_id = sqlc.arg(turn_id)
+    AND request.turn_position IS NOT NULL
+    AND request.turn_visible = true
+    AND request.turn_superseded_at IS NULL
+  LIMIT 1
+  FOR UPDATE
+),
+next_seq AS (
+  SELECT
+    target.turn_id,
+    target.session_id,
+    target.turn_position,
+    COALESCE(MAX(existing.turn_message_seq), 0) + 1 AS turn_message_seq
+  FROM target
+  JOIN bot_history_messages existing
+    ON existing.team_id = public.memoh_current_team_id()
+   AND existing.turn_id = target.turn_id
+  GROUP BY target.turn_id, target.session_id, target.turn_position
+)
+UPDATE bot_history_messages message
+SET turn_id = next_seq.turn_id,
+    turn_position = next_seq.turn_position,
+    turn_visible = true,
+    turn_message_seq = next_seq.turn_message_seq,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
+FROM next_seq
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.id = sqlc.arg(message_id)
+  AND message.session_id = next_seq.session_id
+  AND message.turn_id IS NULL
+RETURNING message.id;
+
 -- name: AppendMessageToLatestHistoryTurn :one
 WITH latest AS (
   SELECT visible.turn_id, visible.session_id, visible.turn_position
@@ -1155,11 +1273,27 @@ replacement_input AS (
           AND request_message.session_id = old_turn.session_id
           AND request_message.role = 'user'
           AND (
-            request_message.turn_id IS NULL
-            OR request_message.turn_id = old_turn.id
-          )
+	        (
+	          sqlc.narg(replacement_turn_id)::uuid IS NULL
+	          AND (request_message.turn_id IS NULL OR request_message.turn_id = old_turn.id)
+	        )
+	        OR (
+	          sqlc.narg(replacement_turn_id)::uuid IS NOT NULL
+	          AND request_message.turn_id = sqlc.narg(replacement_turn_id)::uuid
+	          AND request_message.turn_position = sqlc.narg(replacement_turn_position)::bigint
+	          AND request_message.turn_message_seq = 1
+	        )
+	      )
         FOR UPDATE
       )
+	  OR (
+	    sqlc.narg(replacement_turn_id)::uuid IS NOT NULL
+	    AND old_turn.request_message_id IS NOT NULL
+	    AND NOT EXISTS (
+	      SELECT 1 FROM bot_history_messages conflicting_request
+	      WHERE conflicting_request.id = sqlc.narg(request_message_id)::uuid
+	    )
+	  )
     )
     AND (
       sqlc.narg(assistant_message_id)::uuid IS NULL
@@ -1169,7 +1303,14 @@ replacement_input AS (
         WHERE assistant_message.team_id = public.memoh_current_team_id() AND assistant_message.id = sqlc.narg(assistant_message_id)::uuid
           AND assistant_message.session_id = old_turn.session_id
           AND assistant_message.role = 'assistant'
-          AND assistant_message.turn_id IS NULL
+	      AND (
+	        assistant_message.turn_id IS NULL
+	        OR assistant_message.turn_id = sqlc.narg(replacement_turn_id)::uuid
+	      )
+	      AND (
+	        sqlc.narg(replacement_turn_position)::bigint IS NULL
+	        OR assistant_message.turn_position = sqlc.narg(replacement_turn_position)::bigint
+	      )
         FOR UPDATE
       )
     )
@@ -1192,7 +1333,10 @@ affected_compaction_sessions AS MATERIALIZED (
 ),
 next_position AS (
   UPDATE bot_sessions s
-  SET next_turn_position = next_turn_position + 1,
+  SET next_turn_position = next_turn_position + CASE
+	    WHEN sqlc.narg(replacement_turn_position)::bigint IS NULL THEN 1
+	    ELSE 0
+	  END,
       compaction_epoch = compaction_epoch + CASE
         WHEN EXISTS (
           SELECT 1
@@ -1203,14 +1347,18 @@ next_position AS (
       END
   FROM replacement_input
   WHERE s.team_id = public.memoh_current_team_id() AND s.id = replacement_input.session_id
-  RETURNING s.next_turn_position - 1 AS position
+	RETURNING CASE
+	  WHEN sqlc.narg(replacement_turn_position)::bigint IS NULL THEN s.next_turn_position - 1
+	  ELSE sqlc.narg(replacement_turn_position)::bigint
+	END AS position
 ),
 replacement AS (
   SELECT
-    gen_random_uuid() AS id,
+	(COALESCE(sqlc.narg(replacement_turn_id)::uuid, gen_random_uuid()))::uuid AS id,
     replacement_input.bot_id,
     replacement_input.session_id,
     next_position.position::bigint AS position,
+    replacement_input.request_message_id AS source_request_message_id,
     replacement_input.replacement_request_message_id AS request_message_id,
     replacement_input.replacement_assistant_message_id AS assistant_message_id,
     NULL::uuid AS superseded_by_turn_id,
@@ -1220,6 +1368,41 @@ replacement AS (
     now()::timestamptz AS updated_at
   FROM replacement_input
   CROSS JOIN next_position
+),
+cloned_request AS (
+  INSERT INTO bot_history_messages (
+    id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
+    source_message_id, source_reply_to_message_id, role, content, metadata, usage,
+    session_mode, runtime_type, model_id, compact_id, event_id, display_text,
+    turn_id, turn_position, turn_message_seq, turn_visible,
+    turn_superseded_by_turn_id, turn_superseded_at, turn_superseded_reason, created_at
+  )
+  SELECT
+    replacement.request_message_id, source.bot_id, source.session_id,
+    source.sender_channel_identity_id, source.sender_account_user_id,
+    source.source_message_id, source.source_reply_to_message_id, source.role,
+    source.content, source.metadata, source.usage, source.session_mode,
+    source.runtime_type, source.model_id, NULL, source.event_id, source.display_text,
+    replacement.id, replacement.position, 1, true, NULL, NULL, NULL, now()
+  FROM replacement
+  JOIN bot_history_messages source
+    ON source.id = replacement.source_request_message_id
+   AND source.session_id = replacement.session_id
+   AND source.role = 'user'
+  WHERE replacement.request_message_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM bot_history_messages existing
+      WHERE existing.id = replacement.request_message_id
+    )
+  RETURNING id
+),
+cloned_request_assets AS (
+  INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash, name, metadata, created_at)
+  SELECT cloned.id, asset.role, asset.ordinal, asset.content_hash, asset.name, asset.metadata, now()
+  FROM cloned_request cloned
+  JOIN replacement ON replacement.request_message_id = cloned.id
+  JOIN bot_history_message_assets asset ON asset.message_id = replacement.source_request_message_id
+  RETURNING id
 ),
 updated AS (
   UPDATE bot_history_messages old
@@ -1274,12 +1457,16 @@ linked_anchors AS (
         AND (
           m.turn_id IS NULL
           OR m.turn_id = updated_turn.id
+          OR m.turn_id = replacement.id
         )
       )
       OR (
         m.id = replacement.assistant_message_id
         AND m.role = 'assistant'
-        AND m.turn_id IS NULL
+        AND (
+          m.turn_id IS NULL
+          OR m.turn_id = replacement.id
+        )
       )
     )
   RETURNING m.id
@@ -1298,15 +1485,29 @@ linked_tail AS (
       m.id AS message_id,
       replacement.id AS turn_id,
       replacement.position AS turn_position,
-      2 + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id) AS turn_message_seq
+	  CASE
+	    WHEN sqlc.narg(replacement_turn_id)::uuid IS NOT NULL THEN m.turn_message_seq
+	    ELSE 2 + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id)
+	  END AS turn_message_seq
     FROM replacement
     JOIN bot_history_messages assistant ON assistant.id = replacement.assistant_message_id AND assistant.team_id = public.memoh_current_team_id()
     JOIN bot_history_messages m
       ON m.session_id = replacement.session_id
      AND m.role IN ('assistant', 'tool')
     WHERE m.team_id = public.memoh_current_team_id() AND m.id <> replacement.assistant_message_id
-      AND m.turn_id IS NULL
-      AND (m.created_at, m.id) > (assistant.created_at, assistant.id)
+	  AND (
+	    (
+	      sqlc.narg(replacement_turn_id)::uuid IS NOT NULL
+	      AND m.turn_id = replacement.id
+	      AND m.turn_position = replacement.position
+	      AND m.turn_message_seq > 2
+	    )
+	    OR (
+	      sqlc.narg(replacement_turn_id)::uuid IS NULL
+	      AND m.turn_id IS NULL
+	      AND (m.created_at, m.id) > (assistant.created_at, assistant.id)
+	    )
+	  )
   ) tail
   WHERE m.team_id = public.memoh_current_team_id() AND m.id = tail.message_id
   RETURNING m.id
@@ -1316,6 +1517,12 @@ linked_anchors_done AS (
 ),
 linked_tail_done AS (
   SELECT COUNT(*) AS count FROM linked_tail
+),
+cloned_request_done AS (
+  SELECT COUNT(*) AS count FROM cloned_request
+),
+cloned_request_assets_done AS (
+  SELECT COUNT(*) AS count FROM cloned_request_assets
 )
 SELECT replacement.id, replacement.bot_id, replacement.session_id, replacement.position::bigint AS position,
   replacement.request_message_id, replacement.assistant_message_id,
@@ -1324,7 +1531,9 @@ SELECT replacement.id, replacement.bot_id, replacement.session_id, replacement.p
 FROM replacement
 JOIN updated_turn ON true
 CROSS JOIN linked_anchors_done
-CROSS JOIN linked_tail_done;
+CROSS JOIN linked_tail_done
+CROSS JOIN cloned_request_done
+CROSS JOIN cloned_request_assets_done;
 
 -- name: SupersedeHistoryTurn :one
 WITH owner_session AS MATERIALIZED (
@@ -1345,6 +1554,17 @@ updated AS (
     AND m.turn_id = sqlc.arg(old_turn_id)
     AND m.session_id = owner.id
     AND m.turn_superseded_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM bot_history_messages newer
+      WHERE newer.team_id = public.memoh_current_team_id()
+        AND newer.session_id = owner.id
+        AND newer.turn_id IS NOT NULL
+        AND newer.turn_id IS DISTINCT FROM sqlc.arg(superseded_by_turn_id)
+        AND newer.turn_position > m.turn_position
+        AND newer.turn_visible = true
+        AND newer.turn_superseded_at IS NULL
+    )
   RETURNING
     m.turn_id,
     m.bot_id,
@@ -1457,6 +1677,9 @@ SELECT
   m.runtime_type,
   m.event_id,
   m.display_text,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1541,6 +1764,9 @@ SELECT
   m.runtime_type,
   m.event_id,
   m.display_text,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1720,6 +1946,9 @@ SELECT
   m.runtime_type,
   m.event_id,
   m.display_text,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1826,6 +2055,9 @@ SELECT
   m.runtime_type,
   m.event_id,
   m.display_text,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1854,6 +2086,9 @@ SELECT
   m.content,
   m.metadata,
   m.display_text,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -1886,6 +2121,9 @@ SELECT
   m.runtime_type,
   m.event_id,
   m.display_text,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -2067,6 +2305,9 @@ SELECT
   m.runtime_type,
   m.event_id,
   m.display_text,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -2174,6 +2415,9 @@ SELECT
   m.runtime_type,
   m.event_id,
   m.display_text,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -2240,7 +2484,6 @@ WITH cursor_message AS (
   SELECT m.turn_position
   FROM bot_history_messages m
   WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = sqlc.arg(session_id)
-    AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
     AND m.id = sqlc.arg(message_id)
@@ -2263,6 +2506,9 @@ SELECT
   m.event_id,
   m.display_text,
   m.compact_id,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -2277,6 +2523,42 @@ WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = sqlc.arg(ses
   AND m.turn_position IS NOT NULL
   AND m.turn_message_seq IS NOT NULL
   AND m.turn_position >= cursor.turn_position
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+LIMIT NULLIF(sqlc.arg(max_count)::integer, 0);
+
+-- name: ListVisibleMessagesByTurnIDBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id,
+  m.display_text,
+  m.compact_id,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.turn_id = sqlc.arg(turn_id)
+  AND m.turn_visible = true
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
 -- name: CountMessagesByBot :one

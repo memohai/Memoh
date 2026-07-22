@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -71,6 +72,83 @@ func TestMemoryBackendRejectsUnserializableSnapshotWithoutCorruptingState(t *tes
 	}
 	if snapshot.Seq != 1 || snapshot.CurrentRunView != nil {
 		t.Fatalf("snapshot corrupted after rejected update: %#v", snapshot)
+	}
+}
+
+func TestMemoryBackendPreservesDynamicJSONShapes(t *testing.T) {
+	t.Parallel()
+
+	backend := NewMemoryBackend()
+	key := Key{BotID: "bot-fidelity", SessionID: "session-fidelity"}
+	input := map[string]any{
+		"empty": []any{},
+		"large": int64(9007199254740993),
+	}
+	if _, changed, err := backend.Update(context.Background(), key, func(Snapshot, bool) (Snapshot, bool, error) {
+		return Snapshot{
+			BotID: key.BotID, SessionID: key.SessionID, Seq: 1, Queue: []QueuedRunView{},
+			CurrentRunView: &CurrentRunView{
+				StreamID: "stream-fidelity", Generation: "generation-fidelity", Status: RunStatusRunning,
+				Messages: []conversation.UIMessage{{ID: 1, Type: conversation.UIMessageTool, Input: input, Progress: []any{[]any{}}}},
+			},
+		}, true, nil
+	}); err != nil || !changed {
+		t.Fatalf("seed fidelity snapshot: changed=%v err=%v", changed, err)
+	}
+	snapshot, ok, err := backend.Load(context.Background(), key)
+	if err != nil || !ok || snapshot.CurrentRunView == nil {
+		t.Fatalf("load fidelity snapshot: ok=%v err=%v snapshot=%#v", ok, err, snapshot)
+	}
+	assertDynamicJSONFidelity(t, snapshot.CurrentRunView.Messages[0])
+
+	sub, err := backend.Subscribe(context.Background(), key)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(sub.Close)
+	if err := backend.Publish(context.Background(), Event{
+		Type: EventRuntimeDelta, BotID: key.BotID, SessionID: key.SessionID, Epoch: "epoch-fidelity", Seq: 2,
+		Delta: &RuntimeDelta{MessageUpserts: []conversation.UIMessage{{ID: 1, Type: conversation.UIMessageTool, Input: input, Progress: []any{[]any{}}}}},
+	}); err != nil {
+		t.Fatalf("publish fidelity event: %v", err)
+	}
+	event := <-sub.C
+	assertDynamicJSONFidelity(t, event.Delta.MessageUpserts[0])
+}
+
+func assertDynamicJSONFidelity(t *testing.T, message conversation.UIMessage) {
+	t.Helper()
+	input, ok := message.Input.(map[string]any)
+	if !ok {
+		t.Fatalf("dynamic input = %#v", message.Input)
+	}
+	if empty, ok := input["empty"].([]any); !ok || len(empty) != 0 {
+		t.Fatalf("dynamic empty array = %#v", input["empty"])
+	}
+	if large, ok := input["large"].(json.Number); !ok || large.String() != "9007199254740993" {
+		t.Fatalf("dynamic large integer = %#v", input["large"])
+	}
+	if len(message.Progress) != 1 {
+		t.Fatalf("dynamic progress = %#v", message.Progress)
+	}
+	if empty, ok := message.Progress[0].([]any); !ok || len(empty) != 0 {
+		t.Fatalf("dynamic nested progress array = %#v", message.Progress[0])
+
+func TestCloneUIMessagesCopiesRowIdentityLedger(t *testing.T) {
+	messages := []conversation.UIMessage{{
+		ID:   1,
+		Type: conversation.UIMessageTool,
+		RowIdentities: []conversation.UIRowIdentity{{
+			StableID: "assistant-row", TurnID: "turn-1", TurnPosition: 4, TurnMessageSeq: 2,
+		}},
+	}}
+	cloned, err := cloneUIMessages(messages)
+	if err != nil {
+		t.Fatalf("cloneUIMessages() error = %v", err)
+	}
+	messages[0].RowIdentities[0].StableID = "mutated"
+	if cloned[0].RowIdentities[0].StableID != "assistant-row" {
+		t.Fatalf("cloned row identities alias source: %#v", cloned[0].RowIdentities)
 	}
 }
 

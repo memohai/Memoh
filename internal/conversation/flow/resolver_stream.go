@@ -3,11 +3,15 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
@@ -27,6 +31,7 @@ type terminalSnapshot struct {
 	deferredToolID string
 	aborted        bool
 	visibleOutput  bool
+	runtimeRows    []messagepkg.RuntimeRowReservation
 }
 
 func hasVisibleAgentStreamOutput(event agentpkg.StreamEvent) bool {
@@ -48,6 +53,68 @@ func hasVisibleAgentStreamOutput(event agentpkg.StreamEvent) bool {
 	default:
 		return false
 	}
+}
+
+// IsCanceledStreamError reports whether err represents a canceled stream:
+// context cancellation, a gRPC Canceled status, or a wrapped provider error
+// that only exposes cancellation through its message.
+func IsCanceledStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || grpcstatus.Code(err) == codes.Canceled {
+		return true
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "context canceled") ||
+		strings.Contains(message, "context cancelled") ||
+		strings.Contains(message, "grpc canceled")
+}
+
+func isCanceledFlowError(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && IsCanceledStreamError(err)
+}
+
+type terminalEventDeliveryTimeoutContextKey struct{}
+
+func WithTerminalEventDeliveryTimeout(ctx context.Context, timeout time.Duration) context.Context {
+	if ctx == nil || timeout <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, terminalEventDeliveryTimeoutContextKey{}, timeout)
+}
+
+func sendWSAgentEvent(ctx context.Context, eventCh chan<- WSStreamEvent, event agentpkg.StreamEvent, data json.RawMessage) bool {
+	if eventCh == nil {
+		return false
+	}
+	deliveryCtx := ctx
+	cancel := func() {}
+	if event.IsTerminal() {
+		if timeout, ok := ctx.Value(terminalEventDeliveryTimeoutContextKey{}).(time.Duration); ok && timeout > 0 {
+			deliveryCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), timeout)
+		}
+	}
+	defer cancel()
+
+	select {
+	case eventCh <- data:
+		return true
+	case <-deliveryCtx.Done():
+		return false
+	}
+}
+
+// logCanceledAware logs err at Error level, degrading to Debug with the
+// canceled message when the failure is just our own context cancellation.
+func (r *Resolver) logCanceledAware(ctx context.Context, err error, failedMsg, canceledMsg string, args ...any) {
+	log := r.logger.Error
+	msg := failedMsg
+	if isCanceledFlowError(ctx, err) {
+		log = r.logger.Debug
+		msg = canceledMsg
+	}
+	log(msg, append(args, slog.Any("error", err))...)
 }
 
 // extractTerminalSnapshot decodes a terminal stream event payload into the
@@ -127,7 +194,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
 		var err error
-		if !streamReq.UserMessagePersisted {
+		if !streamReq.UserMessagePersisted && !streamReq.UserMessageHookApplied {
 			streamReq, err = r.applyUserMessageHook(streamCtx, streamReq)
 			if err != nil {
 				r.logger.Error("agent stream user message hook failed",
@@ -169,6 +236,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		var hasSnapshot bool
 		var toolCallCount int
 		var hasVisibleOutput bool
+		var persistenceErr error
 		for event := range eventCh {
 			idleCancel.Reset() // each event resets the idle timer
 
@@ -204,7 +272,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 						// when the parent ctx has already been cancelled by a
 						// client disconnect or idle timeout.
 						if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(streamCtx), streamReq, rc, snap); storeErr != nil {
-							r.logger.Error("stream persist failed", slog.Any("error", storeErr))
+							persistenceErr = fmt.Errorf("persist terminal agent result: %w", storeErr)
 						} else {
 							stored = true
 						}
@@ -224,6 +292,10 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				}
 			}
 		}
+		if persistenceErr != nil {
+			errCh <- persistenceErr
+			return
+		}
 
 		// Intermediate persistence on abort/error: persist only concrete
 		// partial assistant/tool state. Failed sends without a terminal
@@ -232,7 +304,10 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		if !stored {
 			switch {
 			case hasSnapshot:
-				_ = r.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+				if _, err := r.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot, toolCallCount, idleCancel.DidFire(), hasVisibleOutput); err != nil {
+					errCh <- fmt.Errorf("persist partial agent result: %w", err)
+					return
+				}
 			default:
 				r.logger.Info("skip persisting failed startup stream",
 					slog.String("bot_id", streamReq.BotID),
@@ -278,13 +353,62 @@ func (r *Resolver) StreamChatWS(
 	return err
 }
 
+type (
+	persistenceGuardContextKey      struct{}
+	terminalHookAuthorityContextKey struct{}
+)
+
+func WithTerminalHookAuthority(ctx context.Context, authority agentpkg.TerminalHookAuthority) context.Context {
+	if ctx == nil || authority.Context == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, terminalHookAuthorityContextKey{}, authority)
+}
+
+// TerminalHookAuthorityFromContext returns the runtime ownership authority
+// installed by the transport before agent execution begins.
+func TerminalHookAuthorityFromContext(ctx context.Context) agentpkg.TerminalHookAuthority {
+	if ctx == nil {
+		return agentpkg.TerminalHookAuthority{}
+	}
+	authority, _ := ctx.Value(terminalHookAuthorityContextKey{}).(agentpkg.TerminalHookAuthority)
+	return authority
+}
+
+// WithPersistenceGuard installs a fail-closed ownership check that runs
+// immediately before terminal or partial agent output is written to history.
+func WithPersistenceGuard(ctx context.Context, guard func(context.Context) error) context.Context {
+	if guard == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, persistenceGuardContextKey{}, guard)
+}
+
+func persistenceGuardFromContext(ctx context.Context) func(context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	guard, _ := ctx.Value(persistenceGuardContextKey{}).(func(context.Context) error)
+	return guard
+}
+
+func runPersistenceGuard(ctx context.Context) error {
+	guard := persistenceGuardFromContext(ctx)
+	if guard == nil {
+		return nil
+	}
+	guardCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return guard(guardCtx)
+}
+
 func (r *Resolver) streamChatWSResult(
 	ctx context.Context,
 	req conversation.ChatRequest,
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) ([]messagepkg.Message, error) {
-	return r.streamChatWSResultWithHooks(ctx, req, eventCh, abortCh, nil, nil)
+	return r.streamChatWSResultWithHooks(ctx, req, eventCh, abortCh, nil)
 }
 
 func (r *Resolver) streamChatWSResultWithHooks(
@@ -293,7 +417,17 @@ func (r *Resolver) streamChatWSResultWithHooks(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 	preflight func(context.Context) error,
-	postPersist func(context.Context, []messagepkg.Message) error,
+) ([]messagepkg.Message, error) {
+	return r.streamChatWSResultWithHooksAndTurn(ctx, req, eventCh, abortCh, preflight, false)
+}
+
+func (r *Resolver) streamChatWSResultWithHooksAndTurn(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	eventCh chan<- WSStreamEvent,
+	abortCh <-chan struct{},
+	preflight func(context.Context) error,
+	sessionTurnHeld bool,
 ) ([]messagepkg.Message, error) {
 	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
 		return nil, err
@@ -302,10 +436,11 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		return nil, err
 	}
 	if ok, err := r.isACPAgentSession(ctx, req); err != nil {
-		r.logger.Error("StreamChatWS: ACP session check failed",
+		r.logCanceledAware(ctx, err,
+			"StreamChatWS: ACP session check failed",
+			"StreamChatWS: ACP session check canceled",
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.SessionID),
-			slog.Any("error", err),
 		)
 		return nil, err
 	} else if ok {
@@ -320,8 +455,10 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		return nil, prepareErr
 	}
 
-	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
-	defer doneTurn()
+	if !sessionTurnHeld {
+		doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
+		defer doneTurn()
+	}
 
 	if preflight != nil {
 		if err := preflight(ctx); err != nil {
@@ -333,21 +470,23 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	var err error
-	if !req.UserMessagePersisted && !req.ReusePersistedUserMessage {
+	if !req.UserMessagePersisted && !req.UserMessageHookApplied && !req.ReusePersistedUserMessage {
 		req, err = r.applyUserMessageHook(ctx, req)
 		if err != nil {
-			r.logger.Error("StreamChatWS: user message hook failed",
+			r.logCanceledAware(ctx, err,
+				"StreamChatWS: user message hook failed",
+				"StreamChatWS: user message hook canceled",
 				slog.String("bot_id", req.BotID),
-				slog.Any("error", err),
 			)
 			return nil, err
 		}
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
-		r.logger.Error("StreamChatWS: resolve failed",
+		r.logCanceledAware(ctx, err,
+			"StreamChatWS: resolve failed",
+			"StreamChatWS: resolve canceled",
 			slog.String("bot_id", req.BotID),
-			slog.Any("error", err),
 		)
 		return nil, fmt.Errorf("resolve: %w", err)
 	}
@@ -370,6 +509,26 @@ func (r *Resolver) streamChatWSResultWithHooks(
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
 	cfg = r.prepareRunConfig(streamCtx, cfg)
+	rowTracker := newRuntimeRowTracker(req.RuntimeTurn)
+	bindRuntimeInjectedRecorder(&cfg, rc, rowTracker)
+	bindRuntimeSyntheticRowRecorder(&cfg, rowTracker)
+	canonicalSteps, err := r.beginCanonicalStepPersistence(streamCtx, req, rc)
+	if err != nil {
+		return nil, err
+	}
+	if canonicalSteps != nil {
+		committed := agentpkg.StreamEvent{Type: agentpkg.EventHistoryCommit, HistoryCommitted: true}
+		data, marshalErr := json.Marshal(committed)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("marshal canonical history commit: %w", marshalErr)
+		}
+		select {
+		case eventCh <- json.RawMessage(data):
+		case <-streamCtx.Done():
+			return nil, context.Cause(streamCtx)
+		}
+	}
+	cfg = canonicalSteps.attachToRunConfig(cfg)
 
 	// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
 	idleCtx, idleCancel := withIdleTimeout(streamCtx)
@@ -384,9 +543,10 @@ func (r *Resolver) streamChatWSResultWithHooks(
 	var toolCallCount int
 	var hasVisibleOutput bool
 	var persistedMessages []messagepkg.Message
-	postPersistApplied := false
+	canonicalFinalized := false
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
+		rowTracker.Annotate(&event)
 
 		// Track tool calls for adaptive idle timeout
 		if event.Type == agentpkg.EventToolCallStart {
@@ -411,44 +571,93 @@ func (r *Resolver) streamChatWSResultWithHooks(
 			continue
 		}
 
-		if event.IsTerminal() && len(event.Messages) > 0 {
+		if event.IsTerminal() && canonicalSteps != nil {
+			if !stored {
+				if snap, ok := extractTerminalSnapshot(data); ok {
+					snap.visibleOutput = hasVisibleOutput
+					lastSnapshot = snap
+					hasSnapshot = true
+					if err := canonicalSteps.appendTerminalSnapshot(context.WithoutCancel(ctx), snap); err != nil {
+						return persistedMessages, fmt.Errorf("persist terminal canonical step: %w", err)
+					}
+					r.finalizeCanonicalStepPersistence(context.WithoutCancel(ctx), req, rc, canonicalSteps, snap)
+					canonicalFinalized = true
+				}
+				persistedMessages, event.HistoryCommitted = canonicalSteps.result()
+				stored = true
+				data, err = json.Marshal(event)
+				if err != nil {
+					return persistedMessages, fmt.Errorf("marshal terminal canonical result: %w", err)
+				}
+			}
+		} else if event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.visibleOutput = hasVisibleOutput
+				snap.runtimeRows = rowTracker.bindTerminalRows(snap.sdkMessages)
 				lastSnapshot = snap
 				hasSnapshot = true
 				if !stored {
 					persisted, storeErr := r.persistTerminalSnapshotResult(context.WithoutCancel(ctx), req, rc, snap)
 					if storeErr != nil {
-						r.logger.Error("ws persist failed", slog.Any("error", storeErr))
-					} else {
-						persistedMessages = persisted
-						stored = true
+						return persistedMessages, fmt.Errorf("persist terminal agent result: %w", storeErr)
+					}
+					persistedMessages = persisted
+					if len(persisted) > 0 {
+						if event.Metadata == nil {
+							event.Metadata = make(map[string]any, 1)
+						}
+						event.Metadata[conversation.RuntimePersistedProjectionMetadataKey] = conversation.NewRuntimePersistedProjection(persisted)
+						if remarshal, marshalErr := json.Marshal(event); marshalErr == nil {
+							data = remarshal
+						}
+					}
+					stored = true
+				}
+				if len(persistedMessages) > 0 {
+					event.HistoryCommitted = true
+					data, err = json.Marshal(event)
+					if err != nil {
+						return persistedMessages, fmt.Errorf("marshal terminal agent result: %w", err)
 					}
 				}
 			}
 		}
 
-		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
-			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
-				return persistedMessages, err
-			}
-			postPersistApplied = true
-		}
-
-		if !clientGone {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
+		if event.IsTerminal() {
+			// Execution cancellation must not discard the terminal event that
+			// acknowledges partial-history persistence.
+			if !sendWSAgentEvent(ctx, eventCh, event, data) {
 				clientGone = true
 			}
+		} else if !clientGone {
+			clientGone = !sendWSAgentEvent(ctx, eventCh, event, data)
 		}
 	}
 
 	// Intermediate persistence on abort/error
+	if canonicalSteps != nil && !stored {
+		if hasSnapshot {
+			if err := canonicalSteps.appendTerminalSnapshot(context.WithoutCancel(ctx), lastSnapshot); err != nil {
+				return persistedMessages, fmt.Errorf("persist final canonical step: %w", err)
+			}
+		}
+		if !canonicalFinalized {
+			r.finalizeCanonicalStepPersistence(context.WithoutCancel(ctx), req, rc, canonicalSteps, lastSnapshot)
+		}
+		persistedMessages, _ = canonicalSteps.result()
+		stored = true
+	}
 	if !stored {
 		switch {
 		case hasSnapshot:
-			persistedMessages = r.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+			if guardErr := runPersistenceGuard(ctx); guardErr != nil {
+				return persistedMessages, fmt.Errorf("runtime ownership check before partial persistence: %w", guardErr)
+			}
+			var persistErr error
+			persistedMessages, persistErr = r.persistPartialResult(ctx, req, rc, lastSnapshot, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+			if persistErr != nil {
+				return persistedMessages, fmt.Errorf("persist partial agent result: %w", persistErr)
+			}
 		default:
 			r.logger.Info("skip persisting failed startup ws stream",
 				slog.String("bot_id", req.BotID),
@@ -479,13 +688,47 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		}
 	}
 
-	if postPersist != nil && !postPersistApplied {
-		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
-			return persistedMessages, err
-		}
-	}
-
 	return persistedMessages, nil
+}
+
+func (r *Resolver) finalizeCanonicalStepPersistence(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	rc resolvedContext,
+	state *canonicalStepPersistenceState,
+	snap terminalSnapshot,
+) {
+	if state == nil {
+		return
+	}
+	if err := runPersistenceGuard(ctx); err != nil {
+		r.logger.Warn("skip canonical ancillary finalization after ownership loss",
+			slog.String("bot_id", req.BotID),
+			slog.String("session_id", req.SessionID),
+			slog.Any("error", err),
+		)
+		return
+	}
+	if err := r.persistSessionWorkspaceTarget(ctx, req); err != nil {
+		r.logger.Error("persist canonical workspace target failed",
+			slog.String("bot_id", req.BotID),
+			slog.String("session_id", req.SessionID),
+			slog.Any("error", err),
+		)
+	}
+	if state.hasAssistant() && !req.SkipMemoryExtraction {
+		outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
+		roundMessages := prependTurnUserMessage(req, outputMessages)
+		if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
+			roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
+		}
+		go r.storeMemory(context.WithoutCancel(ctx), req, roundMessages)
+	}
+	if inputTokens := extractInputTokensFromUsage(snap.usage); inputTokens > 0 {
+		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
+	} else if snap.aborted && rc.estimatedTokens > 0 {
+		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, rc.estimatedTokens)
+	}
 }
 
 // persistTerminalSnapshot stores the SDK messages produced by an agent run
@@ -497,7 +740,17 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 }
 
 func (r *Resolver) persistTerminalSnapshotResult(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) ([]messagepkg.Message, error) {
+	if err := runPersistenceGuard(ctx); err != nil {
+		return nil, fmt.Errorf("runtime ownership check before persistence: %w", err)
+	}
 	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
+	for i := range outputMessages {
+		if i >= len(snap.runtimeRows) || strings.TrimSpace(snap.runtimeRows[i].MessageID) == "" {
+			continue
+		}
+		row := snap.runtimeRows[i]
+		outputMessages[i].RuntimeRow = &row
+	}
 	if snap.aborted && !snap.visibleOutput {
 		r.logger.Info("skip persisting aborted terminal snapshot before visible output",
 			slog.String("bot_id", req.BotID),
@@ -553,6 +806,26 @@ func hasPersistableAssistantOutput(messages []conversation.ModelMessage) bool {
 	return false
 }
 
+func bindRuntimeInjectedRecorder(cfg *agentpkg.RunConfig, rc resolvedContext, rowTracker *RuntimeRowTracker) {
+	if cfg == nil || rowTracker == nil || rc.recordInjectedMessage == nil {
+		return
+	}
+	cfg.InjectedRecorder = func(headerifiedText string, _ []sdk.ImagePart, insertAfter int) {
+		rc.recordInjectedMessage(conversation.InjectedMessageRecord{
+			HeaderifiedText: headerifiedText,
+			InsertAfter:     insertAfter,
+			RuntimeRow:      rowTracker.reserveInjectedRow(),
+		})
+	}
+}
+
+func bindRuntimeSyntheticRowRecorder(cfg *agentpkg.RunConfig, rowTracker *RuntimeRowTracker) {
+	if cfg == nil || rowTracker == nil {
+		return
+	}
+	cfg.SyntheticRowRecorder = rowTracker.reserveTerminalSyntheticRow
+}
+
 // persistPartialResult is the interrupt-path fallback. When the agent stream
 // was interrupted (provider error, user abort, idle timeout) and partial SDK
 // messages are available, those are persisted via the normal pipeline so
@@ -562,24 +835,33 @@ func hasPersistableAssistantOutput(messages []conversation.ModelMessage) bool {
 // When no partial messages are available, failures are not persisted. The UI
 // can show temporary errors without committing a user-only history row for a
 // send that did not successfully produce an assistant turn.
+//
+// Reachability note: both stream loops persist a captured terminal snapshot
+// inline (or return on its error), so today hasSnapshot implies stored and
+// this branch never fires. It stays as the defensive fallback for partial
+// persistence and therefore must carry the full snapshot — including the row
+// identities bound at capture time. Dropping runtimeRows would persist the
+// user row with its reservation while assistant rows fall back to fresh
+// identities, which breaks the turn's row-ledger ordering.
 func (r *Resolver) persistPartialResult(
 	ctx context.Context,
 	req conversation.ChatRequest,
 	rc resolvedContext,
-	partialMessages []sdk.Message,
+	snap terminalSnapshot,
 	toolCallCount int,
 	wasIdleTimeout bool,
 	hasVisibleOutput bool,
-) []messagepkg.Message {
+) ([]messagepkg.Message, error) {
 	persistCtx := context.WithoutCancel(ctx)
 
-	if len(partialMessages) > 0 {
+	if len(snap.sdkMessages) > 0 {
 		// AllowPendingToolCalls=false → repairToolCallClosures will inject
 		// synthetic error tool_results for any tool_calls that never received
 		// a real result, preserving the assistant ↔ tool pairing required by
 		// downstream provider serializers (especially Anthropic).
 		persisted, err := r.persistTerminalSnapshotResult(persistCtx, req, rc, terminalSnapshot{
-			sdkMessages:   partialMessages,
+			sdkMessages:   snap.sdkMessages,
+			runtimeRows:   snap.runtimeRows,
 			aborted:       !hasVisibleOutput,
 			visibleOutput: hasVisibleOutput,
 		})
@@ -587,7 +869,7 @@ func (r *Resolver) persistPartialResult(
 			r.logger.Info("persisted partial agent result",
 				slog.String("bot_id", req.BotID),
 				slog.Int("tool_calls", toolCallCount),
-				slog.Int("partial_messages", len(partialMessages)),
+				slog.Int("partial_messages", len(snap.sdkMessages)),
 				slog.Bool("idle_timeout", wasIdleTimeout),
 			)
 			// Trigger compaction on the failure path so that oversized
@@ -596,12 +878,13 @@ func (r *Resolver) persistPartialResult(
 			if rc.estimatedTokens > 0 {
 				go r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 			}
-			return persisted
+			return persisted, nil
 		}
 		r.logger.Error("failed to persist partial agent messages",
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
+		return nil, err
 	}
 
 	r.logger.Info("skip persisting failed stream without terminal snapshot",
@@ -614,7 +897,7 @@ func (r *Resolver) persistPartialResult(
 	if rc.estimatedTokens > 0 {
 		go r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 	}
-	return nil
+	return nil, nil
 }
 
 // interleaveInjectedMessages inserts injected user messages at their correct
@@ -633,16 +916,18 @@ func interleaveInjectedMessages(round []conversation.ModelMessage, injections []
 		result = append(result, msg)
 		for injIdx < len(injections) && injections[injIdx].InsertAfter == i {
 			result = append(result, conversation.ModelMessage{
-				Role:    "user",
-				Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+				Role:       "user",
+				Content:    conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+				RuntimeRow: injections[injIdx].RuntimeRow,
 			})
 			injIdx++
 		}
 	}
 	for ; injIdx < len(injections); injIdx++ {
 		result = append(result, conversation.ModelMessage{
-			Role:    "user",
-			Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+			Role:       "user",
+			Content:    conversation.NewTextContent(injections[injIdx].HeaderifiedText),
+			RuntimeRow: injections[injIdx].RuntimeRow,
 		})
 	}
 	return result

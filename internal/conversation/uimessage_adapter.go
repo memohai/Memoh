@@ -18,22 +18,37 @@ func UIStreamEventFromAgentEvent(ev event.StreamEvent) UIMessageStreamEvent {
 	for _, attachment := range ev.Attachments {
 		attachments = append(attachments, UIAttachmentFromAgentAttachment(attachment))
 	}
+	rowIdentities := make([]UIRowIdentity, 0, len(ev.RowIdentities))
+	for _, row := range ev.RowIdentities {
+		rowIdentities = append(rowIdentities, UIRowIdentity{
+			StableID:       row.StableID,
+			Role:           row.Role,
+			TurnID:         row.TurnID,
+			TurnPosition:   row.TurnPosition,
+			TurnMessageSeq: row.TurnMessageSeq,
+		})
+	}
 
 	return UIMessageStreamEvent{
-		Type:        string(ev.Type),
-		Delta:       ev.Delta,
-		ToolName:    ev.ToolName,
-		ToolCallID:  ev.ToolCallID,
-		Input:       ev.Input,
-		Output:      ev.Result,
-		Progress:    ev.Progress,
-		Attachments: attachments,
-		Error:       ev.Error,
-		ApprovalID:  ev.ApprovalID,
-		UserInputID: ev.UserInputID,
-		ShortID:     ev.ShortID,
-		Status:      ev.Status,
-		Metadata:    ev.Metadata,
+		Type:           string(ev.Type),
+		Delta:          ev.Delta,
+		ToolName:       ev.ToolName,
+		ToolCallID:     ev.ToolCallID,
+		Input:          ev.Input,
+		Output:         ev.Result,
+		Progress:       ev.Progress,
+		Attachments:    attachments,
+		Error:          ev.Error,
+		ApprovalID:     ev.ApprovalID,
+		UserInputID:    ev.UserInputID,
+		ShortID:        ev.ShortID,
+		Status:         ev.Status,
+		Metadata:       ev.Metadata,
+		StableID:       ev.StableID,
+		TurnID:         ev.TurnID,
+		TurnPosition:   ev.TurnPosition,
+		TurnMessageSeq: ev.TurnMessageSeq,
+		RowIdentities:  rowIdentities,
 	}
 }
 

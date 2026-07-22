@@ -11,7 +11,6 @@ vi.mock('@memohai/sdk', () => ({
   getBotsByBotIdSessionsEvents: vi.fn(),
   getBotsByBotIdMessages: vi.fn(),
   getBotsByBotIdMessagesLocate: vi.fn(),
-  postBotsByBotIdWebMessages: vi.fn(),
 }))
 
 vi.mock('@memohai/sdk/client', () => ({
@@ -21,12 +20,11 @@ vi.mock('@memohai/sdk/client', () => ({
 import {
   getBotsByBotIdSessionsBySessionIdMessagesEvents,
   getBotsByBotIdSessionsEvents,
-  postBotsByBotIdWebMessages,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 
 import {
-  sendLocalChannelMessage,
+  fetchMessagesUI,
   streamBotSessionsActivityEvents,
   streamSessionMessageEvents,
 } from './useChat.message-api'
@@ -34,6 +32,27 @@ import {
 async function* singleEventStream(event: unknown) {
   yield event
 }
+
+describe('fetchMessagesUI', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('requests one complete persisted turn by its runtime turn id', async () => {
+    vi.mocked(client.get).mockResolvedValue({ data: { items: [] } } as never)
+
+    await fetchMessagesUI('bot-1', 'session-1', { turnId: 'turn-1' })
+
+    expect(client.get).toHaveBeenCalledWith(expect.objectContaining({
+      query: expect.objectContaining({
+        session_id: 'session-1',
+        limit: 30,
+        format: 'ui',
+        turn_id: 'turn-1',
+      }),
+    }))
+  })
+})
 
 describe('streamSessionMessageEvents', () => {
   beforeEach(() => {
@@ -92,24 +111,5 @@ describe('streamBotSessionsActivityEvents', () => {
 
     expect(onEvent).toHaveBeenCalledTimes(1)
     expect(onEvent).toHaveBeenCalledWith(event)
-  })
-})
-
-describe('sendLocalChannelMessage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('posts normal REST fallback messages through the generated Web SDK function', async () => {
-    vi.mocked(postBotsByBotIdWebMessages).mockResolvedValue({ data: undefined } as never)
-
-    await sendLocalChannelMessage('bot-1', 'hello')
-
-    expect(postBotsByBotIdWebMessages).toHaveBeenCalledWith({
-      path: { bot_id: 'bot-1' },
-      body: { message: { text: 'hello' } },
-      throwOnError: true,
-    })
-    expect(client.post).not.toHaveBeenCalled()
   })
 })

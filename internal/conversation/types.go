@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 // Conversation kind constants.
@@ -93,12 +95,13 @@ type UpdateSettingsRequest struct {
 // ModelMessage is the canonical message format exchanged with the agent gateway.
 // Aligned with Vercel AI SDK ModelMessage structure.
 type ModelMessage struct {
-	Role       string          `json:"role"`
-	Content    json.RawMessage `json:"content,omitempty"`
-	Usage      json.RawMessage `json:"-"`
-	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	Name       string          `json:"name,omitempty"`
+	Role       string                            `json:"role"`
+	Content    json.RawMessage                   `json:"content,omitempty"`
+	Usage      json.RawMessage                   `json:"-"`
+	ToolCalls  []ToolCall                        `json:"tool_calls,omitempty"`
+	ToolCallID string                            `json:"tool_call_id,omitempty"`
+	Name       string                            `json:"name,omitempty"`
+	RuntimeRow *messagepkg.RuntimeRowReservation `json:"-"`
 }
 
 // TextContent extracts the plain text from the message content.
@@ -222,50 +225,52 @@ type OutboundAssetRef struct {
 
 // ChatRequest is the input for Chat and StreamChat.
 type ChatRequest struct {
-	BotID                        string           `json:"-"`
-	ChatID                       string           `json:"-"`
-	SessionID                    string           `json:"-"`
-	StreamID                     string           `json:"-"`
-	Token                        string           `json:"-"`
-	UserID                       string           `json:"-"`
-	SourceChannelIdentityID      string           `json:"-"`
-	DisplayName                  string           `json:"-"`
-	RouteID                      string           `json:"-"`
-	ChatToken                    string           `json:"-"`
-	ExternalMessageID            string           `json:"-"`
-	ReplyTarget                  string           `json:"-"`
-	ConversationType             string           `json:"-"`
-	ConversationName             string           `json:"-"`
-	SourceReplyToMessageID       string           `json:"-"`
-	ReplySender                  string           `json:"-"`
-	ReplyPreview                 string           `json:"-"`
-	ReplyAttachments             []ChatAttachment `json:"-"`
-	MentionsBot                  bool             `json:"-"`
-	RepliesToBot                 bool             `json:"-"`
-	ForwardMessageID             string           `json:"-"`
-	ForwardFromUserID            string           `json:"-"`
-	ForwardFromConversationID    string           `json:"-"`
-	ForwardSender                string           `json:"-"`
-	ForwardDate                  int64            `json:"-"`
-	UserMessagePersisted         bool             `json:"-"`
-	PersistedUserMessageID       string           `json:"-"`
-	ReusePersistedUserMessage    bool             `json:"-"`
-	EventID                      string           `json:"-"`
-	RawQuery                     string           `json:"-"`
-	ModelQuery                   string           `json:"-"`
-	UserMessageKind              string           `json:"-"`
-	UserVisibleText              string           `json:"-"`
-	SkillActivation              *SkillActivation `json:"-"`
-	ToolHTTPURL                  string           `json:"-"`
-	SessionType                  string           `json:"-"`
-	RuntimeType                  string           `json:"-"`
-	SkipMemoryExtraction         bool             `json:"-"`
-	SkipHistoryTurn              bool             `json:"-"`
-	SkipTitleGeneration          bool             `json:"-"`
-	ForceFreshRuntime            bool             `json:"-"`
-	HistoryCutoffBeforeMessageID string           `json:"-"`
-	RequiredHistoryMessageID     string           `json:"-"`
-	WorkspaceTarget              *WorkspaceTarget `json:"-"`
+	BotID                        string                             `json:"-"`
+	ChatID                       string                             `json:"-"`
+	SessionID                    string                             `json:"-"`
+	StreamID                     string                             `json:"-"`
+	Token                        string                             `json:"-"`
+	UserID                       string                             `json:"-"`
+	SourceChannelIdentityID      string                             `json:"-"`
+	DisplayName                  string                             `json:"-"`
+	RouteID                      string                             `json:"-"`
+	ChatToken                    string                             `json:"-"`
+	ExternalMessageID            string                             `json:"-"`
+	ReplyTarget                  string                             `json:"-"`
+	ConversationType             string                             `json:"-"`
+	ConversationName             string                             `json:"-"`
+	SourceReplyToMessageID       string                             `json:"-"`
+	ReplySender                  string                             `json:"-"`
+	ReplyPreview                 string                             `json:"-"`
+	ReplyAttachments             []ChatAttachment                   `json:"-"`
+	MentionsBot                  bool                               `json:"-"`
+	RepliesToBot                 bool                               `json:"-"`
+	ForwardMessageID             string                             `json:"-"`
+	ForwardFromUserID            string                             `json:"-"`
+	ForwardFromConversationID    string                             `json:"-"`
+	ForwardSender                string                             `json:"-"`
+	ForwardDate                  int64                              `json:"-"`
+	UserMessagePersisted         bool                               `json:"-"`
+	UserMessageHookApplied       bool                               `json:"-"`
+	PersistedUserMessageID       string                             `json:"-"`
+	ReusePersistedUserMessage    bool                               `json:"-"`
+	EventID                      string                             `json:"-"`
+	RawQuery                     string                             `json:"-"`
+	ModelQuery                   string                             `json:"-"`
+	UserMessageKind              string                             `json:"-"`
+	UserVisibleText              string                             `json:"-"`
+	SkillActivation              *SkillActivation                   `json:"-"`
+	ToolHTTPURL                  string                             `json:"-"`
+	SessionType                  string                             `json:"-"`
+	RuntimeType                  string                             `json:"-"`
+	SkipMemoryExtraction         bool                               `json:"-"`
+	SkipHistoryTurn              bool                               `json:"-"`
+	SkipTitleGeneration          bool                               `json:"-"`
+	ForceFreshRuntime            bool                               `json:"-"`
+	HistoryCutoffBeforeMessageID string                             `json:"-"`
+	RequiredHistoryMessageID     string                             `json:"-"`
+	WorkspaceTarget              *WorkspaceTarget                   `json:"-"`
+	RuntimeTurn                  *messagepkg.RuntimeTurnReservation `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
 	// Set by the inbound channel processor; called by the resolver at persist time.
@@ -335,6 +340,7 @@ type InjectMessage struct {
 // together with its position in the output message sequence.
 type InjectedMessageRecord struct {
 	HeaderifiedText string
+	RuntimeRow      *messagepkg.RuntimeRowReservation
 	// InsertAfter is the number of SDK output messages that existed before
 	// this injection. Used to determine the correct insertion position when
 	// interleaving injected messages into the persisted round.

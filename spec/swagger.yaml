@@ -1867,10 +1867,20 @@ definitions:
       progress:
         items: {}
         type: array
+      row_identities:
+        items:
+          $ref: '#/definitions/conversation.UIRowIdentity'
+        type: array
       running:
         type: boolean
+      stable_id:
+        type: string
       tool_call_id:
         type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
       type:
         $ref: '#/definitions/conversation.UIMessageType'
       user_input:
@@ -1900,6 +1910,19 @@ definitions:
         type: string
       sender:
         type: string
+    type: object
+  conversation.UIRowIdentity:
+    properties:
+      role:
+        type: string
+      stable_id:
+        type: string
+      turn_id:
+        type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
     type: object
   conversation.UIToolApproval:
     properties:
@@ -1952,6 +1975,10 @@ definitions:
         type: string
       timestamp:
         type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
       user_message_kind:
         type: string
     type: object
@@ -2878,19 +2905,6 @@ definitions:
         type: array
       snapshotter:
         type: string
-    type: object
-  handlers.LocalChannelMessageRequest:
-    properties:
-      message:
-        $ref: '#/definitions/channel.Message'
-      model_id:
-        type: string
-      reasoning_effort:
-        type: string
-      workspace_target_id:
-        type: string
-    required:
-    - message
     type: object
   handlers.LoginRequest:
     properties:
@@ -3874,6 +3888,12 @@ definitions:
         type: string
       source_reply_to_message_id:
         type: string
+      turn_id:
+        type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
       usage:
         items:
           type: integer
@@ -3898,6 +3918,28 @@ definitions:
         type: integer
       storage_key:
         type: string
+    type: object
+  message.RuntimeRowReservation:
+    properties:
+      message_id:
+        type: string
+      role:
+        type: string
+      turn_id:
+        type: string
+      turn_message_seq:
+        type: integer
+      turn_position:
+        type: integer
+    type: object
+  message.RuntimeTurnReservation:
+    properties:
+      request:
+        $ref: '#/definitions/message.RuntimeRowReservation'
+      turn_id:
+        type: string
+      turn_position:
+        type: integer
     type: object
   models.AddRequest:
     properties:
@@ -4709,6 +4751,101 @@ definitions:
       title:
         type: string
       type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  sessionruntime.CurrentRunView:
+    properties:
+      canonical_ready:
+        type: boolean
+      error:
+        type: string
+      generation:
+        type: string
+      history_committed:
+        type: boolean
+      messages:
+        items:
+          $ref: '#/definitions/conversation.UIMessage'
+        type: array
+      operation:
+        $ref: '#/definitions/sessionruntime.RunOperationView'
+      owner_id:
+        type: string
+      owner_lease_expires_at:
+        type: string
+      request_user_turn:
+        $ref: '#/definitions/conversation.UITurn'
+      row_ledger:
+        items:
+          $ref: '#/definitions/conversation.UIRowIdentity'
+        type: array
+      started_at:
+        type: string
+      status:
+        type: string
+      steer:
+        $ref: '#/definitions/sessionruntime.SteerState'
+      stream_id:
+        type: string
+      turn_reservation:
+        $ref: '#/definitions/message.RuntimeTurnReservation'
+      updated_at:
+        type: string
+    required:
+    - generation
+    type: object
+  sessionruntime.QueuedRunView:
+    properties:
+      stream_id:
+        type: string
+    type: object
+  sessionruntime.RunOperationView:
+    properties:
+      kind:
+        enum:
+        - retry
+        - edit
+        type: string
+      replace_from_message_id:
+        type: string
+      replacement_user_turn:
+        $ref: '#/definitions/conversation.UITurn'
+    required:
+    - kind
+    - replace_from_message_id
+    type: object
+  sessionruntime.Snapshot:
+    properties:
+      bot_id:
+        type: string
+      current_run_view:
+        $ref: '#/definitions/sessionruntime.CurrentRunView'
+      epoch:
+        type: string
+      queue:
+        items:
+          $ref: '#/definitions/sessionruntime.QueuedRunView'
+        type: array
+      seq:
+        type: integer
+      session_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  sessionruntime.SteerState:
+    properties:
+      created_at:
+        type: string
+      error:
+        type: string
+      id:
+        type: string
+      status:
+        type: string
+      text:
         type: string
       updated_at:
         type: string
@@ -8744,6 +8881,10 @@ paths:
         in: query
         name: before_message_id
         type: string
+      - description: Turn ID whose complete visible rows should be returned
+        in: query
+        name: turn_id
+        type: string
       - description: 'Response format: ui returns normalized chat UI turns'
         in: query
         name: format
@@ -9794,6 +9935,46 @@ paths:
       summary: Stream message events for one session
       tags:
       - messages
+  /bots/{bot_id}/sessions/{session_id}/runtime:
+    get:
+      description: Returns the current live runtime snapshot for a chat session.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/sessionruntime.Snapshot'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get session runtime state
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/status:
     get:
       description: Get aggregated info for a chat session including message count,
@@ -10523,48 +10704,6 @@ paths:
       summary: List grantable workspace members
       tags:
       - bots
-  /bots/{bot_id}/web/messages:
-    post:
-      consumes:
-      - application/json
-      description: Post a user message (with optional attachments) through the local
-        channel pipeline.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Message payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.LocalChannelMessageRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Send a message to a local channel
-      tags:
-      - local-channel
   /bots/{bot_id}/web/stream:
     get:
       description: Open a persistent SSE connection to receive real-time stream events

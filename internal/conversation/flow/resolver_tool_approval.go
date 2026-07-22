@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/contextlimit"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/runtimefence"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/workspace"
@@ -31,9 +31,105 @@ type ToolApprovalResponseInput struct {
 	Reason                     string
 	ChatToken                  string
 	SuppressActivePromptAttach bool
+	ResolveOnly                bool
+}
+
+func (r *Resolver) PrepareToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput) (runtimefence.PreservedDecision, error) {
+	return r.prepareToolApprovalResponseTarget(ctx, input, false)
+}
+
+// PrepareToolApprovalResponseTarget validates a response and returns its
+// canonical scope even when the decision was already committed. Runtime
+// routers use that scope to replay or reconcile idempotent commands.
+func (r *Resolver) PrepareToolApprovalResponseTarget(ctx context.Context, input ToolApprovalResponseInput) (runtimefence.PreservedDecision, error) {
+	return r.prepareToolApprovalResponseTarget(ctx, input, true)
+}
+
+func (r *Resolver) prepareToolApprovalResponseTarget(ctx context.Context, input ToolApprovalResponseInput, includeDecided bool) (runtimefence.PreservedDecision, error) {
+	if r.toolApproval == nil {
+		return runtimefence.PreservedDecision{}, errors.New("tool approval service not configured")
+	}
+	target, err := r.toolApproval.ResolveTarget(ctx, toolapproval.ResolveInput{
+		BotID:                  input.BotID,
+		SessionID:              input.SessionID,
+		ExplicitID:             firstNonEmpty(input.ExplicitID, input.ApprovalID),
+		ReplyExternalMessageID: input.ReplyExternalMessageID,
+	})
+	if includeDecided && errors.Is(err, toolapproval.ErrNotFound) {
+		explicitID := firstNonEmpty(input.ExplicitID, input.ApprovalID)
+		if explicitID != "" {
+			if existing, getErr := r.toolApproval.Get(ctx, explicitID); getErr == nil {
+				if (strings.TrimSpace(input.BotID) == "" || strings.TrimSpace(input.BotID) == existing.BotID) &&
+					(strings.TrimSpace(input.SessionID) == "" || strings.TrimSpace(input.SessionID) == existing.SessionID) {
+					target = existing
+					err = nil
+				}
+			}
+		}
+	}
+	if err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	_, err = r.authorizeToolApprovalResponse(ctx, target, input)
+	if err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	switch strings.ToLower(strings.TrimSpace(input.Decision)) {
+	case "approve", "approved", "reject", "rejected":
+	default:
+		return runtimefence.PreservedDecision{}, fmt.Errorf("unknown tool approval decision %q", input.Decision)
+	}
+	return runtimefence.PreservedDecision{
+		Kind:      runtimefence.DecisionToolApproval,
+		ID:        target.ID,
+		BotID:     target.BotID,
+		SessionID: target.SessionID,
+	}, nil
 }
 
 func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	return r.respondToolApproval(ctx, input, nil, eventCh)
+}
+
+// PrepareDeferredToolApprovalContinuation reconstructs the persisted turn
+// before runtime admission. It does not resolve the decision or execute the
+// tool; the returned row plan is consumed only after the new owner is active.
+func (r *Resolver) PrepareDeferredToolApprovalContinuation(ctx context.Context, input ToolApprovalResponseInput) (DeferredContinuation, error) {
+	if r.toolApproval == nil {
+		return DeferredContinuation{}, errors.New("tool approval service not configured")
+	}
+	target, err := r.toolApproval.ResolveTarget(ctx, toolapproval.ResolveInput{
+		BotID:                  input.BotID,
+		SessionID:              input.SessionID,
+		ExplicitID:             firstNonEmpty(input.ExplicitID, input.ApprovalID),
+		ReplyExternalMessageID: input.ReplyExternalMessageID,
+	})
+	if err != nil {
+		return DeferredContinuation{}, err
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return DeferredContinuation{}, err
+	}
+	isACP, err := r.authorizeToolApprovalResponse(ctx, target, input)
+	if err != nil {
+		return DeferredContinuation{}, err
+	}
+	if isACP || r.toolApproval.CanRespond(target) {
+		return DeferredContinuation{}, errors.New("tool approval still belongs to a live waiter")
+	}
+	return r.prepareDeferredContinuation(ctx, target.SessionID, target.ToolCallID)
+}
+
+// RespondToolApprovalContinuation consumes the exact plan published at
+// admission, so row IDs cannot change between the runtime snapshot and DB.
+func (r *Resolver) RespondToolApprovalContinuation(ctx context.Context, input ToolApprovalResponseInput, continuation DeferredContinuation, eventCh chan<- WSStreamEvent) error {
+	return r.respondToolApproval(ctx, input, &continuation, eventCh)
+}
+
+func (r *Resolver) respondToolApproval(ctx context.Context, input ToolApprovalResponseInput, continuation *DeferredContinuation, eventCh chan<- WSStreamEvent) error {
 	if r.toolApproval == nil {
 		return errors.New("tool approval service not configured")
 	}
@@ -44,16 +140,36 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 		ReplyExternalMessageID: input.ReplyExternalMessageID,
 	})
 	if err != nil {
+		if input.ResolveOnly && errors.Is(err, toolapproval.ErrNotFound) {
+			if handled, replayErr := r.reconcileToolApprovalReplay(ctx, input); handled {
+				return replayErr
+			}
+		}
 		return err
 	}
-	if isACP, err := r.isACPToolApprovalSession(ctx, target.SessionID); err != nil {
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
 		return err
-	} else if isACP {
+	}
+	isACP, err := r.authorizeToolApprovalResponse(ctx, target, input)
+	if err != nil {
+		return err
+	}
+	if input.ResolveOnly {
+		return r.resolveToolApprovalDecision(ctx, target, input, eventCh)
+	}
+	if isACP {
 		return r.respondACPToolApproval(ctx, target, input, eventCh)
 	}
 	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
-	if err := r.authorizeToolApprovalResponse(ctx, target, input); err != nil {
-		return err
+	if r.toolApproval.CanRespond(target) {
+		return r.respondLiveToolApproval(ctx, target, input, eventCh)
+	}
+	if continuation == nil {
+		prepared, prepareErr := r.prepareDeferredContinuation(ctx, target.SessionID, target.ToolCallID)
+		if prepareErr != nil {
+			return prepareErr
+		}
+		continuation = &prepared
 	}
 
 	var toolResult sdk.ToolResultPart
@@ -82,7 +198,74 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 		return fmt.Errorf("unknown tool approval decision %q", input.Decision)
 	}
 
-	return r.storeToolResultAndContinue(ctx, target, input, toolResult, eventCh)
+	return r.storeToolResultAndContinue(ctx, target, input, toolResult, *continuation, eventCh)
+}
+
+func (r *Resolver) reconcileToolApprovalReplay(ctx context.Context, input ToolApprovalResponseInput) (bool, error) {
+	targetID := firstNonEmpty(input.ExplicitID, input.ApprovalID)
+	target, err := r.toolApproval.Get(ctx, targetID)
+	if err != nil {
+		if errors.Is(err, toolapproval.ErrNotFound) {
+			return false, nil
+		}
+		return true, err
+	}
+	if strings.TrimSpace(target.BotID) != strings.TrimSpace(input.BotID) || strings.TrimSpace(target.SessionID) != strings.TrimSpace(input.SessionID) {
+		return false, nil
+	}
+	if target.Status == toolapproval.StatusPending {
+		return false, nil
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return true, err
+	}
+	if _, err := r.authorizeToolApprovalResponse(ctx, target, input); err != nil {
+		return true, err
+	}
+	wantStatus := ""
+	switch strings.ToLower(strings.TrimSpace(input.Decision)) {
+	case "approve", "approved":
+		wantStatus = toolapproval.StatusApproved
+	case "reject", "rejected":
+		wantStatus = toolapproval.StatusRejected
+	default:
+		return true, fmt.Errorf("unknown tool approval decision %q", input.Decision)
+	}
+	if target.Status != wantStatus || strings.TrimSpace(target.DecisionReason) != strings.TrimSpace(input.Reason) {
+		return true, toolapproval.ErrAlreadyDecided
+	}
+	return true, emitApprovalAck(ctx, nil)
+}
+
+// ReconcileToolApprovalResponse checks whether a ResolveOnly response was
+// already committed. It is read-only and does not require local run control.
+func (r *Resolver) ReconcileToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput) (bool, error) {
+	if r == nil || r.toolApproval == nil {
+		return false, errors.New("tool approval service not configured")
+	}
+	return r.reconcileToolApprovalReplay(ctx, input)
+}
+
+// A live waiter owns tool execution and continuation inside the active run.
+// The response path only resolves the decision so the waiter can resume.
+func (r *Resolver) respondLiveToolApproval(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	return r.resolveToolApprovalDecision(ctx, target, input, eventCh)
+}
+
+func (r *Resolver) resolveToolApprovalDecision(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	switch strings.ToLower(strings.TrimSpace(input.Decision)) {
+	case "approve", "approved":
+		if _, err := r.toolApproval.Approve(ctx, target.ID, input.ActorChannelIdentityID, input.Reason); err != nil {
+			return err
+		}
+	case "reject", "rejected":
+		if _, err := r.toolApproval.Reject(ctx, target.ID, input.ActorChannelIdentityID, input.Reason); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown tool approval decision %q", input.Decision)
+	}
+	return emitApprovalAck(ctx, eventCh)
 }
 
 func (r *Resolver) toolOutputLimit() contextlimit.ToolOutputLimit {
@@ -109,22 +292,11 @@ func (r *Resolver) limitToolApprovalResult(result sdk.ToolApprovalResult, toolNa
 	return result
 }
 
-func (r *Resolver) isACPToolApprovalSession(ctx context.Context, sessionID string) (bool, error) {
-	if r == nil || r.sessionService == nil {
-		return false, nil
-	}
-	sess, err := r.sessionService.Get(ctx, sessionID)
-	if err != nil {
-		return false, err
-	}
-	return sessionpkg.IsACPRuntime(sess), nil
-}
-
 func (r *Resolver) respondACPToolApproval(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
-	if err := r.authorizeACPToolApprovalResponse(ctx, target, input); err != nil {
-		return err
-	}
 	if !r.toolApproval.CanRespond(target) {
+		if target.RuntimeFenced {
+			return ErrRuntimeDecisionOwnerUnavailable
+		}
 		_, err := r.toolApproval.Reject(ctx, target.ID, "", "tool approval expired: the requesting tool call is no longer waiting")
 		if err != nil && !errors.Is(err, toolapproval.ErrAlreadyDecided) {
 			return err
@@ -168,6 +340,60 @@ func (r *Resolver) respondACPToolApproval(ctx context.Context, target toolapprov
 	return emitApprovalAck(ctx, eventCh)
 }
 
+func (r *Resolver) authorizeToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) (bool, error) {
+	if r == nil || r.sessionService == nil {
+		return false, errors.New("session service not configured")
+	}
+	if r.botPermissions == nil {
+		return false, errors.New("bot permission checker not configured")
+	}
+	sessionID := firstNonEmpty(target.SessionID, input.SessionID)
+	sess, err := r.sessionService.Get(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	botID := firstNonEmpty(target.BotID, input.BotID)
+	if strings.TrimSpace(sess.BotID) == "" || strings.TrimSpace(botID) == "" || sess.BotID != botID {
+		return false, toolapproval.ErrForbidden
+	}
+	if sessionpkg.IsACPRuntime(sess) {
+		return true, r.authorizeACPToolApprovalResponse(ctx, target, input)
+	}
+
+	actorID := firstNonEmpty(input.ActorUserID, input.ActorChannelIdentityID)
+	if actorID == "" {
+		return false, toolapproval.ErrForbidden
+	}
+	if ok, err := r.botPermissions.HasBotPermission(ctx, botID, actorID, bots.PermissionManage); err != nil {
+		return false, err
+	} else if ok {
+		return false, r.authorizeToolApprovalOperation(ctx, target, input)
+	}
+	if strings.TrimSpace(sess.CreatedByUserID) == "" || sess.CreatedByUserID != actorID {
+		return false, toolapproval.ErrForbidden
+	}
+	required := toolApprovalSessionPermission(sess)
+	if ok, err := r.botPermissions.HasBotPermission(ctx, botID, actorID, required); err != nil {
+		return false, err
+	} else if !ok {
+		return false, toolapproval.ErrForbidden
+	}
+	return false, r.authorizeToolApprovalOperation(ctx, target, input)
+}
+
+func toolApprovalSessionPermission(sess sessionpkg.Session) string {
+	mode := strings.TrimSpace(sess.SessionMode)
+	if !sessionpkg.IsKnownSessionMode(mode) {
+		mode, _ = sessionpkg.DescriptorFromLegacyType(sess.Type)
+	}
+	switch mode {
+	case sessionpkg.TypeChat, sessionpkg.TypeSubagent:
+		return bots.PermissionChat
+	default:
+		return bots.PermissionManage
+	}
+}
+
 func (r *Resolver) authorizeACPToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {
 	if r == nil || r.sessionService == nil {
 		return errors.New("session service not configured")
@@ -181,7 +407,7 @@ func (r *Resolver) authorizeACPToolApprovalResponse(ctx context.Context, target 
 		return err
 	}
 	if !sessionpkg.IsACPRuntime(sess) {
-		return r.authorizeToolApprovalResponse(ctx, target, input)
+		return r.authorizeToolApprovalOperation(ctx, target, input)
 	}
 	botID := firstNonEmpty(target.BotID, input.BotID)
 	if strings.TrimSpace(sess.BotID) != "" && strings.TrimSpace(botID) != "" && sess.BotID != botID {
@@ -200,10 +426,10 @@ func (r *Resolver) authorizeACPToolApprovalResponse(ctx context.Context, target 
 	if runtimeOwnerID == "" || runtimeOwnerID != actorID {
 		return toolapproval.ErrForbidden
 	}
-	return r.authorizeToolApprovalResponse(ctx, target, input)
+	return r.authorizeToolApprovalOperation(ctx, target, input)
 }
 
-func (r *Resolver) authorizeToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {
+func (r *Resolver) authorizeToolApprovalOperation(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {
 	if r == nil || r.botPermissions == nil {
 		return errors.New("bot permission checker not configured")
 	}
@@ -271,7 +497,7 @@ func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Req
 	})
 }
 
-func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, result sdk.ToolResultPart, continuation DeferredContinuation, eventCh chan<- WSStreamEvent) error {
 	approval = withLocalWebReplyTarget(approval)
 	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
 	target, err := r.resolveWorkspaceTargetSnapshot(ctx, input.BotID, approval.WorkspaceTargetID)
@@ -291,13 +517,14 @@ func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval tool
 		WorkspaceTargetID:       approval.WorkspaceTargetID,
 	}
 	storeReq.WorkspaceTarget = target
-	if err := r.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
+	continuation, err = r.persistDeferredResponse(ctx, storeReq, modelMessages, continuation)
+	if err != nil {
 		return err
 	}
-	return r.continueToolApprovalSession(ctx, approval, input, eventCh)
+	return r.continueToolApprovalSession(ctx, approval, input, continuation, eventCh)
 }
 
-func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, continuation DeferredContinuation, eventCh chan<- WSStreamEvent) error {
 	approval = withLocalWebReplyTarget(approval)
 	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
 	resolved, err := r.ResolveRunConfig(ctx,
@@ -336,36 +563,7 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		WorkspaceTargetID:       approval.WorkspaceTargetID,
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
-
-	stream := r.agent.Stream(ctx, cfg)
-	stored := false
-	for event := range stream {
-		data, err := json.Marshal(event)
-		if err != nil {
-			continue
-		}
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if snap, ok := extractTerminalSnapshot(data); ok {
-				if storeErr := r.persistTerminalSnapshot(
-					context.WithoutCancel(ctx),
-					req,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
-					snap,
-				); storeErr != nil {
-					return storeErr
-				}
-				stored = true
-			}
-		}
-		if eventCh != nil {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-	return nil
+	return r.continueDeferredSession(ctx, continuation, cfg, req, resolvedContext{model: models.GetResponse{ID: resolved.ModelID}}, eventCh)
 }
 
 func withLocalWebReplyTarget(req toolapproval.Request) toolapproval.Request {

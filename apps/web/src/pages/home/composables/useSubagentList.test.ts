@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/store/chat-list'
+import { seedSynchronizedTranscriptForTest } from '@/store/chat/sync/projection'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useSubagentList } from './useSubagentList'
 
@@ -209,7 +210,7 @@ function pushSubagentTool(
     done?: boolean
   },
 ) {
-  chatStore.messages.push({
+  seedSynchronizedTranscriptForTest(chatStore.chatView().transcript, {
     id: `assistant-${task.agentSessionId}`,
     role: 'assistant',
     timestamp: '2026-01-01T00:00:00.000Z',

@@ -2,12 +2,24 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/session"
 )
 
 // stubMessageService mirrors the production ordering contract of the message
@@ -19,7 +31,11 @@ import (
 // panics.
 type stubMessageService struct {
 	messagepkg.Service
-	bySession map[string][]messagepkg.Message
+	bySession            map[string][]messagepkg.Message
+	visibleTurnSessionID string
+	visibleTurnID        string
+	visibleTurnResult    []messagepkg.Message
+	beforeMessageCalls   int
 }
 
 func (s *stubMessageService) latest(sid string, limit int) []messagepkg.Message {
@@ -57,12 +73,151 @@ func (s *stubMessageService) ListBeforeBySession(_ context.Context, sid string, 
 }
 
 func (s *stubMessageService) ListBeforeMessageBySession(_ context.Context, sid string, beforeMessageID string, limit int32) ([]messagepkg.Message, error) {
+	s.beforeMessageCalls++
 	for _, m := range s.bySession[sid] {
 		if m.ID == beforeMessageID {
 			return s.before(sid, m.CreatedAt, int(limit)), nil
 		}
 	}
 	return nil, nil
+}
+
+func (s *stubMessageService) ListVisibleMessagesByTurnIDBySession(_ context.Context, sessionID string, turnID string) ([]messagepkg.Message, error) {
+	s.visibleTurnSessionID = sessionID
+	s.visibleTurnID = turnID
+	return s.visibleTurnResult, nil
+}
+
+type messagePaginationQueries struct {
+	dbstore.Queries
+	bot     sqlc.GetBotByIDRow
+	session sqlc.BotSession
+}
+
+func (q *messagePaginationQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
+	return q.bot, nil
+}
+
+func (q *messagePaginationQueries) GetSessionByID(_ context.Context, _ pgtype.UUID) (sqlc.BotSession, error) {
+	return q.session, nil
+}
+
+func TestListMessagesTurnIDReturnsCompleteUIExactTurn(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID     = "11111111-1111-1111-1111-111111111111"
+		sessionID = "22222222-2222-2222-2222-222222222222"
+		turnID    = "33333333-3333-3333-3333-333333333333"
+	)
+	queries := &messagePaginationQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:          testUUID(sessionID),
+			BotID:       testUUID(botID),
+			ChannelType: pgtype.Text{String: "local", Valid: true},
+		},
+	}
+	messageService := &stubMessageService{visibleTurnResult: []messagepkg.Message{
+		{
+			ID: "44444444-4444-4444-4444-444444444441", BotID: botID, SessionID: sessionID,
+			Role: "user", Content: []byte(`{"role":"user","content":"hello"}`), DisplayContent: "hello",
+			TurnID: turnID, TurnPosition: 7, TurnMessageSeq: 1,
+		},
+		{
+			ID: "44444444-4444-4444-4444-444444444442", BotID: botID, SessionID: sessionID,
+			Role: "assistant", Content: []byte(`{"role":"assistant","content":"done"}`),
+			TurnID: turnID, TurnPosition: 7, TurnMessageSeq: 2,
+		},
+	}}
+	handler := NewMessageHandler(
+		slog.Default(),
+		nil,
+		messageService,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/messages?session_id="+sessionID+"&turn_id="+turnID+"&format=ui&limit=1", nil)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	ctx.SetPath("/bots/:bot_id/messages")
+	ctx.SetParamNames("bot_id")
+	ctx.SetParamValues(botID)
+
+	if err := handler.ListMessages(ctx); err != nil {
+		t.Fatalf("ListMessages() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if messageService.visibleTurnSessionID != sessionID || messageService.visibleTurnID != turnID {
+		t.Fatalf("exact turn args = %q/%q, want %q/%q", messageService.visibleTurnSessionID, messageService.visibleTurnID, sessionID, turnID)
+	}
+	if messageService.beforeMessageCalls != 0 {
+		t.Fatalf("exact turn UI query extended into prior history %d times", messageService.beforeMessageCalls)
+	}
+	var payload struct {
+		Items []conversation.UITurn `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Items) != 2 || payload.Items[0].Role != "user" || payload.Items[1].Role != "assistant" {
+		t.Fatalf("exact turn UI items = %#v, want complete user/assistant turn", payload.Items)
+	}
+}
+
+func TestListMessagesRejectsInvalidTurnID(t *testing.T) {
+	t.Parallel()
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/bots/11111111-1111-1111-1111-111111111111/messages?session_id=22222222-2222-2222-2222-222222222222&turn_id=not-a-uuid", nil)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	ctx.SetParamNames("bot_id")
+	ctx.SetParamValues("11111111-1111-1111-1111-111111111111")
+
+	err := (&MessageHandler{messageService: &stubMessageService{}}).ListMessages(ctx)
+	assertHTTPErrorCode(t, err, http.StatusBadRequest)
+}
+
+func TestListMessagesRejectsConflictingTurnIDCursor(t *testing.T) {
+	t.Parallel()
+
+	const turnID = "33333333-3333-3333-3333-333333333333"
+	tests := []string{
+		"before_message_id=44444444-4444-4444-4444-444444444444",
+		"before=2026-07-16T00:00:00Z",
+	}
+	for _, query := range tests {
+		query := query
+		t.Run(query, func(t *testing.T) {
+			t.Parallel()
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, "/bots/11111111-1111-1111-1111-111111111111/messages?session_id=22222222-2222-2222-2222-222222222222&turn_id="+turnID+"&"+query, nil)
+			rec := httptest.NewRecorder()
+			ctx := testAuthContext(e, req, rec, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+			ctx.SetParamNames("bot_id")
+			ctx.SetParamValues("11111111-1111-1111-1111-111111111111")
+
+			err := (&MessageHandler{messageService: &stubMessageService{}}).ListMessages(ctx)
+			assertHTTPErrorCode(t, err, http.StatusBadRequest)
+		})
+	}
+}
+
+func assertHTTPErrorCode(t *testing.T, err error, want int) {
+	t.Helper()
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error = %T %v, want *echo.HTTPError", err, err)
+	}
+	if httpErr.Code != want {
+		t.Fatalf("HTTP status = %d, want %d", httpErr.Code, want)
+	}
 }
 
 func msg(role string, t time.Time) messagepkg.Message {

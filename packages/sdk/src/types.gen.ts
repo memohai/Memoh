@@ -1089,8 +1089,12 @@ export type ConversationUiMessage = {
     name?: string;
     output?: unknown;
     progress?: Array<unknown>;
+    row_identities?: Array<ConversationUiRowIdentity>;
     running?: boolean;
+    stable_id?: string;
     tool_call_id?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
     type?: ConversationUiMessageType;
     user_input?: ConversationUiUserInput;
 };
@@ -1102,6 +1106,14 @@ export type ConversationUiReplyRef = {
     message_id?: string;
     preview?: string;
     sender?: string;
+};
+
+export type ConversationUiRowIdentity = {
+    role?: string;
+    stable_id?: string;
+    turn_id?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
 };
 
 export type ConversationUiToolApproval = {
@@ -1129,6 +1141,8 @@ export type ConversationUiTurn = {
     skill_activation?: ConversationSkillActivation;
     text?: string;
     timestamp?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
     user_message_kind?: string;
 };
 
@@ -1709,13 +1723,6 @@ export type HandlersInstallSkillRequest = {
 export type HandlersListSnapshotsResponse = {
     snapshots?: Array<HandlersSnapshotInfo>;
     snapshotter?: string;
-};
-
-export type HandlersLocalChannelMessageRequest = {
-    message: ChannelMessage;
-    model_id?: string;
-    reasoning_effort?: string;
-    workspace_target_id?: string;
 };
 
 export type HandlersLoginRequest = {
@@ -2319,6 +2326,9 @@ export type MessageMessage = {
     session_id?: string;
     session_mode?: string;
     source_reply_to_message_id?: string;
+    turn_id?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
     usage?: Array<number>;
 };
 
@@ -2333,6 +2343,20 @@ export type MessageMessageAsset = {
     role?: string;
     size_bytes?: number;
     storage_key?: string;
+};
+
+export type MessageRuntimeRowReservation = {
+    message_id?: string;
+    role?: string;
+    turn_id?: string;
+    turn_message_seq?: number;
+    turn_position?: number;
+};
+
+export type MessageRuntimeTurnReservation = {
+    request?: MessageRuntimeRowReservation;
+    turn_id?: string;
+    turn_position?: number;
 };
 
 export type ModelsAddRequest = {
@@ -2794,6 +2818,54 @@ export type SessionSession = {
     session_mode?: string;
     title?: string;
     type?: string;
+    updated_at?: string;
+};
+
+export type SessionruntimeCurrentRunView = {
+    canonical_ready?: boolean;
+    error?: string;
+    generation: string;
+    history_committed?: boolean;
+    messages?: Array<ConversationUiMessage>;
+    operation?: SessionruntimeRunOperationView;
+    owner_id?: string;
+    owner_lease_expires_at?: string;
+    request_user_turn?: ConversationUiTurn;
+    row_ledger?: Array<ConversationUiRowIdentity>;
+    started_at?: string;
+    status?: string;
+    steer?: SessionruntimeSteerState;
+    stream_id?: string;
+    turn_reservation?: MessageRuntimeTurnReservation;
+    updated_at?: string;
+};
+
+export type SessionruntimeQueuedRunView = {
+    stream_id?: string;
+};
+
+export type SessionruntimeRunOperationView = {
+    kind: 'retry' | 'edit';
+    replace_from_message_id: string;
+    replacement_user_turn?: ConversationUiTurn;
+};
+
+export type SessionruntimeSnapshot = {
+    bot_id?: string;
+    current_run_view?: SessionruntimeCurrentRunView;
+    epoch?: string;
+    queue?: Array<SessionruntimeQueuedRunView>;
+    seq?: number;
+    session_id?: string;
+    updated_at?: string;
+};
+
+export type SessionruntimeSteerState = {
+    created_at?: string;
+    error?: string;
+    id?: string;
+    status?: string;
+    text?: string;
     updated_at?: string;
 };
 
@@ -7562,6 +7634,10 @@ export type GetBotsByBotIdMessagesData = {
          */
         before_message_id?: string;
         /**
+         * Turn ID whose complete visible rows should be returned
+         */
+        turn_id?: string;
+        /**
          * Response format: ui returns normalized chat UI turns
          */
         format?: string;
@@ -8894,6 +8970,52 @@ export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses = {
 
 export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponse = GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses[keyof GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses];
 
+export type GetBotsByBotIdSessionsBySessionIdRuntimeData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/runtime';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdRuntimeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdRuntimeError = GetBotsByBotIdSessionsBySessionIdRuntimeErrors[keyof GetBotsByBotIdSessionsBySessionIdRuntimeErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdRuntimeResponses = {
+    /**
+     * OK
+     */
+    200: SessionruntimeSnapshot;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdRuntimeResponse = GetBotsByBotIdSessionsBySessionIdRuntimeResponses[keyof GetBotsByBotIdSessionsBySessionIdRuntimeResponses];
+
 export type GetBotsByBotIdSessionsBySessionIdStatusData = {
     body?: never;
     path: {
@@ -9723,49 +9845,6 @@ export type PutBotsByBotIdUserAccessByGrantIdResponses = {
 };
 
 export type PutBotsByBotIdUserAccessByGrantIdResponse = PutBotsByBotIdUserAccessByGrantIdResponses[keyof PutBotsByBotIdUserAccessByGrantIdResponses];
-
-export type PostBotsByBotIdWebMessagesData = {
-    /**
-     * Message payload
-     */
-    body: HandlersLocalChannelMessageRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/web/messages';
-};
-
-export type PostBotsByBotIdWebMessagesErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdWebMessagesError = PostBotsByBotIdWebMessagesErrors[keyof PostBotsByBotIdWebMessagesErrors];
-
-export type PostBotsByBotIdWebMessagesResponses = {
-    /**
-     * OK
-     */
-    200: {
-        [key: string]: string;
-    };
-};
-
-export type PostBotsByBotIdWebMessagesResponse = PostBotsByBotIdWebMessagesResponses[keyof PostBotsByBotIdWebMessagesResponses];
 
 export type GetBotsByBotIdWebStreamData = {
     body?: never;

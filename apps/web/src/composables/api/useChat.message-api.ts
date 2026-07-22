@@ -2,16 +2,15 @@ import { client } from '@memohai/sdk/client'
 import {
   getBotsByBotIdMessages,
   getBotsByBotIdMessagesLocate,
+  getBotsByBotIdSessionsBySessionIdRuntime,
   getBotsByBotIdSessionsBySessionIdMessagesEvents,
   getBotsByBotIdSessionsEvents,
   getBotsByBotIdSkillsCatalog,
   postBotsByBotIdQuickActionsExecute,
-  postBotsByBotIdWebMessages,
 } from '@memohai/sdk'
-import type { ChannelAttachment, ChannelMessage, HandlersLocalChannelMessageRequest } from '@memohai/sdk'
+import type { SessionruntimeSnapshot } from '@memohai/sdk'
 import type {
   BotSessionActivityEvent,
-  ChatAttachment,
   CommandEventResponse,
   FetchMessagesOptions,
   Message,
@@ -55,12 +54,26 @@ export async function fetchMessagesUI(
       limit: options?.limit ?? 30,
       format: 'ui',
       ...(options?.beforeMessageId?.trim() ? { before_message_id: options.beforeMessageId.trim() } : {}),
+      ...(options?.turnId?.trim() ? { turn_id: options.turnId.trim() } : {}),
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
     },
     throwOnError: true,
   })
 
   return (response.data as { items?: UITurn[] } | undefined)?.items ?? []
+}
+
+export async function fetchSessionRuntime(botId: string, sessionId: string, signal?: AbortSignal): Promise<SessionruntimeSnapshot> {
+  const bid = botId.trim()
+  const sid = sessionId.trim()
+  if (!bid || !sid) throw new Error('bot id and session id are required')
+  const { data } = await getBotsByBotIdSessionsBySessionIdRuntime({
+    path: { bot_id: bid, session_id: sid },
+    signal,
+    throwOnError: true,
+  })
+  if (!data) throw new Error('session runtime response is empty')
+  return data
 }
 
 export interface LocateMessageResult {
@@ -93,11 +106,6 @@ export async function locateMessageUI(
     target_id: data?.target_id,
     target_external_message_id: data?.target_external_message_id,
   }
-}
-
-export interface SendMessageOverrides {
-  modelId?: string
-  reasoningEffort?: string
 }
 
 function isCommandEvent(value: unknown): value is CommandEventResponse {
@@ -150,35 +158,6 @@ export async function executeQuickAction(
   })
   if (isCommandEvent(data)) return data
   throw new Error('invalid quick action response')
-}
-
-export async function sendLocalChannelMessage(
-  botId: string,
-  text: string,
-  attachments?: ChatAttachment[],
-  overrides?: SendMessageOverrides,
-): Promise<void> {
-  const msg: ChannelMessage = {}
-  const trimmedText = text.trim()
-  if (trimmedText) {
-    msg.text = trimmedText
-  }
-  if (attachments?.length) {
-    msg.attachments = attachments.map((item): ChannelAttachment => ({
-      type: item.type as ChannelAttachment['type'],
-      base64: item.base64,
-      mime: item.mime ?? '',
-      name: item.name ?? '',
-    }))
-  }
-  const body: HandlersLocalChannelMessageRequest = { message: msg }
-  if (overrides?.modelId) body.model_id = overrides.modelId
-  if (overrides?.reasoningEffort) body.reasoning_effort = overrides.reasoningEffort
-  await postBotsByBotIdWebMessages({
-    path: { bot_id: botId.trim() },
-    body,
-    throwOnError: true,
-  })
 }
 
 // The SDK's `sse.get` yields parsed `data` payloads from the async generator.

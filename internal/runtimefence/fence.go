@@ -26,8 +26,10 @@ const (
 )
 
 type PreservedDecision struct {
-	Kind string
-	ID   string
+	Kind      string
+	ID        string
+	BotID     string
+	SessionID string
 }
 
 type ActivationOptions struct {

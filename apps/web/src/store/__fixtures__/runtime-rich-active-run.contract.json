@@ -1,0 +1,1004 @@
+{
+  "version": 6,
+  "scenario": "rich_active_run",
+  "runtime_snapshot": {
+    "bot_id": "bot-1",
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 10,
+    "session_id": "session-1",
+    "snapshot": {
+      "bot_id": "bot-1",
+      "current_run_view": {
+        "canonical_ready": false,
+        "generation": "generation-stream-rich",
+        "messages": [
+          {
+            "content": "I need to inspect the workspace.",
+            "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "reasoning"
+          },
+          {
+            "content": "I will check the current state.",
+            "id": 1,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "text"
+          },
+          {
+            "id": 2,
+            "input": {
+              "command": "pwd"
+            },
+            "name": "exec",
+            "output": {
+              "structuredContent": {
+                "stdout": "/workspace\n"
+              }
+            },
+            "progress": [
+              "queued",
+              {
+                "stdout": "/workspace\n"
+              }
+            ],
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              },
+              {
+                "role": "tool",
+                "stable_id": "turn-stream-rich-1-row-02",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 3,
+                "turn_position": 1
+              }
+            ],
+            "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
+            "tool_call_id": "call-exec",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "tool"
+          },
+          {
+            "approval": {
+              "approval_id": "approval-1",
+              "can_approve": true,
+              "short_id": 7,
+              "status": "pending"
+            },
+            "id": 3,
+            "input": {
+              "command": "rm -rf build"
+            },
+            "name": "exec",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
+            "tool_call_id": "call-approval",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "tool"
+          },
+          {
+            "id": 4,
+            "input": {
+              "questions": [
+                {
+                  "kind": "single_select",
+                  "text": "Continue?"
+                }
+              ]
+            },
+            "name": "ask_user",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
+            "tool_call_id": "call-ask",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "tool",
+            "user_input": {
+              "can_respond": true,
+              "questions": [
+                {
+                  "id": "q1",
+                  "kind": "single_select",
+                  "options": [
+                    {
+                      "id": "yes",
+                      "label": "Yes"
+                    },
+                    {
+                      "id": "no",
+                      "label": "No"
+                    }
+                  ],
+                  "text": "Continue?"
+                }
+              ],
+              "short_id": 8,
+              "status": "pending",
+              "user_input_id": "input-1"
+            }
+          }
+        ],
+        "request_user_turn": {
+          "attachments": [
+            {
+              "content_hash": "sha256:notes",
+              "name": "notes.txt",
+              "type": "file"
+            }
+          ],
+          "external_message_id": "stream-rich",
+          "id": "turn-stream-rich-1-request",
+          "platform": "local",
+          "role": "user",
+          "sender_user_id": "user-1",
+          "text": "Inspect the workspace",
+          "timestamp": "2026-07-10T00:00:00Z"
+        },
+        "row_ledger": [
+          {
+            "role": "user",
+            "stable_id": "turn-stream-rich-1-request",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          },
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 2,
+            "turn_position": 1
+          },
+          {
+            "role": "tool",
+            "stable_id": "turn-stream-rich-1-row-02",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 3,
+            "turn_position": 1
+          }
+        ],
+        "started_at": "2026-07-10T00:00:00Z",
+        "status": "running",
+        "stream_id": "stream-rich",
+        "turn_reservation": {
+          "request": {
+            "message_id": "turn-stream-rich-1-request",
+            "role": "user",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          },
+          "turn_id": "turn-stream-rich-1",
+          "turn_position": 1
+        },
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "queue": [],
+      "seq": 10,
+      "session_id": "session-1",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    "type": "runtime_snapshot"
+  },
+  "runtime_stream": [
+    {
+      "bot_id": "bot-1",
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 2,
+      "session_id": "session-1",
+      "snapshot": {
+        "bot_id": "bot-1",
+        "current_run_view": {
+          "canonical_ready": false,
+          "generation": "generation-stream-rich",
+          "messages": [],
+          "request_user_turn": {
+            "attachments": [
+              {
+                "content_hash": "sha256:notes",
+                "name": "notes.txt",
+                "type": "file"
+              }
+            ],
+            "external_message_id": "stream-rich",
+            "id": "turn-stream-rich-1-request",
+            "platform": "local",
+            "role": "user",
+            "sender_user_id": "user-1",
+            "text": "Inspect the workspace",
+            "timestamp": "2026-07-10T00:00:00Z"
+          },
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-rich-1-request",
+              "turn_id": "turn-stream-rich-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "running",
+          "stream_id": "stream-rich",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-rich-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-rich-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-rich-1",
+            "turn_position": 1
+          },
+          "updated_at": "2026-07-10T00:00:10Z"
+        },
+        "epoch": "epoch-runtime-contract-v1",
+        "queue": [],
+        "seq": 2,
+        "session_id": "session-1",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "type": "runtime_snapshot"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_appends": [
+          {
+            "content": "I need to inspect the workspace.",
+            "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "reasoning"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 2,
+            "turn_position": 1
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 3,
+      "session_id": "session-1",
+      "stream_id": "stream-rich",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_appends": [
+          {
+            "content": "I will check the current state.",
+            "id": 1,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-rich-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "text"
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 4,
+      "session_id": "session-1",
+      "stream_id": "stream-rich",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_upserts": [
+          {
+            "id": 2,
+            "input": {
+              "command": "pwd"
+            },
+            "name": "exec",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "running": true,
+            "stable_id": "turn-stream-rich-1-row-01",
+            "tool_call_id": "call-exec",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "tool"
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 5,
+      "session_id": "session-1",
+      "stream_id": "stream-rich",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "progress_appends": [
+          {
+            "id": 2,
+            "progress": "queued"
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 6,
+      "session_id": "session-1",
+      "stream_id": "stream-rich",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "progress_appends": [
+          {
+            "id": 2,
+            "progress": {
+              "stdout": "/workspace\n"
+            }
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 7,
+      "session_id": "session-1",
+      "stream_id": "stream-rich",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_upserts": [
+          {
+            "id": 2,
+            "input": {
+              "command": "pwd"
+            },
+            "name": "exec",
+            "output": {
+              "structuredContent": {
+                "stdout": "/workspace\n"
+              }
+            },
+            "progress": [
+              "queued",
+              {
+                "stdout": "/workspace\n"
+              }
+            ],
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              },
+              {
+                "role": "tool",
+                "stable_id": "turn-stream-rich-1-row-02",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 3,
+                "turn_position": 1
+              }
+            ],
+            "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
+            "tool_call_id": "call-exec",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "tool"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "tool",
+            "stable_id": "turn-stream-rich-1-row-02",
+            "turn_id": "turn-stream-rich-1",
+            "turn_message_seq": 3,
+            "turn_position": 1
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 8,
+      "session_id": "session-1",
+      "stream_id": "stream-rich",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_upserts": [
+          {
+            "approval": {
+              "approval_id": "approval-1",
+              "can_approve": true,
+              "short_id": 7,
+              "status": "pending"
+            },
+            "id": 3,
+            "input": {
+              "command": "rm -rf build"
+            },
+            "name": "exec",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
+            "tool_call_id": "call-approval",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "tool"
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 9,
+      "session_id": "session-1",
+      "stream_id": "stream-rich",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_upserts": [
+          {
+            "id": 4,
+            "input": {
+              "questions": [
+                {
+                  "kind": "single_select",
+                  "text": "Continue?"
+                }
+              ]
+            },
+            "name": "ask_user",
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-rich-1-row-01",
+                "turn_id": "turn-stream-rich-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "running": false,
+            "stable_id": "turn-stream-rich-1-row-01",
+            "tool_call_id": "call-ask",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "tool",
+            "user_input": {
+              "can_respond": true,
+              "questions": [
+                {
+                  "id": "q1",
+                  "kind": "single_select",
+                  "options": [
+                    {
+                      "id": "yes",
+                      "label": "Yes"
+                    },
+                    {
+                      "id": "no",
+                      "label": "No"
+                    }
+                  ],
+                  "text": "Continue?"
+                }
+              ],
+              "short_id": 8,
+              "status": "pending",
+              "user_input_id": "input-1"
+            }
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 10,
+      "session_id": "session-1",
+      "stream_id": "stream-rich",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    }
+  ],
+  "runtime_terminal_stream": [
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "run": {
+          "canonical_ready": true,
+          "error": "",
+          "history_committed": true,
+          "status": "completed",
+          "stream_id": "stream-rich",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 11,
+      "session_id": "session-1",
+      "stream_id": "stream-rich",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    }
+  ],
+  "runtime_admission_stream": [
+    {
+      "bot_id": "bot-1",
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 0,
+      "session_id": "session-1",
+      "snapshot": {
+        "bot_id": "bot-1",
+        "epoch": "epoch-runtime-contract-v1",
+        "queue": [],
+        "seq": 0,
+        "session_id": "session-1",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "type": "runtime_snapshot"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "current_run_view": {
+          "canonical_ready": false,
+          "generation": "generation-stream-admission",
+          "messages": [],
+          "row_ledger": [],
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "admitting",
+          "stream_id": "stream-admission",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 1,
+      "session_id": "session-1",
+      "stream_id": "stream-admission",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "current_run_view": {
+          "canonical_ready": false,
+          "generation": "generation-stream-admission",
+          "messages": [],
+          "request_user_turn": {
+            "attachments": [
+              {
+                "content_hash": "sha256:notes",
+                "name": "notes.txt",
+                "type": "file"
+              }
+            ],
+            "external_message_id": "stream-admission",
+            "id": "turn-stream-admission-1-request",
+            "platform": "local",
+            "role": "user",
+            "sender_user_id": "user-1",
+            "text": "Inspect the workspace",
+            "timestamp": "2026-07-10T00:00:00Z"
+          },
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-admission-1-request",
+              "turn_id": "turn-stream-admission-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "running",
+          "stream_id": "stream-admission",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-admission-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-admission-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-admission-1",
+            "turn_position": 1
+          },
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 2,
+      "session_id": "session-1",
+      "stream_id": "stream-admission",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    }
+  ],
+  "runtime_reset_stream": [
+    {
+      "bot_id": "bot-1",
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 2,
+      "session_id": "session-1",
+      "snapshot": {
+        "bot_id": "bot-1",
+        "current_run_view": {
+          "canonical_ready": false,
+          "generation": "generation-stream-reset",
+          "messages": [],
+          "request_user_turn": {
+            "attachments": [
+              {
+                "content_hash": "sha256:notes",
+                "name": "notes.txt",
+                "type": "file"
+              }
+            ],
+            "external_message_id": "stream-reset",
+            "id": "turn-stream-reset-1-request",
+            "platform": "local",
+            "role": "user",
+            "sender_user_id": "user-1",
+            "text": "Inspect the workspace",
+            "timestamp": "2026-07-10T00:00:00Z"
+          },
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-reset-1-request",
+              "turn_id": "turn-stream-reset-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "running",
+          "stream_id": "stream-reset",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-reset-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-reset-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-reset-1",
+            "turn_position": 1
+          },
+          "updated_at": "2026-07-10T00:00:10Z"
+        },
+        "epoch": "epoch-runtime-contract-v1",
+        "queue": [],
+        "seq": 2,
+        "session_id": "session-1",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "type": "runtime_snapshot"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_appends": [
+          {
+            "content": "discarded draft",
+            "id": 0,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-reset-1-row-01",
+                "turn_id": "turn-stream-reset-1",
+                "turn_message_seq": 2,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-reset-1-row-01",
+            "turn_message_seq": 2,
+            "turn_position": 1,
+            "type": "text"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-reset-1-row-01",
+            "turn_id": "turn-stream-reset-1",
+            "turn_message_seq": 2,
+            "turn_position": 1
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 3,
+      "session_id": "session-1",
+      "stream_id": "stream-reset",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "reset_messages": true,
+        "reset_row_ledger": true,
+        "row_ledger_upserts": [
+          {
+            "role": "user",
+            "stable_id": "turn-stream-reset-1-request",
+            "turn_id": "turn-stream-reset-1",
+            "turn_message_seq": 1,
+            "turn_position": 1
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 4,
+      "session_id": "session-1",
+      "stream_id": "stream-reset",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_appends": [
+          {
+            "content": "replacement draft",
+            "id": 1,
+            "row_identities": [
+              {
+                "role": "assistant",
+                "stable_id": "turn-stream-reset-1-row-02",
+                "turn_id": "turn-stream-reset-1",
+                "turn_message_seq": 4,
+                "turn_position": 1
+              }
+            ],
+            "stable_id": "turn-stream-reset-1-row-02",
+            "turn_message_seq": 4,
+            "turn_position": 1,
+            "type": "text"
+          }
+        ],
+        "row_ledger_upserts": [
+          {
+            "role": "assistant",
+            "stable_id": "turn-stream-reset-1-row-02",
+            "turn_id": "turn-stream-reset-1",
+            "turn_message_seq": 4,
+            "turn_position": 1
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 5,
+      "session_id": "session-1",
+      "stream_id": "stream-reset",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    }
+  ],
+  "runtime_steer_stream": [
+    {
+      "bot_id": "bot-1",
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 2,
+      "session_id": "session-1",
+      "snapshot": {
+        "bot_id": "bot-1",
+        "current_run_view": {
+          "canonical_ready": false,
+          "generation": "generation-stream-steer",
+          "messages": [],
+          "request_user_turn": {
+            "attachments": [
+              {
+                "content_hash": "sha256:notes",
+                "name": "notes.txt",
+                "type": "file"
+              }
+            ],
+            "external_message_id": "stream-steer",
+            "id": "turn-stream-steer-1-request",
+            "platform": "local",
+            "role": "user",
+            "sender_user_id": "user-1",
+            "text": "Inspect the workspace",
+            "timestamp": "2026-07-10T00:00:00Z"
+          },
+          "row_ledger": [
+            {
+              "role": "user",
+              "stable_id": "turn-stream-steer-1-request",
+              "turn_id": "turn-stream-steer-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            }
+          ],
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "running",
+          "stream_id": "stream-steer",
+          "turn_reservation": {
+            "request": {
+              "message_id": "turn-stream-steer-1-request",
+              "role": "user",
+              "turn_id": "turn-stream-steer-1",
+              "turn_message_seq": 1,
+              "turn_position": 1
+            },
+            "turn_id": "turn-stream-steer-1",
+            "turn_position": 1
+          },
+          "updated_at": "2026-07-10T00:00:10Z"
+        },
+        "epoch": "epoch-runtime-contract-v1",
+        "queue": [],
+        "seq": 2,
+        "session_id": "session-1",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "type": "runtime_snapshot"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "run": {
+          "steer": {
+            "created_at": "2026-07-10T00:00:00Z",
+            "id": "steer-runtime-contract",
+            "status": "pending",
+            "text": "adjust course",
+            "updated_at": "2026-07-10T00:00:10Z"
+          },
+          "stream_id": "stream-steer",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 3,
+      "session_id": "session-1",
+      "stream_id": "stream-steer",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "run": {
+          "steer": {
+            "created_at": "2026-07-10T00:00:00Z",
+            "id": "steer-runtime-contract",
+            "status": "queued",
+            "text": "adjust course",
+            "updated_at": "2026-07-10T00:00:10Z"
+          },
+          "stream_id": "stream-steer",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 4,
+      "session_id": "session-1",
+      "stream_id": "stream-steer",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "run": {
+          "steer": {
+            "created_at": "2026-07-10T00:00:00Z",
+            "id": "steer-runtime-contract",
+            "status": "applied",
+            "text": "adjust course",
+            "updated_at": "2026-07-10T00:00:10Z"
+          },
+          "stream_id": "stream-steer",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 5,
+      "session_id": "session-1",
+      "stream_id": "stream-steer",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    }
+  ]
+}

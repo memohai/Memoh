@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
-	messageevent "github.com/memohai/memoh/internal/message/event"
 )
 
 type RetryLatestMessageInput struct {
@@ -45,39 +43,131 @@ type EditLatestMessageInput struct {
 	ToolHTTPURL            string
 }
 
+type ReplacementOperation struct {
+	Kind                 string
+	ReplaceFromMessageID string
+	ReplacementUserTurn  *conversation.UITurn
+}
+
+type PreparedReplacementWS struct {
+	Request          conversation.ChatRequest
+	OldTurnID        string
+	RequestMessageID string
+	Reason           string
+	Operation        ReplacementOperation
+	sessionTurnHeld  bool
+}
+
+type replacementPersistenceContextKey struct{}
+
+type replacementPersistenceState struct {
+	oldTurnID                  string
+	requestMessageID           string
+	reason                     string
+	replacedTailStartMessageID string
+	forkAnchor                 *forkAnchorUpdate
+	forkAnchorPrepared         bool
+	atomicCommitted            bool
+}
+
+func replacementPersistenceFromContext(ctx context.Context) *replacementPersistenceState {
+	state, _ := ctx.Value(replacementPersistenceContextKey{}).(*replacementPersistenceState)
+	return state
+}
+
+// AdmitPreparedReplacementWS reserves the local session turn without blocking
+// the WebSocket command loop. Cross-server serialization is completed by the
+// runtime admission that follows.
+func (r *Resolver) AdmitPreparedReplacementWS(ctx context.Context, prepared PreparedReplacementWS) (PreparedReplacementWS, func(), error) {
+	if r == nil {
+		return PreparedReplacementWS{}, func() {}, errors.New("resolver is not configured")
+	}
+	if strings.TrimSpace(prepared.OldTurnID) == "" || strings.TrimSpace(prepared.Request.SessionID) == "" {
+		return PreparedReplacementWS{}, func() {}, errors.New("prepared replacement is invalid")
+	}
+	release, admitted := r.tryEnterIdleSessionTurn(ctx, prepared.Request.BotID, prepared.Request.SessionID)
+	if !admitted {
+		return PreparedReplacementWS{}, func() {}, errors.New("session already has an active turn")
+	}
+	if err := r.ensureLatestVisibleTurn(ctx, prepared.Request.SessionID, prepared.OldTurnID); err != nil {
+		release()
+		return PreparedReplacementWS{}, func() {}, errors.New("replacement target is no longer the latest turn")
+	}
+	prepared.sessionTurnHeld = true
+	return prepared, release, nil
+}
+
+// ValidatePreparedReplacementWS performs the final database check after the
+// cross-server runtime reservation has succeeded and before the operation is
+// published.
+func (r *Resolver) ValidatePreparedReplacementWS(ctx context.Context, prepared PreparedReplacementWS) error {
+	if r == nil || strings.TrimSpace(prepared.OldTurnID) == "" || strings.TrimSpace(prepared.Request.SessionID) == "" {
+		return errors.New("prepared replacement is invalid")
+	}
+	if err := r.ensureLatestVisibleTurn(ctx, prepared.Request.SessionID, prepared.OldTurnID); err != nil {
+		return errors.New("replacement target is no longer the latest turn")
+	}
+	return nil
+}
+
+// WithAttachments replaces an admitted edit's transport attachments with their
+// persisted media references before the operation is published.
+func (prepared PreparedReplacementWS) WithAttachments(attachments []conversation.ChatAttachment) (PreparedReplacementWS, error) {
+	if !strings.EqualFold(strings.TrimSpace(prepared.Reason), "edit") {
+		return PreparedReplacementWS{}, errors.New("only prepared edits accept replacement attachments")
+	}
+	prepared.Request.Attachments = append([]conversation.ChatAttachment(nil), attachments...)
+	turn := prepared.Operation.ReplacementUserTurn
+	if turn == nil {
+		return PreparedReplacementWS{}, errors.New("prepared edit has no replacement user turn")
+	}
+	turnCopy := *turn
+	turnCopy.Attachments = uiAttachmentsFromChatAttachments(attachments)
+	prepared.Operation.ReplacementUserTurn = &turnCopy
+	return prepared, nil
+}
+
 func (r *Resolver) RetryLatestMessageWS(ctx context.Context, input RetryLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+	prepared, err := r.PrepareRetryLatestMessageWS(ctx, input)
+	if err != nil {
+		return err
+	}
+	return r.StreamPreparedReplacementWS(ctx, prepared, eventCh, abortCh)
+}
+
+func (r *Resolver) PrepareRetryLatestMessageWS(ctx context.Context, input RetryLatestMessageInput) (PreparedReplacementWS, error) {
 	if r == nil || r.messageService == nil {
-		return errors.New("message service not configured")
+		return PreparedReplacementWS{}, errors.New("message service not configured")
 	}
 	sessionID := strings.TrimSpace(input.SessionID)
 	messageID := strings.TrimSpace(input.MessageID)
 	if sessionID == "" {
-		return errors.New("session id is required")
+		return PreparedReplacementWS{}, errors.New("session id is required")
 	}
 	if messageID == "" {
-		return errors.New("message id is required")
+		return PreparedReplacementWS{}, errors.New("message id is required")
 	}
 
 	turn, target, err := r.latestVisibleTurnAndMessage(ctx, sessionID, messageID)
 	if err != nil {
-		return err
+		return PreparedReplacementWS{}, err
 	}
 	if !strings.EqualFold(target.Role, "assistant") {
-		return errors.New("only latest assistant messages can be retried")
+		return PreparedReplacementWS{}, errors.New("only latest assistant messages can be retried")
 	}
 	if err := r.ensureLatestVisibleTurn(ctx, sessionID, turn.ID); err != nil {
-		return errors.New("only the latest assistant message can be retried")
+		return PreparedReplacementWS{}, errors.New("only the latest assistant message can be retried")
 	}
 	requestMessageID := strings.TrimSpace(turn.RequestMessageID)
 	if requestMessageID == "" {
-		return errors.New("retry target has no request message")
+		return PreparedReplacementWS{}, errors.New("retry target has no request message")
 	}
 	requestMessage, err := r.messageService.GetByIDBySession(ctx, sessionID, requestMessageID)
 	if err != nil {
-		return err
+		return PreparedReplacementWS{}, err
 	}
 	if !strings.EqualFold(requestMessage.Role, "user") {
-		return errors.New("retry target request is not a user message")
+		return PreparedReplacementWS{}, errors.New("retry target request is not a user message")
 	}
 	cutoffMessageID := strings.TrimSpace(turn.AssistantMessageID)
 	if cutoffMessageID == "" {
@@ -109,38 +199,55 @@ func (r *Resolver) RetryLatestMessageWS(ctx context.Context, input RetryLatestMe
 		HistoryCutoffBeforeMessageID: cutoffMessageID,
 		RequiredHistoryMessageID:     requestMessage.ID,
 	}
-	return r.streamReplacementWS(ctx, req, turn.ID, requestMessage.ID, "retry", eventCh, abortCh)
+	return PreparedReplacementWS{
+		Request:          req,
+		OldTurnID:        turn.ID,
+		RequestMessageID: requestMessage.ID,
+		Reason:           "retry",
+		Operation: ReplacementOperation{
+			Kind:                 "retry",
+			ReplaceFromMessageID: cutoffMessageID,
+		},
+	}, nil
 }
 
 func (r *Resolver) EditLatestMessageWS(ctx context.Context, input EditLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+	prepared, err := r.PrepareEditLatestMessageWS(ctx, input)
+	if err != nil {
+		return err
+	}
+	return r.StreamPreparedReplacementWS(ctx, prepared, eventCh, abortCh)
+}
+
+func (r *Resolver) PrepareEditLatestMessageWS(ctx context.Context, input EditLatestMessageInput) (PreparedReplacementWS, error) {
 	if r == nil || r.messageService == nil {
-		return errors.New("message service not configured")
+		return PreparedReplacementWS{}, errors.New("message service not configured")
 	}
 	sessionID := strings.TrimSpace(input.SessionID)
 	messageID := strings.TrimSpace(input.MessageID)
 	text := strings.TrimSpace(input.Text)
 	if sessionID == "" {
-		return errors.New("session id is required")
+		return PreparedReplacementWS{}, errors.New("session id is required")
 	}
 	if messageID == "" {
-		return errors.New("message id is required")
+		return PreparedReplacementWS{}, errors.New("message id is required")
 	}
 	if text == "" && len(input.Attachments) == 0 {
-		return errors.New("message text or attachments required")
+		return PreparedReplacementWS{}, errors.New("message text or attachments required")
 	}
 
 	turn, target, err := r.latestVisibleTurnAndMessage(ctx, sessionID, messageID)
 	if err != nil {
-		return err
+		return PreparedReplacementWS{}, err
 	}
 	if !strings.EqualFold(target.Role, "user") {
-		return errors.New("only latest user messages can be edited")
+		return PreparedReplacementWS{}, errors.New("only latest user messages can be edited")
 	}
 	if strings.TrimSpace(turn.RequestMessageID) != target.ID {
-		return errors.New("edit target is not the request for its turn")
+		return PreparedReplacementWS{}, errors.New("edit target is not the request for its turn")
 	}
 	if err := r.ensureLatestVisibleTurn(ctx, sessionID, turn.ID); err != nil {
-		return errors.New("only the latest user message can be edited")
+		return PreparedReplacementWS{}, errors.New("only the latest user message can be edited")
 	}
 
 	req := conversation.ChatRequest{
@@ -166,7 +273,51 @@ func (r *Resolver) EditLatestMessageWS(ctx context.Context, input EditLatestMess
 		SkipHistoryTurn:              true,
 		HistoryCutoffBeforeMessageID: target.ID,
 	}
-	return r.streamReplacementWS(ctx, req, turn.ID, "", "edit", eventCh, abortCh)
+	replacementUserTurn := &conversation.UITurn{
+		Role:        "user",
+		Text:        text,
+		Attachments: uiAttachmentsFromChatAttachments(input.Attachments),
+		Timestamp:   time.Now().UTC(),
+		Platform:    "local",
+	}
+	return PreparedReplacementWS{
+		Request:   req,
+		OldTurnID: turn.ID,
+		Reason:    "edit",
+		Operation: ReplacementOperation{
+			Kind:                 "edit",
+			ReplaceFromMessageID: target.ID,
+			ReplacementUserTurn:  replacementUserTurn,
+		},
+	}, nil
+}
+
+func (r *Resolver) StreamPreparedReplacementWS(ctx context.Context, prepared PreparedReplacementWS, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+	if strings.TrimSpace(prepared.OldTurnID) == "" || strings.TrimSpace(prepared.Reason) == "" {
+		return errors.New("prepared replacement is invalid")
+	}
+	return r.streamReplacementWS(ctx, prepared.Request, prepared.OldTurnID, prepared.RequestMessageID, prepared.Reason, eventCh, abortCh, prepared.sessionTurnHeld)
+}
+
+func uiAttachmentsFromChatAttachments(attachments []conversation.ChatAttachment) []conversation.UIAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]conversation.UIAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		out = append(out, conversation.UIAttachment{
+			Type:        strings.TrimSpace(attachment.Type),
+			Path:        strings.TrimSpace(attachment.Path),
+			URL:         strings.TrimSpace(attachment.URL),
+			Base64:      strings.TrimSpace(attachment.Base64),
+			Name:        strings.TrimSpace(attachment.Name),
+			ContentHash: strings.TrimSpace(attachment.ContentHash),
+			Mime:        strings.TrimSpace(attachment.Mime),
+			Size:        attachment.Size,
+			Metadata:    attachment.Metadata,
+		})
+	}
+	return out
 }
 
 func (r *Resolver) latestVisibleTurnAndMessage(ctx context.Context, sessionID, messageID string) (messagepkg.HistoryTurn, messagepkg.Message, error) {
@@ -200,121 +351,80 @@ func (r *Resolver) streamReplacementWS(
 	reason string,
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
+	sessionTurnHeld bool,
 ) error {
-	_, err := r.streamChatWSResultWithHooks(
+	persistence := &replacementPersistenceState{
+		oldTurnID:                  oldTurnID,
+		requestMessageID:           requestMessageID,
+		reason:                     reason,
+		replacedTailStartMessageID: req.HistoryCutoffBeforeMessageID,
+	}
+	ctx = context.WithValue(ctx, replacementPersistenceContextKey{}, persistence)
+	var preflight func(context.Context) error
+	if !sessionTurnHeld {
+		preflight = func(ctx context.Context) error {
+			return r.ensureLatestVisibleTurn(ctx, req.SessionID, oldTurnID)
+		}
+	}
+	run := r.streamChatWSResultWithHooksAndTurn
+	if r.streamReplacementFn != nil {
+		run = r.streamReplacementFn
+	}
+	persisted, err := run(
 		ctx,
 		req,
 		eventCh,
 		abortCh,
-		func(ctx context.Context) error {
-			return r.ensureLatestVisibleTurn(ctx, req.SessionID, oldTurnID)
-		},
-		func(ctx context.Context, persisted []messagepkg.Message) error {
-			return r.replacePersistedTurn(ctx, req, oldTurnID, requestMessageID, reason, persisted)
-		},
+		preflight,
+		sessionTurnHeld,
 	)
-	return err
-}
-
-func (r *Resolver) replacePersistedTurn(
-	ctx context.Context,
-	req conversation.ChatRequest,
-	oldTurnID string,
-	requestMessageID string,
-	reason string,
-	persisted []messagepkg.Message,
-) error {
-	replacementID := firstAssistantID(persisted)
-	if replacementID == "" {
-		replacementID = latestPersistedID(persisted)
-	}
-	if replacementID == "" {
-		return errors.New("replacement message was not persisted")
-	}
-	if strings.TrimSpace(requestMessageID) == "" {
-		requestMessageID = firstUserID(persisted)
-	}
-	forkAnchorUpdate := r.prepareForkAnchorUpdate(ctx, req.SessionID, req.HistoryCutoffBeforeMessageID)
-	if _, err := r.messageService.ReplaceTurn(context.WithoutCancel(ctx), req.SessionID, oldTurnID, requestMessageID, replacementID, reason); err != nil {
-		r.logger.Error("replace history turn failed", slog.String("reason", reason), slog.Any("error", err))
-		r.cleanupReplacementMessages(ctx, persisted)
-		return fmt.Errorf("replace history turn: %w", err)
-	}
-	r.applyForkAnchorUpdate(context.WithoutCancel(ctx), req.SessionID, forkAnchorUpdate)
-	r.publishReplacementMessageCreated(req.BotID, persisted)
-	return nil
-}
-
-func (r *Resolver) publishReplacementMessageCreated(botID string, persisted []messagepkg.Message) {
-	if r == nil || r.eventPublisher == nil || len(persisted) == 0 {
-		return
-	}
-	var latest messagepkg.Message
-	for i := len(persisted) - 1; i >= 0; i-- {
-		if strings.TrimSpace(persisted[i].ID) == "" {
-			continue
-		}
-		latest = persisted[i]
-		break
-	}
-	if strings.TrimSpace(latest.ID) == "" {
-		return
-	}
-	eventBotID := strings.TrimSpace(botID)
-	if eventBotID == "" {
-		eventBotID = strings.TrimSpace(latest.BotID)
-	}
-	data, err := json.Marshal(latest)
 	if err != nil {
-		if r.logger != nil {
-			r.logger.Warn("marshal replacement message event failed", slog.Any("error", err))
-		}
-		return
+		return err
 	}
-	r.eventPublisher.Publish(messageevent.Event{
-		Type:  messageevent.EventTypeMessageCreated,
-		BotID: eventBotID,
-		Data:  data,
-	})
+	if len(persisted) > 0 && !persistence.atomicCommitted {
+		return errors.New("replacement was not atomically persisted")
+	}
+	return nil
 }
 
 type forkAnchorUpdate struct {
 	metadata map[string]any
 }
 
-func (r *Resolver) prepareForkAnchorUpdate(ctx context.Context, sessionID string, replacedTailStartMessageID string) *forkAnchorUpdate {
+func (r *Resolver) prepareForkAnchorUpdate(ctx context.Context, sessionID string, replacedTailStartMessageID string) (*forkAnchorUpdate, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	replacedTailStartMessageID = strings.TrimSpace(replacedTailStartMessageID)
 	if r == nil || r.sessionService == nil || r.messageService == nil || sessionID == "" || replacedTailStartMessageID == "" {
-		return nil
+		return nil, nil
 	}
 
 	sess, err := r.sessionService.Get(ctx, sessionID)
 	if err != nil {
-		r.logForkAnchorUpdateWarning("load session for fork anchor update failed", sessionID, err)
-		return nil
+		return nil, fmt.Errorf("load session for fork anchor update: %w", err)
 	}
 	fork, ok := forkedFromMetadata(sess.Metadata)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	currentAnchor := forkMetadataString(fork, "fork_message_id")
 	if currentAnchor == "" {
-		return nil
+		return nil, nil
 	}
 
-	replacedTail, err := r.messageService.ListVisibleFromBySession(ctx, sessionID, replacedTailStartMessageID)
+	replacedTail, err := r.messageService.ListVisibleFromBySession(ctx, sessionID, replacedTailStartMessageID, 0)
 	if err != nil {
-		r.logForkAnchorUpdateWarning("load replaced tail for fork anchor update failed", sessionID, err)
-		return nil
+		return nil, fmt.Errorf("load replaced tail for fork anchor update: %w", err)
 	}
 	if !messagesContainAnchor(replacedTail, currentAnchor) {
-		return nil
+		return nil, nil
 	}
 
-	nextAnchor := r.latestInheritedAssistantBefore(ctx, sessionID, replacedTailStartMessageID, sess.CreatedAt)
+	nextAnchor, err := r.latestInheritedAssistantBefore(ctx, sessionID, replacedTailStartMessageID, sess.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
 	if nextAnchor == currentAnchor {
-		return nil
+		return nil, nil
 	}
 
 	nextFork := cloneMetadataMap(fork)
@@ -326,24 +436,13 @@ func (r *Resolver) prepareForkAnchorUpdate(ctx context.Context, sessionID string
 
 	nextMetadata := cloneMetadataMap(sess.Metadata)
 	nextMetadata["forked_from"] = nextFork
-	return &forkAnchorUpdate{metadata: nextMetadata}
+	return &forkAnchorUpdate{metadata: nextMetadata}, nil
 }
 
-func (r *Resolver) applyForkAnchorUpdate(ctx context.Context, sessionID string, update *forkAnchorUpdate) {
-	sessionID = strings.TrimSpace(sessionID)
-	if r == nil || r.sessionService == nil || update == nil || sessionID == "" {
-		return
-	}
-	if _, err := r.sessionService.UpdateMetadata(ctx, sessionID, update.metadata); err != nil {
-		r.logForkAnchorUpdateWarning("persist fork anchor update failed", sessionID, err)
-	}
-}
-
-func (r *Resolver) latestInheritedAssistantBefore(ctx context.Context, sessionID string, beforeMessageID string, sessionCreatedAt time.Time) string {
+func (r *Resolver) latestInheritedAssistantBefore(ctx context.Context, sessionID string, beforeMessageID string, sessionCreatedAt time.Time) (string, error) {
 	messages, err := r.messageService.ListBeforeMessageBySession(ctx, sessionID, beforeMessageID, 10000)
 	if err != nil {
-		r.logForkAnchorUpdateWarning("load previous messages for fork anchor update failed", sessionID, err)
-		return ""
+		return "", fmt.Errorf("load previous messages for fork anchor update: %w", err)
 	}
 	hasCutoff := !sessionCreatedAt.IsZero()
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -354,9 +453,9 @@ func (r *Resolver) latestInheritedAssistantBefore(ctx context.Context, sessionID
 		if hasCutoff && (msg.CreatedAt.IsZero() || msg.CreatedAt.After(sessionCreatedAt)) {
 			continue
 		}
-		return strings.TrimSpace(msg.ID)
+		return strings.TrimSpace(msg.ID), nil
 	}
-	return ""
+	return "", nil
 }
 
 func messagesContainAnchor(messages []messagepkg.Message, anchor string) bool {
@@ -416,30 +515,6 @@ func cloneMetadataMap(metadata map[string]any) map[string]any {
 	return out
 }
 
-func (r *Resolver) logForkAnchorUpdateWarning(message string, sessionID string, err error) {
-	if r != nil && r.logger != nil {
-		r.logger.Warn("fork anchor update skipped", slog.String("reason", message), slog.String("session_id", sessionID), slog.Any("error", err))
-	}
-}
-
-func (r *Resolver) cleanupReplacementMessages(ctx context.Context, persisted []messagepkg.Message) {
-	if r == nil || r.messageService == nil || len(persisted) == 0 {
-		return
-	}
-	ids := make([]string, 0, len(persisted))
-	for _, msg := range persisted {
-		if id := strings.TrimSpace(msg.ID); id != "" {
-			ids = append(ids, id)
-		}
-	}
-	if len(ids) == 0 {
-		return
-	}
-	if err := r.messageService.DeleteByIDs(context.WithoutCancel(ctx), ids); err != nil {
-		r.logger.Error("cleanup replacement messages failed", slog.Any("error", err), slog.Int("message_count", len(ids)))
-	}
-}
-
 func visibleMessageText(msg messagepkg.Message) string {
 	if text := strings.TrimSpace(msg.DisplayContent); text != "" {
 		return text
@@ -451,31 +526,4 @@ func visibleMessageText(msg messagepkg.Message) string {
 		}
 	}
 	return strings.TrimSpace(string(msg.Content))
-}
-
-func firstAssistantID(messages []messagepkg.Message) string {
-	for _, msg := range messages {
-		if strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
-			return strings.TrimSpace(msg.ID)
-		}
-	}
-	return ""
-}
-
-func firstUserID(messages []messagepkg.Message) string {
-	for _, msg := range messages {
-		if strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
-			return strings.TrimSpace(msg.ID)
-		}
-	}
-	return ""
-}
-
-func latestPersistedID(messages []messagepkg.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if id := strings.TrimSpace(messages[i].ID); id != "" {
-			return id
-		}
-	}
-	return ""
 }

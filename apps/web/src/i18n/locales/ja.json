@@ -541,6 +541,7 @@
     "attachFiles": "ファイルを添付する",
     "send": "送信",
     "sendFailed": "メッセージの送信に失敗しました",
+    "responseAborted": "応答を停止しました",
     "forkFailed": "セッションのフォークに失敗しました",
     "forkedFrom": "{session} からフォーク",
     "forkSourceUnavailable": "元のセッションは存在しないか、削除されています。",

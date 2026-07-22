@@ -190,6 +190,38 @@ func TestCanceledResultIsToolResultPayload(t *testing.T) {
 	}
 }
 
+func TestResponseMatchesCommittedPayload(t *testing.T) {
+	t.Parallel()
+
+	payload := selectPayload()
+	answers := []QuestionAnswer{
+		{QuestionID: "q1", OptionIDs: []string{"q1.o1"}},
+		{QuestionID: "q2", OptionIDs: []string{"q2.o1"}},
+		{QuestionID: "q3", Text: "continue"},
+	}
+	result, err := submittedResult(payload, answers)
+	if err != nil {
+		t.Fatalf("build submitted result: %v", err)
+	}
+	req := Request{Status: StatusSubmitted, UIPayload: payload, Result: result}
+	if matches, err := ResponseMatches(req, false, "", answers); err != nil || !matches {
+		t.Fatalf("same submitted response = %v, err %v", matches, err)
+	}
+	conflicting := append([]QuestionAnswer(nil), answers...)
+	conflicting[2] = QuestionAnswer{QuestionID: "q3", Text: "stop"}
+	if matches, err := ResponseMatches(req, false, "", conflicting); err != nil || matches {
+		t.Fatalf("conflicting submitted response = %v, err %v", matches, err)
+	}
+
+	canceled := Request{Status: StatusCanceled, Result: canceledResult("not now")}
+	if matches, err := ResponseMatches(canceled, true, "not now", nil); err != nil || !matches {
+		t.Fatalf("same canceled response = %v, err %v", matches, err)
+	}
+	if matches, err := ResponseMatches(canceled, true, "different", nil); err != nil || matches {
+		t.Fatalf("conflicting canceled response = %v, err %v", matches, err)
+	}
+}
+
 func TestServiceCanRespond(t *testing.T) {
 	t.Parallel()
 

@@ -142,6 +142,9 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 		t.Fatalf("events = %#v, want ACP stream delta", events)
 	}
 	end := requireStreamEvent(t, events, agentpkg.EventEnd)
+	if !end.HistoryCommitted {
+		t.Fatal("terminal ACP event did not acknowledge committed history")
+	}
 	if got := terminalAssistantText(t, end); got != "done from codex" {
 		t.Fatalf("terminal assistant text = %q, want done from codex", got)
 	}
@@ -292,6 +295,7 @@ func TestStreamChatWSRejectsConcurrentACPPromptForSameSession(t *testing.T) {
 func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 	t.Parallel()
 
+	guardCalls := 0
 	pool := &recordingACPPrompter{
 		result: acpclient.PromptResult{
 			Text:       "done from codex",
@@ -322,7 +326,11 @@ func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler),
 	}
 
-	chunks, errs := resolver.StreamChat(context.Background(), conversation.ChatRequest{
+	ctx := WithPersistenceGuard(context.Background(), func(context.Context) error {
+		guardCalls++
+		return nil
+	})
+	chunks, errs := resolver.StreamChat(ctx, conversation.ChatRequest{
 		BotID:     "bot-1",
 		SessionID: "session-1",
 		Query:     "inspect the app",
@@ -336,6 +344,13 @@ func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 	}
 	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
 		t.Fatalf("ACP prompt input = %#v", pool.input)
+	}
+	if pool.input.RuntimeGuard == nil {
+		t.Fatal("ACP prompt input is missing the runtime guard")
+	}
+	before := guardCalls
+	if err := pool.input.RuntimeGuard(context.Background()); err != nil || guardCalls != before+1 {
+		t.Fatalf("ACP runtime guard = (%v, calls:%d), want one additional successful call", err, guardCalls)
 	}
 	if !containsStreamEvent(events, agentpkg.EventStart) || !containsStreamEvent(events, agentpkg.EventEnd) {
 		t.Fatalf("events = %#v, want agent start/end", events)
@@ -427,6 +442,165 @@ func TestACPTerminalStreamEventFallsBackToTranscriptEvents(t *testing.T) {
 	}
 	if usage.InputTokens != 2 || usage.OutputTokens != 4 || usage.TotalTokens != 6 {
 		t.Fatalf("terminal usage = %+v, want input=2 output=4 total=6", usage)
+	}
+}
+
+func TestStreamACPAgentWSTerminalProjectionUsesPersistedRows(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		result       acpclient.PromptResult
+		promptErr    error
+		terminalType agentpkg.StreamEventType
+	}{
+		{
+			name: "success",
+			result: acpclient.PromptResult{
+				Output:     []sdk.Message{sdk.AssistantMessage("done")},
+				StopReason: "end_turn",
+			},
+			terminalType: agentpkg.EventEnd,
+		},
+		{
+			name:         "abort",
+			promptErr:    errors.New("ACP process exited"),
+			terminalType: agentpkg.EventAbort,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			turn := runtimeRowTestTurn()
+			messages := &acpProjectionMessageService{}
+			pool := &recordingACPPrompter{result: tt.result, err: tt.promptErr}
+			resolver := &Resolver{
+				messageService: messages,
+				acpPool:        pool,
+				botPermissions: allowWorkspaceExecFor("user-1"),
+				sessionService: acpRuntimeSessionServiceForTest("user-1"),
+				logger:         slog.New(slog.DiscardHandler),
+			}
+
+			eventCh := make(chan WSStreamEvent, 16)
+			if err := resolver.streamACPAgentWS(
+				context.Background(),
+				conversation.ChatRequest{
+					BotID: "bot-1", SessionID: "session-1", Query: "inspect",
+					RuntimeTurn: turn, UserMessagePersisted: true, PersistedUserMessageID: turn.Request.MessageID,
+				},
+				eventCh,
+				make(chan struct{}),
+			); err != nil {
+				t.Fatalf("streamACPAgentWS() error = %v", err)
+			}
+
+			terminal := requireStreamEvent(t, drainAgentEvents(t, eventCh), tt.terminalType)
+			projection, ok := conversation.RuntimePersistedProjectionFromMetadata(terminal.Metadata)
+			if !ok {
+				t.Fatalf("terminal metadata = %#v, want persisted projection", terminal.Metadata)
+			}
+			if len(messages.roundInputs) != 1 || len(projection.AssistantMessages) != 1 {
+				t.Fatalf("persisted/projection rows = %d/%d, want 1/1", len(messages.roundInputs), len(projection.AssistantMessages))
+			}
+			persisted := messages.roundInputs[0]
+			projected := projection.AssistantMessages[0]
+			if persisted.MessageID == "" || projected.StableID != persisted.MessageID {
+				t.Fatalf("projected stable ID = %q, want persisted %q", projected.StableID, persisted.MessageID)
+			}
+			if projected.TurnPosition != persisted.TurnPosition || projected.TurnMessageSeq != persisted.TurnMessageSeq {
+				t.Fatalf("projected row identity = %#v, want persisted %#v", projected, persisted)
+			}
+		})
+	}
+}
+
+// ACP streams carry no step-start events, so the row tracker derives
+// assistant-row boundaries from the transcript folding rules. This test runs
+// a two-segment turn end to end: every live block's stable ID must equal the
+// identity its row settles with at the persistence fence.
+func TestStreamACPAgentWSKeepsMultiSegmentRowIdentitiesAligned(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	messages := &acpProjectionMessageService{}
+	pool := &recordingACPPrompter{
+		streamEvents: []event.StreamEvent{
+			{Type: event.TextDelta, Delta: "first answer"},
+			{Type: event.ToolCallStart, ToolCallID: "call-1", ToolName: "read"},
+			{Type: event.ToolCallEnd, ToolCallID: "call-1", ToolName: "read", Result: "contents"},
+			{Type: event.TextDelta, Delta: "second answer"},
+		},
+		result: acpclient.PromptResult{
+			Output: []sdk.Message{
+				{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+					sdk.TextPart{Text: "first answer"},
+					sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "read"},
+				}},
+				sdk.ToolMessage(sdk.ToolResultPart{
+					ToolCallID: "call-1",
+					ToolName:   "read",
+					Result:     "contents",
+				}),
+				sdk.AssistantMessage("second answer"),
+			},
+			StopReason: "end_turn",
+		},
+	}
+	resolver := &Resolver{
+		messageService: messages,
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: acpRuntimeSessionServiceForTest("user-1"),
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	eventCh := make(chan WSStreamEvent, 16)
+	if err := resolver.streamACPAgentWS(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID: "bot-1", SessionID: "session-1", Query: "inspect",
+			RuntimeTurn: turn, UserMessagePersisted: true, PersistedUserMessageID: turn.Request.MessageID,
+		},
+		eventCh,
+		make(chan struct{}),
+	); err != nil {
+		t.Fatalf("streamACPAgentWS() error = %v", err)
+	}
+
+	events := drainAgentEvents(t, eventCh)
+	deltas := make([]agentpkg.StreamEvent, 0, 2)
+	for _, ev := range events {
+		if ev.Type == agentpkg.EventTextDelta {
+			deltas = append(deltas, ev)
+		}
+	}
+	if len(deltas) != 2 {
+		t.Fatalf("streamed text deltas = %d, want 2 (events: %#v)", len(deltas), events)
+	}
+	if len(messages.roundInputs) != 3 {
+		t.Fatalf("persisted rows = %d, want 3 (assistant, tool, assistant)", len(messages.roundInputs))
+	}
+	first, tool, second := messages.roundInputs[0], messages.roundInputs[1], messages.roundInputs[2]
+	if first.Role != "assistant" || tool.Role != "tool" || second.Role != "assistant" {
+		t.Fatalf("persisted roles = %q, %q, %q", first.Role, tool.Role, second.Role)
+	}
+	if deltas[0].StableID == "" || deltas[0].StableID != first.MessageID {
+		t.Fatalf("first delta stable ID = %q, want persisted %q", deltas[0].StableID, first.MessageID)
+	}
+	if deltas[1].StableID == "" || deltas[1].StableID != second.MessageID {
+		t.Fatalf("second delta stable ID = %q, want persisted %q", deltas[1].StableID, second.MessageID)
+	}
+	if deltas[0].StableID == deltas[1].StableID {
+		t.Fatalf("both segments share live identity %q", deltas[0].StableID)
+	}
+	toolEnd := requireStreamEvent(t, events, agentpkg.EventToolCallEnd)
+	if len(toolEnd.RowIdentities) != 2 || toolEnd.RowIdentities[1].StableID != tool.MessageID {
+		t.Fatalf("tool end identities = %#v, want persisted tool row %q", toolEnd.RowIdentities, tool.MessageID)
+	}
+	if first.TurnMessageSeq != 2 || tool.TurnMessageSeq != 3 || second.TurnMessageSeq != 4 {
+		t.Fatalf("persisted sequences = %d, %d, %d, want 2, 3, 4",
+			first.TurnMessageSeq, tool.TurnMessageSeq, second.TurnMessageSeq)
 	}
 }
 
@@ -976,6 +1150,67 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 	}
 }
 
+func TestPersistACPLeadingUserMessageKeepsRuntimeReservation(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	messages := &recordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	prepared, err := resolver.persistACPLeadingUserMessage(context.Background(), conversation.ChatRequest{
+		BotID: "bot-1", SessionID: "session-1", Query: "inspect", RuntimeTurn: turn,
+	})
+	if err != nil {
+		t.Fatalf("persistACPLeadingUserMessage() error = %v", err)
+	}
+	if !prepared.UserMessagePersisted || len(messages.persisted) != 1 {
+		t.Fatalf("prepared/persisted = %#v/%d", prepared, len(messages.persisted))
+	}
+	input := messages.persisted[0]
+	if input.MessageID != turn.Request.MessageID || input.TurnID != turn.TurnID || input.TurnPosition != turn.TurnPosition || input.TurnMessageSeq != 1 {
+		t.Fatalf("ACP leading user reservation = %#v", input)
+	}
+}
+
+func TestPersistACPRoundKeepsRuntimeAssistantReservation(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	assistantRow := messagepkg.RuntimeRowReservation{
+		MessageID:      "33333333-3333-3333-3333-333333333333",
+		Role:           "assistant",
+		TurnID:         turn.TurnID,
+		TurnPosition:   turn.TurnPosition,
+		TurnMessageSeq: 2,
+	}
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	err := resolver.persistACPRound(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID: "bot-1", SessionID: "session-1", Query: "inspect",
+			RuntimeTurn: turn, UserMessagePersisted: true, PersistedUserMessageID: turn.Request.MessageID,
+		},
+		"codex",
+		"/data/app",
+		acpclient.PromptResult{Output: []sdk.Message{sdk.AssistantMessage("done")}, StopReason: "end_turn"},
+		nil,
+		[]messagepkg.RuntimeRowReservation{assistantRow},
+	)
+	if err != nil {
+		t.Fatalf("persistACPRound returned error: %v", err)
+	}
+	if len(messages.roundInputs) != 1 {
+		t.Fatalf("atomic ACP inputs = %d, want one terminal assistant", len(messages.roundInputs))
+	}
+	input := messages.roundInputs[0]
+	if input.MessageID != assistantRow.MessageID || input.TurnID != turn.TurnID || input.TurnPosition != turn.TurnPosition || input.TurnMessageSeq != 2 {
+		t.Fatalf("ACP assistant reservation = %#v", input)
+	}
+	if len(messages.persisted) != 0 || len(messages.batchInputs) != 0 {
+		t.Fatalf("ACP runtime used non-atomic fallback: persist=%d batch=%d", len(messages.persisted), len(messages.batchInputs))
+	}
+}
+
 func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 	t.Parallel()
 
@@ -1245,6 +1480,9 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	}
 	events := drainAgentEvents(t, eventCh)
 	abort := requireStreamEvent(t, events, agentpkg.EventAbort)
+	if !abort.HistoryCommitted {
+		t.Fatal("aborted ACP event did not acknowledge committed history")
+	}
 	if got := terminalAssistantText(t, abort); got != "ACP agent failed to complete the turn. Please retry." {
 		t.Fatalf("terminal abort assistant text = %q, want sanitized failure", got)
 	}
@@ -1770,6 +2008,21 @@ type recordingACPPrompter struct {
 	onPrompt     func()
 	streamEvents []event.StreamEvent
 	afterEvents  func()
+}
+
+type acpProjectionMessageService struct {
+	atomicRecordingMessageService
+}
+
+func (s *acpProjectionMessageService) PersistRound(ctx context.Context, inputs []messagepkg.PersistInput, options messagepkg.RoundPersistenceOptions) ([]messagepkg.Message, bool, error) {
+	persisted, handled, err := s.atomicRecordingMessageService.PersistRound(ctx, inputs, options)
+	for index := range persisted {
+		persisted[index].ID = inputs[index].MessageID
+		persisted[index].TurnID = inputs[index].TurnID
+		persisted[index].TurnPosition = inputs[index].TurnPosition
+		persisted[index].TurnMessageSeq = inputs[index].TurnMessageSeq
+	}
+	return persisted, handled, err
 }
 
 type storeRoundMemoryProvider struct {

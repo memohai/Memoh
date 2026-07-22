@@ -5530,6 +5530,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Turn ID whose complete visible rows should be returned",
+                        "name": "turn_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Response format: ui returns normalized chat UI turns",
                         "name": "format",
                         "in": "query"
@@ -7187,6 +7193,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/runtime": {
+            "get": {
+                "description": "Returns the current live runtime snapshot for a chat session.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get session runtime state",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/sessionruntime.Snapshot"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/status": {
             "get": {
                 "description": "Get aggregated info for a chat session including message count, context usage, cache stats, and used skills",
@@ -8207,68 +8273,6 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/web/messages": {
-            "post": {
-                "description": "Post a user message (with optional attachments) through the local channel pipeline.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "local-channel"
-                ],
-                "summary": "Send a message to a local channel",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Message payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.LocalChannelMessageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -16579,11 +16583,26 @@ const docTemplate = `{
                     "type": "array",
                     "items": {}
                 },
+                "row_identities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIRowIdentity"
+                    }
+                },
                 "running": {
                     "type": "boolean"
                 },
+                "stable_id": {
+                    "type": "string"
+                },
                 "tool_call_id": {
                     "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
                 },
                 "type": {
                     "$ref": "#/definitions/conversation.UIMessageType"
@@ -16625,6 +16644,26 @@ const docTemplate = `{
                 },
                 "sender": {
                     "type": "string"
+                }
+            }
+        },
+        "conversation.UIRowIdentity": {
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string"
+                },
+                "stable_id": {
+                    "type": "string"
+                },
+                "turn_id": {
+                    "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
                 }
             }
         },
@@ -16704,6 +16743,12 @@ const docTemplate = `{
                 },
                 "timestamp": {
                     "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
                 },
                 "user_message_kind": {
                     "type": "string"
@@ -18118,26 +18163,6 @@ const docTemplate = `{
                     }
                 },
                 "snapshotter": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.LocalChannelMessageRequest": {
-            "type": "object",
-            "required": [
-                "message"
-            ],
-            "properties": {
-                "message": {
-                    "$ref": "#/definitions/channel.Message"
-                },
-                "model_id": {
-                    "type": "string"
-                },
-                "reasoning_effort": {
-                    "type": "string"
-                },
-                "workspace_target_id": {
                     "type": "string"
                 }
             }
@@ -19639,6 +19664,15 @@ const docTemplate = `{
                 "source_reply_to_message_id": {
                     "type": "string"
                 },
+                "turn_id": {
+                    "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
+                },
                 "usage": {
                     "type": "array",
                     "items": {
@@ -19674,6 +19708,40 @@ const docTemplate = `{
                 },
                 "storage_key": {
                     "type": "string"
+                }
+            }
+        },
+        "message.RuntimeRowReservation": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "turn_id": {
+                    "type": "string"
+                },
+                "turn_message_seq": {
+                    "type": "integer"
+                },
+                "turn_position": {
+                    "type": "integer"
+                }
+            }
+        },
+        "message.RuntimeTurnReservation": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "$ref": "#/definitions/message.RuntimeRowReservation"
+                },
+                "turn_id": {
+                    "type": "string"
+                },
+                "turn_position": {
+                    "type": "integer"
                 }
             }
         },
@@ -20881,6 +20949,150 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "sessionruntime.CurrentRunView": {
+            "type": "object",
+            "required": [
+                "generation"
+            ],
+            "properties": {
+                "canonical_ready": {
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "string"
+                },
+                "history_committed": {
+                    "type": "boolean"
+                },
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIMessage"
+                    }
+                },
+                "operation": {
+                    "$ref": "#/definitions/sessionruntime.RunOperationView"
+                },
+                "owner_id": {
+                    "type": "string"
+                },
+                "owner_lease_expires_at": {
+                    "type": "string"
+                },
+                "request_user_turn": {
+                    "$ref": "#/definitions/conversation.UITurn"
+                },
+                "row_ledger": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIRowIdentity"
+                    }
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "steer": {
+                    "$ref": "#/definitions/sessionruntime.SteerState"
+                },
+                "stream_id": {
+                    "type": "string"
+                },
+                "turn_reservation": {
+                    "$ref": "#/definitions/message.RuntimeTurnReservation"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "sessionruntime.QueuedRunView": {
+            "type": "object",
+            "properties": {
+                "stream_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "sessionruntime.RunOperationView": {
+            "type": "object",
+            "required": [
+                "kind",
+                "replace_from_message_id"
+            ],
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "retry",
+                        "edit"
+                    ]
+                },
+                "replace_from_message_id": {
+                    "type": "string"
+                },
+                "replacement_user_turn": {
+                    "$ref": "#/definitions/conversation.UITurn"
+                }
+            }
+        },
+        "sessionruntime.Snapshot": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "current_run_view": {
+                    "$ref": "#/definitions/sessionruntime.CurrentRunView"
+                },
+                "epoch": {
+                    "type": "string"
+                },
+                "queue": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sessionruntime.QueuedRunView"
+                    }
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "sessionruntime.SteerState": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "text": {
                     "type": "string"
                 },
                 "updated_at": {

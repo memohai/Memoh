@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/runtimefence"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/workspace"
@@ -50,9 +50,108 @@ type UserInputResponseInput struct {
 	Reason                     string
 	ChatToken                  string
 	SuppressActivePromptAttach bool
+	ResolveOnly                bool
+}
+
+func (r *Resolver) PrepareUserInputResponse(ctx context.Context, input UserInputResponseInput) (runtimefence.PreservedDecision, error) {
+	return r.prepareUserInputResponseTarget(ctx, input, false)
+}
+
+// PrepareUserInputResponseTarget validates a response and returns its
+// canonical scope even when the decision was already committed. Runtime
+// routers use that scope to replay or reconcile idempotent commands.
+func (r *Resolver) PrepareUserInputResponseTarget(ctx context.Context, input UserInputResponseInput) (runtimefence.PreservedDecision, error) {
+	return r.prepareUserInputResponseTarget(ctx, input, true)
+}
+
+func (r *Resolver) prepareUserInputResponseTarget(ctx context.Context, input UserInputResponseInput, includeDecided bool) (runtimefence.PreservedDecision, error) {
+	if r.userInput == nil {
+		return runtimefence.PreservedDecision{}, errors.New("user input service not configured")
+	}
+	target, err := r.userInput.ResolveTarget(ctx, userinput.ResolveInput{
+		BotID:                  input.BotID,
+		SessionID:              input.SessionID,
+		ExplicitID:             firstNonEmpty(input.ExplicitID, input.UserInputID),
+		ReplyExternalMessageID: input.ReplyExternalMessageID,
+	})
+	if includeDecided && errors.Is(err, userinput.ErrNotFound) {
+		explicitID := firstNonEmpty(input.ExplicitID, input.UserInputID)
+		if getter, ok := r.userInput.(userInputRequestGetter); ok && explicitID != "" {
+			if existing, getErr := getter.Get(ctx, explicitID); getErr == nil {
+				if (strings.TrimSpace(input.BotID) == "" || strings.TrimSpace(input.BotID) == existing.BotID) &&
+					(strings.TrimSpace(input.SessionID) == "" || strings.TrimSpace(input.SessionID) == existing.SessionID) {
+					target = existing
+					err = nil
+				}
+			}
+		}
+	}
+	if err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	if userinput.IsACPMCPRequest(target) {
+		if err := r.authorizeACPUserInputResponse(ctx, target, input); err != nil {
+			return runtimefence.PreservedDecision{}, err
+		}
+	}
+	if !input.Canceled {
+		answers := input.Answers
+		if len(answers) == 0 && strings.TrimSpace(input.TextAnswer) != "" {
+			answers, err = userInputAnswersFromText(target.UIPayload, input.TextAnswer)
+			if err != nil {
+				return runtimefence.PreservedDecision{}, err
+			}
+		}
+		if err := userinput.ValidateAnswers(target.UIPayload, answers); err != nil {
+			return runtimefence.PreservedDecision{}, err
+		}
+	}
+	return runtimefence.PreservedDecision{
+		Kind:      runtimefence.DecisionUserInput,
+		ID:        target.ID,
+		BotID:     target.BotID,
+		SessionID: target.SessionID,
+	}, nil
 }
 
 func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
+	return r.respondUserInput(ctx, input, nil, eventCh)
+}
+
+// PrepareDeferredUserInputContinuation fixes the row allocation before the
+// fallback run becomes active, without submitting or canceling the request.
+func (r *Resolver) PrepareDeferredUserInputContinuation(ctx context.Context, input UserInputResponseInput) (DeferredContinuation, error) {
+	if r.userInput == nil {
+		return DeferredContinuation{}, errors.New("user input service not configured")
+	}
+	target, err := r.userInput.ResolveTarget(ctx, userinput.ResolveInput{
+		BotID:                  input.BotID,
+		SessionID:              input.SessionID,
+		ExplicitID:             firstNonEmpty(input.ExplicitID, input.UserInputID),
+		ReplyExternalMessageID: input.ReplyExternalMessageID,
+	})
+	if err != nil {
+		return DeferredContinuation{}, err
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return DeferredContinuation{}, err
+	}
+	if userinput.IsACPMCPRequest(target) || r.userInput.CanRespond(target) {
+		return DeferredContinuation{}, errors.New("user input still belongs to a live waiter")
+	}
+	return r.prepareDeferredContinuation(ctx, target.SessionID, target.ToolCallID)
+}
+
+// RespondUserInputContinuation consumes the plan already published by
+// admission, preserving the response row identity across runtime and DB.
+func (r *Resolver) RespondUserInputContinuation(ctx context.Context, input UserInputResponseInput, continuation DeferredContinuation, eventCh chan<- WSStreamEvent) error {
+	return r.respondUserInput(ctx, input, &continuation, eventCh)
+}
+
+func (r *Resolver) respondUserInput(ctx context.Context, input UserInputResponseInput, continuation *DeferredContinuation, eventCh chan<- WSStreamEvent) error {
 	if r.userInput == nil {
 		return errors.New("user input service not configured")
 	}
@@ -63,6 +162,14 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 		ReplyExternalMessageID: input.ReplyExternalMessageID,
 	})
 	if err != nil {
+		if input.ResolveOnly && errors.Is(err, userinput.ErrNotFound) {
+			if handled, replayErr := r.reconcileUserInputReplay(ctx, input); handled {
+				return replayErr
+			}
+		}
+		return err
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
 		return err
 	}
 
@@ -75,7 +182,10 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 	if !isACPMCP {
 		ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
 	}
-	if isACPMCP && !r.userInput.CanRespond(target) {
+	if isACPMCP && !input.ResolveOnly && !r.userInput.CanRespond(target) {
+		if target.RuntimeFenced {
+			return ErrRuntimeDecisionOwnerUnavailable
+		}
 		if _, err := r.userInput.Cancel(ctx, userinput.CancelInput{
 			RequestID:              target.ID,
 			ActorChannelIdentityID: input.ActorChannelIdentityID,
@@ -84,6 +194,13 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 			return err
 		}
 		return emitApprovalAck(ctx, eventCh)
+	}
+	if !isACPMCP && !input.ResolveOnly && continuation == nil && r.continueUserInputFn == nil {
+		prepared, prepareErr := r.prepareDeferredContinuation(ctx, target.SessionID, target.ToolCallID)
+		if prepareErr != nil {
+			return prepareErr
+		}
+		continuation = &prepared
 	}
 	var activePrompt *acpActivePromptSubscription
 	if isACPMCP && eventCh != nil && !input.SuppressActivePromptAttach {
@@ -126,6 +243,9 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 		}
 		return err
 	}
+	if input.ResolveOnly {
+		return emitApprovalAck(ctx, eventCh)
+	}
 	if userinput.IsACPMCPRequest(resolved) {
 		// An ACP/MCP waiter is blocked on this request and resumes the run
 		// itself. When this response stream has reattached to the active ACP
@@ -148,9 +268,66 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 	}
 	continueFn := r.continueUserInputFn
 	if continueFn == nil {
-		continueFn = r.storeUserInputResultAndContinue
+		return r.storeUserInputResultAndContinue(ctx, resolved, input, toolResult, *continuation, eventCh)
 	}
 	return continueFn(ctx, resolved, input, toolResult, eventCh)
+}
+
+type userInputRequestGetter interface {
+	Get(context.Context, string) (userinput.Request, error)
+}
+
+func (r *Resolver) reconcileUserInputReplay(ctx context.Context, input UserInputResponseInput) (bool, error) {
+	getter, ok := r.userInput.(userInputRequestGetter)
+	if !ok {
+		return false, nil
+	}
+	targetID := firstNonEmpty(input.ExplicitID, input.UserInputID)
+	target, err := getter.Get(ctx, targetID)
+	if err != nil {
+		if errors.Is(err, userinput.ErrNotFound) {
+			return false, nil
+		}
+		return true, err
+	}
+	if strings.TrimSpace(target.BotID) != strings.TrimSpace(input.BotID) || strings.TrimSpace(target.SessionID) != strings.TrimSpace(input.SessionID) {
+		return false, nil
+	}
+	if target.Status == userinput.StatusPending {
+		return false, nil
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return true, err
+	}
+	if userinput.IsACPMCPRequest(target) {
+		if err := r.authorizeACPUserInputResponse(ctx, target, input); err != nil {
+			return true, err
+		}
+	}
+	answers := input.Answers
+	if len(answers) == 0 && strings.TrimSpace(input.TextAnswer) != "" {
+		answers, err = userInputAnswersFromText(target.UIPayload, input.TextAnswer)
+		if err != nil {
+			return true, err
+		}
+	}
+	matches, err := userinput.ResponseMatches(target, input.Canceled, input.Reason, answers)
+	if err != nil {
+		return true, err
+	}
+	if !matches {
+		return true, userinput.ErrAlreadyDecided
+	}
+	return true, emitApprovalAck(ctx, nil)
+}
+
+// ReconcileUserInputResponse checks whether a ResolveOnly response was
+// already committed. It is read-only and does not require local run control.
+func (r *Resolver) ReconcileUserInputResponse(ctx context.Context, input UserInputResponseInput) (bool, error) {
+	if r == nil || r.userInput == nil {
+		return false, errors.New("user input service not configured")
+	}
+	return r.reconcileUserInputReplay(ctx, input)
 }
 
 func (r *Resolver) authorizeACPUserInputResponse(ctx context.Context, target userinput.Request, input UserInputResponseInput) error {
@@ -267,7 +444,7 @@ func splitUserInputAnswerText(text string) []string {
 	return parts
 }
 
-func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, continuation DeferredContinuation, eventCh chan<- WSStreamEvent) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	target, err := r.resolveWorkspaceTargetSnapshot(ctx, input.BotID, req.WorkspaceTargetID)
@@ -287,13 +464,14 @@ func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req user
 		WorkspaceTargetID:       req.WorkspaceTargetID,
 		WorkspaceTarget:         target,
 	}
-	if err := r.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
+	continuation, err = r.persistDeferredResponse(ctx, storeReq, modelMessages, continuation)
+	if err != nil {
 		return err
 	}
-	return r.continueUserInputSession(ctx, req, input, eventCh)
+	return r.continueUserInputSession(ctx, req, input, continuation, eventCh)
 }
 
-func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
+func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, continuation DeferredContinuation, eventCh chan<- WSStreamEvent) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	resolved, err := r.ResolveRunConfig(ctx,
@@ -333,35 +511,7 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	stream := r.agent.Stream(ctx, cfg)
-	stored := false
-	for event := range stream {
-		data, err := json.Marshal(event)
-		if err != nil {
-			continue
-		}
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if snap, ok := extractTerminalSnapshot(data); ok {
-				if storeErr := r.persistTerminalSnapshot(
-					context.WithoutCancel(ctx),
-					chatReq,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
-					snap,
-				); storeErr != nil {
-					return storeErr
-				}
-				stored = true
-			}
-		}
-		if eventCh != nil {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-	return nil
+	return r.continueDeferredSession(ctx, continuation, cfg, chatReq, resolvedContext{model: models.GetResponse{ID: resolved.ModelID}}, eventCh)
 }
 
 func withLocalWebUserInputReplyTarget(req userinput.Request) userinput.Request {

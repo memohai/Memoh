@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -167,9 +168,23 @@ func (a *Agent) baseHookRequest(ctx context.Context, cfg RunConfig, event string
 	}
 }
 
-func (a *Agent) runTurnHook(ctx context.Context, cfg RunConfig, eventName, errMsg string) {
+// Terminal hook authority intentionally outlives user cancellation and is
+// revoked only when runtime ownership ends.
+func (a *Agent) runTurnHook(ctx context.Context, cfg RunConfig, eventName, errMsg string) { //nolint:contextcheck
 	if a == nil || a.hookService == nil {
 		return
+	}
+	if authority := cfg.TerminalHookAuthority; authority.Context != nil {
+		if err := context.Cause(authority.Context); err != nil { //nolint:contextcheck // Ownership authority intentionally has a separate lifetime.
+			a.logSkippedTurnHook(cfg, eventName, err)
+			return
+		}
+		if authority.Validate != nil {
+			if err := authority.Validate(ctx); err != nil {
+				a.logSkippedTurnHook(cfg, eventName, err)
+				return
+			}
+		}
 	}
 	req := a.baseHookRequest(ctx, cfg, eventName)
 	req.Turn = map[string]any{
@@ -189,6 +204,42 @@ func (a *Agent) runTurnHook(ctx context.Context, cfg RunConfig, eventName, errMs
 			slog.Any("error", err),
 		)
 	}
+}
+
+func (a *Agent) runTerminalTurnHook(ctx context.Context, cfg RunConfig, eventName, errMsg string) { //nolint:contextcheck
+	parent := context.WithoutCancel(ctx) //nolint:contextcheck // Terminal hooks outlive execution cancellation.
+	if authority := cfg.TerminalHookAuthority; authority.Context != nil {
+		parent = authority.Context
+	}
+	hookCtx, cancel := context.WithTimeout(parent, a.terminalHookTimeoutValue())
+	defer cancel()
+	a.runTurnHook(hookCtx, cfg, eventName, errMsg)
+}
+
+func (a *Agent) terminalHookTimeoutValue() time.Duration {
+	if a != nil && a.terminalHookTimeout > 0 {
+		return a.terminalHookTimeout
+	}
+	return defaultTerminalHookTimeout
+}
+
+func (a *Agent) terminalDeliveryTimeout() time.Duration {
+	if a != nil && a.terminalEventDeliveryTimeout > 0 {
+		return a.terminalEventDeliveryTimeout
+	}
+	return defaultTerminalEventDeliveryTimeout
+}
+
+func (a *Agent) logSkippedTurnHook(cfg RunConfig, eventName string, err error) {
+	if a == nil || a.logger == nil {
+		return
+	}
+	a.logger.Warn("skip turn hook after runtime ownership loss",
+		slog.String("event", eventName),
+		slog.String("bot_id", cfg.Identity.BotID),
+		slog.String("session_id", cfg.Identity.SessionID),
+		slog.Any("error", err),
+	)
 }
 
 func (a *Agent) applyBeforeModelCallHook(ctx context.Context, cfg RunConfig, step int) (RunConfig, error) {

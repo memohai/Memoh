@@ -70,9 +70,15 @@ type LoopDetectionConfig struct {
 type InjectMessage struct {
 	Text            string
 	HeaderifiedText string
+	Applied         func()
 	// ImageParts carries inline images (data URL or public URL) to attach
 	// alongside the injected text when the model supports vision input.
 	ImageParts []sdk.ImagePart
+}
+
+type TerminalHookAuthority struct {
+	Context  context.Context
+	Validate func(context.Context) error
 }
 
 // RunConfig holds everything needed for a single agent invocation.
@@ -108,6 +114,7 @@ type RunConfig struct {
 	Skills                   []SkillEntry
 	LoopDetection            LoopDetectionConfig
 	Retry                    RetryConfig
+	TerminalHookAuthority    TerminalHookAuthority
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier
@@ -136,7 +143,16 @@ type RunConfig struct {
 	// PrepareStep, recording the headerified text and the number of SDK
 	// output messages that preceded the injection. Used by the resolver
 	// to interleave injected messages at the correct position in storeRound.
-	InjectedRecorder func(headerifiedText string, insertAfter int)
+	InjectedRecorder func(headerifiedText string, imageParts []sdk.ImagePart, insertAfter int)
+
+	// OnStepCompleted runs after a complete model/tool step has been assembled.
+	// Returning an error cancels the remaining run before another model step.
+	OnStepCompleted func(context.Context, *sdk.StepResult) error
+
+	// SyntheticRowRecorder reserves durable ordering for generated context
+	// messages that are included in terminal output but have no live stream
+	// event of their own, such as read_media's image-only user message.
+	SyntheticRowRecorder func(role string)
 
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step

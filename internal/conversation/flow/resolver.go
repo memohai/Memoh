@@ -87,6 +87,15 @@ type workspaceTargetResolver interface {
 	ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (workspace.ResolvedWorkspaceTarget, error)
 }
 
+type wsStreamResultRunner func(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	eventCh chan<- WSStreamEvent,
+	abortCh <-chan struct{},
+	preflight func(context.Context) error,
+	sessionTurnHeld bool,
+) ([]messagepkg.Message, error)
+
 // Resolver orchestrates chat with the internal agent.
 type Resolver struct {
 	agent              *agentpkg.Agent
@@ -119,6 +128,9 @@ type Resolver struct {
 	// continueUserInputFn overrides the chat-flow resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
+	// streamReplacementFn replaces only agent execution while retaining
+	// replacement validation and persistence. Test seam.
+	streamReplacementFn wsStreamResultRunner
 	sessionTurnMu       sync.Mutex
 	sessionTurnRefs     map[string]int // key: "botID:sessionID" → active turn refcount
 	sessionTurnLocks    map[string]*sync.Mutex
@@ -296,6 +308,7 @@ type resolvedContext struct {
 	query                       string // headerified persistable query
 	userMessageAlreadyInContext bool
 	injectedRecords             *[]conversation.InjectedMessageRecord
+	recordInjectedMessage       func(conversation.InjectedMessageRecord)
 	estimatedTokens             int // estimated input token count for compaction
 	compactableTokens           int // raw history eligible for compaction
 	compactableTokensKnown      bool
@@ -494,6 +507,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	runCfg = runCfg.RefreshContextFrag()
 
 	var injectedRecords *[]conversation.InjectedMessageRecord
+	var recordInjectedMessage func(conversation.InjectedMessageRecord)
 	if req.InjectCh != nil {
 		agentInjectCh := make(chan agentpkg.InjectMessage, cap(req.InjectCh))
 		go func() {
@@ -501,6 +515,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 				agentMsg := agentpkg.InjectMessage{
 					Text:            msg.Text,
 					HeaderifiedText: msg.HeaderifiedText,
+					Applied:         msg.Applied,
 				}
 				// Inline any image attachments from the injected message so the
 				// model receives them as vision input alongside the text.
@@ -516,13 +531,16 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		records := make([]conversation.InjectedMessageRecord, 0)
 		injectedRecords = &records
 		var recMu sync.Mutex
-		runCfg.InjectedRecorder = func(headerifiedText string, insertAfter int) {
+		recordInjectedMessage = func(record conversation.InjectedMessageRecord) {
 			recMu.Lock()
-			*injectedRecords = append(*injectedRecords, conversation.InjectedMessageRecord{
+			*injectedRecords = append(*injectedRecords, record)
+			recMu.Unlock()
+		}
+		runCfg.InjectedRecorder = func(headerifiedText string, _ []sdk.ImagePart, insertAfter int) {
+			recordInjectedMessage(conversation.InjectedMessageRecord{
 				HeaderifiedText: headerifiedText,
 				InsertAfter:     insertAfter,
 			})
-			recMu.Unlock()
 		}
 	}
 
@@ -533,6 +551,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		query:                       headerifiedQuery,
 		userMessageAlreadyInContext: usePipeline,
 		injectedRecords:             injectedRecords,
+		recordInjectedMessage:       recordInjectedMessage,
 		estimatedTokens:             estimatedTokens,
 		compactableTokens:           compactableTokens,
 		compactableTokensKnown:      compactableTokensKnown,
@@ -1209,6 +1228,7 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 
 // prepareRunConfig generates the system prompt and appends the user message.
 func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig) agentpkg.RunConfig {
+	cfg.TerminalHookAuthority = TerminalHookAuthorityFromContext(ctx)
 	beforePromptContext := r.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
 		SessionID:    cfg.Identity.SessionID,

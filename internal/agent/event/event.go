@@ -9,6 +9,7 @@ type StreamEventType string
 
 const (
 	AgentStart          StreamEventType = "agent_start"
+	HistoryCommit       StreamEventType = "history_commit"
 	TextStart           StreamEventType = "text_start"
 	TextDelta           StreamEventType = "text_delta"
 	TextEnd             StreamEventType = "text_end"
@@ -30,36 +31,55 @@ const (
 	Retry               StreamEventType = "retry"
 	Progress            StreamEventType = "progress"
 	Error               StreamEventType = "error"
+	ModelStepStart      StreamEventType = "model_step_start"
 )
+
+// RowIdentity identifies one durable history row represented by a projected
+// stream block. A tool block may reference both call and result rows.
+type RowIdentity struct {
+	StableID       string `json:"stable_id"`
+	Role           string `json:"role,omitempty"`
+	TurnID         string `json:"turn_id,omitempty"`
+	TurnPosition   int64  `json:"turn_position"`
+	TurnMessageSeq int64  `json:"turn_message_seq"`
+}
 
 // StreamEvent is emitted by an agent runtime during streaming. The JSON
 // shape is the wire format WebSocket clients consume; do not change tags.
 type StreamEvent struct {
-	Type           StreamEventType  `json:"type"`
-	Delta          string           `json:"delta,omitempty"`
-	ToolName       string           `json:"toolName,omitempty"`
-	ToolCallID     string           `json:"toolCallId,omitempty"`
-	ApprovalID     string           `json:"approvalId,omitempty"`
-	UserInputID    string           `json:"userInputId,omitempty"`
-	ShortID        int              `json:"shortId,omitempty"`
-	Status         string           `json:"status,omitempty"`
-	Input          any              `json:"input,omitempty"`
-	Metadata       map[string]any   `json:"metadata,omitempty"`
-	Progress       any              `json:"progress,omitempty"`
-	Result         any              `json:"result,omitempty"`
-	Attachments    []FileAttachment `json:"attachments,omitempty"`
-	Reactions      []ReactionItem   `json:"reactions,omitempty"`
-	Speeches       []SpeechItem     `json:"speeches,omitempty"`
-	Messages       json.RawMessage  `json:"messages,omitempty"`
-	Usage          json.RawMessage  `json:"usage,omitempty"`
-	Reasoning      []string         `json:"reasoning,omitempty"`
-	Error          string           `json:"error,omitempty"`
-	Attempt        int              `json:"attempt,omitempty"`
-	MaxAttempt     int              `json:"maxAttempt,omitempty"`
-	RetryError     string           `json:"retryError,omitempty"`
-	StepNumber     int              `json:"stepNumber,omitempty"`
-	TotalSteps     int              `json:"totalSteps,omitempty"`
-	ProgressStatus string           `json:"progressStatus,omitempty"`
+	Type             StreamEventType  `json:"type"`
+	Delta            string           `json:"delta,omitempty"`
+	ToolName         string           `json:"toolName,omitempty"`
+	ToolCallID       string           `json:"toolCallId,omitempty"`
+	ApprovalID       string           `json:"approvalId,omitempty"`
+	UserInputID      string           `json:"userInputId,omitempty"`
+	ShortID          int              `json:"shortId,omitempty"`
+	Status           string           `json:"status,omitempty"`
+	Input            any              `json:"input,omitempty"`
+	Metadata         map[string]any   `json:"metadata,omitempty"`
+	Progress         any              `json:"progress,omitempty"`
+	Result           any              `json:"result,omitempty"`
+	Attachments      []FileAttachment `json:"attachments,omitempty"`
+	Reactions        []ReactionItem   `json:"reactions,omitempty"`
+	Speeches         []SpeechItem     `json:"speeches,omitempty"`
+	Messages         json.RawMessage  `json:"messages,omitempty"`
+	Usage            json.RawMessage  `json:"usage,omitempty"`
+	HistoryCommitted bool             `json:"history_committed,omitempty"`
+	Reasoning        []string         `json:"reasoning,omitempty"`
+	Error            string           `json:"error,omitempty"`
+	Attempt          int              `json:"attempt,omitempty"`
+	MaxAttempt       int              `json:"maxAttempt,omitempty"`
+	RetryError       string           `json:"retryError,omitempty"`
+	StepNumber       int              `json:"stepNumber,omitempty"`
+	TotalSteps       int              `json:"totalSteps,omitempty"`
+	ProgressStatus   string           `json:"progressStatus,omitempty"`
+	StableID         string           `json:"stable_id,omitempty"`
+	TurnID           string           `json:"turn_id,omitempty"`
+	TurnPosition     int64            `json:"turn_position,omitempty"`
+	TurnMessageSeq   int64            `json:"turn_message_seq,omitempty"`
+	RowIdentities    []RowIdentity    `json:"row_identities,omitempty"`
+	LedgerRows       []RowIdentity    `json:"ledger_rows,omitempty"`
+	ResetLedger      bool             `json:"reset_ledger,omitempty"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

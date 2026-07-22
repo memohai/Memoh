@@ -67,6 +67,113 @@ function approvalMessage(status = 'pending'): UIMessage {
 }
 
 describe('chat transcript controller', () => {
+  it('tracks run, presence, and persistence as independent sync-state dimensions', () => {
+    const { transcript } = makeTranscript()
+    const user = transcript.createOptimisticUserTurn('hello', [], ' stream-1 ')
+    const assistantTurn = transcript.createOptimisticAssistantTurn('assistant-local')
+
+    expect(user).toMatchObject({
+      __optimistic: true,
+      syncState: {
+        run: 'admitting',
+        presence: 'optimistic',
+        persistence: 'unknown',
+        streamId: 'stream-1',
+      },
+    })
+    expect(assistantTurn).toMatchObject({
+      __optimistic: true,
+      syncState: {
+        run: 'admitting',
+        presence: 'optimistic',
+        persistence: 'unknown',
+      },
+    })
+
+    transcript.setMessageSyncState(user, {
+      run: 'running',
+      presence: 'live',
+      persistence: 'unknown',
+      streamId: ' stream-1 ',
+      generation: ' generation-1 ',
+    })
+    expect(user).toMatchObject({
+      __optimistic: false,
+      syncState: {
+        run: 'running',
+        presence: 'live',
+        persistence: 'unknown',
+        streamId: 'stream-1',
+        generation: 'generation-1',
+      },
+    })
+
+    transcript.setMessageSyncState(user, {
+      run: 'completed',
+      presence: 'settled',
+      persistence: 'persisted',
+    })
+    transcript.setMessageSyncState(assistantTurn, {
+      run: 'aborted',
+      presence: 'settled',
+      persistence: 'vanished',
+      streamId: ' ',
+      generation: ' ',
+    })
+
+    expect(user.syncState).toEqual({
+      run: 'completed',
+      presence: 'settled',
+      persistence: 'persisted',
+      streamId: undefined,
+      generation: undefined,
+    })
+    expect(assistantTurn).toMatchObject({
+      __optimistic: false,
+      syncState: {
+        run: 'aborted',
+        presence: 'settled',
+        persistence: 'vanished',
+        streamId: undefined,
+        generation: undefined,
+      },
+    })
+  })
+
+  it('preserves a settled runtime terminal state across later persisted merges', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([
+      rawUser('user-1'),
+      rawAssistant('assistant-1', [{ id: 1, type: 'text', content: 'first persisted value' }]),
+    ], 'session-1')
+    const settled = transcript.messages[1]
+    if (settled?.role !== 'assistant') throw new Error('missing assistant turn')
+    transcript.setMessageSyncState(settled, {
+      run: 'aborted',
+      presence: 'settled',
+      persistence: 'persisted',
+      streamId: 'stream-1',
+      generation: 'generation-1',
+    })
+
+    transcript.mergeMessages([
+      rawUser('user-1'),
+      rawAssistant('assistant-1', [{ id: 1, type: 'text', content: 'authoritative persisted value' }]),
+    ], 'session-1')
+
+    const merged = transcript.messages[1]
+    expect(merged?.role === 'assistant' ? merged.messages : []).toEqual([
+      expect.objectContaining({ type: 'text', content: 'authoritative persisted value' }),
+    ])
+    expect(merged?.syncState).toEqual({
+      run: 'aborted',
+      presence: 'settled',
+      persistence: 'persisted',
+      streamId: 'stream-1',
+      generation: 'generation-1',
+    })
+  })
+
   it('is the single context gate for appending active-session turns', () => {
     const { transcript } = makeTranscript()
     const turn = assistant('assistant-1')
@@ -96,6 +203,7 @@ describe('chat transcript controller', () => {
       timestamp: '2026-01-01T00:00:03.000Z',
       streaming: false,
       isSelf: true,
+      externalMessageId: 'stream-1',
       __optimistic: true,
     }
     transcript.appendToView(optimisticUser)
@@ -120,14 +228,193 @@ describe('chat transcript controller', () => {
       timestamp: '2026-01-01T00:00:00.000Z',
       streaming: false,
       isSelf: true,
+      externalMessageId: 'stream-1',
       __optimistic: true,
     }
     transcript.appendToView(optimistic)
 
-    transcript.replaceMessages([rawUser('server-user')], 'session-1')
+    transcript.replaceMessages([{ ...rawUser('server-user'), external_message_id: 'stream-1' }], 'session-1')
 
     expect(snapshotHook).toHaveBeenCalledWith('session-1', expect.any(Array))
     expect(transcript.messages[0]).toMatchObject({ id: 'local-user', serverId: 'server-user' })
+  })
+
+  it('keeps an optimistic tail after its durable anchor during a persisted-window refresh', () => {
+    const { transcript } = makeTranscript()
+    const persisted = [
+      { ...rawUser('user-1'), turn_position: 1, turn_message_seq: 1 },
+      { ...rawAssistant('assistant-1'), turn_position: 1, turn_message_seq: 2 },
+    ]
+    transcript.replaceMessages(persisted, 'session-1')
+    const optimisticUser = transcript.createOptimisticUserTurn('next', [], 'stream-next')
+    const optimisticAssistant = transcript.createOptimisticAssistantTurn('assistant-next')
+    transcript.appendToView(optimisticUser, optimisticAssistant)
+
+    transcript.replacePersistedWindow(persisted, 'session-1')
+
+    expect(transcript.messages.map(turn => turn.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      optimisticUser.id,
+      optimisticAssistant.id,
+    ])
+    transcript.adoptRuntimeUserTurn(optimisticUser, {
+      ...optimisticUser,
+      id: 'server-user-next',
+      serverId: 'server-user-next',
+      turnPosition: 2,
+      turnMessageSeq: 1,
+    })
+    transcript.setAssistantRowIdentity(optimisticAssistant, {
+      stableId: 'server-assistant-next',
+      turnPosition: 2,
+      turnMessageSeq: 2,
+    })
+    expect(transcript.messages.map(turn => turn.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      optimisticUser.id,
+      optimisticAssistant.id,
+    ])
+  })
+
+  it('replaces only the authoritative suffix after a sixty-turn prefix', () => {
+    const { transcript } = makeTranscript()
+    const prefix = Array.from({ length: 60 }, (_, index) => ({
+      ...rawUser(`history-${index + 1}`, `history ${index + 1}`),
+      turn_position: index + 1,
+      turn_message_seq: 1,
+    }))
+    transcript.replaceMessages([
+      ...prefix,
+      { ...rawUser('anchor', 'stale anchor'), turn_position: 61, turn_message_seq: 1 },
+      { ...rawAssistant('stale-tail'), turn_position: 61, turn_message_seq: 2 },
+    ], 'session-1')
+    const prefixRefs = transcript.messages.slice(0, 60).map(turn => toRaw(turn))
+
+    const applied = transcript.replacePersistedSuffix([
+      { ...rawUser('anchor', 'authoritative anchor'), turn_position: 61, turn_message_seq: 1 },
+      {
+        ...rawAssistant('canonical-tail', [{ id: 1, type: 'text', content: 'settled' }]),
+        turn_position: 61,
+        turn_message_seq: 2,
+      },
+    ], 'anchor', 'session-1')
+
+    expect(applied).toBe(true)
+    expect(transcript.messages).toHaveLength(62)
+    expect(transcript.messages.slice(0, 60).map(turn => toRaw(turn))).toEqual(prefixRefs)
+    expect(transcript.messages.slice(60).map(turn => turn.id)).toEqual(['anchor', 'canonical-tail'])
+    expect(transcript.messages[60]).toMatchObject({ role: 'user', text: 'authoritative anchor' })
+  })
+
+  it('deletes persisted stale and superseded rows from the scoped suffix', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([
+      { ...rawUser('prefix'), turn_position: 1, turn_message_seq: 1 },
+      { ...rawUser('anchor', 'old anchor'), turn_position: 2, turn_message_seq: 1 },
+      { ...rawAssistant('stale-assistant'), turn_position: 2, turn_message_seq: 2 },
+      { ...rawUser('superseded-user'), turn_position: 3, turn_message_seq: 1 },
+    ], 'session-1')
+
+    expect(transcript.replacePersistedSuffix([
+      { ...rawUser('anchor', 'new anchor'), turn_position: 2, turn_message_seq: 1 },
+    ], 'anchor', 'session-1')).toBe(true)
+
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['prefix', 'anchor'])
+    expect(transcript.messages[1]).toMatchObject({ role: 'user', text: 'new anchor' })
+  })
+
+  it('preserves unmatched optimistic and live rows in their suffix slots', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([
+      { ...rawUser('anchor'), turn_position: 1, turn_message_seq: 1 },
+    ], 'session-1')
+    const optimisticUser = transcript.createOptimisticUserTurn('pending', [], 'stream-pending')
+    const optimisticAssistant = transcript.createOptimisticAssistantTurn('optimistic-assistant')
+    const matchedLive = assistant('live-render', [{ id: 0, type: 'text', content: 'partial' }])
+    transcript.setAssistantRowIdentity(matchedLive, {
+      stableId: 'live-stable',
+      turnPosition: 2,
+      turnMessageSeq: 1,
+    })
+    transcript.setMessageSyncState(matchedLive, {
+      run: 'running',
+      presence: 'live',
+      persistence: 'unknown',
+    })
+    const unmatchedLive = assistant('unmatched-live', [{ id: 0, type: 'text', content: 'still live' }])
+    transcript.setMessageSyncState(unmatchedLive, {
+      run: 'running',
+      presence: 'live',
+      persistence: 'unknown',
+    })
+    const stalePersisted = transcript.normalizeTurn({
+      ...rawAssistant('stale-persisted'),
+      turn_position: 2,
+      turn_message_seq: 2,
+    })
+    transcript.appendToView(
+      optimisticUser,
+      optimisticAssistant,
+      matchedLive,
+      unmatchedLive,
+      stalePersisted,
+    )
+    const optimisticUserRef = toRaw(transcript.messages[1]!)
+    const optimisticAssistantRef = toRaw(transcript.messages[2]!)
+    const unmatchedLiveRef = toRaw(transcript.messages[4]!)
+
+    expect(transcript.replacePersistedSuffix([
+      { ...rawUser('anchor'), turn_position: 1, turn_message_seq: 1 },
+      {
+        ...rawAssistant('live-stable', [{ id: 0, type: 'text', content: 'canonical' }]),
+        turn_position: 2,
+        turn_message_seq: 1,
+      },
+      { ...rawUser('canonical-end'), turn_position: 3, turn_message_seq: 1 },
+    ], 'anchor', 'session-1')).toBe(true)
+
+    expect(transcript.messages.map(turn => turn.id)).toEqual([
+      'anchor',
+      optimisticUser.id,
+      optimisticAssistant.id,
+      'live-render',
+      'unmatched-live',
+      'canonical-end',
+    ])
+    expect(toRaw(transcript.messages[1]!)).toBe(optimisticUserRef)
+    expect(toRaw(transcript.messages[2]!)).toBe(optimisticAssistantRef)
+    expect(toRaw(transcript.messages[4]!)).toBe(unmatchedLiveRef)
+    expect(transcript.messages[3]).toMatchObject({
+      id: 'live-render',
+      serverId: 'live-stable',
+      syncState: { presence: 'settled', persistence: 'persisted' },
+    })
+    expect(transcript.messages[3]?.role === 'assistant' ? transcript.messages[3].messages : [])
+      .toEqual([expect.objectContaining({ type: 'text', content: 'canonical' })])
+  })
+
+  it('leaves the transcript unchanged when either side lacks the suffix anchor', () => {
+    const { transcript } = makeTranscript()
+    const snapshotHook = vi.fn()
+    transcript.setSnapshotHook(snapshotHook)
+    transcript.replaceMessages([
+      { ...rawUser('anchor'), turn_position: 1, turn_message_seq: 1 },
+      { ...rawAssistant('tail'), turn_position: 1, turn_message_seq: 2 },
+    ], 'session-1')
+    snapshotHook.mockClear()
+    const before = transcript.messages.map(turn => toRaw(turn))
+
+    expect(transcript.replacePersistedSuffix([
+      { ...rawUser('other'), turn_position: 2, turn_message_seq: 1 },
+    ], 'anchor', 'session-1')).toBe(false)
+    expect(transcript.replacePersistedSuffix([
+      { ...rawUser('missing'), turn_position: 2, turn_message_seq: 1 },
+    ], 'missing', 'session-1')).toBe(false)
+
+    expect(transcript.messages.map(turn => toRaw(turn))).toEqual(before)
+    expect(snapshotHook).not.toHaveBeenCalled()
   })
 
   it('rolls an optimistic tail back only while its original context is active', () => {
@@ -162,6 +449,28 @@ describe('chat transcript controller', () => {
 
     transcript.restoreToolApprovalStates(snapshots)
     expect(block.approval?.status).toBe('pending')
+  })
+
+  it('replaces an authoritative assistant snapshot without losing matching local tool state', () => {
+    const { transcript } = makeTranscript()
+    const turn = assistant('assistant-1')
+    transcript.appendToView(turn)
+    transcript.upsertAssistantUIMessage(turn, { id: 0, type: 'text', content: 'stale' })
+    transcript.upsertAssistantUIMessage(turn, approvalMessage('pending'))
+    transcript.markToolApprovalDecision('approval-1', 'approved')
+
+    transcript.replaceAssistantUIMessageSnapshot(turn, [
+      { ...approvalMessage('pending'), id: 9 },
+      { id: 2, type: 'text', content: 'canonical' },
+    ], new Set([0, 1]))
+
+    expect(turn.messages.map(block => block.id)).toEqual([1, 2])
+    const tool = turn.messages[0]
+    expect(tool?.type).toBe('tool')
+    if (tool?.type === 'tool') expect(tool.approval?.status).toBe('approved')
+
+    transcript.replaceAssistantUIMessageSnapshot(turn, [], new Set([2]))
+    expect(turn.messages.map(block => block.id)).toEqual([1])
   })
 
   it('snapshots and restores optimistic user-input state', () => {
@@ -207,6 +516,60 @@ describe('chat transcript controller', () => {
     transcript.resetUserScope()
     transcript.replaceMessages([rawUser('user-1')], 'session-1')
     expect(transcript.messages).toHaveLength(1)
+  })
+
+  it('keeps identical runtime errors distinct by stream generation across refreshes', () => {
+    const { transcript } = makeTranscript()
+    const userA = { ...rawUser('user-a', 'same prompt'), external_message_id: 'stream-reused' }
+    const userB = { ...rawUser('user-b', 'same prompt', '2026-01-01T00:01:00.000Z'), external_message_id: 'stream-reused' }
+    const identityA = { streamId: 'stream-reused', generation: 'generation-a' }
+    const identityB = { streamId: 'stream-reused', generation: 'generation-b' }
+
+    transcript.replaceMessages([userA], 'session-1')
+    const failedA = assistant('assistant-a')
+    transcript.appendToView(failedA)
+    transcript.appendAssistantError(failedA, 'session-1', 'Response stopped', true, identityA)
+
+    transcript.replaceMessages([userA, userB], 'session-1')
+    const failedB = assistant('assistant-b')
+    transcript.appendToView(failedB)
+    transcript.appendAssistantError(failedB, 'session-1', 'Response stopped', true, identityB)
+
+    transcript.replaceMessages([userA, userB], 'session-1')
+
+    const errors = transcript.messages.filter((turn): turn is ChatAssistantTurn =>
+      turn.role === 'assistant'
+      && turn.messages.some(block => block.type === 'error' && block.content === 'Response stopped'))
+    expect(errors).toHaveLength(2)
+    expect(errors.every(turn => turn.__ephemeral === true)).toBe(true)
+    expect(transcript.isLatestVisibleAssistantTurn(errors[1]!)).toBe(false)
+    expect(errors[0]?.id).not.toBe(errors[1]?.id)
+    expect(transcript.assistantTurnForRuntimeError('session-1', identityA)).toBe(errors[0])
+    expect(transcript.assistantTurnForRuntimeError('session-1', identityB)).toBe(errors[1])
+  })
+
+  it('does not accumulate identical terminal errors on one persisted assistant', () => {
+    const { transcript } = makeTranscript()
+    const user = { ...rawUser('user-1'), external_message_id: 'stream-reused' }
+    const persisted = rawAssistant('assistant-1', [{ id: 0, type: 'text', content: 'partial' }])
+    transcript.replaceMessages([user, persisted], 'session-1')
+    const assistantTurn = transcript.messages[1]
+    if (assistantTurn?.role !== 'assistant') throw new Error('missing assistant')
+
+    transcript.appendAssistantError(assistantTurn, 'session-1', 'Response stopped', false, {
+      streamId: 'stream-reused',
+      generation: 'generation-a',
+    })
+    transcript.appendAssistantError(assistantTurn, 'session-1', 'Response stopped', false, {
+      streamId: 'stream-reused',
+      generation: 'generation-b',
+    })
+    transcript.replaceMessages([user, persisted], 'session-1')
+
+    const stopped = transcript.messages.flatMap(turn => turn.role === 'assistant'
+      ? turn.messages.filter(block => block.type === 'error' && block.content === 'Response stopped')
+      : [])
+    expect(stopped).toHaveLength(1)
   })
 
   it('routes completed tool messages through the fs mutation beacon', () => {
@@ -285,7 +648,7 @@ describe('chat transcript controller', () => {
     // Round 2 (stream-end refresh): the server now returns persisted twins —
     // no duplicates, the optimistic pair collapses into the server rows.
     // Server timestamps sit next to the optimistic client clock (the twin
-    // match tolerates 5s of skew), unlike the fixed dates used elsewhere.
+    // matching uses explicit request identity, unlike the fixed dates used elsewhere.
     const now = new Date().toISOString()
     fetchMessages.mockResolvedValueOnce([
       rawUser('server-user', 'hello first', now),
@@ -340,7 +703,7 @@ describe('chat transcript controller', () => {
 
     expect(transcript.loadingMessages.value).toBe(false)
     expect(transcript.hasMoreOlder.value).toBe(true)
-    expect(onRefreshApplied).toHaveBeenCalledWith('session-1', '2026-01-01T00:00:02.000Z')
+    expect(onRefreshApplied).toHaveBeenCalledWith('bot-1', 'session-1', '2026-01-01T00:00:02.000Z')
   })
 
   it('drops an older-page response that resolves after the active session changes', async () => {

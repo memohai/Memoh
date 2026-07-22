@@ -2,9 +2,11 @@ package message
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -97,6 +99,122 @@ func TestPostgresRuntimeFenceUnfencedReplacementIsAtomic(t *testing.T) {
 	}
 }
 
+func TestPostgresRuntimeRetryClonesRequestWithoutMovingSupersededRows(t *testing.T) {
+	ctx := context.Background()
+	pool := openRuntimeFencePostgresPool(t, ctx)
+	botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
+	service := NewService(nil, postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool)))
+
+	oldUser, err := service.Persist(ctx, PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+		Content:     []byte(`{"role":"user","content":"inspect the diagram"}`),
+		Metadata:    map[string]any{"origin": "retry-source"},
+		DisplayText: "inspect the diagram",
+		Assets: []AssetRef{{
+			ContentHash: "sha256:retry-source", Role: "attachment", Ordinal: 0,
+			Name: "diagram.png", Metadata: map[string]any{"storage_key": "media/diagram.png"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("persist retry source request: %v", err)
+	}
+	oldAssistant, err := service.Persist(ctx, PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"old answer"}`), TurnRequestMessageID: oldUser.ID,
+	})
+	if err != nil {
+		t.Fatalf("persist retry source assistant: %v", err)
+	}
+	oldTurn, err := service.GetVisibleTurnByMessage(ctx, sessionID.String(), oldAssistant.ID)
+	if err != nil {
+		t.Fatalf("load retry source turn: %v", err)
+	}
+
+	type rowCoordinates struct {
+		turnID       string
+		position     int64
+		messageSeq   int64
+		visible      bool
+		supersededBy *string
+	}
+	loadCoordinates := func(messageID string) rowCoordinates {
+		t.Helper()
+		var coordinates rowCoordinates
+		if err := pool.QueryRow(ctx, `
+			SELECT turn_id::text, turn_position, turn_message_seq, turn_visible, turn_superseded_by_turn_id::text
+			FROM bot_history_messages WHERE id = $1
+		`, messageID).Scan(&coordinates.turnID, &coordinates.position, &coordinates.messageSeq, &coordinates.visible, &coordinates.supersededBy); err != nil {
+			t.Fatalf("load coordinates for %s: %v", messageID, err)
+		}
+		return coordinates
+	}
+	oldUserBefore := loadCoordinates(oldUser.ID)
+	oldAssistantBefore := loadCoordinates(oldAssistant.ID)
+
+	reservation, err := service.ReserveRuntimeTurn(ctx, botID.String(), sessionID.String(), "")
+	if err != nil {
+		t.Fatalf("reserve retry turn: %v", err)
+	}
+	assistantRow := RuntimeRowReservation{
+		MessageID: uuid.NewString(), TurnID: reservation.TurnID,
+		TurnPosition: reservation.TurnPosition, TurnMessageSeq: 2,
+	}
+	persisted, handled, err := service.PersistRound(ctx, []PersistInput{{
+		MessageID: assistantRow.MessageID, BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"new answer"}`), SkipHistoryTurn: true,
+		TurnID: assistantRow.TurnID, TurnPosition: assistantRow.TurnPosition, TurnMessageSeq: assistantRow.TurnMessageSeq,
+	}}, RoundPersistenceOptions{Replacement: &TurnReplacement{
+		OldTurnID: oldTurn.ID, RequestMessageID: reservation.Request.MessageID,
+		TurnID: reservation.TurnID, TurnPosition: reservation.TurnPosition, Reason: "retry",
+	}})
+	if err != nil || !handled || len(persisted) != 2 {
+		t.Fatalf("persist runtime retry = (%d, %v, %v), want cloned request + assistant", len(persisted), handled, err)
+	}
+	if persisted[0].ID != reservation.Request.MessageID || persisted[1].ID != assistantRow.MessageID {
+		t.Fatalf("runtime retry persisted identities = %#v", persisted)
+	}
+
+	visible, err := service.ListBySession(ctx, sessionID.String())
+	if err != nil {
+		t.Fatalf("list visible runtime retry: %v", err)
+	}
+	if len(visible) != 2 || visible[0].ID != reservation.Request.MessageID || visible[1].ID != assistantRow.MessageID {
+		t.Fatalf("visible runtime retry rows = %#v", visible)
+	}
+	cloned := visible[0]
+	var clonedContent, sourceContent any
+	if err := json.Unmarshal(cloned.Content, &clonedContent); err != nil {
+		t.Fatalf("decode cloned request content: %v", err)
+	}
+	if err := json.Unmarshal(oldUser.Content, &sourceContent); err != nil {
+		t.Fatalf("decode source request content: %v", err)
+	}
+	if !reflect.DeepEqual(clonedContent, sourceContent) || cloned.DisplayContent != oldUser.DisplayContent || cloned.Metadata["origin"] != "retry-source" {
+		t.Fatalf("cloned request content = %#v, source = %#v", cloned, oldUser)
+	}
+	if len(cloned.Assets) != 1 || cloned.Assets[0].ContentHash != "sha256:retry-source" || cloned.Assets[0].Name != "diagram.png" {
+		t.Fatalf("cloned request assets = %#v", cloned.Assets)
+	}
+	if cloned.TurnID != reservation.TurnID || cloned.TurnPosition != reservation.TurnPosition || cloned.TurnMessageSeq != 1 {
+		t.Fatalf("cloned request coordinates = %#v", cloned)
+	}
+
+	oldUserAfter := loadCoordinates(oldUser.ID)
+	oldAssistantAfter := loadCoordinates(oldAssistant.ID)
+	for label, pair := range map[string][2]rowCoordinates{
+		"user":      {oldUserBefore, oldUserAfter},
+		"assistant": {oldAssistantBefore, oldAssistantAfter},
+	} {
+		before, after := pair[0], pair[1]
+		if after.turnID != before.turnID || after.position != before.position || after.messageSeq != before.messageSeq {
+			t.Fatalf("superseded %s coordinates moved: before=%#v after=%#v", label, before, after)
+		}
+		if after.visible || after.supersededBy == nil || *after.supersededBy != reservation.TurnID {
+			t.Fatalf("superseded %s state = %#v", label, after)
+		}
+	}
+}
+
 func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	ctx := context.Background()
 	pool := openRuntimeFencePostgresPool(t, ctx)
@@ -177,6 +295,227 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	}
 	if len(visible) != 2 || visible[0].ID != persisted[0].ID || visible[1].ID != replacement[0].ID {
 		t.Fatalf("visible messages changed after stale writes: %#v", visible)
+	}
+}
+
+func TestPostgresRuntimeFenceRejectsStaleCanonicalTurnWrites(t *testing.T) {
+	ctx := context.Background()
+	pool := openRuntimeFencePostgresPool(t, ctx)
+	botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
+	queries := dbsqlc.New(pool)
+	service := NewService(nil, postgresstore.NewQueriesWithPool(pool, queries))
+
+	token1 := acquireRuntimeFenceToken(t, ctx, queries, botID, sessionID)
+	owner1 := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: botID.String(), SessionID: sessionID.String(), Token: token1})
+	turn, _, err := service.StartCanonicalTurn(owner1, CanonicalTurnStart{Request: PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+		Content: []byte(`{"role":"user","content":"owner one"}`),
+	}})
+	if err != nil {
+		t.Fatalf("start owner-one canonical turn: %v", err)
+	}
+
+	token2 := acquireRuntimeFenceToken(t, ctx, queries, botID, sessionID)
+	owner2 := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: botID.String(), SessionID: sessionID.String(), Token: token2})
+	var before int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM bot_history_messages WHERE session_id = $1", sessionID).Scan(&before); err != nil {
+		t.Fatalf("count canonical messages before stale writes: %v", err)
+	}
+	if _, err := service.AppendCanonicalTurn(owner1, turn, []PersistInput{{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"stale append"}`),
+	}}); !errors.Is(err, runtimefence.ErrStale) {
+		t.Fatalf("stale canonical append error = %v, want %v", err, runtimefence.ErrStale)
+	}
+	if _, _, err := service.StartCanonicalTurn(owner1, CanonicalTurnStart{Request: PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+		Content: []byte(`{"role":"user","content":"stale start"}`),
+	}}); !errors.Is(err, runtimefence.ErrStale) {
+		t.Fatalf("stale canonical start error = %v, want %v", err, runtimefence.ErrStale)
+	}
+	var after int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM bot_history_messages WHERE session_id = $1", sessionID).Scan(&after); err != nil {
+		t.Fatalf("count canonical messages after stale writes: %v", err)
+	}
+	if after != before {
+		t.Fatalf("stale canonical writes changed message count: before=%d after=%d", before, after)
+	}
+	if _, err := service.AppendCanonicalTurn(owner2, turn, []PersistInput{{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"owner two"}`),
+	}}); err != nil {
+		t.Fatalf("current owner canonical append: %v", err)
+	}
+}
+
+func TestPostgresCanonicalReplacementStartsVisibleAndAppendsCompletedStep(t *testing.T) {
+	ctx := context.Background()
+	pool := openRuntimeFencePostgresPool(t, ctx)
+	botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
+	service := NewService(nil, postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool)))
+
+	oldUser, err := service.Persist(ctx, PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+		Content: []byte(`{"role":"user","content":"old prompt"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist old user: %v", err)
+	}
+	oldAssistant, err := service.Persist(ctx, PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"old answer"}`), TurnRequestMessageID: oldUser.ID,
+	})
+	if err != nil {
+		t.Fatalf("persist old assistant: %v", err)
+	}
+	oldTurn, err := service.GetVisibleTurnByMessage(ctx, sessionID.String(), oldAssistant.ID)
+	if err != nil {
+		t.Fatalf("load old turn: %v", err)
+	}
+
+	var beforeFailedStart int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM bot_history_messages WHERE session_id = $1", sessionID).Scan(&beforeFailedStart); err != nil {
+		t.Fatalf("count messages before failed canonical start: %v", err)
+	}
+	if _, _, err := service.StartCanonicalTurn(ctx, CanonicalTurnStart{
+		Request: PersistInput{
+			BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+			Content: []byte(`{"role":"user","content":"must roll back"}`),
+		},
+		Replacement: &TurnReplacement{OldTurnID: uuid.NewString(), Reason: "edit"},
+	}); err == nil {
+		t.Fatal("invalid canonical replacement start succeeded")
+	}
+	var afterFailedStart int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM bot_history_messages WHERE session_id = $1", sessionID).Scan(&afterFailedStart); err != nil {
+		t.Fatalf("count messages after failed canonical start: %v", err)
+	}
+	if afterFailedStart != beforeFailedStart {
+		t.Fatalf("failed canonical start left messages: before=%d after=%d", beforeFailedStart, afterFailedStart)
+	}
+
+	turn, newUser, err := service.StartCanonicalTurn(ctx, CanonicalTurnStart{
+		Request: PersistInput{
+			BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+			Content: []byte(`{"role":"user","content":"edited prompt"}`),
+		},
+		Replacement: &TurnReplacement{OldTurnID: oldTurn.ID, Reason: "edit"},
+	})
+	if err != nil {
+		t.Fatalf("start canonical replacement: %v", err)
+	}
+	visible, err := service.ListBySession(ctx, sessionID.String())
+	if err != nil {
+		t.Fatalf("list canonical replacement start: %v", err)
+	}
+	if len(visible) != 1 || visible[0].ID != newUser.ID {
+		t.Fatalf("visible canonical start = %#v, want only %s", visible, newUser.ID)
+	}
+
+	step, err := service.AppendCanonicalTurn(ctx, turn, []PersistInput{
+		{
+			BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+			Content: []byte(`{"role":"user","content":"injected guidance"}`),
+		},
+		{
+			BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+			Content: []byte(`{"role":"assistant","content":"calling tool"}`),
+		},
+		{
+			BotID: botID.String(), SessionID: sessionID.String(), Role: "tool",
+			Content: []byte(`{"role":"tool","content":"tool result"}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("append canonical step: %v", err)
+	}
+	if len(step) != 3 {
+		t.Fatalf("canonical step messages = %d, want 3", len(step))
+	}
+	visible, err = service.ListBySession(ctx, sessionID.String())
+	if err != nil {
+		t.Fatalf("list appended canonical step: %v", err)
+	}
+	if len(visible) != 4 || visible[0].ID != newUser.ID || visible[1].ID != step[0].ID || visible[2].ID != step[1].ID || visible[3].ID != step[2].ID {
+		t.Fatalf("visible canonical step = %#v", visible)
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT turn_id::text, turn_message_seq
+		FROM bot_history_messages
+		WHERE id = ANY($1::uuid[])
+		ORDER BY turn_message_seq
+	`, []string{newUser.ID, step[0].ID, step[1].ID, step[2].ID})
+	if err != nil {
+		t.Fatalf("read canonical turn sequence: %v", err)
+	}
+	defer rows.Close()
+	var gotSeq int64
+	for rows.Next() {
+		var turnID string
+		var seq int64
+		gotSeq++
+		if err := rows.Scan(&turnID, &seq); err != nil {
+			t.Fatalf("scan canonical turn sequence: %v", err)
+		}
+		if turnID != turn.ID || seq != gotSeq {
+			t.Fatalf("canonical message turn/seq = %s/%d, want %s/%d", turnID, seq, turn.ID, gotSeq)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate canonical turn sequence: %v", err)
+	}
+	if gotSeq != 4 {
+		t.Fatalf("canonical sequence rows = %d, want 4", gotSeq)
+	}
+	queries := dbsqlc.New(pool)
+	approval, err := queries.CreateToolApprovalRequest(ctx, dbsqlc.CreateToolApprovalRequestParams{
+		BotID: botID, SessionID: sessionID, ToolCallID: "superseded-approval", ToolName: "write",
+		Operation: "write", ToolInput: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("create pending approval: %v", err)
+	}
+	input, err := queries.CreateUserInputRequest(ctx, dbsqlc.CreateUserInputRequestParams{
+		BotID: botID, SessionID: sessionID, ToolCallID: "superseded-input", ToolName: "ask_user",
+		InputJson: []byte(`{}`), UiPayloadJson: []byte(`{}`), ProviderMetadata: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("create pending user input: %v", err)
+	}
+
+	successor, successorUser, err := service.StartCanonicalTurn(ctx, CanonicalTurnStart{
+		Request: PersistInput{
+			BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+			Content: []byte(`{"role":"user","content":"newer edit"}`),
+		},
+		Replacement: &TurnReplacement{OldTurnID: turn.ID, Reason: "edit"},
+	})
+	if err != nil {
+		t.Fatalf("start successor canonical turn: %v", err)
+	}
+	var approvalStatus, inputStatus string
+	if err := pool.QueryRow(ctx, "SELECT status FROM tool_approval_requests WHERE id = $1", approval.ID).Scan(&approvalStatus); err != nil {
+		t.Fatalf("load superseded approval status: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT status FROM user_input_requests WHERE id = $1", input.ID).Scan(&inputStatus); err != nil {
+		t.Fatalf("load superseded user input status: %v", err)
+	}
+	if approvalStatus != "cancelled" || inputStatus != "canceled" {
+		t.Fatalf("superseded decision statuses = approval %q, user input %q", approvalStatus, inputStatus)
+	}
+	if _, err := service.AppendCanonicalTurn(ctx, turn, []PersistInput{{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"stale output"}`),
+	}}); err == nil {
+		t.Fatal("append to superseded canonical turn succeeded")
+	}
+	visible, err = service.ListBySession(ctx, sessionID.String())
+	if err != nil {
+		t.Fatalf("list successor canonical turn: %v", err)
+	}
+	if len(visible) != 1 || visible[0].ID != successorUser.ID || successor.ID == turn.ID {
+		t.Fatalf("visible successor turn = %#v, successor=%#v", visible, successor)
 	}
 }
 

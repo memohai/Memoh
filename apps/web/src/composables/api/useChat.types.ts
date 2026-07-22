@@ -1,4 +1,16 @@
-import type { BotsBot } from '@memohai/sdk'
+import type {
+  BotsBot,
+} from '@memohai/sdk'
+import type {
+  SessionRuntimeDelta,
+  SessionRuntimeDeltaEvent,
+  SessionRuntimeDroppedEvent,
+  SessionRuntimeMessageAppend,
+  SessionRuntimeProgressAppend,
+  SessionRuntimeRunPatch,
+  SessionRuntimeSnapshotEvent,
+  SessionRuntimeStateEvent,
+} from '@memohai/sdk/session-runtime'
 
 export type Bot = BotsBot
 
@@ -47,6 +59,9 @@ export interface Message {
   metadata?: Record<string, unknown>
   assets?: MessageAsset[]
   display_content?: string
+  turn_id?: string
+  turn_position?: number
+  turn_message_seq?: number
   created_at?: string
 }
 
@@ -123,6 +138,7 @@ export interface FetchMessagesOptions {
   limit?: number
   before?: string
   beforeMessageId?: string
+  turnId?: string
   session_id?: string
 }
 
@@ -205,19 +221,34 @@ export interface UIForwardRef {
   date?: number
 }
 
-export interface UITextMessage {
+export interface UIMessageCoordinates {
+  stable_id?: string
+  turn_position?: number
+  turn_message_seq?: number
+  row_identities?: UIRowIdentity[]
+}
+
+export interface UIRowIdentity {
+  stable_id: string
+  role?: string
+  turn_id?: string
+  turn_position: number
+  turn_message_seq: number
+}
+
+export interface UITextMessage extends UIMessageCoordinates {
   id: number
   type: 'text'
   content: string
 }
 
-export interface UIReasoningMessage {
+export interface UIReasoningMessage extends UIMessageCoordinates {
   id: number
   type: 'reasoning'
   content: string
 }
 
-export interface UIToolMessage {
+export interface UIToolMessage extends UIMessageCoordinates {
   id: number
   type: 'tool'
   name: string
@@ -287,13 +318,13 @@ export interface UIUserInputOption {
   description?: string
 }
 
-export interface UIAttachmentsMessage {
+export interface UIAttachmentsMessage extends UIMessageCoordinates {
   id: number
   type: 'attachments'
   attachments: UIAttachment[]
 }
 
-export interface UIErrorMessage {
+export interface UIErrorMessage extends UIMessageCoordinates {
   id: number
   type: 'error'
   content: string
@@ -329,6 +360,8 @@ export interface UIUserTurn {
   sender_user_id?: string
   external_message_id?: string
   id?: string
+  turn_position?: number
+  turn_message_seq?: number
 }
 
 export interface UIAssistantTurn {
@@ -338,6 +371,8 @@ export interface UIAssistantTurn {
   platform?: string
   external_message_id?: string
   id?: string
+  turn_position?: number
+  turn_message_seq?: number
 }
 
 export interface UISystemTurn {
@@ -347,28 +382,11 @@ export interface UISystemTurn {
   timestamp: string
   platform?: string
   id?: string
+  turn_position?: number
+  turn_message_seq?: number
 }
 
 export type UITurn = UIUserTurn | UIAssistantTurn | UISystemTurn
-
-export interface UIStreamStartEvent {
-  type: 'start'
-  stream_id?: string
-  session_id?: string
-}
-
-export interface UIStreamMessageEvent {
-  type: 'message'
-  stream_id?: string
-  session_id?: string
-  data: UIMessage
-}
-
-export interface UIStreamEndEvent {
-  type: 'end'
-  stream_id?: string
-  session_id?: string
-}
 
 export interface UIStreamErrorEvent {
   type: 'error'
@@ -391,13 +409,20 @@ export interface UIStreamUserMessageEvent {
   data: UIUserTurn
 }
 
+export type UIRuntimeSnapshotEvent = SessionRuntimeSnapshotEvent
+export type UIRuntimeDeltaEvent = SessionRuntimeDeltaEvent
+export type UIRuntimeDelta = SessionRuntimeDelta
+export type UIRuntimeRunPatch = SessionRuntimeRunPatch
+export type UIRuntimeMessageAppend = SessionRuntimeMessageAppend
+export type UIRuntimeProgressAppend = SessionRuntimeProgressAppend
+export type UIRuntimeDroppedEvent = SessionRuntimeDroppedEvent
+export type UIRuntimeStateEvent = SessionRuntimeStateEvent
+
 export type UIStreamEvent =
-  | UIStreamStartEvent
-  | UIStreamMessageEvent
-  | UIStreamEndEvent
   | UIStreamErrorEvent
   | UIStreamSessionCreatedEvent
   | UIStreamUserMessageEvent
+  | UIRuntimeStateEvent
   | CommandEventResponse
 
 export type UIStreamEventHandler = (event: UIStreamEvent) => void

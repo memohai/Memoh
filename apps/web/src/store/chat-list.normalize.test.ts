@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  SAME_TURN_TIMESTAMP_TOLERANCE_MS,
   asRecord,
   cloneRequestedSkills,
   cloneUserInputState,
   createStreamId,
   isOptimisticTurn,
-  isSameLogicalTurn,
+  hasSameTurnIdentity,
   mergeApprovalState,
   normalizeForwardRef,
   normalizeReplyRef,
@@ -97,19 +96,33 @@ describe('skillActivationTextFromRaw', () => {
 })
 
 describe('sortChatMessages', () => {
-  it('sorts by timestamp then id, without mutating input', () => {
+  it('preserves uncoordinated anchor order without mutating input', () => {
     const items = [
       userTurn({ id: 'b', timestamp: '2026-07-09T00:00:02.000Z' }),
       userTurn({ id: 'a', timestamp: '2026-07-09T00:00:01.000Z' }),
       userTurn({ id: 'c', timestamp: '2026-07-09T00:00:01.000Z' }),
     ] as ChatMessage[]
     const sorted = sortChatMessages(items)
-    expect(sorted.map(m => m.id)).toEqual(['a', 'c', 'b'])
+    expect(sorted.map(m => m.id)).toEqual(['b', 'a', 'c'])
     expect(items.map(m => m.id)).toEqual(['b', 'a', 'c'])
+  })
+
+  it('sorts durable rows by coordinates while preserving optimistic slots', () => {
+    const items = [
+      userTurn({ id: 'durable-2', turnPosition: 2, turnMessageSeq: 1, timestamp: '2026-07-09T00:00:00.000Z' }),
+      userTurn({ id: 'optimistic', __optimistic: true, timestamp: '2026-07-09T00:00:01.000Z' } as Partial<ChatUserTurn>),
+      userTurn({ id: 'durable-1', turnPosition: 1, turnMessageSeq: 1, timestamp: '2026-07-09T00:00:02.000Z' }),
+    ] as ChatMessage[]
+
+    expect(sortChatMessages(items).map(message => message.id)).toEqual([
+      'durable-1',
+      'optimistic',
+      'durable-2',
+    ])
   })
 })
 
-describe('isOptimisticTurn / isSameLogicalTurn', () => {
+describe('isOptimisticTurn / hasSameTurnIdentity', () => {
   it('only flags explicitly optimistic turns', () => {
     expect(isOptimisticTurn(userTurn())).toBe(false)
     expect(isOptimisticTurn(userTurn({ __optimistic: true } as Partial<ChatUserTurn>))).toBe(true)
@@ -118,22 +131,19 @@ describe('isOptimisticTurn / isSameLogicalTurn', () => {
   it('matches by externalMessageId when both sides carry one', () => {
     const a = userTurn({ externalMessageId: 'x' } as Partial<ChatUserTurn>)
     const b = userTurn({ id: 'u2', text: 'different', externalMessageId: 'x' } as Partial<ChatUserTurn>)
-    expect(isSameLogicalTurn(a, b)).toBe(true)
+    expect(hasSameTurnIdentity(a, b)).toBe(true)
   })
 
-  it('matches user turns by text + timestamp within tolerance', () => {
+  it('does not guess user identity from matching text or timestamps', () => {
     const a = userTurn()
-    const near = userTurn({ id: 'u2', timestamp: new Date(Date.parse(a.timestamp) + SAME_TURN_TIMESTAMP_TOLERANCE_MS).toISOString() })
-    const far = userTurn({ id: 'u3', timestamp: new Date(Date.parse(a.timestamp) + SAME_TURN_TIMESTAMP_TOLERANCE_MS + 1).toISOString() })
-    expect(isSameLogicalTurn(a, near)).toBe(true)
-    expect(isSameLogicalTurn(a, far)).toBe(false)
-    expect(isSameLogicalTurn(a, userTurn({ id: 'u4', text: 'other' }))).toBe(false)
+    const twin = userTurn({ id: 'u2', timestamp: a.timestamp })
+    expect(hasSameTurnIdentity(a, twin)).toBe(false)
   })
 
   it('refuses to guess on assistant content', () => {
     const asst = { id: 'a1', role: 'assistant', timestamp: userTurn().timestamp, messages: [], streaming: false } as unknown as ChatMessage
     const twin = { ...asst, id: 'a2' } as ChatMessage
-    expect(isSameLogicalTurn(asst, twin)).toBe(false)
+    expect(hasSameTurnIdentity(asst, twin)).toBe(false)
   })
 })
 

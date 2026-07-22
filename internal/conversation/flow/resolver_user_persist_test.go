@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/memohai/memoh/internal/conversation"
 )
@@ -79,6 +80,35 @@ func TestPersistUserTurnSkillActivationWithPromptStoresPromptOnly(t *testing.T) 
 	}
 	if messages.persisted[0].DisplayText != "Plan the widget implementation" {
 		t.Fatalf("display text = %q, want prompt", messages.persisted[0].DisplayText)
+	}
+}
+
+func TestRuntimeRequestUserTurnMatchesPersistedDisplaySemantics(t *testing.T) {
+	t.Parallel()
+
+	timestamp := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	turn := RuntimeRequestUserTurn(conversation.ChatRequest{
+		Query:             "model query",
+		RawQuery:          "raw query",
+		UserVisibleText:   "visible query",
+		CurrentChannel:    "local",
+		UserID:            "user-1",
+		ExternalMessageID: "stream-1",
+		Attachments: []conversation.ChatAttachment{{
+			Type:        "file",
+			Name:        "notes.txt",
+			ContentHash: "sha256:notes",
+		}},
+	}, timestamp)
+
+	if turn.Role != "user" || turn.Text != "visible query" || turn.Timestamp != timestamp {
+		t.Fatalf("runtime request user turn = %#v", turn)
+	}
+	if turn.Platform != "local" || turn.SenderUserID != "user-1" || turn.ExternalMessageID != "stream-1" {
+		t.Fatalf("runtime request user identity = %#v", turn)
+	}
+	if len(turn.Attachments) != 1 || turn.Attachments[0].ContentHash != "sha256:notes" {
+		t.Fatalf("runtime request user attachments = %#v", turn.Attachments)
 	}
 }
 

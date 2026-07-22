@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -46,8 +47,9 @@ func (*agentToolPlaceholderProvider) DoStream(_ context.Context, _ sdk.GenerateP
 	return &sdk.StreamResult{Stream: ch}, nil
 }
 
-// TestAgentStreamEmitsToolCallInputStartThenStart asserts that a tool call
-// produces a lightweight EventToolCallInputStart (name + call ID, no input)
+// TestAgentStreamEmitsToolCallInputStartThenStart asserts that a model step is
+// announced before its tool events, then a tool call produces a lightweight
+// EventToolCallInputStart (name + call ID, no input)
 // when the SDK emits ToolInputStartPart, followed by a EventToolCallStart
 // carrying the fully-assembled Input when StreamToolCallPart arrives. The
 // early input-start lets the Web UI render the tool block while arguments are
@@ -71,26 +73,92 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 		events = append(events, event)
 	}
 
-	if len(events) != 4 {
-		t.Fatalf("expected 4 events, got %d: %#v", len(events), events)
+	if len(events) != 5 {
+		t.Fatalf("expected 5 events, got %d: %#v", len(events), events)
 	}
 	if events[0].Type != EventAgentStart {
 		t.Fatalf("expected first event %q, got %#v", EventAgentStart, events[0])
 	}
-	if events[1].Type != EventToolCallInputStart || events[1].ToolCallID != "call-1" || events[1].ToolName != "write" {
-		t.Fatalf("unexpected tool call input start event: %#v", events[1])
+	if events[1].Type != EventModelStepStart {
+		t.Fatalf("expected model step event %q, got %#v", EventModelStepStart, events[1])
 	}
-	if events[1].Input != nil {
-		t.Fatalf("expected tool call input start to carry no input, got %#v", events[1].Input)
+	if events[2].Type != EventToolCallInputStart || events[2].ToolCallID != "call-1" || events[2].ToolName != "write" {
+		t.Fatalf("unexpected tool call input start event: %#v", events[2])
 	}
-	if events[2].Type != EventToolCallStart || events[2].ToolCallID != "call-1" || events[2].ToolName != "write" {
-		t.Fatalf("unexpected tool call start event: %#v", events[2])
+	if events[2].Input != nil {
+		t.Fatalf("expected tool call input start to carry no input, got %#v", events[2].Input)
+	}
+	if events[3].Type != EventToolCallStart || events[3].ToolCallID != "call-1" || events[3].ToolName != "write" {
+		t.Fatalf("unexpected tool call start event: %#v", events[3])
 	}
 	expectedInput := map[string]any{"path": "/tmp/long.txt"}
-	if !reflect.DeepEqual(events[2].Input, expectedInput) {
-		t.Fatalf("expected tool call start input %#v, got %#v", expectedInput, events[2].Input)
+	if !reflect.DeepEqual(events[3].Input, expectedInput) {
+		t.Fatalf("expected tool call start input %#v, got %#v", expectedInput, events[3].Input)
 	}
-	if events[3].Type != EventAgentEnd {
-		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[3])
+	if events[4].Type != EventAgentEnd {
+		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[4])
+	}
+}
+
+func TestAgentStreamRunsStepCompletedBeforeTerminal(t *testing.T) {
+	t.Parallel()
+
+	a := New(Deps{})
+	order := make([]string, 0, 2)
+	stepValid := false
+	for event := range a.Stream(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: &agentToolPlaceholderProvider{}},
+		Messages: []sdk.Message{sdk.UserMessage("hello")},
+		Identity: SessionContext{BotID: "bot-1", SessionID: "session-1"},
+		OnStepCompleted: func(_ context.Context, step *sdk.StepResult) error {
+			stepValid = step != nil && len(step.Messages) == 1 && step.Messages[0].Role == sdk.MessageRoleAssistant
+			order = append(order, "step")
+			return nil
+		},
+	}) {
+		if event.IsTerminal() {
+			order = append(order, "terminal")
+		}
+	}
+	if !reflect.DeepEqual(order, []string{"step", "terminal"}) {
+		t.Fatalf("callback order = %#v, want step before terminal", order)
+	}
+	if !stepValid {
+		t.Fatal("completed step did not contain one assistant message")
+	}
+}
+
+func TestAgentStreamStepCompletedFailureAbortsRun(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("checkpoint failed")
+	a := New(Deps{})
+	callbackCalls := 0
+	sawCheckpointError := false
+	var terminal StreamEvent
+	for event := range a.Stream(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: &agentToolPlaceholderProvider{}},
+		Messages: []sdk.Message{sdk.UserMessage("hello")},
+		Identity: SessionContext{BotID: "bot-1", SessionID: "session-1"},
+		OnStepCompleted: func(context.Context, *sdk.StepResult) error {
+			callbackCalls++
+			return sentinel
+		},
+	}) {
+		if event.Type == EventError && event.Error == "agent step completion failed" {
+			sawCheckpointError = true
+		}
+		if event.IsTerminal() {
+			terminal = event
+		}
+	}
+	if callbackCalls != 1 {
+		t.Fatalf("step callback calls = %d, want 1", callbackCalls)
+	}
+	if terminal.Type != EventAgentAbort {
+		t.Fatalf("terminal event = %q, want %q", terminal.Type, EventAgentAbort)
+	}
+	if !sawCheckpointError {
+		t.Fatal("step completion failure did not emit an error event")
 	}
 }

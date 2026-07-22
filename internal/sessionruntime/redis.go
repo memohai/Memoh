@@ -2,14 +2,16 @@ package sessionruntime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/memohai/memoh/internal/conversation"
 )
 
 type RedisOptions struct {
@@ -50,6 +52,7 @@ if not expires_at_ms or expires_at_ms <= now_ms then
 end
 redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[6])
 redis.call('SET', KEYS[2], ARGV[4], 'PXAT', ARGV[5])
+redis.call('ZADD', KEYS[3], ARGV[5], ARGV[7])
 return 1
 `)
 
@@ -59,7 +62,76 @@ if not current_ref or current_ref ~= ARGV[1] then
   return 0
 end
 redis.call('DEL', KEYS[1])
+local state_data = redis.call('GET', KEYS[3])
+if not state_data then
+  redis.call('ZREM', KEYS[2], ARGV[2])
+  return 1
+end
+local ok_ref, expected_ref = pcall(cjson.decode, ARGV[1])
+local ok_state, state = pcall(cjson.decode, state_data)
+if ok_ref and ok_state and state.current_run_view then
+  local run = state.current_run_view
+  if run.stream_id == expected_ref.stream_id and run.generation == expected_ref.generation then
+    redis.call('ZREM', KEYS[2], ARGV[2])
+  end
+end
 return 1
+`)
+
+var listExpiredRedisRunsScript = redis.NewScript(`
+local now = redis.call('TIME')
+local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+local members = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now_ms, 'LIMIT', 0, ARGV[1])
+local claim_until_ms = now_ms + tonumber(ARGV[3])
+local active = {}
+for _, member in ipairs(members) do
+  local ok_key, key = pcall(cjson.decode, member)
+  local keep = false
+  if ok_key and key.bot_id and key.session_id then
+    local state_data = redis.call('GET', ARGV[2] .. key.bot_id .. ':' .. key.session_id)
+    if state_data then
+      local ok_state, state = pcall(cjson.decode, state_data)
+      if ok_state and state.current_run_view then
+        local status = state.current_run_view.status
+        keep = status == 'admitting' or status == 'running' or status == 'aborting'
+      end
+    end
+  end
+  if keep then
+    redis.call('ZADD', KEYS[1], claim_until_ms, member)
+    table.insert(active, member)
+  else
+    redis.call('ZREM', KEYS[1], member)
+  end
+end
+return active
+`)
+
+var appendRedisNormalizedMessageScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[4]) == 0 then
+  return {0}
+end
+local current_ref = redis.call('GET', KEYS[1])
+if not current_ref or current_ref ~= ARGV[1] or redis.call('PTTL', KEYS[1]) <= 0 then
+  return {0}
+end
+local content = redis.call('HGET', KEYS[2], ARGV[2])
+if not content then
+  return {2}
+end
+local epoch = redis.call('HGET', KEYS[3], 'epoch')
+local current_seq = redis.call('HGET', KEYS[3], 'seq')
+if not epoch or not current_seq then
+  return {2}
+end
+local now = redis.call('TIME')
+local seq = redis.call('HINCRBY', KEYS[3], 'seq', 1)
+redis.call('HSET', KEYS[2], ARGV[2], content .. ARGV[3])
+redis.call('HSET', KEYS[3], 'updated_at_seconds', now[1], 'updated_at_microseconds', now[2])
+redis.call('PEXPIRE', KEYS[4], ARGV[4])
+redis.call('PEXPIRE', KEYS[2], ARGV[4])
+redis.call('PEXPIRE', KEYS[3], ARGV[4])
+return {1, tostring(seq), epoch, now[1], now[2]}
 `)
 
 var validateRedisRunOwnershipScript = redis.NewScript(`
@@ -111,6 +183,10 @@ func NewRedisBackend(ctx context.Context, opts RedisOptions) (*RedisBackend, err
 }
 
 var errRedisBackendClosed = errors.New("session runtime redis backend is closed")
+
+const redisTransactionMaxAttempts = 64
+
+const redisExpiredRunClaimTTL = 2 * time.Second
 
 func newRedisBackend(opts RedisOptions) (*RedisBackend, error) {
 	redisOpts, err := redis.ParseURL(strings.TrimSpace(opts.URL))
@@ -165,19 +241,33 @@ func (b *RedisBackend) Now(ctx context.Context) (time.Time, error) {
 }
 
 func (b *RedisBackend) Load(ctx context.Context, key Key) (Snapshot, bool, error) {
-	data, err := b.client.Get(ctx, b.stateKey(key)).Bytes()
-	if errors.Is(err, redis.Nil) {
-		return Snapshot{}, false, nil
+	stateKey := b.stateKey(key)
+	contentKey := b.contentKey(key)
+	revisionKey := b.revisionKey(key)
+	for attempt := 0; attempt < redisTransactionMaxAttempts; attempt++ {
+		var snapshot Snapshot
+		var ok bool
+		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
+			var err error
+			snapshot, ok, err = loadRedisSnapshot(ctx, tx, stateKey, contentKey, revisionKey)
+			if err != nil {
+				return err
+			}
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Exists(ctx, stateKey)
+				return nil
+			})
+			return err
+		}, stateKey, contentKey, revisionKey)
+		if errors.Is(err, redis.TxFailedErr) {
+			if retryErr := waitRedisTransactionRetry(ctx, attempt); retryErr != nil {
+				return Snapshot{}, false, retryErr
+			}
+			continue
+		}
+		return snapshot, ok, err
 	}
-	if err != nil {
-		return Snapshot{}, false, err
-	}
-	var snapshot Snapshot
-	if err := json.Unmarshal(data, &snapshot); err != nil {
-		return Snapshot{}, false, err
-	}
-	snapshot.Queue = nonNilQueue(snapshot.Queue)
-	return snapshot, true, nil
+	return Snapshot{}, false, ErrBackendConflict
 }
 
 func (b *RedisBackend) Update(ctx context.Context, key Key, update SnapshotUpdate) (Snapshot, bool, error) {
@@ -185,13 +275,15 @@ func (b *RedisBackend) Update(ctx context.Context, key Key, update SnapshotUpdat
 		return Snapshot{}, false, errors.New("snapshot update is required")
 	}
 	stateKey := b.stateKey(key)
-	for {
+	contentKey := b.contentKey(key)
+	revisionKey := b.revisionKey(key)
+	for attempt := 0; attempt < redisTransactionMaxAttempts; attempt++ {
 		var updated Snapshot
 		var changed bool
 		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
 			// current is freshly unmarshaled per attempt and next is
 			// transaction-local, so neither needs a defensive clone.
-			current, ok, err := loadRedisSnapshot(ctx, tx, stateKey)
+			current, ok, err := loadRedisSnapshot(ctx, tx, stateKey, contentKey, revisionKey)
 			if err != nil {
 				return err
 			}
@@ -205,12 +297,12 @@ func (b *RedisBackend) Update(ctx context.Context, key Key, update SnapshotUpdat
 				return nil
 			}
 			next.Queue = nonNilQueue(next.Queue)
-			data, err := json.Marshal(next)
+			prepared, err := prepareRedisSnapshot(next)
 			if err != nil {
 				return err
 			}
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, stateKey, data, b.stateTTL)
+				writeRedisSnapshot(ctx, pipe, stateKey, contentKey, revisionKey, prepared, b.stateTTL)
 				return nil
 			}); err != nil {
 				return err
@@ -218,12 +310,16 @@ func (b *RedisBackend) Update(ctx context.Context, key Key, update SnapshotUpdat
 			updated = next
 			changed = true
 			return nil
-		}, stateKey)
+		}, stateKey, contentKey, revisionKey)
 		if errors.Is(err, redis.TxFailedErr) {
+			if retryErr := waitRedisTransactionRetry(ctx, attempt); retryErr != nil {
+				return Snapshot{}, false, retryErr
+			}
 			continue
 		}
 		return updated, changed, err
 	}
+	return Snapshot{}, false, ErrBackendConflict
 }
 
 func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, generation string, update ActiveRunUpdate) (Snapshot, bool, error) {
@@ -236,8 +332,10 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, g
 		return Snapshot{}, false, errors.New("stream_id and generation are required")
 	}
 	stateKey := b.stateKey(key)
+	contentKey := b.contentKey(key)
+	revisionKey := b.revisionKey(key)
 	streamKey := b.streamKey(key, streamID)
-	for {
+	for attempt := 0; attempt < redisTransactionMaxAttempts; attempt++ {
 		var updated Snapshot
 		var changed bool
 		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
@@ -249,7 +347,7 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, g
 			if err != nil {
 				return err
 			}
-			current, stateOK, err := loadRedisSnapshot(ctx, tx, stateKey)
+			current, stateOK, err := loadRedisSnapshot(ctx, tx, stateKey, contentKey, revisionKey)
 			if err != nil {
 				return err
 			}
@@ -270,12 +368,12 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, g
 				return nil
 			}
 			next.Queue = nonNilQueue(next.Queue)
-			data, err := json.Marshal(next)
+			prepared, err := prepareRedisSnapshot(next)
 			if err != nil {
 				return err
 			}
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, stateKey, data, b.stateTTL)
+				writeRedisSnapshot(ctx, pipe, stateKey, contentKey, revisionKey, prepared, b.stateTTL)
 				return nil
 			}); err != nil {
 				return err
@@ -283,12 +381,93 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, g
 			updated = next
 			changed = true
 			return nil
-		}, stateKey, streamKey)
+		}, stateKey, contentKey, revisionKey, streamKey)
 		if errors.Is(err, redis.TxFailedErr) {
+			if retryErr := waitRedisTransactionRetry(ctx, attempt); retryErr != nil {
+				return Snapshot{}, false, retryErr
+			}
 			continue
 		}
 		return updated, changed, err
 	}
+	return Snapshot{}, false, ErrBackendConflict
+}
+
+func (b *RedisBackend) AppendActiveRunMessage(ctx context.Context, key Key, ref StreamRef, messageAppend RuntimeMessageAppend) (RuntimeRevision, bool, error) {
+	ref.BotID = strings.TrimSpace(ref.BotID)
+	ref.SessionID = strings.TrimSpace(ref.SessionID)
+	ref.StreamID = strings.TrimSpace(ref.StreamID)
+	ref.OwnerID = strings.TrimSpace(ref.OwnerID)
+	ref.Generation = strings.TrimSpace(ref.Generation)
+	if ref.BotID != strings.TrimSpace(key.BotID) || ref.SessionID != strings.TrimSpace(key.SessionID) || ref.StreamID == "" || ref.OwnerID == "" || ref.Generation == "" {
+		return RuntimeRevision{}, false, ErrRunOwnershipLost
+	}
+	if messageAppend.Content == "" {
+		return RuntimeRevision{}, false, nil
+	}
+	if messageAppend.Type != conversation.UIMessageText && messageAppend.Type != conversation.UIMessageReasoning {
+		return RuntimeRevision{}, false, nil
+	}
+	refData, err := marshalRuntimeJSON(ref)
+	if err != nil {
+		return RuntimeRevision{}, false, err
+	}
+	contentField := redisMessageContentField(ref.Generation, conversation.UIMessage{
+		ID:   messageAppend.ID,
+		Type: messageAppend.Type,
+	})
+	result, err := appendRedisNormalizedMessageScript.Run(
+		ctx,
+		b.client,
+		[]string{b.streamKey(key, ref.StreamID), b.contentKey(key), b.revisionKey(key), b.stateKey(key)},
+		refData,
+		contentField,
+		messageAppend.Content,
+		b.stateTTL.Milliseconds(),
+	).Slice()
+	if err != nil {
+		return RuntimeRevision{}, false, err
+	}
+	if len(result) == 0 {
+		return RuntimeRevision{}, false, errors.New("runtime append script returned no status")
+	}
+	status, err := redisScriptInt64(result[0])
+	if err != nil {
+		return RuntimeRevision{}, false, fmt.Errorf("decode runtime append status: %w", err)
+	}
+	switch status {
+	case 0:
+		return RuntimeRevision{}, false, ErrRunOwnershipLost
+	case 2:
+		return RuntimeRevision{}, false, nil
+	case 1:
+	default:
+		return RuntimeRevision{}, false, fmt.Errorf("unexpected runtime append status %d", status)
+	}
+	if len(result) != 5 {
+		return RuntimeRevision{}, false, fmt.Errorf("runtime append script returned %d values", len(result))
+	}
+	seq, err := redisScriptInt64(result[1])
+	if err != nil {
+		return RuntimeRevision{}, false, fmt.Errorf("decode runtime append seq: %w", err)
+	}
+	epoch := strings.TrimSpace(fmt.Sprint(result[2]))
+	seconds, err := redisScriptInt64(result[3])
+	if err != nil {
+		return RuntimeRevision{}, false, fmt.Errorf("decode runtime append seconds: %w", err)
+	}
+	microseconds, err := redisScriptInt64(result[4])
+	if err != nil {
+		return RuntimeRevision{}, false, fmt.Errorf("decode runtime append microseconds: %w", err)
+	}
+	if epoch == "" || seq <= 0 {
+		return RuntimeRevision{}, false, errors.New("runtime append revision is invalid")
+	}
+	return RuntimeRevision{
+		Epoch:     epoch,
+		Seq:       seq,
+		UpdatedAt: time.Unix(seconds, microseconds*int64(time.Microsecond)).UTC(),
+	}, true, nil
 }
 
 func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error) {
@@ -304,8 +483,10 @@ func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, u
 		return Snapshot{}, false, ErrRunOwnershipLost
 	}
 	stateKey := b.stateKey(key)
+	contentKey := b.contentKey(key)
+	revisionKey := b.revisionKey(key)
 	streamKey := b.streamKey(key, ref.StreamID)
-	for {
+	for attempt := 0; attempt < redisTransactionMaxAttempts; attempt++ {
 		var updated Snapshot
 		var changed bool
 		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
@@ -317,7 +498,7 @@ func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, u
 			if err != nil {
 				return err
 			}
-			current, stateOK, err := loadRedisSnapshot(ctx, tx, stateKey)
+			current, stateOK, err := loadRedisSnapshot(ctx, tx, stateKey, contentKey, revisionKey)
 			if err != nil {
 				return err
 			}
@@ -338,13 +519,14 @@ func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, u
 				return nil
 			}
 			next.Queue = nonNilQueue(next.Queue)
-			data, err := json.Marshal(next)
+			prepared, err := prepareRedisSnapshot(next)
 			if err != nil {
 				return err
 			}
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, stateKey, data, b.stateTTL)
+				writeRedisSnapshot(ctx, pipe, stateKey, contentKey, revisionKey, prepared, b.stateTTL)
 				pipe.Del(ctx, streamKey)
+				pipe.ZRem(ctx, b.runLeaseIndexKey(), redisRunLeaseMember(key))
 				return nil
 			}); err != nil {
 				return err
@@ -352,15 +534,19 @@ func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, u
 			updated = next
 			changed = true
 			return nil
-		}, stateKey, streamKey)
+		}, stateKey, contentKey, revisionKey, streamKey)
 		if errors.Is(err, redis.TxFailedErr) {
+			if retryErr := waitRedisTransactionRetry(ctx, attempt); retryErr != nil {
+				return Snapshot{}, false, retryErr
+			}
 			continue
 		}
 		return updated, changed, err
 	}
+	return Snapshot{}, false, ErrBackendConflict
 }
 
-func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref StreamRef, update SnapshotUpdate) (Snapshot, bool, error) {
+func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error) {
 	if update == nil {
 		return Snapshot{}, false, errors.New("snapshot update is required")
 	}
@@ -370,26 +556,32 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref StreamRef, upd
 		return Snapshot{}, false, errors.New("stream_id and generation are required")
 	}
 	ref.StreamID = streamID
-	refData, err := json.Marshal(ref)
+	refData, err := marshalRuntimeJSON(ref)
 	if err != nil {
 		return Snapshot{}, false, err
 	}
 	stateKey := b.stateKey(key)
+	contentKey := b.contentKey(key)
+	revisionKey := b.revisionKey(key)
 	streamKey := b.streamKey(key, streamID)
-	for {
+	for attempt := 0; attempt < redisTransactionMaxAttempts; attempt++ {
 		var updated Snapshot
 		var changed bool
 		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
+			now, err := tx.Time(ctx).Result()
+			if err != nil {
+				return err
+			}
 			if existing, ok, err := loadRedisStreamRef(ctx, tx, streamKey); err != nil {
 				return err
 			} else if ok {
 				return fmt.Errorf("stream_id %q is already registered for session %q", streamID, existing.SessionID)
 			}
-			current, ok, err := loadRedisSnapshot(ctx, tx, stateKey)
+			current, _, err := loadRedisSnapshot(ctx, tx, stateKey, contentKey, revisionKey)
 			if err != nil {
 				return err
 			}
-			next, apply, err := update(current, ok)
+			next, apply, err := update(current, now)
 			if err != nil {
 				return err
 			}
@@ -399,14 +591,16 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref StreamRef, upd
 				return nil
 			}
 			next.Queue = nonNilQueue(next.Queue)
-			stateData, err := json.Marshal(next)
+			prepared, err := prepareRedisSnapshot(next)
 			if err != nil {
 				return err
 			}
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, stateKey, stateData, b.stateTTL)
+				writeRedisSnapshot(ctx, pipe, stateKey, contentKey, revisionKey, prepared, b.stateTTL)
 				pipe.Set(ctx, streamKey, refData, 0)
-				pipe.PExpireAt(ctx, streamKey, streamLeaseExpiry(next, streamID, time.Now().Add(b.stateTTL)))
+				leaseExpiry := streamLeaseExpiry(next, streamID, now.Add(b.stateTTL))
+				pipe.PExpireAt(ctx, streamKey, leaseExpiry)
+				pipe.ZAdd(ctx, b.runLeaseIndexKey(), redis.Z{Score: float64(leaseExpiry.UnixMilli()), Member: redisRunLeaseMember(key)})
 				return nil
 			}); err != nil {
 				return err
@@ -414,12 +608,16 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref StreamRef, upd
 			updated = next
 			changed = true
 			return nil
-		}, stateKey, streamKey)
+		}, stateKey, contentKey, revisionKey, streamKey)
 		if errors.Is(err, redis.TxFailedErr) {
+			if retryErr := waitRedisTransactionRetry(ctx, attempt); retryErr != nil {
+				return Snapshot{}, false, retryErr
+			}
 			continue
 		}
 		return updated, changed, err
 	}
+	return Snapshot{}, false, ErrBackendConflict
 }
 
 func (b *RedisBackend) RenewLease(ctx context.Context, key Key, streamID, ownerID, generation string, renewedAt, expiresAt time.Time) error {
@@ -434,7 +632,7 @@ func (b *RedisBackend) RenewLease(ctx context.Context, key Key, streamID, ownerI
 	}
 	stateKey := b.stateKey(key)
 	streamKey := b.streamKey(key, streamID)
-	for {
+	for attempt := 0; attempt < redisTransactionMaxAttempts; attempt++ {
 		stateData, err := b.client.Get(ctx, stateKey).Bytes()
 		if errors.Is(err, redis.Nil) {
 			return ErrRunOwnershipLost
@@ -450,14 +648,14 @@ func (b *RedisBackend) RenewLease(ctx context.Context, key Key, streamID, ownerI
 			return err
 		}
 		var ref StreamRef
-		if err := json.Unmarshal(refData, &ref); err != nil {
+		if err := unmarshalRuntimeJSON(refData, &ref); err != nil {
 			return err
 		}
 		if ref.OwnerID != ownerID || ref.BotID != key.BotID || ref.SessionID != key.SessionID || ref.StreamID != streamID || ref.Generation != generation {
 			return ErrRunOwnershipLost
 		}
-		var snapshot Snapshot
-		if err := json.Unmarshal(stateData, &snapshot); err != nil {
+		snapshot, err := decodeRedisSnapshot(stateData)
+		if err != nil {
 			return err
 		}
 		if snapshot.CurrentRunView == nil {
@@ -472,12 +670,12 @@ func (b *RedisBackend) RenewLease(ctx context.Context, key Key, streamID, ownerI
 		}
 		run.OwnerLeaseExpiresAt = &expiresAt
 		snapshot.Queue = nonNilQueue(snapshot.Queue)
-		nextStateData, err := json.Marshal(snapshot)
+		nextStateData, err := marshalRuntimeJSON(snapshot)
 		if err != nil {
 			return err
 		}
-		result, err := renewRedisLeaseScript.Run(ctx, b.client, []string{stateKey, streamKey},
-			stateData, refData, nextStateData, refData, expiresAt.UnixMilli(), b.stateTTL.Milliseconds(),
+		result, err := renewRedisLeaseScript.Run(ctx, b.client, []string{stateKey, streamKey, b.runLeaseIndexKey()},
+			stateData, refData, nextStateData, refData, expiresAt.UnixMilli(), b.stateTTL.Milliseconds(), redisRunLeaseMember(key),
 		).Int64()
 		if err != nil {
 			return err
@@ -486,11 +684,15 @@ func (b *RedisBackend) RenewLease(ctx context.Context, key Key, streamID, ownerI
 		case 1:
 			return nil
 		case 0:
+			if retryErr := waitRedisTransactionRetry(ctx, attempt); retryErr != nil {
+				return retryErr
+			}
 			continue
 		default:
 			return ErrRunOwnershipLost
 		}
 	}
+	return ErrBackendConflict
 }
 
 func (b *RedisBackend) ValidateRunOwnership(ctx context.Context, key Key, ref StreamRef) error {
@@ -515,7 +717,7 @@ func (b *RedisBackend) ValidateRunOwnership(ctx context.Context, key Key, ref St
 }
 
 func (b *RedisBackend) Publish(ctx context.Context, event Event) error {
-	data, err := json.Marshal(event)
+	data, err := marshalRuntimeJSON(event)
 	if err != nil {
 		return err
 	}
@@ -564,7 +766,7 @@ func (b *RedisBackend) Subscribe(ctx context.Context, key Key) (Subscription, er
 				continue
 			}
 			var event Event
-			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
+			if err := unmarshalRuntimeJSON([]byte(msg.Payload), &event); err != nil {
 				enqueueRuntimeEvent(ch, Event{
 					Type:      EventRuntimeDropped,
 					BotID:     key.BotID,
@@ -598,7 +800,7 @@ func (b *RedisBackend) LoadStreamRef(ctx context.Context, key Key, streamID stri
 		return StreamRef{}, false, err
 	}
 	var ref StreamRef
-	if err := json.Unmarshal(data, &ref); err != nil {
+	if err := unmarshalRuntimeJSON(data, &ref); err != nil {
 		return StreamRef{}, false, err
 	}
 	return ref, true, nil
@@ -610,16 +812,43 @@ func (b *RedisBackend) DeleteStreamRef(ctx context.Context, ref StreamRef) (bool
 	if ref.StreamID == "" || ref.Generation == "" {
 		return false, nil
 	}
-	data, err := json.Marshal(ref)
+	data, err := marshalRuntimeJSON(ref)
 	if err != nil {
 		return false, err
 	}
-	deleted, err := deleteRedisStreamRefScript.Run(ctx, b.client, []string{b.streamKey(Key{BotID: ref.BotID, SessionID: ref.SessionID}, ref.StreamID)}, data).Int64()
+	key := Key{BotID: ref.BotID, SessionID: ref.SessionID}
+	deleted, err := deleteRedisStreamRefScript.Run(ctx, b.client, []string{b.streamKey(key, ref.StreamID), b.runLeaseIndexKey(), b.stateKey(key)}, data, redisRunLeaseMember(key)).Int64()
 	return deleted == 1, err
 }
 
+func (b *RedisBackend) ListExpiredRunKeys(ctx context.Context, limit int64) ([]Key, error) {
+	if limit <= 0 {
+		limit = expiredRunReaperBatchSize
+	}
+	members, err := listExpiredRedisRunsScript.Run(
+		ctx,
+		b.client,
+		[]string{b.runLeaseIndexKey()},
+		limit,
+		b.keyPrefix+"state:",
+		redisExpiredRunClaimTTL.Milliseconds(),
+	).StringSlice()
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]Key, 0, len(members))
+	for _, member := range members {
+		var key Key
+		if err := unmarshalRuntimeJSON([]byte(member), &key); err != nil {
+			return nil, fmt.Errorf("decode expired runtime key: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
 func (b *RedisBackend) PublishCommand(ctx context.Context, ownerID string, command Command) error {
-	data, err := json.Marshal(command)
+	data, err := marshalRuntimeJSON(command)
 	if err != nil {
 		return err
 	}
@@ -666,7 +895,7 @@ func (b *RedisBackend) SubscribeCommands(ctx context.Context, ownerID string) (C
 				continue
 			}
 			var command Command
-			if err := json.Unmarshal([]byte(msg.Payload), &command); err != nil {
+			if err := unmarshalRuntimeJSON([]byte(msg.Payload), &command); err != nil {
 				continue
 			}
 			select {
@@ -697,7 +926,7 @@ func (b *RedisBackend) StoreCommandResult(ctx context.Context, result Command, t
 	if ttl <= 0 {
 		return errors.New("command result ttl must be positive")
 	}
-	data, err := json.Marshal(result)
+	data, err := marshalRuntimeJSON(result)
 	if err != nil {
 		return err
 	}
@@ -717,7 +946,7 @@ func (b *RedisBackend) LoadCommandResult(ctx context.Context, commandID string) 
 		return Command{}, false, err
 	}
 	var result Command
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := unmarshalRuntimeJSON(data, &result); err != nil {
 		return Command{}, false, err
 	}
 	if strings.TrimSpace(result.Type) != CommandResult || strings.TrimSpace(result.ID) != commandID {
@@ -747,20 +976,118 @@ func (b *RedisBackend) Close() error {
 	return b.closeErr
 }
 
-func loadRedisSnapshot(ctx context.Context, tx *redis.Tx, key string) (Snapshot, bool, error) {
-	data, err := tx.Get(ctx, key).Bytes()
+func loadRedisSnapshot(ctx context.Context, tx *redis.Tx, stateKey, contentKey, revisionKey string) (Snapshot, bool, error) {
+	data, err := tx.Get(ctx, stateKey).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return Snapshot{}, false, nil
 	}
 	if err != nil {
 		return Snapshot{}, false, err
 	}
-	var snapshot Snapshot
-	if err := json.Unmarshal(data, &snapshot); err != nil {
+	contents, err := tx.HGetAll(ctx, contentKey).Result()
+	if err != nil {
 		return Snapshot{}, false, err
 	}
-	snapshot.Queue = nonNilQueue(snapshot.Queue)
+	revision, err := tx.HGetAll(ctx, revisionKey).Result()
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	snapshot, err := decodeRedisSnapshot(data)
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	hydrateRedisSnapshot(&snapshot, contents, revision)
 	return snapshot, true, nil
+}
+
+type preparedRedisSnapshot struct {
+	stateData []byte
+	contents  map[string]string
+	revision  map[string]string
+}
+
+func prepareRedisSnapshot(snapshot Snapshot) (preparedRedisSnapshot, error) {
+	persisted := snapshot
+	contents := make(map[string]string)
+	if snapshot.CurrentRunView != nil {
+		run := *snapshot.CurrentRunView
+		run.Messages = append([]conversation.UIMessage(nil), snapshot.CurrentRunView.Messages...)
+		for index := range run.Messages {
+			message := &run.Messages[index]
+			if message.Type != conversation.UIMessageText && message.Type != conversation.UIMessageReasoning {
+				continue
+			}
+			contents[redisMessageContentField(run.Generation, *message)] = message.Content
+			message.Content = ""
+		}
+		persisted.CurrentRunView = &run
+	}
+	stateData, err := marshalRuntimeJSON(persisted)
+	if err != nil {
+		return preparedRedisSnapshot{}, err
+	}
+	revision := map[string]string{
+		"epoch":                   snapshot.Epoch,
+		"seq":                     strconv.FormatInt(snapshot.Seq, 10),
+		"updated_at_seconds":      strconv.FormatInt(snapshot.UpdatedAt.Unix(), 10),
+		"updated_at_microseconds": strconv.FormatInt(int64(snapshot.UpdatedAt.Nanosecond())/int64(time.Microsecond), 10),
+	}
+	return preparedRedisSnapshot{stateData: stateData, contents: contents, revision: revision}, nil
+}
+
+func writeRedisSnapshot(ctx context.Context, pipe redis.Pipeliner, stateKey, contentKey, revisionKey string, prepared preparedRedisSnapshot, ttl time.Duration) {
+	pipe.Set(ctx, stateKey, prepared.stateData, ttl)
+	pipe.Del(ctx, contentKey)
+	if len(prepared.contents) > 0 {
+		pipe.HSet(ctx, contentKey, prepared.contents)
+		pipe.PExpire(ctx, contentKey, ttl)
+	}
+	pipe.Del(ctx, revisionKey)
+	pipe.HSet(ctx, revisionKey, prepared.revision)
+	pipe.PExpire(ctx, revisionKey, ttl)
+}
+
+func redisMessageContentField(generation string, message conversation.UIMessage) string {
+	return strings.TrimSpace(generation) + ":" + strconv.Itoa(message.ID) + ":" + string(message.Type)
+}
+
+func decodeRedisSnapshot(data []byte) (Snapshot, error) {
+	var snapshot Snapshot
+	if err := unmarshalRuntimeJSON(data, &snapshot); err != nil {
+		return Snapshot{}, err
+	}
+	snapshot.Queue = nonNilQueue(snapshot.Queue)
+	return snapshot, nil
+}
+
+func hydrateRedisSnapshot(snapshot *Snapshot, contents, revision map[string]string) {
+	if snapshot == nil {
+		return
+	}
+	if seq, err := strconv.ParseInt(revision["seq"], 10, 64); err == nil {
+		snapshot.Seq = seq
+	}
+	if epoch := strings.TrimSpace(revision["epoch"]); epoch != "" {
+		snapshot.Epoch = epoch
+	}
+	seconds, secondsErr := strconv.ParseInt(revision["updated_at_seconds"], 10, 64)
+	microseconds, microsErr := strconv.ParseInt(revision["updated_at_microseconds"], 10, 64)
+	if secondsErr == nil && microsErr == nil {
+		updatedAt := time.Unix(seconds, microseconds*int64(time.Microsecond)).UTC()
+		snapshot.UpdatedAt = updatedAt
+		if snapshot.CurrentRunView != nil {
+			snapshot.CurrentRunView.UpdatedAt = updatedAt
+		}
+	}
+	if snapshot.CurrentRunView == nil {
+		return
+	}
+	for index := range snapshot.CurrentRunView.Messages {
+		message := &snapshot.CurrentRunView.Messages[index]
+		if content, ok := contents[redisMessageContentField(snapshot.CurrentRunView.Generation, *message)]; ok {
+			message.Content = content
+		}
+	}
 }
 
 func waitRedisSubscriptionRetry(ctx context.Context) bool {
@@ -774,6 +1101,18 @@ func waitRedisSubscriptionRetry(ctx context.Context) bool {
 	}
 }
 
+func waitRedisTransactionRetry(ctx context.Context, attempt int) error {
+	delay := 100 * time.Microsecond * time.Duration(1<<min(attempt, 6))
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func loadRedisStreamRef(ctx context.Context, tx *redis.Tx, key string) (StreamRef, bool, error) {
 	data, err := tx.Get(ctx, key).Bytes()
 	if errors.Is(err, redis.Nil) {
@@ -783,14 +1122,35 @@ func loadRedisStreamRef(ctx context.Context, tx *redis.Tx, key string) (StreamRe
 		return StreamRef{}, false, err
 	}
 	var ref StreamRef
-	if err := json.Unmarshal(data, &ref); err != nil {
+	if err := unmarshalRuntimeJSON(data, &ref); err != nil {
 		return StreamRef{}, false, err
 	}
 	return ref, true, nil
 }
 
+func redisScriptInt64(value any) (int64, error) {
+	switch typed := value.(type) {
+	case int64:
+		return typed, nil
+	case string:
+		return strconv.ParseInt(typed, 10, 64)
+	case []byte:
+		return strconv.ParseInt(string(typed), 10, 64)
+	default:
+		return strconv.ParseInt(fmt.Sprint(value), 10, 64)
+	}
+}
+
 func (b *RedisBackend) stateKey(key Key) string {
 	return b.keyPrefix + "state:" + key.String()
+}
+
+func (b *RedisBackend) contentKey(key Key) string {
+	return b.keyPrefix + "content:" + key.String()
+}
+
+func (b *RedisBackend) revisionKey(key Key) string {
+	return b.keyPrefix + "revision:" + key.String()
 }
 
 func (b *RedisBackend) streamKey(key Key, streamID string) string {
@@ -807,4 +1167,13 @@ func (b *RedisBackend) commandChannel(ownerID string) string {
 
 func (b *RedisBackend) commandResultKey(commandID string) string {
 	return b.keyPrefix + "command_result:" + strings.TrimSpace(commandID)
+}
+
+func (b *RedisBackend) runLeaseIndexKey() string {
+	return b.keyPrefix + "run_leases"
+}
+
+func redisRunLeaseMember(key Key) string {
+	data, _ := marshalRuntimeJSON(Key{BotID: strings.TrimSpace(key.BotID), SessionID: strings.TrimSpace(key.SessionID)})
+	return string(data)
 }

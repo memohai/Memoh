@@ -1,10 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createPinia, setActivePinia } from 'pinia'
-import type { BotSessionActivityEvent, SessionMessageStreamEvent, UIStreamEvent, UIStreamEventHandler, UIToolApproval, UIUserInput } from '@/composables/api/useChat'
+import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia'
+import type { BotSessionActivityEvent, SessionMessageStreamEvent, UIStreamEvent, UIStreamEventHandler, UIToolApproval, UITurn, UIUserInput } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
 import { AUTH_SESSION_CLEARED_EVENT } from '@/lib/auth-session'
 import { useChatSelectionStore } from './chat-selection'
 import { useChatStore } from './chat-list'
+import { seedSynchronizedTranscriptForTest } from './chat/sync/projection'
+import type { ChatMessage, ChatViewTarget } from './chat/types'
+import type { ConversationUiMessage, ConversationUiTurn, SessionruntimeRunOperationView, SessionruntimeSnapshot } from '@memohai/sdk'
+import {
+  generationReuseContractFixture,
+  interruptedRunContractFixture,
+  replacementOperationsContractFixture,
+  richActiveRunContractFixture,
+  runtimeRecoveryContractFixture,
+} from './runtime-contract-fixtures.test-support'
 
 const api = vi.hoisted(() => ({
   createSession: vi.fn(),
@@ -14,6 +24,7 @@ const api = vi.hoisted(() => ({
   fetchSessions: vi.fn(),
   fetchBots: vi.fn(),
   fetchMessagesUI: vi.fn(),
+  fetchSessionRuntime: vi.fn(),
   sendLocalChannelMessage: vi.fn(),
   executeQuickAction: vi.fn(),
   fetchSafeSkillCatalog: vi.fn(),
@@ -72,6 +83,26 @@ function deferred<T>() {
     reject = rej
   })
   return { promise, resolve, reject }
+}
+
+let testPiniaInstances: Pinia[] = []
+
+function createTestPinia() {
+  const pinia = createPinia()
+  testPiniaInstances.push(pinia)
+  return pinia
+}
+
+function seedTranscript(store: ReturnType<typeof useChatStore>, ...turns: ChatMessage[]) {
+  seedSynchronizedTranscriptForTest(store.chatView().transcript, ...turns)
+}
+
+function seedTargetTranscript(
+  store: ReturnType<typeof useChatStore>,
+  target: ChatViewTarget,
+  ...turns: ChatMessage[]
+) {
+  seedSynchronizedTranscriptForTest(store.chatView(target).transcript, ...turns)
 }
 
 function applyLatestDraftRequest(store: ReturnType<typeof useChatStore>) {
@@ -149,110 +180,117 @@ function approvalTurn(approval: UIToolApproval, blockId = 1) {
 }
 
 function richActiveRunStoreScript(sessionId = 'session-1', streamId = 'stream-rich'): UIStreamEvent[] {
-  return [
-    { type: 'start', stream_id: streamId, session_id: sessionId } as UIStreamEvent,
-    {
-      type: 'message',
-      stream_id: streamId,
-      session_id: sessionId,
-      data: { id: 0, type: 'reasoning', content: 'I need to inspect the workspace.' },
-    } as UIStreamEvent,
-    {
-      type: 'message',
-      stream_id: streamId,
-      session_id: sessionId,
-      data: { id: 1, type: 'text', content: 'I will check the current state.' },
-    } as UIStreamEvent,
-    {
-      type: 'message',
-      stream_id: streamId,
-      session_id: sessionId,
-      data: {
-        id: 2,
-        type: 'tool',
-        name: 'exec',
-        tool_call_id: 'call-exec',
-        input: { command: 'pwd' },
-        running: true,
-        progress: ['queued'],
-      },
-    } as UIStreamEvent,
-    {
-      type: 'message',
-      stream_id: streamId,
-      session_id: sessionId,
-      data: {
-        id: 2,
-        type: 'tool',
-        name: 'exec',
-        tool_call_id: 'call-exec',
-        input: { command: 'pwd' },
-        output: { structuredContent: { stdout: '/workspace\n' } },
-        running: false,
-        progress: ['queued', { stdout: '/workspace\n' }],
-      },
-    } as UIStreamEvent,
-    {
-      type: 'message',
-      stream_id: streamId,
-      session_id: sessionId,
-      data: {
-        id: 3,
-        type: 'tool',
-        name: 'exec',
-        tool_call_id: 'call-approval',
-        input: { command: 'rm -rf build' },
-        running: false,
-        approval: {
-          approval_id: 'approval-1',
-          short_id: 7,
-          status: 'pending',
-          can_approve: true,
-        },
-      },
-    } as UIStreamEvent,
-    {
-      type: 'message',
-      stream_id: streamId,
-      session_id: sessionId,
-      data: {
-        id: 4,
-        type: 'tool',
-        name: 'ask_user',
-        tool_call_id: 'call-ask',
-        input: { questions: [{ text: 'Continue?', kind: 'single_select' }] },
-        running: false,
-        user_input: {
-          user_input_id: 'input-1',
-          short_id: 8,
-          status: 'pending',
-          can_respond: true,
-          questions: [{
-            id: 'q1',
-            text: 'Continue?',
-            kind: 'single_select',
-            options: [
-              { id: 'yes', label: 'Yes' },
-              { id: 'no', label: 'No' },
-            ],
-          }],
-        },
-      },
-    } as UIStreamEvent,
-  ]
+  return structuredClone(richActiveRunContractFixture.runtime_snapshot.snapshot.current_run_view?.messages ?? []).map(data => ({
+    type: 'message',
+    data,
+    stream_id: streamId,
+    session_id: sessionId,
+  })) as UIStreamEvent[]
 }
 
-function interruptedRunStoreScript(sessionId = 'session-1', streamId = 'stream-interrupted'): UIStreamEvent[] {
-  return [
-    { type: 'start', stream_id: streamId, session_id: sessionId } as UIStreamEvent,
-    {
-      type: 'message',
+function runtimeMessagesWithIdentity(
+  messages: ConversationUiMessage[],
+  streamId: string,
+  turnPosition = 1,
+): ConversationUiMessage[] {
+  return messages.map((message, index) => ({
+    ...message,
+    stable_id: message.stable_id ?? `${streamId}-row-${message.id ?? index}`,
+    turn_position: message.turn_position ?? turnPosition,
+    turn_message_seq: message.turn_message_seq ?? index + 2,
+  }))
+}
+
+function runtimeUserTurnWithIdentity(
+  turn: ConversationUiTurn | undefined,
+  streamId: string,
+  turnPosition = 1,
+): ConversationUiTurn | undefined {
+  if (!turn) return undefined
+  return {
+    ...turn,
+    id: turn.id ?? `${streamId}-user-row`,
+    turn_position: turn.turn_position ?? turnPosition,
+    turn_message_seq: turn.turn_message_seq ?? 1,
+  }
+}
+
+function runtimeSnapshotFromScript(
+  script: UIStreamEvent[],
+  sessionId = 'session-1',
+  streamId = 'stream-rich',
+  status = 'running',
+  seq = 10,
+  error = '',
+  requestUserTurn?: ConversationUiTurn,
+  historyCommitted = false,
+  canonicalReady = false,
+): SessionruntimeSnapshot {
+  const messages = runtimeMessagesWithIdentity(script.flatMap((event) => {
+    if (event.type !== 'message') return []
+    return [event.data as ConversationUiMessage]
+  }), streamId)
+  const normalizedRequestUserTurn = runtimeUserTurnWithIdentity(requestUserTurn, streamId)
+  return {
+    bot_id: 'bot-1',
+    session_id: sessionId,
+    epoch: `epoch-${sessionId}`,
+    seq,
+    current_run_view: {
       stream_id: streamId,
+      generation: `generation-${streamId}`,
+      status,
+      messages,
+      ...(historyCommitted ? { history_committed: true } : {}),
+      ...(canonicalReady ? { canonical_ready: true } : {}),
+      ...(normalizedRequestUserTurn ? { request_user_turn: normalizedRequestUserTurn } : {}),
+      ...(error ? { error } : {}),
+    },
+    queue: [],
+  }
+}
+
+function runtimeReplacementSnapshot(
+  streamId: string,
+  operation: SessionruntimeRunOperationView,
+  messages: ConversationUiMessage[] = [],
+  status = 'running',
+  seq = 10,
+  sessionId = 'session-1',
+  canonicalReady = false,
+  historyCommitted = true,
+): UIStreamEvent {
+  const epoch = `epoch-${sessionId}`
+  return {
+    type: 'runtime_snapshot',
+    bot_id: 'bot-1',
+    session_id: sessionId,
+    epoch,
+    seq,
+    snapshot: {
+      bot_id: 'bot-1',
       session_id: sessionId,
-      data: { id: 0, type: 'text', content: 'partial output' },
-    } as UIStreamEvent,
-    { type: 'error', stream_id: streamId, session_id: sessionId, message: 'runtime interrupted' } as UIStreamEvent,
-  ]
+      epoch,
+      seq,
+      current_run_view: {
+        stream_id: streamId,
+        generation: `generation-${streamId}`,
+        status,
+        messages: runtimeMessagesWithIdentity(messages, streamId, 2),
+        operation: {
+          ...operation,
+          replacement_user_turn: runtimeUserTurnWithIdentity(operation.replacement_user_turn, streamId, 2),
+        },
+        ...(historyCommitted ? { history_committed: true } : {}),
+        ...(canonicalReady ? { canonical_ready: true } : {}),
+      },
+      queue: [],
+    },
+  } as UIStreamEvent
+}
+
+function richActiveRunRuntimeSnapshot(): SessionruntimeSnapshot {
+  return structuredClone(richActiveRunContractFixture.runtime_snapshot.snapshot)
 }
 
 describe('chat-list store', () => {
@@ -264,12 +302,33 @@ describe('chat-list store', () => {
   let sessionsActivityHandler: ((event: BotSessionActivityEvent) => void) | null
   let sendEvents: UIStreamEvent[]
   let sentWSMessages: Array<Record<string, unknown>>
-  let abortedWSStreams: string[]
+  let wsOutboundTimeline: Array<Record<string, unknown>>
+  let runtimeSubscribeMessages: Array<Record<string, unknown>>
+  let runtimeUnsubscribeMessages: Array<Record<string, unknown>>
   let lastStreamId = ''
   let lastSessionId = ''
+  let legacyRuntimeStates: Map<string, {
+    sessionId: string
+    generation: string
+    epoch: string
+    seq: number
+    messages: ConversationUiMessage[]
+    requestUserTurn?: ConversationUiTurn
+    operation?: SessionruntimeRunOperationView
+  }>
+  let legacyRuntimeAdmissions: Map<string, {
+    requestUserTurn?: ConversationUiTurn
+    operation?: SessionruntimeRunOperationView
+  }>
+  let canonicalRuntimeStreams: Set<string>
+
+  function sentAbortMessages() {
+    return sentWSMessages.filter(message => message.type === 'abort')
+  }
 
   beforeEach(() => {
-    setActivePinia(createPinia())
+    testPiniaInstances = []
+    setActivePinia(createTestPinia())
     streamHandler = null
     _sessionMessageHandler = null
     sessionMessageHandlers = new Map()
@@ -277,11 +336,13 @@ describe('chat-list store', () => {
     lastStreamId = ''
     lastSessionId = ''
     sentWSMessages = []
-    abortedWSStreams = []
-    sendEvents = [
-      { type: 'start' } as UIStreamEvent,
-      { type: 'error', message: 'model failed' } as UIStreamEvent,
-    ]
+    wsOutboundTimeline = []
+    runtimeSubscribeMessages = []
+    runtimeUnsubscribeMessages = []
+    legacyRuntimeStates = new Map()
+    legacyRuntimeAdmissions = new Map()
+    canonicalRuntimeStreams = new Set()
+    sendEvents = [{ type: 'error', message: 'model failed' } as UIStreamEvent]
     vi.clearAllMocks()
 
     api.fetchBots.mockResolvedValue([
@@ -405,6 +466,12 @@ describe('chat-list store', () => {
     })
     api.closeACPRuntime.mockResolvedValue(undefined)
     api.fetchMessagesUI.mockResolvedValue([])
+    api.fetchSessionRuntime.mockImplementation((botId: string, sessionId: string) => Promise.resolve({
+      bot_id: botId,
+      session_id: sessionId,
+      seq: 0,
+      queue: [],
+    }))
     api.executeQuickAction.mockResolvedValue(null)
     api.fetchSafeSkillCatalog.mockResolvedValue([])
     sdk.getBotsByBotIdSettings.mockResolvedValue({ data: { chat_runtime: 'model' } })
@@ -421,27 +488,207 @@ describe('chat-list store', () => {
       sessionsActivityHandler = onEvent
       signal.addEventListener('abort', () => resolve(), { once: true })
     }))
-    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
-      streamHandler = onStreamEvent
+    api.connectWebSocket.mockImplementation((sourceBotId: string, onStreamEvent: UIStreamEventHandler) => {
+      const abort = vi.fn()
+      const emitRuntime = (
+        streamId: string,
+        targetSessionId: string,
+        status: string,
+        messages?: ConversationUiMessage[],
+        error = '',
+      ) => {
+        const runtimeKey = `${targetSessionId}\u0000${streamId}`
+        const existing = legacyRuntimeStates.get(runtimeKey)
+        const admission = legacyRuntimeAdmissions.get(runtimeKey)
+        const state = existing ?? {
+          sessionId: targetSessionId,
+          generation: `generation-${streamId}`,
+          epoch: `epoch-${targetSessionId || 'unbound'}`,
+          seq: 0,
+          messages: [],
+          ...admission,
+        }
+        state.sessionId = targetSessionId || state.sessionId
+        if (messages) state.messages = messages.map((message, index) => ({
+          ...message,
+          stable_id: message.stable_id ?? `${streamId}-row-${message.id}`,
+          turn_position: message.turn_position ?? 1,
+          turn_message_seq: message.turn_message_seq ?? index + 2,
+        }))
+        state.seq += 1
+        legacyRuntimeStates.set(runtimeKey, state)
+        onStreamEvent({
+          type: 'runtime_snapshot',
+          bot_id: sourceBotId,
+          session_id: state.sessionId,
+          stream_id: streamId,
+          epoch: state.epoch,
+          seq: state.seq,
+          snapshot: {
+            bot_id: sourceBotId,
+            session_id: state.sessionId,
+            epoch: state.epoch,
+            seq: state.seq,
+            current_run_view: {
+              stream_id: streamId,
+              generation: state.generation,
+              status,
+              messages: state.messages,
+              ...(state.requestUserTurn ? { request_user_turn: state.requestUserTurn } : {}),
+              ...(state.operation ? { operation: state.operation } : {}),
+              ...(error ? { error } : {}),
+            },
+            queue: [],
+          },
+        } as UIStreamEvent)
+      }
+      const adaptLegacyEvent = (event: UIStreamEvent, streamId: string, targetSessionId: string) => {
+        if (event.type === 'runtime_snapshot' || event.type === 'runtime_delta') {
+          const canonicalSessionId = (event.session_id ?? targetSessionId).trim()
+          const canonicalStreamId = (event.stream_id ?? streamId).trim()
+          if (canonicalSessionId && canonicalStreamId) {
+            canonicalRuntimeStreams.add(`${canonicalSessionId}\u0000${canonicalStreamId}`)
+          }
+          onStreamEvent(event)
+          return
+        }
+        if (canonicalRuntimeStreams.has(`${targetSessionId}\u0000${streamId}`)) {
+          onStreamEvent(event)
+          return
+        }
+        if (event.type === 'start') {
+          emitRuntime(streamId, targetSessionId, 'running')
+          return
+        }
+        if (event.type === 'message') {
+          const runtimeKey = `${targetSessionId}\u0000${streamId}`
+          const previous = legacyRuntimeStates.get(runtimeKey)?.messages ?? []
+          const messages = [...previous]
+          const index = messages.findIndex(message => message.id === event.data.id)
+          if (index >= 0) messages[index] = event.data as ConversationUiMessage
+          else messages.push(event.data as ConversationUiMessage)
+          emitRuntime(streamId, targetSessionId, 'running', messages)
+          return
+        }
+        if (event.type === 'end') {
+          emitRuntime(streamId, targetSessionId, 'completed')
+          return
+        }
+        if (event.type === 'error' && legacyRuntimeStates.has(`${targetSessionId}\u0000${streamId}`)) {
+          emitRuntime(streamId, targetSessionId, 'errored', undefined, event.message)
+          return
+        }
+        onStreamEvent(event)
+      }
+      streamHandler = event => adaptLegacyEvent(
+        event,
+        (event as { stream_id?: string }).stream_id ?? lastStreamId,
+        (event as { session_id?: string }).session_id ?? lastSessionId,
+      )
       return {
         get connected() {
           return true
         },
-        send: vi.fn((message: { stream_id?: string; session_id?: string }) => {
+        send: vi.fn((message: {
+          type?: string
+          stream_id?: string
+          session_id?: string
+          message_id?: string
+          text?: string
+        }) => {
+          wsOutboundTimeline.push(message as Record<string, unknown>)
+          if ((message as Record<string, unknown>).type === 'runtime_subscribe') {
+            runtimeSubscribeMessages.push(message as Record<string, unknown>)
+            return
+          }
+          if ((message as Record<string, unknown>).type === 'runtime_unsubscribe') {
+            runtimeUnsubscribeMessages.push(message as Record<string, unknown>)
+            return
+          }
           sentWSMessages.push(message as Record<string, unknown>)
           lastStreamId = message.stream_id ?? ''
           lastSessionId = message.session_id ?? ''
+          const outboundType = String((message as Record<string, unknown>).type ?? '')
+          if (outboundType === 'abort') {
+            return
+          }
+          if (lastStreamId && ['message', 'retry_message', 'edit_message'].includes(outboundType)) {
+            const runtimeKey = `${lastSessionId}\u0000${lastStreamId}`
+            const admission: {
+              requestUserTurn?: ConversationUiTurn
+              operation?: SessionruntimeRunOperationView
+            } = {}
+            if (outboundType === 'message') {
+              admission.requestUserTurn = {
+                role: 'user',
+                id: `${lastStreamId}-user-row`,
+                text: message.text ?? '',
+                external_message_id: lastStreamId,
+                timestamp: '2026-07-16T00:00:00.000Z',
+                turn_position: 1,
+                turn_message_seq: 1,
+              }
+            } else if (outboundType === 'retry_message') {
+              admission.operation = {
+                kind: 'retry',
+                replace_from_message_id: message.message_id,
+              }
+            } else {
+              admission.operation = {
+                kind: 'edit',
+                replace_from_message_id: message.message_id,
+                replacement_user_turn: {
+                  role: 'user',
+                  id: `${lastStreamId}-user-row`,
+                  text: message.text ?? '',
+                  external_message_id: lastStreamId,
+                  timestamp: '2026-07-16T00:00:00.000Z',
+                  turn_position: 1,
+                  turn_message_seq: 1,
+                },
+              }
+            }
+            legacyRuntimeAdmissions.set(runtimeKey, admission)
+          }
+          const sidebandAction = outboundType === 'tool_approval_response' || outboundType === 'user_input_response'
+          const preAdmissionError = sendEvents.some(event => event.type === 'error')
+            && !sendEvents.some(event => event.type === 'message')
           for (const event of sendEvents) {
-            onStreamEvent({
+            const explicitEventSessionId = (event as { session_id?: string }).session_id?.trim()
+            if (event.type === 'session_created' && explicitEventSessionId) {
+              const unboundRuntimeKey = `\u0000${lastStreamId}`
+              const boundRuntimeKey = `${explicitEventSessionId}\u0000${lastStreamId}`
+              const admission = legacyRuntimeAdmissions.get(unboundRuntimeKey)
+              if (admission) {
+                legacyRuntimeAdmissions.delete(unboundRuntimeKey)
+                legacyRuntimeAdmissions.set(boundRuntimeKey, admission)
+              }
+              lastSessionId = explicitEventSessionId
+            }
+            const eventSessionId = explicitEventSessionId || lastSessionId
+            const commandInvocation = event.type === 'command_result' || event.type === 'command_error'
+              ? { invocation_id: event.invocation_id ?? lastStreamId }
+              : {}
+            if ((sidebandAction || preAdmissionError) && event.type === 'start') continue
+            if (sidebandAction && (event.type === 'end' || event.type === 'error')) {
+              onStreamEvent({
+                type: event.type === 'end' ? 'command_result' : 'command_error',
+                invocation_id: lastStreamId,
+                action_id: outboundType,
+                session_id: eventSessionId,
+                ...(event.type === 'error' ? { error: { message: event.message } } : {}),
+              } as UIStreamEvent)
+              continue
+            }
+            streamHandler?.({
               ...event,
+              ...commandInvocation,
               stream_id: lastStreamId,
-              session_id: lastSessionId,
+              session_id: eventSessionId,
             } as UIStreamEvent)
           }
         }),
-        abort: vi.fn((streamId: string) => {
-          abortedWSStreams.push(streamId)
-        }),
+        abort,
         close: vi.fn(),
         onOpen: null,
         onClose: null,
@@ -449,7 +696,9 @@ describe('chat-list store', () => {
     })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const pinia of testPiniaInstances) disposePinia(pinia)
+    await flushPromises()
     vi.unstubAllGlobals()
   })
 
@@ -680,7 +929,7 @@ describe('chat-list store', () => {
     const store = useChatStore()
 
     await store.selectBot('bot-1')
-    store.messages.push({
+    seedTranscript(store, {
       id: 'existing-user',
       role: 'user',
       text: 'old message',
@@ -975,10 +1224,7 @@ describe('chat-list store', () => {
       },
     })
 
-    sendEvents = [
-      { type: 'start' } as UIStreamEvent,
-      { type: 'end' } as UIStreamEvent,
-    ]
+    sendEvents = [{ type: 'command_result', action_id: 'tool_approval_response', terminal: true } as UIStreamEvent]
     await store.respondToolApproval(tool!.approval!, 'approve')
     await flushPromises()
 
@@ -1069,11 +1315,13 @@ describe('chat-list store', () => {
     }
     const tool = assistant.messages.find(block => block.type === 'tool')
 
-    // The approval response stream fails before the server applies the decision.
-    sendEvents = [
-      { type: 'start' } as UIStreamEvent,
-      { type: 'error', message: 'approval failed' } as UIStreamEvent,
-    ]
+    // The approval side-band command fails before the server applies the decision.
+    sendEvents = [{
+      type: 'command_error',
+      action_id: 'tool_approval_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'approval failed' },
+    } as UIStreamEvent]
     await store.respondToolApproval(tool!.approval!, 'approve')
     await flushPromises()
 
@@ -1086,10 +1334,7 @@ describe('chat-list store', () => {
     })
 
     // The user can retry, and the retry goes through.
-    sendEvents = [
-      { type: 'start' } as UIStreamEvent,
-      { type: 'end' } as UIStreamEvent,
-    ]
+    sendEvents = [{ type: 'command_result', action_id: 'tool_approval_response', terminal: true } as UIStreamEvent]
     const retried = await store.respondToolApproval(rolledBackTool!.approval!, 'approve')
     await flushPromises()
 
@@ -1145,15 +1390,17 @@ describe('chat-list store', () => {
     const tool = assistant.messages.find(block => block.type === 'tool')
     if (!tool?.approval) throw new Error('approval block was not streamed')
 
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     await store.respondToolApproval(tool.approval, 'approve')
     const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
     await store.selectSession('session-2')
     streamHandler?.({
-      type: 'error',
-      stream_id: responseStreamId,
+      type: 'command_error',
+      invocation_id: responseStreamId,
+      action_id: 'tool_approval_response',
+      terminal: true,
       session_id: 'session-1',
-      message: 'approval failed',
+      error: { code: 'runtime_response_failed', message: 'approval failed' },
     } as UIStreamEvent)
     await flushPromises()
     await flushPromises()
@@ -1173,6 +1420,15 @@ describe('chat-list store', () => {
     })
 
     store.abort()
+    const originalStreamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: originalStreamId,
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', originalStreamId, 'aborted', 3),
+    } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: false, stage: 'stream' })
     expect(assistant.streaming).toBe(false)
   })
@@ -1215,7 +1471,7 @@ describe('chat-list store', () => {
     }
     const approval = tool.approval
 
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     await store.respondToolApproval(approval, 'approve')
     await store.respondToolApproval(approval, 'approve')
     await flushPromises()
@@ -1230,7 +1486,7 @@ describe('chat-list store', () => {
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
-  it('aborts a visible approval response, rolls back its decision, and unlocks retry', async () => {
+  it('does not create a second active run for a visible approval response', async () => {
     sendEvents = [{ type: 'start' } as UIStreamEvent]
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
@@ -1244,66 +1500,32 @@ describe('chat-list store', () => {
       status: 'pending',
       can_approve: true,
     }
-    store.messages.push(approvalTurn(approval))
+    seedTranscript(store, approvalTurn(approval))
     await expect(store.respondToolApproval(approval, 'approve')).resolves.toBe(true)
     const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
     const responseStreamId = responseMessage?.stream_id as string
-    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
-
     store.abort()
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: responseStreamId,
+      action_id: 'tool_approval_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'response failed' },
+    } as UIStreamEvent)
     await flushPromises()
 
-    expect(ws.abort).toHaveBeenCalledTimes(1)
-    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(sentAbortMessages()).toHaveLength(0)
     expect(store.streaming).toBe(false)
     const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
     expect(block?.type).toBe('tool')
     if (block?.type !== 'tool' || !block.approval) throw new Error('approval block missing')
     expect(block.approval).toMatchObject({ status: 'pending', can_approve: true })
 
-    sendEvents = [{ type: 'start' } as UIStreamEvent, { type: 'end' } as UIStreamEvent]
+    sendEvents = [{ type: 'command_result', action_id: 'tool_approval_response', terminal: true } as UIStreamEvent]
     await expect(store.respondToolApproval(block.approval, 'approve')).resolves.toBe(true)
   })
 
-  it('keeps the approved tool block visible while the response stream continues', async () => {
-    api.fetchSessions.mockResolvedValueOnce({ items: [
-      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
-    ], nextCursor: null })
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
-    const store = useChatStore()
-
-    await store.selectBot('bot-1')
-    const approval: UIToolApproval = {
-      approval_id: 'approval-pwd',
-      short_id: 9,
-      status: 'pending',
-      can_approve: true,
-    }
-    store.messages.push(approvalTurn(approval, 0))
-
-    await expect(store.respondToolApproval(approval, 'approve')).resolves.toBe(true)
-    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
-    streamHandler?.({
-      type: 'message',
-      stream_id: responseStreamId,
-      session_id: 'session-1',
-      data: { id: 0, type: 'reasoning', content: 'Running the approved tool' },
-    } as UIStreamEvent)
-
-    const assistant = store.messages.find(turn => turn.role === 'assistant')
-    if (!assistant || assistant.role !== 'assistant') throw new Error('assistant turn was not found')
-    expect(assistant.messages.map(block => [block.id, block.type])).toEqual([
-      [0, 'tool'],
-      [1, 'reasoning'],
-    ])
-    const tool = assistant.messages.find(block => block.type === 'tool')
-    expect(tool?.approval).toMatchObject({ status: 'approved', can_approve: false })
-
-    streamHandler?.({ type: 'end', stream_id: responseStreamId, session_id: 'session-1' } as UIStreamEvent)
-    await flushPromises()
-  })
-
-  it('aborts silent approval and original streams once and ignores late response events', async () => {
+  it('aborts only the active run while an approval command is in flight', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
       {
@@ -1324,6 +1546,7 @@ describe('chat-list store', () => {
         },
       } as UIStreamEvent,
     ]
+    const runtimeEvents = structuredClone(sendEvents)
     const store = useChatStore()
 
     await store.selectBot('bot-1')
@@ -1339,16 +1562,76 @@ describe('chat-list store', () => {
     await expect(store.respondToolApproval(tool.approval, 'approve')).resolves.toBe(true)
     const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
     const responseStreamId = responseMessage?.stream_id as string
-    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
     const messageCount = store.messages.length
 
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: originalStreamId,
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript(runtimeEvents, 'session-1', originalStreamId, 'running', 3),
+    } as UIStreamEvent)
     store.abort()
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: responseStreamId,
+      action_id: 'tool_approval_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'run stopped' },
+    } as UIStreamEvent)
+    api.fetchMessagesUI.mockResolvedValue([
+      {
+        id: `${originalStreamId}-user-row`,
+        role: 'user',
+        text: 'run pwd',
+        attachments: [],
+        external_message_id: originalStreamId,
+        turn_position: 1,
+        turn_message_seq: 1,
+        timestamp: '2026-07-16T00:00:00.000Z',
+      },
+      {
+        id: `${originalStreamId}-row-1`,
+        role: 'assistant',
+        messages: [{
+          id: 1,
+          stable_id: `${originalStreamId}-row-1`,
+          turn_position: 1,
+          turn_message_seq: 2,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        }],
+        timestamp: '2026-07-16T00:00:00.000Z',
+        streaming: false,
+      },
+    ])
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: originalStreamId,
+      seq: 4,
+      snapshot: runtimeSnapshotFromScript(runtimeEvents, 'session-1', originalStreamId, 'aborted', 4),
+    } as UIStreamEvent)
     await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
     await flushPromises()
 
-    expect(ws.abort).toHaveBeenCalledTimes(2)
-    expect(ws.abort).toHaveBeenCalledWith(originalStreamId)
-    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(sentAbortMessages()).toEqual([expect.objectContaining({
+      type: 'abort',
+      stream_id: originalStreamId,
+      session_id: 'session-1',
+      generation: `generation-${originalStreamId}`,
+    })])
     expect(tool.approval).toMatchObject({ status: 'pending', can_approve: true })
     expect(store.messages).toHaveLength(messageCount)
 
@@ -1393,13 +1676,13 @@ describe('chat-list store', () => {
       status: 'pending',
       can_approve: true,
     }
-    store.messages.push(approvalTurn(approval))
+    seedTranscript(store, approvalTurn(approval))
 
     const result = await store.respondToolApproval(approval, 'approve')
     await flushPromises()
 
     expect(result).toBe(false)
-    expect(sentWSMessages).toHaveLength(0)
+    expect(sentWSMessages.filter(message => message.type !== 'runtime_subscribe')).toHaveLength(0)
     expect(toast.error).toHaveBeenCalledWith('Connection lost. Reconnect and try again.')
     expect(store.messages).toHaveLength(1)
     const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
@@ -1434,7 +1717,7 @@ describe('chat-list store', () => {
       status: 'pending',
       can_approve: true,
     }
-    store.messages.push(approvalTurn(approval))
+    seedTranscript(store, approvalTurn(approval))
 
     const result = await store.respondToolApproval(approval, 'approve')
     await flushPromises()
@@ -1447,6 +1730,225 @@ describe('chat-list store', () => {
     if (block?.type === 'tool') {
       expect(block.approval).toMatchObject({ status: 'pending', can_approve: true })
     }
+  })
+
+  it('replays an uncertain approval without exposing a conflicting decision', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const snapshot = runtimeSnapshotFromScript([{
+      type: 'message',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'exec',
+        tool_call_id: 'call-approval-reconnect',
+        running: false,
+        approval: {
+          approval_id: 'approval-reconnect',
+          short_id: 9,
+          status: 'pending',
+          can_approve: true,
+        },
+      },
+    } as UIStreamEvent], 'session-1', 'stream-approval-reconnect', 'running', 10)
+    const snapshotEvent = {
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-approval-reconnect',
+      seq: 10,
+      snapshot,
+    } as UIStreamEvent
+    streamHandler?.(structuredClone(snapshotEvent))
+
+    const pending = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.approval?.approval_id === 'approval-reconnect')
+    if (pending?.type !== 'tool' || !pending.approval) throw new Error('pending approval was not projected')
+    expect(await store.respondToolApproval(pending.approval, 'approve')).toBe(true)
+    expect(pending.approval.status).toBe('approved')
+    const initialResponse = sentWSMessages.find(message => message.type === 'tool_approval_response')
+    const responseStreamId = String(initialResponse?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
+      onClose?: (() => void) | null
+      onOpen?: (() => void) | null
+    }
+    websocket.onClose?.()
+    websocket.onOpen?.()
+    streamHandler?.(structuredClone(snapshotEvent))
+
+    const replayedResponses = sentWSMessages.filter(message => message.type === 'tool_approval_response')
+    expect(replayedResponses).toHaveLength(2)
+    expect(replayedResponses[1]).toMatchObject({
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      approval_id: 'approval-reconnect',
+      short_id: 9,
+      decision: 'approve',
+    })
+    const unresolved = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.approval?.approval_id === 'approval-reconnect')
+    if (unresolved?.type !== 'tool' || !unresolved.approval) throw new Error('uncertain approval was not retained')
+    expect(unresolved.approval.status).toBe('approved')
+    expect(await store.respondToolApproval(unresolved.approval, 'reject')).toBe(false)
+    expect(sentWSMessages.filter(message => message.type === 'tool_approval_response')).toHaveLength(2)
+
+    streamHandler?.({
+      type: 'command_result',
+      invocation_id: responseStreamId,
+      action_id: 'tool_approval_response',
+      terminal: true,
+    } as UIStreamEvent)
+    expect(unresolved.approval.status).toBe('approved')
+  })
+
+  it('reconciles a lost approval result after a newer run replaces the old run', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const oldSnapshot = runtimeSnapshotFromScript([{
+      type: 'message',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'exec',
+        tool_call_id: 'call-approval-rollover',
+        running: false,
+        approval: {
+          approval_id: 'approval-rollover',
+          short_id: 11,
+          status: 'pending',
+          can_approve: true,
+        },
+      },
+    } as UIStreamEvent], 'session-1', 'stream-old-run', 'running', 10)
+    const oldSnapshotEvent = {
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-old-run',
+      seq: 10,
+      snapshot: oldSnapshot,
+    } as UIStreamEvent
+    streamHandler?.(structuredClone(oldSnapshotEvent))
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'older-user-turn',
+      role: 'user',
+      text: 'older context',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    } as UITurn])
+    expect(await store.loadOlderMessages()).toBe(1)
+
+    const approvalBlock = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.approval?.approval_id === 'approval-rollover')
+    if (approvalBlock?.type !== 'tool' || !approvalBlock.approval) throw new Error('pending approval was not projected')
+    expect(await store.respondToolApproval(approvalBlock.approval, 'approve')).toBe(true)
+    const responseStreamId = String(sentWSMessages.find(message => message.type === 'tool_approval_response')?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
+      onClose?: (() => void) | null
+      onOpen?: (() => void) | null
+    }
+    websocket.onClose?.()
+    websocket.onOpen?.()
+    streamHandler?.(structuredClone(oldSnapshotEvent))
+    const replayedResponses = sentWSMessages.filter(message => message.type === 'tool_approval_response')
+    expect(replayedResponses).toHaveLength(2)
+    expect(replayedResponses[1]?.stream_id).toBe(responseStreamId)
+
+    const approvedHistory = [approvalTurn({
+      approval_id: 'approval-rollover',
+      short_id: 11,
+      status: 'approved',
+      can_approve: false,
+    })] as UITurn[]
+    const history = deferred<UITurn[]>()
+    api.fetchMessagesUI.mockImplementation(() => history.promise)
+    const newSnapshot = runtimeSnapshotFromScript([{
+      type: 'message',
+      data: { id: 0, type: 'text', content: 'new run output' },
+    } as UIStreamEvent], 'session-1', 'stream-new-run', 'running', 20)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-new-run',
+      seq: 20,
+      snapshot: newSnapshot,
+    } as UIStreamEvent)
+    const subscriptionsBeforeError = runtimeSubscribeMessages.length
+    const historyCallsBeforeError = api.fetchMessagesUI.mock.calls.length
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: responseStreamId,
+      action_id: 'tool_approval_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'approval request not found' },
+    } as UIStreamEvent)
+
+    const lockedApproval = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.approval?.approval_id === 'approval-rollover')
+    if (lockedApproval?.type !== 'tool' || !lockedApproval.approval) throw new Error('uncertain approval left the active transcript')
+    expect(lockedApproval.approval).toMatchObject({ status: 'approved', can_approve: false })
+    expect(await store.respondToolApproval(lockedApproval.approval, 'reject')).toBe(false)
+    expect(runtimeSubscribeMessages.length).toBeGreaterThan(subscriptionsBeforeError)
+    expect(toast.error).not.toHaveBeenCalled()
+    history.resolve(approvedHistory)
+    await flushPromises()
+    await flushPromises()
+    expect(api.fetchMessagesUI.mock.calls.length).toBeGreaterThan(historyCallsBeforeError)
+
+    const settledApproval = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.approval?.approval_id === 'approval-rollover')
+    expect(settledApproval?.type === 'tool' ? settledApproval.approval : undefined).toMatchObject({
+      status: 'approved',
+      can_approve: false,
+    })
+    expect(store.messages.some(turn =>
+      turn.role === 'assistant'
+      && turn.messages.some(block => block.type === 'text' && block.content === 'new run output'),
+    )).toBe(true)
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: responseStreamId,
+      action_id: 'tool_approval_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'late replay failure' },
+    } as UIStreamEvent)
+    expect(toast.error).not.toHaveBeenCalled()
+
+    websocket.onClose?.()
+    websocket.onOpen?.()
+    const historyCallsBeforeSettledReconnect = api.fetchMessagesUI.mock.calls.length
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-new-run',
+      seq: 20,
+      snapshot: newSnapshot,
+    } as UIStreamEvent)
+    await flushPromises()
+    expect(sentWSMessages.filter(message => message.type === 'tool_approval_response')).toHaveLength(2)
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(historyCallsBeforeSettledReconnect)
   })
 
   it('creates ACP sessions without a placeholder title', async () => {
@@ -2233,12 +2735,16 @@ describe('chat-list store', () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
-    sendEvents = [{ type: 'agent_end' } as UIStreamEvent]
+    sendEvents = [{
+      type: 'command_result',
+      action_id: 'user_input_response',
+      terminal: true,
+    } as UIStreamEvent]
     const store = useChatStore()
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
@@ -2259,63 +2765,406 @@ describe('chat-list store', () => {
       expect(block.userInput?.status).toBe('submitted')
       expect(block.userInput?.can_respond).toBe(false)
     }
+    expect(await store.respondUserInput(singleSelectUserInput(), {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(true)
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(2)
   })
 
-  it('keeps the answered ask_user block visible while the response stream continues', async () => {
+  it('sends only one response when user input is submitted twice', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     const store = useChatStore()
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput, 'call-ask', 0))
+    seedTranscript(store, askUserTurn(userInput))
 
-    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
-    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
-    streamHandler?.({
-      type: 'message',
-      stream_id: responseStreamId,
-      session_id: 'session-1',
-      data: { id: 0, type: 'reasoning', content: 'Continuing after your answer' },
-    } as UIStreamEvent)
-
-    const assistant = store.messages.find(turn => turn.role === 'assistant')
-    if (!assistant || assistant.role !== 'assistant') throw new Error('assistant turn was not found')
-    expect(assistant.messages.map(block => [block.id, block.type])).toEqual([
-      [0, 'tool'],
-      [1, 'reasoning'],
+    const [first, second] = await Promise.all([
+      store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] }),
+      store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] }),
     ])
-    const askUser = assistant.messages.find(block => block.type === 'tool')
-    expect(askUser?.userInput).toMatchObject({ status: 'submitted', can_respond: false })
 
-    streamHandler?.({
-      type: 'message',
-      stream_id: responseStreamId,
-      session_id: 'session-1',
-      data: { id: 0, type: 'reasoning', content: 'Still continuing' },
-    } as UIStreamEvent)
-    expect(assistant.messages.map(block => [block.id, block.type])).toEqual([
-      [0, 'tool'],
-      [1, 'reasoning'],
-    ])
-    expect(assistant.messages[1]).toMatchObject({ content: 'Still continuing' })
+    expect(first).toBe(true)
+    expect(second).toBe(false)
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(1)
+  })
 
-    streamHandler?.({ type: 'end', stream_id: responseStreamId, session_id: 'session-1' } as UIStreamEvent)
+  it('replays an uncertain ask-user response when reconnect snapshot remains pending', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
     await flushPromises()
+    const epoch = 'epoch-ask-reconnect'
+    const runtimeSnapshot = runtimeSnapshotFromScript([{
+      type: 'message',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'ask_user',
+        tool_call_id: 'call-ask',
+        running: false,
+        user_input: singleSelectUserInput(),
+      },
+    } as UIStreamEvent], 'session-1', 'stream-ask-reconnect', 'running', 10)
+    runtimeSnapshot.epoch = epoch
+    const reconnectSnapshotEvent = {
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-ask-reconnect',
+      epoch,
+      seq: 10,
+      snapshot: runtimeSnapshot,
+    } as UIStreamEvent
+    streamHandler?.(structuredClone(reconnectSnapshotEvent))
+
+    const pending = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool'
+        && block.userInput?.user_input_id === 'input-1'
+        && block.userInput.status === 'pending')
+    expect(pending?.type).toBe('tool')
+    if (pending?.type !== 'tool' || !pending.userInput) throw new Error('pending user input was not projected')
+    expect(await store.respondUserInput(pending.userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(true)
+    expect(pending.userInput.status).toBe('submitted')
+    const initialResponse = sentWSMessages.find(message => message.type === 'user_input_response')
+    const responseStreamId = String(initialResponse?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
+      onClose?: (() => void) | null
+      onOpen?: (() => void) | null
+    }
+    websocket.onClose?.()
+    websocket.onOpen?.()
+    streamHandler?.(structuredClone(reconnectSnapshotEvent))
+
+    const replayedResponses = sentWSMessages.filter(message => message.type === 'user_input_response')
+    expect(replayedResponses).toHaveLength(2)
+    expect(replayedResponses[1]).toMatchObject({
+      type: 'user_input_response',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      user_input_id: 'input-1',
+      short_id: 4,
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+      canceled: false,
+    })
+    const refreshed = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool'
+        && block.userInput?.user_input_id === 'input-1'
+        && block.userInput.status === 'submitted')
+    expect(refreshed?.type).toBe('tool')
+    if (refreshed?.type !== 'tool' || !refreshed.userInput) throw new Error('uncertain user input was not replayed')
+    expect(await store.respondUserInput(refreshed.userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(false)
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(2)
+  })
+
+  it('retries an ask-user replay when the first hydration arrives before the websocket is connected', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const epoch = 'epoch-ask-replay-connect-race'
+    const snapshot = runtimeSnapshotFromScript([{
+      type: 'message',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'ask_user',
+        tool_call_id: 'call-ask-connect-race',
+        running: false,
+        user_input: singleSelectUserInput(),
+      },
+    } as UIStreamEvent], 'session-1', 'stream-ask-connect-race', 'running', 10)
+    snapshot.epoch = epoch
+    const event = {
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-ask-connect-race',
+      epoch,
+      seq: 10,
+      snapshot,
+    } as UIStreamEvent
+    streamHandler?.(structuredClone(event))
+
+    const pending = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.userInput?.user_input_id === 'input-1')
+    if (pending?.type !== 'tool' || !pending.userInput) throw new Error('pending user input was not projected')
+    expect(await store.respondUserInput(pending.userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(true)
+    const initialResponse = sentWSMessages.find(message => message.type === 'user_input_response')
+    const responseStreamId = String(initialResponse?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    let connected = true
+    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
+      connected: boolean
+      onClose?: (() => void) | null
+      onOpen?: (() => void) | null
+    }
+    Object.defineProperty(websocket, 'connected', { configurable: true, get: () => connected })
+    websocket.onClose?.()
+    websocket.onOpen?.()
+
+    connected = false
+    streamHandler?.(structuredClone(event))
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(1)
+
+    connected = true
+    streamHandler?.(structuredClone(event))
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toEqual([
+      expect.objectContaining({ stream_id: responseStreamId, user_input_id: 'input-1' }),
+      expect.objectContaining({ stream_id: responseStreamId, user_input_id: 'input-1' }),
+    ])
+  })
+
+  it('waits for the websocket checkpoint before replaying an uncertain ask-user response', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = []
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const epoch = 'epoch-ask-rest-reconnect'
+    const snapshot = runtimeSnapshotFromScript([{
+      type: 'message',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'ask_user',
+        tool_call_id: 'call-ask-rest',
+        running: false,
+        user_input: singleSelectUserInput(),
+      },
+    } as UIStreamEvent], 'session-1', 'stream-ask-rest', 'running', 10)
+    snapshot.epoch = epoch
+    const event = {
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-ask-rest',
+      epoch,
+      seq: 10,
+      snapshot,
+    } as UIStreamEvent
+    streamHandler?.(structuredClone(event))
+    const pending = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.userInput?.user_input_id === 'input-1')
+    if (pending?.type !== 'tool' || !pending.userInput) throw new Error('pending user input was not projected')
+    expect(await store.respondUserInput(pending.userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(true)
+    const initialResponse = sentWSMessages.find(message => message.type === 'user_input_response')
+    const responseStreamId = String(initialResponse?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
+      onClose?: (() => void) | null
+      onOpen?: (() => void) | null
+    }
+    websocket.onClose?.()
+    websocket.onOpen?.()
+    await flushPromises()
+
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(1)
+    streamHandler?.(structuredClone(event))
+
+    const restored = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool'
+        && block.userInput?.user_input_id === 'input-1'
+        && block.userInput.status === 'submitted')
+    if (restored?.type !== 'tool' || !restored.userInput) throw new Error('checkpoint did not replay pending user input')
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toEqual([
+      expect.objectContaining({
+        type: 'user_input_response',
+        stream_id: responseStreamId,
+        session_id: 'session-1',
+        user_input_id: 'input-1',
+        answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+      }),
+      expect.objectContaining({
+        type: 'user_input_response',
+        stream_id: responseStreamId,
+        session_id: 'session-1',
+        user_input_id: 'input-1',
+        answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+      }),
+    ])
+    expect(await store.respondUserInput(restored.userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(false)
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(2)
+  })
+
+  it('replays an uncertain ask-user response after a stale checkpoint is followed by the current checkpoint', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = []
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const epoch = 'epoch-ask-stale-rest'
+    const current = runtimeSnapshotFromScript([{
+      type: 'message',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'ask_user',
+        tool_call_id: 'call-ask-stale-rest',
+        running: false,
+        user_input: singleSelectUserInput(),
+      },
+    } as UIStreamEvent], 'session-1', 'stream-ask-stale-rest', 'running', 10)
+    current.epoch = epoch
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', stream_id: 'stream-ask-stale-rest', epoch, seq: 10, snapshot: current,
+    } as UIStreamEvent)
+    const pending = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.userInput?.user_input_id === 'input-1')
+    if (pending?.type !== 'tool' || !pending.userInput) throw new Error('pending user input was not projected')
+    expect(await store.respondUserInput(pending.userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(true)
+    const initialResponse = sentWSMessages.find(message => message.type === 'user_input_response')
+    const responseStreamId = String(initialResponse?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    const stale = structuredClone(current)
+    stale.seq = 9
+    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
+      onClose?: (() => void) | null
+      onOpen?: (() => void) | null
+    }
+
+    websocket.onClose?.()
+    websocket.onOpen?.()
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', stream_id: 'stream-ask-stale-rest', epoch, seq: 9, snapshot: stale,
+    } as UIStreamEvent)
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(1)
+
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', stream_id: 'stream-ask-stale-rest', epoch, seq: 10, snapshot: structuredClone(current),
+    } as UIStreamEvent)
+    const restored = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool'
+        && block.userInput?.user_input_id === 'input-1'
+        && block.userInput.status === 'submitted')
+    if (restored?.type !== 'tool' || !restored.userInput) throw new Error('pending user input was not replayed after current checkpoint')
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(2)
+    expect(await store.respondUserInput(restored.userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(false)
+  })
+
+  it('replays an in-flight ask-user response after switching bots', async () => {
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot 1' },
+      { id: 'bot-2', status: 'active', name: 'Bot 2' },
+    ])
+    api.fetchSessions.mockImplementation((botId: string) => Promise.resolve(botId === 'bot-1'
+      ? { items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }], nextCursor: null }
+      : { items: [], nextCursor: null }))
+    sendEvents = []
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const userInput = singleSelectUserInput()
+    seedTranscript(store, askUserTurn(userInput))
+    expect(await store.respondUserInput(userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(true)
+    const initialResponse = sentWSMessages.find(message => message.type === 'user_input_response')
+    const responseStreamId = String(initialResponse?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    const epoch = 'epoch-ask-bot-switch'
+    const snapshot = runtimeSnapshotFromScript([{
+      type: 'message',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'ask_user',
+        tool_call_id: 'call-ask-switch',
+        running: false,
+        user_input: singleSelectUserInput(),
+      },
+    } as UIStreamEvent], 'session-1', 'stream-ask-switch', 'running', 10)
+    snapshot.epoch = epoch
+    const event = {
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-ask-switch',
+      epoch,
+      seq: 10,
+      snapshot,
+    } as UIStreamEvent
+
+    await store.selectBot('bot-2')
+    await store.selectBot('bot-1')
+    await flushPromises()
+    streamHandler?.(structuredClone(event))
+
+    const restored = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool'
+        && block.userInput?.user_input_id === 'input-1'
+        && block.userInput.status === 'submitted')
+    if (restored?.type !== 'tool' || !restored.userInput) throw new Error('pending user input was not replayed after bot switch')
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toEqual([
+      expect.objectContaining({ stream_id: responseStreamId, user_input_id: 'input-1' }),
+      expect.objectContaining({ stream_id: responseStreamId, user_input_id: 'input-1' }),
+    ])
+    expect(await store.respondUserInput(restored.userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(false)
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(2)
   })
 
   it('cancels user input over websocket and marks the block canceled', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
-    sendEvents = [{ type: 'agent_end' } as UIStreamEvent]
+    sendEvents = [{
+      type: 'command_result',
+      action_id: 'user_input_response',
+      terminal: true,
+    } as UIStreamEvent]
     const store = useChatStore()
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { canceled: true, reason: 'user_canceled' })
     await flushPromises()
@@ -2358,12 +3207,12 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
 
-    expect(sentWSMessages).toHaveLength(0)
+    expect(sentWSMessages.filter(message => message.type !== 'runtime_subscribe')).toHaveLength(0)
     expect(toast.error).toHaveBeenCalledWith('Connection lost. Reconnect and try again.')
     expect(store.messages).toHaveLength(1)
     const block = store.messages[0]?.role === 'assistant'
@@ -2396,7 +3245,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
@@ -2443,7 +3292,7 @@ describe('chat-list store', () => {
       ],
       can_respond: true,
     }
-    store.messages.push({
+    seedTranscript(store, {
       id: 'assistant-1',
       role: 'assistant',
       messages: [{
@@ -2497,7 +3346,7 @@ describe('chat-list store', () => {
     expect(store.isSessionStreaming('bot-1', 'session-1')).toBe(true)
 
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
@@ -2862,34 +3711,24 @@ describe('chat-list store', () => {
     expect(store.sessions.map(session => session.id)).toEqual(['session-hidden', 'session-visible'])
   })
 
-  it('refreshes pending user input after response stream failure', async () => {
+  it('rolls back pending user input after a legacy side-band error', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
     const store = useChatStore()
 
     await store.selectBot('bot-1')
+    await vi.waitFor(() => expect(api.fetchMessagesUI).toHaveBeenCalled())
+    await flushPromises()
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
-    api.fetchMessagesUI.mockResolvedValueOnce([{
-      id: 'assistant-1',
-      role: 'assistant',
-      messages: [{
-        id: 1,
-        type: 'tool',
-        name: 'ask_user',
-        input: { questions: [{ text: 'Which plan?', kind: 'single_select' }] },
-        tool_call_id: 'call-ask',
-        running: false,
-        user_input: userInput,
-      }],
-      timestamp: new Date().toISOString(),
-    }])
+    seedTranscript(store, askUserTurn(userInput))
+    api.fetchMessagesUI.mockClear()
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
     await flushPromises()
 
+    expect(api.fetchMessagesUI).not.toHaveBeenCalled()
     const block = store.messages[0]?.role === 'assistant'
       ? store.messages[0].messages[0]
       : null
@@ -2900,7 +3739,7 @@ describe('chat-list store', () => {
     }
   })
 
-  it('rolls back user input on abort without refreshing the old session', async () => {
+  it('rolls back user input when the side-band command fails without refreshing the session', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
@@ -2908,17 +3747,23 @@ describe('chat-list store', () => {
     const store = useChatStore()
 
     await store.selectBot('bot-1')
+    await vi.waitFor(() => expect(api.fetchMessagesUI).toHaveBeenCalled())
+    await flushPromises()
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
     api.fetchMessagesUI.mockClear()
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
-    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
-    store.abort()
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: responseStreamId,
+      action_id: 'user_input_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'response failed' },
+    } as UIStreamEvent)
     await flushPromises()
 
-    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
     expect(api.fetchMessagesUI).not.toHaveBeenCalled()
     expect(store.messages).toHaveLength(1)
     const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
@@ -2926,6 +3771,243 @@ describe('chat-list store', () => {
     if (block?.type === 'tool') {
       expect(block.userInput).toMatchObject({ status: 'pending', can_respond: true })
     }
+  })
+
+  it('isolates the same user-input response stream id across sessions', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    const targetA = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:user-input-a' }
+    const targetB = { botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:user-input-b' }
+    store.bindChatView(targetA.viewId, targetA, true)
+    store.bindChatView(targetB.viewId, targetB, true)
+    await flushPromises()
+    await flushPromises()
+    const inputA = singleSelectUserInput('input-a')
+    const inputB = singleSelectUserInput('input-b')
+    seedTargetTranscript(store, targetA, askUserTurn(inputA, 'call-a'))
+    seedTargetTranscript(store, targetB, askUserTurn(inputB, 'call-b'))
+    const sharedStreamId = '00000000-0000-4000-8000-000000000001'
+    const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(sharedStreamId)
+
+    expect(await store.respondUserInput(inputA, { canceled: true }, targetA)).toBe(true)
+    expect(await store.respondUserInput(inputB, { canceled: true }, targetB)).toBe(true)
+    uuid.mockRestore()
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(2)
+
+    streamHandler?.({
+      type: 'command_result',
+      invocation_id: sharedStreamId,
+      session_id: 'session-a',
+      action_id: 'user_input_response',
+      terminal: true,
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'error',
+      stream_id: sharedStreamId,
+      session_id: 'session-a',
+      message: 'late completed user-input error',
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: sharedStreamId,
+      action_id: 'user_input_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'ambiguous late error' },
+    } as UIStreamEvent)
+
+    const blockB = store.chatView(targetB).transcript.messages[0]?.role === 'assistant'
+      ? store.chatView(targetB).transcript.messages[0].messages[0]
+      : undefined
+    expect(blockB?.type === 'tool' ? blockB.userInput : undefined).toMatchObject({
+      status: 'canceled',
+      can_respond: false,
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: sharedStreamId,
+      session_id: 'session-b',
+      action_id: 'user_input_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'session B failed' },
+    } as UIStreamEvent)
+    expect(blockB?.type === 'tool' ? blockB.userInput : undefined).toMatchObject({
+      status: 'pending',
+      can_respond: true,
+    })
+    expect(toast.error).toHaveBeenCalledWith('session B failed')
+  })
+
+  it('does not classify an ordinary completed stream as a terminal user-input response', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent, { type: 'end' } as UIStreamEvent]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const completedStreamId = '00000000-0000-4000-8000-000000000004'
+    const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(completedStreamId)
+    await expect(store.sendMessage('ordinary turn')).resolves.toMatchObject({ ok: true })
+
+    sendEvents = []
+    const userInput = singleSelectUserInput('reused-stream-input')
+    seedTranscript(store, askUserTurn(userInput, 'reused-stream-call'))
+    expect(await store.respondUserInput(userInput, { canceled: true })).toBe(true)
+    uuid.mockRestore()
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: completedStreamId,
+      session_id: 'session-1',
+      action_id: 'user_input_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'reused stream response failed' },
+    } as UIStreamEvent)
+
+    const block = store.messages.at(-1)?.role === 'assistant'
+      ? store.messages.at(-1)?.messages[0]
+      : undefined
+    expect(block?.type === 'tool' ? block.userInput : undefined).toMatchObject({
+      status: 'pending',
+      can_respond: true,
+    })
+    expect(toast.error).toHaveBeenCalledWith('reused stream response failed')
+  })
+
+  it('routes side-band results independently from a colliding runtime subscription id', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const subscriptionId = String(runtimeSubscribeMessages.at(-1)?.invocation_id ?? '')
+    expect(subscriptionId).not.toBe('')
+    const userInput = singleSelectUserInput('subscription-collision-input')
+    seedTranscript(store, askUserTurn(userInput, 'subscription-collision-call'))
+    const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(subscriptionId as `${string}-${string}-${string}-${string}-${string}`)
+    expect(await store.respondUserInput(userInput, { canceled: true })).toBe(true)
+    uuid.mockRestore()
+
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: subscriptionId,
+      session_id: 'session-1',
+      action_id: 'user_input_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'side-band collision failed' },
+    } as UIStreamEvent)
+
+    const block = store.messages.at(-1)?.role === 'assistant'
+      ? store.messages.at(-1)?.messages[0]
+      : undefined
+    expect(block?.type === 'tool' ? block.userInput : undefined).toMatchObject({
+      status: 'pending',
+      can_respond: true,
+    })
+    expect(toast.error).toHaveBeenCalledWith('side-band collision failed')
+  })
+
+  it('ignores late user-input results after deleting their session', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    const targetA = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:delete-input-a' }
+    const targetB = { botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:delete-input-b' }
+    store.bindChatView(targetA.viewId, targetA, true)
+    store.bindChatView(targetB.viewId, targetB, true)
+    await flushPromises()
+    await flushPromises()
+    const inputA = singleSelectUserInput('delete-input-a')
+    const inputB = singleSelectUserInput('delete-input-b')
+    seedTargetTranscript(store, targetA, askUserTurn(inputA, 'delete-call-a'))
+    seedTargetTranscript(store, targetB, askUserTurn(inputB, 'delete-call-b'))
+    const sharedStreamId = '00000000-0000-4000-8000-000000000002'
+    const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(sharedStreamId)
+    await store.respondUserInput(inputA, { canceled: true }, targetA)
+    await store.respondUserInput(inputB, { canceled: true }, targetB)
+    uuid.mockRestore()
+
+    api.deleteSession.mockResolvedValueOnce(undefined)
+    await store.removeSession('session-a')
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: sharedStreamId,
+      session_id: 'session-a',
+      action_id: 'user_input_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'deleted session failed' },
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: sharedStreamId,
+      action_id: 'user_input_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'ambiguous deleted session failure' },
+    } as UIStreamEvent)
+
+    const blockB = store.chatView(targetB).transcript.messages[0]?.role === 'assistant'
+      ? store.chatView(targetB).transcript.messages[0].messages[0]
+      : undefined
+    expect(blockB?.type === 'tool' ? blockB.userInput : undefined).toMatchObject({
+      status: 'canceled',
+      can_respond: false,
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('ignores late approval results after deleting their session', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const approval: UIToolApproval = {
+      approval_id: 'delete-approval-a', short_id: 19, status: 'pending', can_approve: true,
+    }
+    seedTranscript(store, approvalTurn(approval))
+    expect(await store.respondToolApproval(approval, 'approve')).toBe(true)
+    const responseStreamId = String(sentWSMessages.at(-1)?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    api.deleteSession.mockResolvedValueOnce(undefined)
+    await store.removeSession('session-a')
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: responseStreamId,
+      session_id: 'session-a',
+      action_id: 'tool_approval_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'deleted approval failed' },
+    } as UIStreamEvent)
+
+    expect(store.sessionId).toBe('session-b')
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('does not refresh a previous bot after user-input teardown', async () => {
@@ -2941,7 +4023,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const userInput = singleSelectUserInput()
-    store.messages.push(askUserTurn(userInput))
+    seedTranscript(store, askUserTurn(userInput))
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     api.fetchMessagesUI.mockClear()
 
@@ -3022,6 +4104,86 @@ describe('chat-list store', () => {
 
     expect(api.closeACPRuntime).toHaveBeenCalledWith('bot-1', 'rt_warm')
     expect(store.pendingACPRuntimeId).toBe('')
+  })
+
+  it('aborts a colliding run in another session during auth reset', async () => {
+    const windowTarget = new EventTarget()
+    vi.stubGlobal('window', windowTarget)
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    const targetA = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:reset-a' }
+    const targetB = { botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:reset-b' }
+    store.bindChatView(targetA.viewId, targetA, true)
+    store.bindChatView(targetB.viewId, targetB, true)
+    await flushPromises()
+    await flushPromises()
+    const sharedStreamId = '00000000-0000-4000-8000-000000000005'
+    const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(sharedStreamId)
+    const sending = store.sendMessage('run in B', undefined, { target: targetB })
+    await flushPromises()
+    const approval: UIToolApproval = {
+      approval_id: 'approval-in-a', short_id: 21, status: 'pending', can_approve: true,
+    }
+    seedTargetTranscript(store, targetA, approvalTurn(approval))
+    expect(await store.respondToolApproval(approval, 'approve', targetA)).toBe(true)
+    uuid.mockRestore()
+    windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
+      detail: { reason: 'logout' },
+    }))
+
+    await expect(sending).resolves.toMatchObject({ ok: false })
+    expect(sentAbortMessages()).toContainEqual(expect.objectContaining({
+      stream_id: sharedStreamId,
+      session_id: 'session-b',
+    }))
+  })
+
+  it('does not reclaim or restore a pending send after auth reset', async () => {
+    const windowTarget = new EventTarget()
+    vi.stubGlobal('window', windowTarget)
+    sendEvents = []
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const target = { botId: 'bot-1', sessionId: 'session-1', viewId: 'chat' }
+
+    const sending = store.sendMessage('old user draft')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(1))
+    const oldStreamId = String(sentWSMessages.find(message => message.type === 'message')?.stream_id ?? '')
+    windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
+      detail: { reason: 'logout' },
+    }))
+
+    await expect(sending).resolves.toMatchObject({ ok: false })
+    expect(store.composerDraftRestoreFor(target, 'chat')).toBeNull()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const oldRequest = { role: 'user', text: 'old user draft', external_message_id: oldStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', oldStreamId, 'running', 1, '', oldRequest),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', oldStreamId, 'aborted', 2, 'aborted', oldRequest),
+    } as UIStreamEvent)
+    await flushPromises()
+    await flushPromises()
+
+    expect(store.composerDraftRestoreFor(target, 'chat')).toBeNull()
   })
 
   it('does not restore bots from an initialization response after auth reset', async () => {
@@ -3127,19 +4289,40 @@ describe('chat-list store', () => {
     await flushPromises()
 
     const assistant = store.messages.find(turn => turn.role === 'assistant')
-    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
     expect(store.streaming).toBe(true)
     expect(assistant?.streaming).toBe(true)
 
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: lastSessionId,
+      stream_id: lastStreamId,
+      seq: 19,
+      snapshot: runtimeSnapshotFromScript([], lastSessionId, lastStreamId, 'running', 19),
+    } as UIStreamEvent)
     store.abort()
 
+    const aborted = runtimeSnapshotFromScript([], lastSessionId, lastStreamId, 'aborted', 20)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: lastSessionId,
+      stream_id: lastStreamId,
+      seq: 20,
+      snapshot: aborted,
+    } as UIStreamEvent)
+
     await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
-    expect(ws.abort).toHaveBeenCalledWith(lastStreamId)
+    expect(sentAbortMessages()).toContainEqual(expect.objectContaining({
+      stream_id: lastStreamId,
+      session_id: lastSessionId,
+      generation: `generation-${lastStreamId}`,
+    }))
     expect(store.streaming).toBe(false)
     expect(assistant?.streaming).toBe(false)
   })
 
-  it('keeps an ephemeral error visible when refresh returns only the persisted user turn', async () => {
+  it('ignores a trailing end after an error without dropping visible assistant output', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
       {
@@ -3153,26 +4336,25 @@ describe('chat-list store', () => {
     await store.selectBot('bot-1')
     await store.sendMessage('hello')
 
-    api.fetchMessagesUI.mockResolvedValueOnce([{
-      role: 'user',
-      id: 'server-user-1',
-      text: 'hello',
-      timestamp: '2026-05-17T08:00:00.000Z',
-    }])
+    const refreshCallsBefore = api.fetchMessagesUI.mock.calls.length
     streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
     await flushPromises()
 
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(refreshCallsBefore)
     expect(store.messages).toHaveLength(2)
     expect(store.messages[0]).toMatchObject({ role: 'user', text: 'hello' })
     expect(store.messages[1]).toMatchObject({
       role: 'assistant',
-      messages: [{ type: 'error', content: 'model failed' }],
+      messages: [
+        { type: 'text', content: 'partial response' },
+        { type: 'error', content: 'model failed' },
+      ],
       streaming: false,
     })
   })
 
-  it('replaces the latest assistant immediately when retry starts', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+  it('waits for the server runtime operation before replacing a retried assistant', async () => {
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
       nextCursor: null,
@@ -3206,12 +4388,26 @@ describe('chat-list store', () => {
       message_id: 'assistant-old',
       workspace_target_id: 'computer-b',
     })
+    expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-old'])
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      streaming: false,
+      messages: [{ type: 'text', content: 'old answer' }],
+    })
+
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'retry',
+      replace_from_message_id: 'assistant-old',
+    }, [{ id: 0, type: 'text', content: 'new answer partial' }]))
+
     expect(store.messages.map(message => message.id)).not.toContain('assistant-old')
     expect(store.messages.map(message => message.role)).toEqual(['user', 'assistant'])
     expect(store.messages[1]).toMatchObject({
       role: 'assistant',
       streaming: true,
-      __optimistic: true,
+      __optimistic: false,
+      syncState: expect.objectContaining({ presence: 'live', persistence: 'unknown' }),
+      messages: [{ type: 'text', content: 'new answer partial' }],
     })
 
     api.fetchMessagesUI.mockResolvedValueOnce([
@@ -3225,20 +4421,131 @@ describe('chat-list store', () => {
       {
         id: 'assistant-new',
         role: 'assistant',
-        messages: [{ id: 1, type: 'text', content: 'new answer' }],
+        messages: [{ id: 1, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new answer' }],
         timestamp: '2026-05-17T08:00:02.000Z',
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'retry',
+      replace_from_message_id: 'assistant-old',
+    }, [{ id: 0, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new answer' }], 'completed', 11))
     await retry
     await flushPromises()
 
-    expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-new'])
+    expect(store.messages[0]?.id).toBe('user-1')
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      serverId: 'assistant-new',
+      streaming: false,
+    })
+  })
+
+  it('keeps an initiating retry pending until runtime admission arrives', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-05-17T08:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'old answer' }],
+        timestamp: '2026-05-17T08:00:01.000Z',
+      },
+    ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const retry = store.retryLatestAssistant('assistant-old')
+    await flushPromises()
+    const retryStreamId = lastStreamId
+
+    expect(store.streaming).toBe(true)
+    expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-old'])
+
+    const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
+    streamHandler?.(runtimeReplacementSnapshot(
+      retryStreamId,
+      operation,
+      [{ id: 0, type: 'text', content: 'new answer' }],
+      'running',
+      1,
+    ))
+    expect(store.messages.map(message => message.id)).not.toContain('assistant-old')
+
+    api.fetchMessagesUI.mockResolvedValue([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-05-17T08:00:00.000Z' },
+      {
+        id: 'assistant-new',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'new answer' }],
+        timestamp: '2026-05-17T08:00:02.000Z',
+      },
+    ])
+    streamHandler?.(runtimeReplacementSnapshot(
+      retryStreamId,
+      operation,
+      [{ id: 0, type: 'text', content: 'new answer' }],
+      'completed',
+      2,
+    ))
+
+    await expect(retry).resolves.toMatchObject({ ok: true })
+  })
+
+  it('times out an unobserved send after disconnect instead of streaming forever', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    vi.useFakeTimers()
+    try {
+      const sending = store.sendMessage('possibly lost')
+      await vi.advanceTimersByTimeAsync(0)
+      const streamId = lastStreamId
+      expect(streamId).not.toBe('')
+
+      const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
+        onClose?: (() => void) | null
+        onOpen?: (() => void) | null
+      }
+      websocket.onClose?.()
+      websocket.onOpen?.()
+      streamHandler?.({
+        type: 'runtime_snapshot',
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        seq: 1,
+        snapshot: { bot_id: 'bot-1', session_id: 'session-1', seq: 1, queue: [] },
+      } as UIStreamEvent)
+
+      await vi.advanceTimersByTimeAsync(29_999)
+      expect(store.streaming).toBe(true)
+      await vi.advanceTimersByTimeAsync(1)
+
+      await expect(sending).resolves.toMatchObject({
+        ok: false,
+        stage: 'startup',
+        error: 'runtime command was not acknowledged',
+        restoreInput: 'possibly lost',
+      })
+      expect(store.streaming).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('moves fork divider anchor to the previous inherited assistant when retry replaces the fork anchor', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{
         id: 'fork-session',
@@ -3293,6 +4600,14 @@ describe('chat-list store', () => {
     await flushPromises()
     const retry = store.retryLatestAssistant('assistant-old')
     await flushPromises()
+    expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
+      fork_message_id: 'assistant-old',
+    })
+
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'retry',
+      replace_from_message_id: 'assistant-old',
+    }, [{ id: 0, type: 'text', content: 'new answer partial' }], 'running', 10, 'fork-session'))
 
     expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
       fork_message_id: 'assistant-prev',
@@ -3328,7 +4643,10 @@ describe('chat-list store', () => {
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'retry',
+      replace_from_message_id: 'assistant-old',
+    }, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11, 'fork-session'))
     await retry
     await flushPromises()
 
@@ -3338,7 +4656,7 @@ describe('chat-list store', () => {
   })
 
   it('clears fork divider anchor when retry replaces the only inherited assistant', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{
         id: 'fork-session',
@@ -3379,6 +4697,12 @@ describe('chat-list store', () => {
     await flushPromises()
     const retry = store.retryLatestAssistant('assistant-old')
     await flushPromises()
+    expect((store.activeChatTarget.metadata.forked_from as Record<string, unknown>).fork_message_id).toBe('assistant-old')
+
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'retry',
+      replace_from_message_id: 'assistant-old',
+    }, [{ id: 0, type: 'text', content: 'new answer partial' }], 'running', 10, 'fork-session'))
 
     expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
       session_id: 'source-session',
@@ -3402,15 +4726,18 @@ describe('chat-list store', () => {
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'retry',
+      replace_from_message_id: 'assistant-old',
+    }, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11, 'fork-session'))
     await retry
-    await flushPromises()
-
-    expect((store.activeChatTarget.metadata.forked_from as Record<string, unknown>).fork_message_id).toBeUndefined()
+    await vi.waitFor(() => {
+      expect((store.activeChatTarget.metadata.forked_from as Record<string, unknown>).fork_message_id).toBeUndefined()
+    })
   })
 
   it('moves fork divider anchor when edit replaces the fork anchor tail', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{
         id: 'fork-session',
@@ -3465,6 +4792,20 @@ describe('chat-list store', () => {
     await flushPromises()
     const edit = store.editLatestUser('user-2', 'edited second')
     await flushPromises()
+    expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
+      fork_message_id: 'assistant-old',
+    })
+
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'edit',
+      replace_from_message_id: 'user-2',
+      replacement_user_turn: {
+        role: 'user',
+        text: 'edited second',
+        timestamp: '2026-05-17T08:00:06.000Z',
+        platform: 'local',
+      },
+    }, [{ id: 0, type: 'text', content: 'new answer partial' }], 'running', 10, 'fork-session'))
 
     expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
       fork_message_id: 'assistant-prev',
@@ -3500,7 +4841,16 @@ describe('chat-list store', () => {
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'edit',
+      replace_from_message_id: 'user-2',
+      replacement_user_turn: {
+        role: 'user',
+        text: 'edited second',
+        timestamp: '2026-05-17T08:00:06.000Z',
+        platform: 'local',
+      },
+    }, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11, 'fork-session'))
     await edit
     await flushPromises()
 
@@ -3588,7 +4938,7 @@ describe('chat-list store', () => {
     await flushPromises()
     const retry = store.retryLatestAssistant('assistant-old')
     await flushPromises()
-    expect(store.messages.map(message => message.id)).toEqual(['user-a', expect.any(String)])
+    expect(store.messages.map(message => message.id)).toEqual(['user-a', 'assistant-old'])
     const retryStreamId = lastStreamId
 
     await store.selectSession('session-b')
@@ -3609,8 +4959,8 @@ describe('chat-list store', () => {
     expect(store.messages.map(message => message.id)).toEqual(['user-b'])
   })
 
-  it('replaces the latest user turn tail immediately when edit starts', async () => {
-    sendEvents = [{ type: 'start' } as UIStreamEvent]
+  it('waits for the server runtime operation before replacing an edited turn', async () => {
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
       nextCursor: null,
@@ -3645,18 +4995,36 @@ describe('chat-list store', () => {
       text: 'new prompt',
       workspace_target_id: 'computer-a',
     })
+    expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-old'])
+    expect(store.messages[0]).toMatchObject({ role: 'user', text: 'old prompt' })
+
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'edit',
+      replace_from_message_id: 'user-1',
+      replacement_user_turn: {
+        role: 'user',
+        text: 'new prompt',
+        timestamp: '2026-05-17T08:00:02.000Z',
+        turn_position: 2,
+        turn_message_seq: 1,
+        platform: 'local',
+      },
+    }, [{ id: 0, type: 'text', content: 'new answer partial' }]))
+
     expect(store.messages.map(message => message.id)).not.toContain('user-1')
     expect(store.messages.map(message => message.id)).not.toContain('assistant-old')
     expect(store.messages.map(message => message.role)).toEqual(['user', 'assistant'])
     expect(store.messages[0]).toMatchObject({
       role: 'user',
       text: 'new prompt',
-      __optimistic: true,
+      __optimistic: false,
+      syncState: expect.objectContaining({ presence: 'live', persistence: 'unknown' }),
     })
     expect(store.messages[1]).toMatchObject({
       role: 'assistant',
       streaming: true,
-      __optimistic: true,
+      __optimistic: false,
+      syncState: expect.objectContaining({ presence: 'live', persistence: 'unknown' }),
     })
 
     api.fetchMessagesUI.mockResolvedValueOnce([
@@ -3666,20 +5034,37 @@ describe('chat-list store', () => {
         text: 'new prompt',
         attachments: [],
         timestamp: '2026-05-17T08:00:02.000Z',
+        turn_position: 2,
+        turn_message_seq: 1,
       },
       {
         id: 'assistant-new',
         role: 'assistant',
-        messages: [{ id: 1, type: 'text', content: 'new answer' }],
+        messages: [{ id: 1, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new answer' }],
         timestamp: '2026-05-17T08:00:03.000Z',
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, {
+      kind: 'edit',
+      replace_from_message_id: 'user-1',
+      replacement_user_turn: {
+        role: 'user',
+        id: 'user-new',
+        text: 'new prompt',
+        timestamp: '2026-05-17T08:00:02.000Z',
+        platform: 'local',
+        turn_position: 2,
+        turn_message_seq: 1,
+      },
+    }, [{ id: 0, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new answer' }], 'completed', 11))
     await edit
-    await flushPromises()
-
-    expect(store.messages.map(message => message.id)).toEqual(['user-new', 'assistant-new'])
+    await vi.waitFor(() => {
+      expect(store.messages).toMatchObject([
+        { role: 'user', serverId: 'user-new', text: 'new prompt' },
+        { role: 'assistant', serverId: 'assistant-new', streaming: false },
+      ])
+    })
   })
 
   it('restores the old latest turn tail when edit fails before streaming starts', async () => {
@@ -3767,7 +5152,7 @@ describe('chat-list store', () => {
     const edit = store.editLatestUser('user-a', 'new prompt')
     await flushPromises()
     expect(store.messages.map(message => message.role)).toEqual(['user', 'assistant'])
-    expect(store.messages[0]).toMatchObject({ role: 'user', text: 'new prompt' })
+    expect(store.messages[0]).toMatchObject({ role: 'user', text: 'old prompt' })
     const editStreamId = lastStreamId
 
     await store.selectSession('session-b')
@@ -4057,8 +5442,29 @@ describe('chat-list store', () => {
     })
     const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
     streamHandler?.({
-      type: 'message', stream_id: responseStreamId, session_id: 'fork-session',
-      data: { id: 2, type: 'text', content: 'continuation' },
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'fork-session',
+      stream_id: responseStreamId,
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript(
+        [{ type: 'message', data: { id: 2, type: 'text', content: 'continuation' } }],
+        'fork-session',
+        responseStreamId,
+        'running',
+        1,
+      ),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'fork-session',
+      stream_id: responseStreamId,
+      seq: 2,
+      delta: {
+        reset_messages: true,
+        message_appends: [{ id: 2, type: 'text', content: 'continuation' }],
+      },
     } as UIStreamEvent)
 
     hydration.resolve(forkTurns)
@@ -4075,9 +5481,46 @@ describe('chat-list store', () => {
       ],
     })
 
-    api.fetchMessagesUI.mockResolvedValueOnce(forkTurns)
-    streamHandler?.({ type: 'end', stream_id: responseStreamId, session_id: 'fork-session' } as UIStreamEvent)
+    const completedForkTurns: UITurn[] = [
+      forkTurns[0]!,
+      {
+        ...forkTurns[1]!,
+        messages: [
+          {
+            ...forkTurns[1]!.messages[0]!,
+            user_input: { ...userInput, status: 'submitted', can_respond: false },
+          },
+          { id: 2, type: 'text', content: 'continuation' },
+        ],
+      },
+    ]
+    api.fetchMessagesUI.mockResolvedValueOnce(completedForkTurns)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'fork-session',
+      stream_id: responseStreamId,
+      seq: 2,
+      snapshot: runtimeSnapshotFromScript(
+        [{ type: 'message', data: { id: 2, type: 'text', content: 'continuation' } }],
+        'fork-session',
+        responseStreamId,
+        'completed',
+        2,
+      ),
+    } as UIStreamEvent)
     await flushPromises()
+    await flushPromises()
+
+    const completedAssistantTurns = store.messages.filter(message => message.role === 'assistant')
+    expect(completedAssistantTurns).toHaveLength(1)
+    expect(completedAssistantTurns[0]).toMatchObject({
+      streaming: false,
+      messages: [
+        { type: 'tool', userInput: { user_input_id: 'input-1', status: 'submitted' } },
+        { type: 'text', content: 'continuation' },
+      ],
+    })
   })
 
   it('routes a late fork response to its origin view without changing the focused Session', async () => {
@@ -4222,6 +5665,40 @@ describe('chat-list store', () => {
     expect(api.forkSessionFromMessage).not.toHaveBeenCalled()
   })
 
+  it('does not fork known non-canonical or non-assistant turns', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: new Date().toISOString() },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    expect(await store.forkMessage('user-1')).toBe(false)
+    seedTranscript(store, {
+      id: 'ephemeral-error',
+      role: 'assistant',
+      messages: [{ id: 0, type: 'error', content: 'Response stopped' }],
+      timestamp: new Date().toISOString(),
+      streaming: false,
+      __ephemeral: true,
+    })
+    expect(await store.forkMessage('ephemeral-error')).toBe(false)
+    seedTranscript(store, {
+      id: 'optimistic-assistant',
+      role: 'assistant',
+      messages: [],
+      timestamp: new Date().toISOString(),
+      streaming: false,
+      __optimistic: true,
+    })
+    expect(await store.forkMessage('optimistic-assistant')).toBe(false)
+    expect(api.forkSessionFromMessage).not.toHaveBeenCalled()
+  })
+
   it('sends disable as an explicit reasoning effort override', async () => {
     sendEvents = []
     const sent: Array<{ reasoning_effort?: string; stream_id?: string; session_id?: string }> = []
@@ -4231,10 +5708,38 @@ describe('chat-list store', () => {
         get connected() {
           return true
         },
-        send: vi.fn((message: { reasoning_effort?: string; stream_id?: string; session_id?: string }) => {
+        send: vi.fn((message: { type?: string; reasoning_effort?: string; stream_id?: string; session_id?: string; text?: string }) => {
+          if (message.type === 'runtime_subscribe' || message.type === 'runtime_unsubscribe') return
           sent.push(message)
-          onStreamEvent({ type: 'start', stream_id: message.stream_id, session_id: message.session_id } as UIStreamEvent)
-          onStreamEvent({ type: 'end', stream_id: message.stream_id, session_id: message.session_id } as UIStreamEvent)
+          if (!message.stream_id || !message.session_id) return
+          onStreamEvent({
+            type: 'runtime_snapshot',
+            bot_id: 'bot-1',
+            session_id: message.session_id,
+            stream_id: message.stream_id,
+            epoch: `epoch-${message.session_id}`,
+            seq: 1,
+            snapshot: runtimeSnapshotFromScript([], message.session_id, message.stream_id, 'running', 1, '', {
+              role: 'user',
+              text: message.text ?? '',
+              external_message_id: message.stream_id,
+              timestamp: '2026-07-16T00:00:00.000Z',
+            }),
+          } as UIStreamEvent)
+          onStreamEvent({
+            type: 'runtime_snapshot',
+            bot_id: 'bot-1',
+            session_id: message.session_id,
+            stream_id: message.stream_id,
+            epoch: `epoch-${message.session_id}`,
+            seq: 2,
+            snapshot: runtimeSnapshotFromScript([], message.session_id, message.stream_id, 'completed', 2, '', {
+              role: 'user',
+              text: message.text ?? '',
+              external_message_id: message.stream_id,
+              timestamp: '2026-07-16T00:00:00.000Z',
+            }),
+          } as UIStreamEvent)
         }),
         abort: vi.fn(),
         close: vi.fn(),
@@ -4250,7 +5755,7 @@ describe('chat-list store', () => {
 
     expect(result).toMatchObject({ ok: true })
     expect(sent).toHaveLength(1)
-    expect(sent[0].reasoning_effort).toBe(REASONING_EFFORT_DISABLE)
+    expect(sent[0]!.reasoning_effort).toBe(REASONING_EFFORT_DISABLE)
   })
 
   it('keeps late quick action events scoped to the composer that sent them', async () => {
@@ -4525,26 +6030,32 @@ describe('chat-list store', () => {
     })
     expect(sentWSMessages[0]?.requested_skills).toBeUndefined()
 
-    streamHandler?.({
-      type: 'user_message',
-      stream_id: streamId,
-      session_id: 'session-a',
-      data: {
-        id: 'msg-skill',
-        role: 'user',
-        text: '',
-        user_message_kind: 'skill_activation',
-        skill_activation: {
-          skills: [{
-            name: 'flutter-adding-home-screen-widgets',
-            display_name: 'Flutter adding home screen widgets',
-            description: 'Safe display summary',
-            source_kind: 'managed',
-            state: 'effective',
-          }],
-        },
-        timestamp: '2026-07-03T00:00:00.000Z',
+    const requestUserTurn: ConversationUiTurn = {
+      id: 'msg-skill',
+      role: 'user',
+      text: '',
+      user_message_kind: 'skill_activation',
+      skill_activation: {
+        skills: [{
+          name: 'flutter-adding-home-screen-widgets',
+          display_name: 'Flutter adding home screen widgets',
+          description: 'Safe display summary',
+          source_kind: 'managed',
+          state: 'effective',
+        }],
       },
+      timestamp: '2026-07-03T00:00:00.000Z',
+      turn_position: 1,
+      turn_message_seq: 1,
+    }
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-a',
+      stream_id: streamId,
+      epoch: 'epoch-session-a',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-a', streamId, 'running', 1, '', requestUserTurn),
     } as UIStreamEvent)
     await flushPromises()
 
@@ -4562,11 +6073,18 @@ describe('chat-list store', () => {
     })
     expect(store.messages[1]).toMatchObject({ role: 'assistant', streaming: true })
 
-    streamHandler?.({
+    const responseScript = [{
       type: 'message',
-      stream_id: streamId,
+      data: { id: 1, stable_id: `${streamId}-row-1`, turn_position: 1, turn_message_seq: 2, type: 'text', content: 'Done' },
+    } as UIStreamEvent]
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
       session_id: 'session-a',
-      data: { id: 1, type: 'text', content: 'Done' },
+      stream_id: streamId,
+      epoch: 'epoch-session-a',
+      seq: 2,
+      snapshot: runtimeSnapshotFromScript(responseScript, 'session-a', streamId, 'running', 2, '', requestUserTurn),
     } as UIStreamEvent)
     expect(store.messages[1]).toMatchObject({
       role: 'assistant',
@@ -4574,7 +6092,25 @@ describe('chat-list store', () => {
       streaming: true,
     })
 
-    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { ...requestUserTurn, attachments: [] },
+      {
+        id: `${streamId}-row-1`,
+        role: 'assistant',
+        messages: responseScript.map(event => event.type === 'message' ? event.data : null).filter(Boolean),
+        timestamp: '2026-07-03T00:00:01.000Z',
+        streaming: false,
+      },
+    ])
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-a',
+      stream_id: streamId,
+      epoch: 'epoch-session-a',
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript(responseScript, 'session-a', streamId, 'completed', 3, '', requestUserTurn),
+    } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
@@ -4598,12 +6134,26 @@ describe('chat-list store', () => {
     expect(secondResult).toMatchObject({ ok: false, stage: 'startup' })
     expect(sentWSMessages).toHaveLength(1)
 
-    streamHandler?.({ type: 'end', stream_id: streamId } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      epoch: 'epoch-session-1',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'completed', 1, '', {
+        role: 'user',
+        text: 'first activation',
+        external_message_id: streamId,
+        timestamp: '2026-07-16T00:00:00.000Z',
+      }),
+    } as UIStreamEvent)
     await expect(firstSend).resolves.toMatchObject({ ok: true })
     expect(store.streaming).toBe(false)
   })
 
-  it('aborts a deferred draft stream before session_created binds it', async () => {
+  it('subscribes before routing abort when session_created binds a deferred draft stream', async () => {
     sendEvents = []
     const store = useChatStore()
 
@@ -4615,10 +6165,40 @@ describe('chat-list store', () => {
     await flushPromises()
     const streamId = sentWSMessages[0]?.stream_id as string
 
+    expect(runtimeSubscribeMessages).toEqual([])
     store.abort()
+    expect(sentAbortMessages()).toHaveLength(0)
+
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-1' } as UIStreamEvent)
+    expect(sentAbortMessages()).toContainEqual(expect.objectContaining({
+      stream_id: streamId,
+      session_id: 'session-1',
+    }))
+    expect(runtimeSubscribeMessages).toEqual([expect.objectContaining({
+      type: 'runtime_subscribe',
+      session_id: 'session-1',
+      invocation_id: expect.any(String),
+    })])
+    expect(api.fetchSessionRuntime).not.toHaveBeenCalled()
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 1),
+    } as UIStreamEvent)
+    expect(sentAbortMessages().filter(message => message.stream_id === streamId)).toHaveLength(2)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'aborted', 2),
+    } as UIStreamEvent)
 
     await expect(sending).resolves.toMatchObject({ ok: false })
-    expect(abortedWSStreams).toContain(streamId)
     expect(store.streaming).toBe(false)
   })
 
@@ -4934,11 +6514,14 @@ describe('chat-list store', () => {
     api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
       if (returningToSessionA && targetSessionId === 'session-a') {
         return [{
-          id: 'server-user-a',
+          id: `${sentWSMessages[0]?.stream_id as string}-user-row`,
           role: 'user',
           text: 'first',
           attachments: [],
           timestamp: '2026-07-10T00:00:00.000Z',
+          external_message_id: sentWSMessages[0]?.stream_id as string,
+          turn_position: 1,
+          turn_message_seq: 1,
         }]
       }
       return []
@@ -4999,15 +6582,14 @@ describe('chat-list store', () => {
     let returningToSessionA = false
     api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
       if (!returningToSessionA || targetSessionId !== 'session-a') return []
-      return [
-        { id: 'server-user-a', role: 'user', text: 'first', attachments: [], timestamp: '2026-07-10T00:00:00.000Z' },
-        {
-          id: 'server-assistant-a',
-          role: 'assistant',
-          messages: [{ id: 0, type: 'text', content: 'persisted' }],
-          timestamp: '2026-07-10T00:00:01.000Z',
-        },
-      ]
+      return [{
+        id: 'server-user-a',
+        role: 'user',
+        text: 'first',
+        attachments: [],
+        timestamp: '2026-07-10T00:00:00.000Z',
+        external_message_id: sentWSMessages[0]?.stream_id as string,
+      }]
     })
     const store = useChatStore()
 
@@ -5090,14 +6672,14 @@ describe('chat-list store', () => {
     ], nextCursor: null })
     api.fetchMessagesUI.mockResolvedValue([])
 
-    const sent: Array<{ stream_id?: string; session_id?: string }> = []
+    const sent: Array<{ type?: string; stream_id?: string; session_id?: string }> = []
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
       streamHandler = onStreamEvent
       return {
         get connected() {
           return true
         },
-        send: vi.fn((message: { stream_id?: string; session_id?: string }) => {
+        send: vi.fn((message: { type?: string; stream_id?: string; session_id?: string }) => {
           sent.push(message)
         }),
         abort: vi.fn(),
@@ -5118,25 +6700,50 @@ describe('chat-list store', () => {
     const second = store.sendMessage('second')
     await flushPromises()
 
-    const streamA = sent.find(item => item.session_id === 'session-a')?.stream_id
-    const streamB = sent.find(item => item.session_id === 'session-b')?.stream_id
+    const streamA = sent.find(item => item.type === 'message' && item.stream_id && item.session_id === 'session-a')?.stream_id
+    const streamB = sent.find(item => item.type === 'message' && item.stream_id && item.session_id === 'session-b')?.stream_id
     expect(streamA).toBeTruthy()
     expect(streamB).toBeTruthy()
+    if (!streamA || !streamB) throw new Error('missing interleaved stream ids')
     expect(store.isSessionStreaming('bot-1', 'session-a')).toBe(true)
     expect(store.isSessionStreaming('bot-1', 'session-b')).toBe(true)
 
-    streamHandler?.({
-      type: 'message',
-      stream_id: streamA,
-      session_id: 'session-a',
-      data: { id: 0, type: 'text', content: 'answer A' },
-    } as UIStreamEvent)
-    streamHandler?.({
-      type: 'message',
-      stream_id: streamB,
-      session_id: 'session-b',
-      data: { id: 0, type: 'text', content: 'answer B' },
-    } as UIStreamEvent)
+    const emitInterleavedSnapshot = (
+      sessionId: string,
+      streamId: string,
+      prompt: string,
+      answer: string,
+      status: string,
+      seq: number,
+    ) => {
+      const script = [{
+        type: 'message',
+        data: {
+          id: 0,
+          stable_id: `${streamId}-assistant-row`,
+          turn_position: 1,
+          turn_message_seq: 2,
+          type: 'text',
+          content: answer,
+        },
+      } as UIStreamEvent]
+      streamHandler?.({
+        type: 'runtime_snapshot',
+        bot_id: 'bot-1',
+        session_id: sessionId,
+        stream_id: streamId,
+        epoch: `epoch-${sessionId}`,
+        seq,
+        snapshot: runtimeSnapshotFromScript(script, sessionId, streamId, status, seq, '', {
+          role: 'user',
+          text: prompt,
+          external_message_id: streamId,
+          timestamp: '2026-07-16T00:00:00.000Z',
+        }),
+      } as UIStreamEvent)
+    }
+    emitInterleavedSnapshot('session-a', streamA, 'first', 'answer A', 'running', 1)
+    emitInterleavedSnapshot('session-b', streamB, 'second', 'answer B', 'running', 1)
     // Active session is B, so its optimistic turn shows the message.
     expect(store.sessionId).toBe('session-b')
     expect(store.messages).toEqual(expect.arrayContaining([
@@ -5146,8 +6753,39 @@ describe('chat-list store', () => {
       }),
     ]))
 
-    streamHandler?.({ type: 'end', stream_id: streamA, session_id: 'session-a' } as UIStreamEvent)
-    streamHandler?.({ type: 'end', stream_id: streamB, session_id: 'session-b' } as UIStreamEvent)
+    api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
+      const streamId = targetSessionId === 'session-a' ? streamA : streamB
+      const prompt = targetSessionId === 'session-a' ? 'first' : 'second'
+      const answer = targetSessionId === 'session-a' ? 'answer A' : 'answer B'
+      return [
+        {
+          id: `${streamId}-user-row`,
+          role: 'user',
+          text: prompt,
+          attachments: [],
+          external_message_id: streamId,
+          turn_position: 1,
+          turn_message_seq: 1,
+          timestamp: '2026-07-16T00:00:00.000Z',
+        },
+        {
+          id: `${streamId}-assistant-row`,
+          role: 'assistant',
+          messages: [{
+            id: 0,
+            stable_id: `${streamId}-assistant-row`,
+            turn_position: 1,
+            turn_message_seq: 2,
+            type: 'text',
+            content: answer,
+          }],
+          timestamp: '2026-07-16T00:00:01.000Z',
+          streaming: false,
+        },
+      ]
+    })
+    emitInterleavedSnapshot('session-a', streamA, 'first', 'answer A', 'completed', 2)
+    emitInterleavedSnapshot('session-b', streamB, 'second', 'answer B', 'completed', 2)
     await first
     await second
   })
@@ -5459,8 +7097,8 @@ describe('chat-list store', () => {
     expect(store.messages[1]?.id).toBe('msg-2')
     expect(store.messages.length).toBe(32)
 
-    // SSE-triggered refresh fetches only the most recent page; merge MUST
-    // preserve the older content the user pulled in.
+    // The latest page overlaps the loaded tail, so only that authoritative
+    // suffix is replaced and the older content stays mounted.
     api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
     _sessionMessageHandler?.({
       type: 'message_created',
@@ -5468,19 +7106,97 @@ describe('chat-list store', () => {
     } as never)
     await new Promise(r => setTimeout(r, 150))
     await flushPromises()
+    expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { limit: 30 })
     expect(store.messages[0]?.id).toBe('msg-1')
     expect(store.messages[1]?.id).toBe('msg-2')
   })
 
+  it('appends the thirty-first persisted turn from a bounded latest page', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const initialPage = Array.from({ length: 30 }, (_, index) => ({
+      id: `message-${index + 1}`,
+      role: 'user' as const,
+      text: `message ${index + 1}`,
+      attachments: [],
+      timestamp: `2026-06-19T00:00:${String(index).padStart(2, '0')}Z`,
+      turn_position: index + 1,
+      turn_message_seq: 1,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const newest = {
+      id: 'message-31',
+      role: 'user' as const,
+      text: 'message 31',
+      attachments: [],
+      timestamp: '2026-06-19T00:01:00Z',
+      turn_position: 31,
+      turn_message_seq: 1,
+    }
+    // The real endpoint returns at most 30 rows: one overlap row falls off
+    // the front as the new tail row enters the page.
+    api.fetchMessagesUI.mockResolvedValueOnce([...initialPage.slice(1), newest])
+    _sessionMessageHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: newest.id,
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        role: 'user',
+        created_at: newest.timestamp,
+      },
+    })
+    await flushPromises()
+
+    expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { limit: 30 })
+    expect(store.messages).toHaveLength(31)
+    expect(store.messages[0]?.id).toBe('message-1')
+    expect(store.messages.at(-1)?.id).toBe('message-31')
+  })
+
+  it('resets to a non-overlapping latest page after dropped persisted events', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+      nextCursor: null,
+    })
+    const initialPage = Array.from({ length: 30 }, (_, index) => ({
+      id: `old-${index + 1}`,
+      role: 'user' as const,
+      text: `old ${index + 1}`,
+      attachments: [],
+      timestamp: `2026-06-19T00:00:${String(index).padStart(2, '0')}Z`,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const latestPage = Array.from({ length: 30 }, (_, index) => ({
+      id: `latest-${index + 1}`,
+      role: 'user' as const,
+      text: `latest ${index + 1}`,
+      attachments: [],
+      timestamp: `2026-06-19T00:02:${String(index).padStart(2, '0')}Z`,
+    }))
+    api.fetchMessagesUI.mockResolvedValueOnce(latestPage)
+    _sessionMessageHandler?.({ type: 'dropped', count: 60 })
+    await flushPromises()
+
+    expect(store.messages.map(turn => turn.id)).toEqual(latestPage.map(turn => turn.id))
+    expect(store.messages.some(turn => turn.id === 'old-30')).toBe(false)
+  })
+
   it('replaces a scrolled-back optimistic user turn with its server twin instead of duplicating', async () => {
-    // The id-keyed dedup in the previous mergeMessages happily kept the
-    // optimistic and server copies side by side while the user was scrolled
-    // back. Logical-turn matching (role + content + ~timestamp), gated on
-    // the explicit `__optimistic` flag, collapses them in place. The flag
-    // (not id shape) is what isOptimisticTurn keys off, so this test also
-    // pins that a server turn whose id contains dashes (UUID-like) is NOT
-    // treated as optimistic — the prior heuristic would have misclassified
-    // it and eaten real history.
+    // Explicit external-message identity adopts the durable server row into
+    // the optimistic render key. Text and timestamps never participate, and
+    // an opaque UUID-shaped server id must remain ordinary persisted history.
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
       nextCursor: null,
@@ -5518,7 +7234,7 @@ describe('chat-list store', () => {
     // accidentally pass via id-shape heuristics — the __optimistic flag is
     // what drives the merge.
     const optimisticTimestamp = '2026-06-19T00:02:00Z'
-    store.messages.push({
+    seedTranscript(store, {
       id: '1700000000000',
       role: 'user',
       text: 'just sent',
@@ -5526,19 +7242,22 @@ describe('chat-list store', () => {
       timestamp: optimisticTimestamp,
       streaming: false,
       isSelf: true,
+      externalMessageId: 'request-just-sent',
       __optimistic: true,
     } as never)
     expect(store.messages.length).toBe(baseLength + 1)
 
-    // SSE-triggered refresh returns the server twin (different id, same
-    // role+content, timestamp within 5s).
+    // SSE-triggered refresh returns the same request under its durable id;
+    // external_message_id is the exact optimistic-to-persisted identity.
     api.fetchMessagesUI.mockResolvedValueOnce([
+      ...initialPage.slice(1),
       {
         id: 'server-user-1',
         role: 'user',
         text: 'just sent',
         attachments: [],
         timestamp: '2026-06-19T00:02:01Z',
+        external_message_id: 'request-just-sent',
       },
     ])
     _sessionMessageHandler?.({
@@ -5547,6 +7266,7 @@ describe('chat-list store', () => {
     } as never)
     await new Promise(r => setTimeout(r, 150))
     await flushPromises()
+    expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { limit: 30 })
 
     // Both copies would survive id-keyed dedup. Consolidation keeps the
     // optimistic render id stable so keyed chat DOM (including turn reserve)
@@ -5662,6 +7382,15 @@ describe('chat-list store', () => {
     await flushPromises()
     const streamId = lastStreamId
     expect(streamId).not.toBe('')
+    const runningSnapshot = runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 10)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      seq: 10,
+      snapshot: runningSnapshot,
+    } as UIStreamEvent)
 
     await store.selectSession('session-2')
     api.deleteSession.mockResolvedValueOnce(undefined)
@@ -5681,7 +7410,7 @@ describe('chat-list store', () => {
     } as UIStreamEvent)
     await flushPromises()
 
-    expect(abortedWSStreams).toContain(streamId)
+    expect(sentAbortMessages()).not.toContainEqual(expect.objectContaining({ stream_id: streamId }))
     expect(store.sessionId).toBe('session-2')
     expect(store.messages).toEqual([])
     expect(store.sessions.map(session => session.id)).toEqual(['session-2'])
@@ -5798,7 +7527,7 @@ describe('chat-list store', () => {
     expect(store.sessions.map(session => session.id)).toEqual(['shared-session', 'session-b2'])
     expect(store.sessionId).toBe('shared-session')
     expect(store.messages.slice(0, 2).map(message => message.id)).toEqual(['bot-2-user', 'bot-2-assistant'])
-    expect(abortedWSStreams).not.toContain(botTwoStreamId)
+    expect(sentAbortMessages()).not.toContainEqual(expect.objectContaining({ stream_id: botTwoStreamId }))
     expect(store.deletedSession).toEqual({
       id: 'shared-session',
       botId: 'bot-1',
@@ -5881,7 +7610,7 @@ describe('chat-list store', () => {
     expect(store.knownSessionSummary('session-2')).toBeNull()
   })
 
-  it('refreshes the current transcript when the session message stream reports dropped events', async () => {
+  it('merges persisted history when the session message stream reports dropped events', async () => {
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
       nextCursor: null,
@@ -5896,13 +7625,14 @@ describe('chat-list store', () => {
     expect(store.messages.map(message => message.id)).toEqual(['message-1'])
 
     api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'message-1', role: 'user', text: 'old', attachments: [], timestamp: '2026-06-20T00:00:00.000Z' },
       { id: 'message-2', role: 'user', text: 'refreshed', attachments: [], timestamp: '2026-06-20T00:00:01.000Z' },
     ])
     _sessionMessageHandler?.({ type: 'dropped', count: 3 })
     await flushPromises()
 
     expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { limit: 30 })
-    expect(store.messages.map(message => message.id)).toEqual(['message-2'])
+    expect(store.messages.map(message => message.id)).toEqual(['message-1', 'message-2'])
   })
 
   it('refreshes the session list when the bot activity stream reports dropped events', async () => {
@@ -6002,6 +7732,98 @@ describe('chat-list store', () => {
     expect(store.sessionId).toBe('session-a')
     expect(store.chatView(targetA).transcript.messages.map(message => message.id)).toEqual(['a-1'])
     expect(store.chatView(targetB).transcript.messages.map(message => message.id)).toEqual(['b-1', 'b-2'])
+  })
+
+  it('subscribes every visible Session pane to runtime and unsubscribes the last hidden pane', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    runtimeSubscribeMessages = []
+    store.bindChatView('chat:a', { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:a' }, true)
+    store.bindChatView('chat:b', { botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:b' }, true)
+    await flushPromises()
+
+    expect(runtimeSubscribeMessages).toContainEqual(
+      expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-b' }),
+    )
+
+    runtimeUnsubscribeMessages = []
+    store.setChatViewVisible('chat:b', false)
+    expect(runtimeUnsubscribeMessages).toContainEqual(expect.objectContaining({
+      type: 'runtime_unsubscribe',
+      session_id: 'session-b',
+      invocation_id: expect.any(String),
+      stream_id: expect.any(String),
+    }))
+    const unsubscribe = runtimeUnsubscribeMessages[0]
+    expect(unsubscribe?.stream_id).toBe(unsubscribe?.invocation_id)
+  })
+
+  it('isolates the same runtime subscription invocation id across sessions', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+        { id: 'session-c', bot_id: 'bot-1', title: 'C', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+    const sharedInvocationId = '00000000-0000-4000-8000-000000000003'
+    const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(sharedInvocationId)
+    store.bindChatView('chat:subscription-b', {
+      botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:subscription-b',
+    }, true)
+    store.bindChatView('chat:subscription-c', {
+      botId: 'bot-1', sessionId: 'session-c', viewId: 'chat:subscription-c',
+    }, true)
+    uuid.mockRestore()
+    await flushPromises()
+    await flushPromises()
+    expect(runtimeSubscribeMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ invocation_id: sharedInvocationId, session_id: 'session-b' }),
+      expect.objectContaining({ invocation_id: sharedInvocationId, session_id: 'session-c' }),
+    ]))
+
+    vi.useFakeTimers()
+    try {
+      streamHandler?.({
+        type: 'command_error',
+        invocation_id: sharedInvocationId,
+        session_id: 'session-b',
+        action_id: 'runtime_subscribe',
+        terminal: true,
+        error: { code: 'runtime_response_failed', message: 'session B subscription failed' },
+      } as UIStreamEvent)
+      streamHandler?.({
+        type: 'command_result',
+        invocation_id: sharedInvocationId,
+        session_id: 'session-c',
+        action_id: 'runtime_subscribe',
+        terminal: true,
+      } as UIStreamEvent)
+      const subscribeCount = runtimeSubscribeMessages.length
+      await vi.advanceTimersToNextTimerAsync()
+      expect(runtimeSubscribeMessages).toHaveLength(subscribeCount + 1)
+      expect(runtimeSubscribeMessages.at(-1)).toMatchObject({
+        type: 'runtime_subscribe',
+        session_id: 'session-b',
+      })
+    } finally {
+      vi.useRealTimers()
+      consoleError.mockRestore()
+    }
   })
 
   it('hydrates a visible non-focused Session summary before it is activated', async () => {
@@ -6123,11 +7945,97 @@ describe('chat-list store', () => {
     expect(store.chatView(targetA).transcript.messages.map(message => message.role)).toEqual(['user', 'assistant'])
     expect(store.chatView(targetB).transcript.messages).toEqual([])
     expect(sentWSMessages.at(-1)).toMatchObject({ session_id: 'session-a', composer_scope: 'bot-1:chat:a' })
+    const runningSnapshot = runtimeSnapshotFromScript([], 'session-a', lastStreamId, 'running', 10)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-a',
+      stream_id: lastStreamId,
+      seq: 10,
+      snapshot: runningSnapshot,
+    } as UIStreamEvent)
 
     store.abort(targetA)
+    const abortedSnapshot = runtimeSnapshotFromScript([], 'session-a', lastStreamId, 'aborted', 11, 'aborted')
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-a',
+      stream_id: lastStreamId,
+      seq: 11,
+      snapshot: abortedSnapshot,
+    } as UIStreamEvent)
     await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
     expect(store.sessionId).toBe('session-b')
     expect(store.chatView(targetB).transcript.messages).toEqual([])
+  })
+
+  it('queues draft restores independently for two panes and retains a hidden pane restore', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    const targetA = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:restore-a' }
+    const targetB = { botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:restore-b' }
+    const scopeA = 'bot-1:chat:restore-a'
+    const scopeB = 'bot-1:chat:restore-b'
+    store.bindChatView(targetA.viewId, targetA, true)
+    store.bindChatView(targetB.viewId, targetB, true)
+    await flushPromises()
+    await flushPromises()
+
+    const sendA = store.sendMessage('restore pane A', undefined, { target: targetA, composerScope: scopeA })
+    const sendB = store.sendMessage('restore pane B', undefined, { target: targetB, composerScope: scopeB })
+    await vi.waitFor(() => {
+      expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(2)
+    })
+    const streamA = String(sentWSMessages.find(message => message.type === 'message' && message.session_id === 'session-a')?.stream_id ?? '')
+    const streamB = String(sentWSMessages.find(message => message.type === 'message' && message.session_id === 'session-b')?.stream_id ?? '')
+    expect(streamA).not.toBe('')
+    expect(streamB).not.toBe('')
+
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-a', seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-a', streamA, 'running', 1),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-b', seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-b', streamB, 'running', 1),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-a', seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-a', streamA, 'aborted', 2, 'aborted'),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-b', seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-b', streamB, 'aborted', 2, 'aborted'),
+    } as UIStreamEvent)
+    store.setChatViewVisible(targetB.viewId, false)
+
+    await expect(sendA).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    await expect(sendB).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    await vi.waitFor(() => {
+      expect(store.composerDraftRestoreFor(targetA, scopeA)?.text).toBe('restore pane A')
+      expect(store.composerDraftRestoreFor(targetB, scopeB)?.text).toBe('restore pane B')
+    })
+
+    const restoreA = store.composerDraftRestoreFor(targetA, scopeA)
+    if (!restoreA) throw new Error('missing pane A restore')
+    store.clearComposerDraftRestore(restoreA.seq)
+    expect(store.composerDraftRestoreFor(targetA, scopeA)).toBeNull()
+    expect(store.composerDraftRestoreFor(targetB, scopeB)?.text).toBe('restore pane B')
+
+    store.setChatViewVisible(targetB.viewId, true)
+    const restoreB = store.composerDraftRestoreFor(targetB, scopeB)
+    if (!restoreB) throw new Error('missing pane B restore after showing pane')
+    store.clearComposerDraftRestore(restoreB.seq)
+    expect(store.composerDraftRestoreFor(targetB, scopeB)).toBeNull()
   })
 
   it('shares one Session transcript and one Session SSE across two visible panes', async () => {
@@ -6330,8 +8238,26 @@ describe('chat-list store', () => {
     expect(store.sessionId).toBeNull()
     expect(store.pendingACPStateFor(targetA)).toBeNull()
     expect(api.closeACPRuntime).not.toHaveBeenCalledWith('bot-1', 'rt_warm')
+    const runningSnapshot = runtimeSnapshotFromScript([], 'session-1', lastStreamId, 'running', 10)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: lastStreamId,
+      seq: 10,
+      snapshot: runningSnapshot,
+    } as UIStreamEvent)
 
     store.abort({ ...targetA, sessionId: 'session-1' })
+    const abortedSnapshot = runtimeSnapshotFromScript([], 'session-1', lastStreamId, 'aborted', 11, 'aborted')
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: lastStreamId,
+      seq: 11,
+      snapshot: abortedSnapshot,
+    } as UIStreamEvent)
     await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
   })
 
@@ -6621,6 +8547,7 @@ describe('chat-list store', () => {
     expect(api.closeACPRuntime).not.toHaveBeenCalledWith('bot-1', 'rt_warm')
   })
   it('applies the rich active-run contract script to the current assistant turn', async () => {
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
       nextCursor: null,
@@ -6629,10 +8556,13 @@ describe('chat-list store', () => {
     await store.selectBot('bot-1')
     await flushPromises()
 
-    sendEvents = richActiveRunStoreScript()
     const sendPromise = store.sendMessage('please inspect')
     await flushPromises()
     await flushPromises()
+    const runtimeEvent = structuredClone(richActiveRunContractFixture.runtime_snapshot)
+    runtimeEvent.stream_id = lastStreamId
+    runtimeEvent.snapshot.current_run_view!.stream_id = lastStreamId
+    streamHandler?.(runtimeEvent as UIStreamEvent)
 
     expect(sentWSMessages[0]).toMatchObject({
       type: 'message',
@@ -6679,11 +8609,18 @@ describe('chat-list store', () => {
       },
     })
 
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    api.fetchMessagesUI.mockResolvedValue([])
+    const completed = structuredClone(runtimeEvent) as unknown as { type: string, seq: number, snapshot: SessionruntimeSnapshot }
+    completed.type = 'runtime_snapshot'
+    completed.seq += 1
+    completed.snapshot.seq = completed.seq
+    completed.snapshot.current_run_view!.status = 'completed'
+    streamHandler?.(completed as UIStreamEvent)
     await sendPromise
   })
 
   it('records interrupted runtime streams as stream-stage failures after visible output', async () => {
+    sendEvents = []
     api.fetchSessions.mockResolvedValueOnce({
       items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
       nextCursor: null,
@@ -6692,8 +8629,14 @@ describe('chat-list store', () => {
     await store.selectBot('bot-1')
     await flushPromises()
 
-    sendEvents = interruptedRunStoreScript()
-    const result = await store.sendMessage('please run')
+    const sendPromise = store.sendMessage('please run')
+    await flushPromises()
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>(() => {}))
+    const runtimeEvent = structuredClone(interruptedRunContractFixture.runtime_snapshot)
+    runtimeEvent.stream_id = lastStreamId
+    runtimeEvent.snapshot.current_run_view!.stream_id = lastStreamId
+    streamHandler?.(runtimeEvent as UIStreamEvent)
+    const result = await sendPromise
 
     expect(result).toMatchObject({
       ok: false,
@@ -6738,4 +8681,4588 @@ describe('chat-list store', () => {
     streamHandler?.({ type: 'end', stream_id: 'stream-old', session_id: 'session-1' } as UIStreamEvent)
   })
 
+  it('does not let stale runtime state for another session pollute the visible transcript', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.fetchMessagesUI.mockResolvedValueOnce([])
+    store.selectSession('session-2')
+    await flushPromises()
+    expect(store.sessionId).toBe('session-2')
+    expect(store.messages).toEqual([])
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 11,
+      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', 'stream-old-runtime'), 'session-1', 'stream-old-runtime', 'running', 11),
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(false)
+    expect(store.messages).toEqual([])
+  })
+
+  it('reattaches a still-running assistant when switching away and back', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const running = runtimeSnapshotFromScript(
+      [{ type: 'message', data: { id: 0, type: 'text', content: 'still working' } }],
+      'session-1',
+      'stream-switch-back',
+      'running',
+      10,
+    )
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 10, snapshot: running } as UIStreamEvent)
+    expect(store.messages.some(turn => turn.role === 'assistant' && turn.messages.some(block => block.type === 'text' && block.content === 'still working'))).toBe(true)
+
+    api.fetchMessagesUI.mockResolvedValue([])
+    await store.selectSession('session-2')
+    await flushPromises()
+    await store.selectSession('session-1')
+    await flushPromises()
+    expect(store.messages.some(turn => turn.role === 'assistant' && turn.messages.some(block => block.type === 'text' && block.content === 'still working'))).toBe(true)
+
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 11, snapshot: { ...running, seq: 11 } } as UIStreamEvent)
+    expect(store.messages.some(turn => turn.role === 'assistant' && turn.messages.some(block => block.type === 'text' && block.content === 'still working'))).toBe(true)
+  })
+
+  it('does not duplicate persisted assistant history from a cold completed runtime snapshot', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValue([
+      {
+        id: 'assistant-persisted',
+        role: 'assistant',
+        messages: [{ id: 0, stable_id: 'assistant-persisted', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'persisted answer' }],
+        timestamp: '2026-07-12T00:00:00Z',
+        streaming: false,
+      },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 20,
+      snapshot: runtimeSnapshotFromScript(
+        [{
+          type: 'message',
+          data: { id: 0, stable_id: 'assistant-persisted', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'persisted answer' },
+        }],
+        'session-1',
+        'stream-already-completed',
+        'completed',
+        20,
+      ),
+    } as UIStreamEvent)
+
+    const assistants = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]?.id).toBe('assistant-persisted')
+  })
+
+  it('starts the new session history request without waiting for the previous session', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    let releaseSession2!: () => void
+    const session2Pending = new Promise<UITurn[]>((resolve) => {
+      releaseSession2 = () => resolve([])
+    })
+    const requested: string[] = []
+    api.fetchMessagesUI.mockImplementation((_botId: string, sid: string) => {
+      requested.push(sid)
+      return sid === 'session-2' ? session2Pending : Promise.resolve([])
+    })
+
+    await store.selectSession('session-2')
+    await flushPromises()
+    await store.selectSession('session-1')
+    await flushPromises()
+    expect(requested).toEqual(expect.arrayContaining(['session-2', 'session-1']))
+
+    releaseSession2()
+    await flushPromises()
+  })
+
+  it('uses the websocket checkpoint without requesting REST runtime hydration', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    expect(api.fetchSessionRuntime).not.toHaveBeenCalled()
+    expect(runtimeSubscribeMessages).toContainEqual(expect.objectContaining({
+      type: 'runtime_subscribe', session_id: 'session-1',
+    }))
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-new-epoch',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript(
+        [{ type: 'message', data: { id: 0, type: 'text', content: 'new epoch' } }],
+        'session-1',
+        'stream-new-epoch',
+        'running',
+        1,
+      ),
+    } as UIStreamEvent)
+
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      stream_id: 'stream-new-epoch',
+      seq: 2,
+      delta: { message_appends: [{ id: 0, type: 'text', content: ' continued' }] },
+    } as UIStreamEvent)
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role === 'assistant' ? assistant.messages : []).toContainEqual(expect.objectContaining({
+      type: 'text',
+      content: 'new epoch continued',
+    }))
+  })
+
+  it('does not fail an active assistant when runtime subscription setup fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const runningSnapshot = runtimeSnapshotFromScript(
+      [{ type: 'message', data: { id: 0, type: 'text', content: 'still running' } }],
+      'session-1',
+      'stream-still-running',
+      'running',
+      1,
+    )
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: runningSnapshot.epoch,
+      stream_id: 'stream-still-running',
+      seq: 1,
+      snapshot: runningSnapshot,
+    } as UIStreamEvent)
+    await flushPromises()
+    vi.useFakeTimers()
+    streamHandler?.({ type: 'runtime_dropped', bot_id: 'bot-1', session_id: 'session-1' } as UIStreamEvent)
+    const subscription = runtimeSubscribeMessages.at(-1)
+    const invocationId = String(subscription?.invocation_id ?? '')
+    expect(invocationId).not.toBe('')
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: invocationId,
+      session_id: 'session-1',
+      action_id: 'runtime_subscribe',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'runtime backend unavailable' },
+    } as UIStreamEvent)
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(store.streaming).toBe(true)
+    expect(assistant?.role === 'assistant' ? assistant.messages : []).toContainEqual(expect.objectContaining({ content: 'still running' }))
+    expect(assistant?.role === 'assistant' ? assistant.messages.some(block => block.type === 'error') : true).toBe(false)
+
+    const subscribeCount = runtimeSubscribeMessages.length
+    try {
+      const firstRetryStartedAt = Date.now()
+      await vi.advanceTimersToNextTimerAsync()
+      const firstRetryDelay = Date.now() - firstRetryStartedAt
+      expect(runtimeSubscribeMessages).toHaveLength(subscribeCount + 1)
+
+      const retryInvocationId = String(runtimeSubscribeMessages.at(-1)?.invocation_id ?? '')
+      expect(retryInvocationId).not.toBe('')
+      streamHandler?.({
+        type: 'command_error',
+        invocation_id: retryInvocationId,
+        session_id: 'session-1',
+        action_id: 'runtime_subscribe',
+        terminal: true,
+        error: { code: 'runtime_response_failed', message: 'runtime backend still unavailable' },
+      } as UIStreamEvent)
+      const secondRetryStartedAt = Date.now()
+      await vi.advanceTimersToNextTimerAsync()
+      const secondRetryDelay = Date.now() - secondRetryStartedAt
+
+      expect(secondRetryDelay).toBeGreaterThan(firstRetryDelay)
+      expect(secondRetryDelay).toBeLessThanOrEqual(30_000)
+      expect(runtimeSubscribeMessages).toHaveLength(subscribeCount + 2)
+      expect(consoleError).toHaveBeenCalledWith(
+        'Runtime subscription failed for bot-1/session-1:',
+        expect.objectContaining({ message: 'runtime backend unavailable' }),
+      )
+    } finally {
+      consoleError.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not treat a colliding ordinary stream error as an old-server runtime rejection', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const subscriptionId = String(runtimeSubscribeMessages.at(-1)?.invocation_id ?? '')
+    expect(subscriptionId).not.toBe('')
+    const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(subscriptionId as `${string}-${string}-${string}-${string}-${string}`)
+    const sending = store.sendMessage('colliding stream')
+    await vi.waitFor(() => expect(lastStreamId).toBe(subscriptionId))
+    uuid.mockRestore()
+
+    streamHandler?.({
+      type: 'error',
+      stream_id: subscriptionId,
+      session_id: 'session-1',
+      message: 'model failed',
+    } as UIStreamEvent)
+
+    await expect(sending).resolves.toMatchObject({ ok: false, stage: 'startup' })
+    expect(store.streaming).toBe(false)
+  })
+
+  it('keeps a long-running legacy stream alive after its start acknowledgement', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    vi.useFakeTimers()
+    try {
+      const sending = store.sendMessage('long legacy request')
+      await vi.advanceTimersByTimeAsync(1)
+      const streamId = lastStreamId
+      expect(streamId).not.toBe('')
+      streamHandler?.({ type: 'start', stream_id: streamId, session_id: 'session-1' } as UIStreamEvent)
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(store.streaming).toBe(true)
+
+      api.fetchMessagesUI.mockResolvedValueOnce([
+        { id: 'legacy-user', role: 'user', text: 'long legacy request', attachments: [], timestamp: new Date().toISOString() },
+        {
+          id: 'legacy-assistant', role: 'assistant',
+          messages: [{ id: 0, type: 'text', content: 'eventually done' }],
+          timestamp: new Date().toISOString(),
+        },
+      ])
+      streamHandler?.({
+        type: 'message', stream_id: streamId, session_id: 'session-1',
+        data: { id: 0, type: 'text', content: 'eventually done' },
+      } as UIStreamEvent)
+      streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-1' } as UIStreamEvent)
+      await expect(sending).resolves.toMatchObject({ ok: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps retrying a failed runtime subscription until a websocket checkpoint arrives', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    vi.useFakeTimers()
+    try {
+      const store = useChatStore()
+      await store.selectBot('bot-1')
+      const initialSubscription = runtimeSubscribeMessages.at(-1)
+      const invocationId = String(initialSubscription?.invocation_id ?? '')
+      expect(invocationId).not.toBe('')
+
+      streamHandler?.({
+        type: 'command_error',
+        invocation_id: invocationId,
+        action_id: 'runtime_subscribe',
+        terminal: true,
+        error: { code: 'runtime_response_failed', message: 'runtime backend unavailable' },
+      } as UIStreamEvent)
+      const subscribeCount = runtimeSubscribeMessages.length
+
+      await vi.advanceTimersToNextTimerAsync()
+
+      expect(runtimeSubscribeMessages).toHaveLength(subscribeCount + 1)
+      const checkpoint = runtimeSnapshotFromScript([], 'session-1', 'stream-ws-recovered', 'running', 1)
+      streamHandler?.({
+        type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', epoch: checkpoint.epoch,
+        seq: 1, stream_id: 'stream-ws-recovered', snapshot: checkpoint,
+      } as UIStreamEvent)
+      expect(store.messages.some(turn => turn.id === 'runtime-stream-ws-recovered')).toBe(true)
+      expect(api.fetchSessionRuntime).not.toHaveBeenCalled()
+    } finally {
+      consoleError.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('subscribes the active session runtime when the session stream starts and resubscribes after drops', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    expect(runtimeSubscribeMessages).toContainEqual(expect.objectContaining({
+      type: 'runtime_subscribe',
+      session_id: 'session-1',
+    }))
+
+    const checkpoint = runtimeSnapshotFromScript([], 'session-1', 'stream-drop-checkpoint', 'running', 1)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', epoch: checkpoint.epoch,
+      stream_id: 'stream-drop-checkpoint', seq: 1, snapshot: checkpoint,
+    } as UIStreamEvent)
+    await flushPromises()
+    const beforeDrop = runtimeSubscribeMessages.length
+    streamHandler?.({ type: 'runtime_dropped', bot_id: 'bot-1', session_id: 'session-1', message: 'subscriber overflow' } as UIStreamEvent)
+
+    expect(runtimeSubscribeMessages).toHaveLength(beforeDrop + 1)
+    expect(runtimeSubscribeMessages.at(-1)).toMatchObject({
+      type: 'runtime_subscribe',
+      session_id: 'session-1',
+    })
+  })
+
+  it('ignores dropped events after an inactive background runtime is unsubscribed', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.fetchMessagesUI.mockResolvedValueOnce([])
+    store.selectSession('session-2')
+    await flushPromises()
+    expect(runtimeUnsubscribeMessages).toContainEqual(expect.objectContaining({
+      type: 'runtime_unsubscribe', session_id: 'session-1',
+    }))
+    runtimeSubscribeMessages = []
+    streamHandler?.({
+      type: 'runtime_dropped',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      message: 'subscriber overflow',
+    } as UIStreamEvent)
+
+    expect(runtimeSubscribeMessages).toEqual([])
+  })
+
+  it('unsubscribes the previous session runtime when switching to a draft', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeUnsubscribeMessages = []
+
+    store.selectDraft({ explicitSelection: true })
+
+    expect(runtimeUnsubscribeMessages).toEqual([
+      expect.objectContaining({ type: 'runtime_unsubscribe', session_id: 'session-1' }),
+    ])
+  })
+
+  it('does not request REST runtime hydration while switching between a draft and session', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.connectWebSocket.mockImplementationOnce((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      streamHandler = onStreamEvent
+      return {
+        get connected() {
+          return false
+        },
+        send: vi.fn(),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    expect(api.fetchSessionRuntime).not.toHaveBeenCalled()
+
+    store.selectDraft({ explicitSelection: true })
+    await store.selectSession('session-1')
+    await flushPromises()
+
+    expect(api.fetchSessionRuntime).not.toHaveBeenCalled()
+  })
+
+  it('does not queue an abort while reconnecting and keeps the run active', async () => {
+    const send = vi.fn()
+    api.connectWebSocket.mockImplementationOnce((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      streamHandler = onStreamEvent
+      return {
+        get connected() {
+          return false
+        },
+        send,
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const reconnectingOutput = [{
+      type: 'message',
+      data: { id: 0, stable_id: 'assistant-reconnecting', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'still running' },
+    } as UIStreamEvent]
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-reconnecting-abort',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript(reconnectingOutput, 'session-1', 'stream-reconnecting-abort', 'running', 1),
+    } as UIStreamEvent)
+    expect(store.streaming).toBe(true)
+    store.abort()
+
+    expect(send.mock.calls.map(([message]) => message).filter(message => message.type === 'abort')).toEqual([])
+    expect(store.streaming).toBe(true)
+    expect(toast.error).toHaveBeenCalledWith('WebSocket is not connected')
+
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-reconnecting',
+      role: 'assistant',
+      messages: reconnectingOutput.map(event => event.type === 'message' ? event.data : null).filter(Boolean),
+      timestamp: '2026-07-16T00:00:00.000Z',
+      streaming: false,
+    }])
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 2,
+      snapshot: runtimeSnapshotFromScript(reconnectingOutput, 'session-1', 'stream-reconnecting-abort', 'aborted', 2),
+    } as UIStreamEvent)
+    expect(store.streaming).toBe(false)
+    expect(store.messages.flatMap(turn =>
+      turn.role === 'assistant' ? turn.messages.filter(block => block.type === 'error') : [],
+    )).toContainEqual(expect.objectContaining({ content: 'Response stopped' }))
+  })
+
+  it('replays an unacknowledged abort after reconnecting to the same generation', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const sending = store.sendMessage('abort then reconnect')
+    await flushPromises()
+    const streamId = lastStreamId
+    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
+      onClose?: (() => void) | null
+      onOpen?: (() => void) | null
+    }
+    const runtimeOutput = [{
+      type: 'message',
+      data: { id: 0, stable_id: 'assistant-aborted-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'partial answer' },
+    } as UIStreamEvent]
+    const requestUserTurn: ConversationUiTurn = {
+      id: 'user-aborted-server',
+      role: 'user',
+      text: 'abort then reconnect',
+      external_message_id: streamId,
+      timestamp: '2026-07-16T00:00:00.000Z',
+      turn_position: 1,
+      turn_message_seq: 1,
+    }
+    const running = runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'running', 1, '', requestUserTurn)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: running,
+    } as UIStreamEvent)
+    store.abort()
+    expect(sentAbortMessages()).toHaveLength(1)
+
+    websocket.onClose?.()
+    websocket.onOpen?.()
+    const reconnected = runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'running', 2, '', requestUserTurn)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: reconnected,
+    } as UIStreamEvent)
+    expect(sentAbortMessages()).toHaveLength(2)
+    expect(sentAbortMessages().at(-1)).toMatchObject({
+      stream_id: streamId,
+      session_id: 'session-1',
+      generation: `generation-${streamId}`,
+    })
+
+    api.fetchMessagesUI.mockResolvedValue([
+      { ...requestUserTurn, attachments: [] },
+      { id: 'assistant-aborted-server', role: 'assistant', messages: runtimeOutput.map(event => event.type === 'message' ? event.data : null).filter(Boolean), timestamp: new Date().toISOString() },
+    ])
+    _sessionMessageHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: { id: 'assistant-aborted-server', bot_id: 'bot-1', session_id: 'session-1', role: 'assistant', content: 'partial answer', created_at: new Date().toISOString() },
+    } as SessionMessageStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'aborted', 3, '', requestUserTurn),
+    } as UIStreamEvent)
+    await expect(sending).resolves.toMatchObject({ ok: false })
+    await vi.waitFor(() => {
+      expect(store.messages[1]?.serverId ?? store.messages[1]?.id).toBe('assistant-aborted-server')
+      const stopped = store.messages.flatMap(turn => turn.role === 'assistant'
+        ? turn.messages.filter(block => block.type === 'error' && block.content === 'Response stopped')
+        : [])
+      expect(stopped).toHaveLength(1)
+    })
+  })
+
+  it('reconciles committed aborted history in every subscribed store without message-created events', async () => {
+    const runtimeHandlers: UIStreamEventHandler[] = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      runtimeHandlers.push(onStreamEvent)
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn((message: { stream_id?: string; session_id?: string }) => {
+          if ((message as Record<string, unknown>).type === 'runtime_subscribe') return
+          lastStreamId = message.stream_id ?? ''
+          lastSessionId = message.session_id ?? ''
+        }),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const first = useChatStore(createTestPinia())
+    const second = useChatStore(createTestPinia())
+    await first.selectBot('bot-1')
+    await second.selectBot('bot-1')
+    await flushPromises()
+    expect(runtimeHandlers).toHaveLength(2)
+
+    const sending = first.sendMessage('stop after partial output')
+    await flushPromises()
+    const streamId = lastStreamId
+    const requestUserTurn: ConversationUiTurn = {
+      role: 'user',
+      text: 'stop after partial output',
+      timestamp: new Date().toISOString(),
+      platform: 'local',
+      external_message_id: streamId,
+    }
+    const runtimeOutput = [{
+      type: 'message',
+      data: { id: 0, type: 'text', content: 'partial answer' },
+    } as UIStreamEvent]
+    const runningSnapshot = runtimeSnapshotFromScript(runtimeOutput, 'session-1', streamId, 'running', 1, '', requestUserTurn)
+    const running = {
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: runningSnapshot.epoch,
+      seq: 1,
+      snapshot: runningSnapshot,
+    } as UIStreamEvent
+    for (const handler of runtimeHandlers) handler(structuredClone(running))
+
+    api.fetchMessagesUI.mockResolvedValue([
+      {
+        id: 'user-aborted-server',
+        role: 'user',
+        text: 'stop after partial output',
+        attachments: [],
+        timestamp: new Date().toISOString(),
+        external_message_id: streamId,
+      },
+      {
+        id: 'assistant-aborted-server',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'partial answer' }],
+        timestamp: new Date().toISOString(),
+      },
+    ])
+    const fixtureTerminal = structuredClone(interruptedRunContractFixture.runtime_abort_stream ?? [])
+      .find(event => event.type === 'runtime_delta' && event.delta.run?.status === 'aborted')
+    if (fixtureTerminal?.type !== 'runtime_delta' || !fixtureTerminal.delta.run) {
+      throw new Error('Go-generated committed abort terminal delta is missing')
+    }
+    expect(fixtureTerminal.delta.run).toMatchObject({
+      status: 'aborted',
+      history_committed: true,
+      canonical_ready: true,
+    })
+    fixtureTerminal.bot_id = 'bot-1'
+    fixtureTerminal.session_id = 'session-1'
+    fixtureTerminal.epoch = runningSnapshot.epoch ?? ''
+    fixtureTerminal.seq = 2
+    fixtureTerminal.stream_id = streamId
+    fixtureTerminal.delta.run.stream_id = streamId
+    const aborted = fixtureTerminal as UIStreamEvent
+    for (const handler of runtimeHandlers) handler(structuredClone(aborted))
+
+    await expect(sending).resolves.toMatchObject({ ok: false })
+    await vi.waitFor(() => {
+      for (const store of [first, second]) {
+        expect(store.messages[0]?.serverId ?? store.messages[0]?.id).toBe('user-aborted-server')
+        expect(store.messages[1]?.serverId ?? store.messages[1]?.id).toBe('assistant-aborted-server')
+        expect(store.messages.some(turn => turn.__optimistic)).toBe(false)
+        expect(store.messages.some(turn => turn.__ephemeral)).toBe(false)
+        expect(store.messages.every(turn => !turn.streaming)).toBe(true)
+        expect(store.streaming).toBe(false)
+        expect(store.loadingMessages).toBe(false)
+      }
+    })
+    for (const store of [first, second]) {
+      const stopped = store.messages.flatMap(turn => turn.role === 'assistant'
+        ? turn.messages.filter(block => block.type === 'error' && block.content === 'Response stopped')
+        : [])
+      expect(stopped).toHaveLength(1)
+    }
+  })
+
+  it('keeps a run active after abort until the runtime publishes its terminal state', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'user-1',
+        role: 'user',
+        text: 'hello',
+        attachments: [],
+        timestamp: '2026-07-12T00:00:00.000Z',
+        external_message_id: 'stream-empty-retry',
+      },
+      { id: 'assistant-old', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-12T00:00:01.000Z' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const retry = store.retryLatestAssistant('assistant-old')
+    await flushPromises()
+    const retryStreamId = lastStreamId
+    const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
+    streamHandler?.(runtimeReplacementSnapshot(
+      retryStreamId,
+      operation,
+      [{ id: 0, type: 'text', content: 'completed despite abort' }],
+      'running',
+      10,
+    ))
+
+    store.abort()
+    expect(store.streaming).toBe(true)
+
+    api.fetchMessagesUI.mockResolvedValue([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      { id: 'assistant-new', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'completed despite abort' }], timestamp: '2026-07-12T00:00:02.000Z' },
+    ])
+    streamHandler?.(runtimeReplacementSnapshot(
+      retryStreamId,
+      operation,
+      [{ id: 0, type: 'text', content: 'completed despite abort' }],
+      'completed',
+      11,
+    ))
+
+    await expect(retry).resolves.toMatchObject({ ok: true })
+    expect(store.streaming).toBe(false)
+  })
+
+  it('resyncs and retries an abort when its terminal runtime update is missing', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    vi.useFakeTimers()
+    try {
+      const sending = store.sendMessage('stop this run')
+      await vi.advanceTimersByTimeAsync(0)
+      const streamId = lastStreamId
+      const running = runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 1)
+      streamHandler?.({
+        type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', epoch: running.epoch,
+        seq: 1, stream_id: streamId, snapshot: running,
+      } as UIStreamEvent)
+
+      store.abort()
+      expect(abortedWSStreams.filter(id => id === streamId)).toHaveLength(1)
+      const subscriptionsBeforeWatchdog = runtimeSubscribeMessages.length
+
+      await vi.advanceTimersByTimeAsync(29_999)
+      expect(runtimeSubscribeMessages).toHaveLength(subscriptionsBeforeWatchdog)
+      await vi.advanceTimersByTimeAsync(1)
+
+      expect(runtimeSubscribeMessages).toHaveLength(subscriptionsBeforeWatchdog + 1)
+      expect(abortedWSStreams.filter(id => id === streamId)).toHaveLength(1)
+
+      streamHandler?.({
+        type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', epoch: running.epoch,
+        seq: 1, stream_id: streamId, snapshot: running,
+      } as UIStreamEvent)
+      expect(abortedWSStreams.filter(id => id === streamId)).toHaveLength(2)
+
+      const aborted = runtimeSnapshotFromScript([], 'session-1', streamId, 'aborted', 2)
+      streamHandler?.({
+        type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', epoch: aborted.epoch,
+        seq: 2, stream_id: streamId, snapshot: aborted,
+      } as UIStreamEvent)
+
+      await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
+      expect(store.streaming).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a run active when the abort command itself is rejected', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const send = store.sendMessage('hello')
+    await flushPromises()
+    const streamId = lastStreamId
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 10,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 10),
+    } as UIStreamEvent)
+
+    store.abort()
+    streamHandler?.({
+      type: 'error',
+      stream_id: streamId,
+      session_id: 'session-1',
+      message: 'runtime abort command was not acknowledged',
+    } as UIStreamEvent)
+
+    expect(toast.error).toHaveBeenCalledWith('runtime abort command was not acknowledged')
+    expect(store.streaming).toBe(true)
+
+    api.fetchMessagesUI.mockResolvedValue([
+      { id: 'user-server', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      { id: 'assistant-server', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'done' }], timestamp: '2026-07-12T00:00:01.000Z' },
+    ])
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 11,
+      snapshot: runtimeSnapshotFromScript(
+        [{ type: 'message', stream_id: streamId, session_id: 'session-1', data: { id: 0, type: 'text', content: 'done' } } as UIStreamEvent],
+        'session-1',
+        streamId,
+        'completed',
+        11,
+      ),
+    } as UIStreamEvent)
+
+    await expect(send).resolves.toMatchObject({ ok: true })
+  })
+
+  it('projects the same retry operation in two independently subscribed stores', async () => {
+    const handlers: UIStreamEventHandler[] = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      handlers.push(onStreamEvent)
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn(),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValue([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-12T00:00:01.000Z',
+      },
+    ])
+
+    const first = useChatStore(createTestPinia())
+    const second = useChatStore(createTestPinia())
+    await first.selectBot('bot-1')
+    await second.selectBot('bot-1')
+    await flushPromises()
+    expect(handlers).toHaveLength(2)
+
+    const retryOperation = replacementOperationsContractFixture.retry_snapshot.snapshot.current_run_view?.operation
+    if (!retryOperation) throw new Error('missing generated retry operation fixture')
+    const event = runtimeReplacementSnapshot('stream-shared-retry', retryOperation, [{ id: 0, type: 'text', content: 'shared partial' }])
+    for (const handler of handlers) handler(structuredClone(event))
+
+    const project = (store: ReturnType<typeof useChatStore>) => store.messages.map((turn) => {
+      if (turn.role === 'user') return { role: turn.role, text: turn.text }
+      if (turn.role === 'assistant') {
+        return {
+          role: turn.role,
+          streaming: turn.streaming,
+          blocks: turn.messages.map(block => ({ type: block.type, content: 'content' in block ? block.content : undefined })),
+        }
+      }
+      return { role: turn.role }
+    })
+    expect(project(first)).toEqual(project(second))
+    expect(project(first)).toEqual([
+      { role: 'user', text: 'hello' },
+      {
+        role: 'assistant',
+        streaming: true,
+        blocks: [{ type: 'text', content: 'shared partial' }],
+      },
+    ])
+
+    const replay = runtimeReplacementSnapshot('stream-shared-retry', {
+      kind: 'retry',
+      replace_from_message_id: 'assistant-old',
+    }, [{ id: 0, type: 'text', content: 'shared partial updated' }], 'running', 11)
+    for (const handler of handlers) handler(structuredClone(replay))
+    expect(first.messages).toHaveLength(2)
+    expect(second.messages).toHaveLength(2)
+    expect(project(first)).toEqual(project(second))
+  })
+
+  it('projects the same ordinary request and assistant run in two independently subscribed stores', async () => {
+    const handlers: UIStreamEventHandler[] = []
+    const outboundMessages: Array<Array<Record<string, unknown>>> = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      handlers.push(onStreamEvent)
+      const outbound: Array<Record<string, unknown>> = []
+      outboundMessages.push(outbound)
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn((message: Record<string, unknown>) => outbound.push(message)),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+
+    const first = useChatStore(createTestPinia())
+    const second = useChatStore(createTestPinia())
+    await first.selectBot('bot-1')
+    await second.selectBot('bot-1')
+    await flushPromises()
+    expect(handlers).toHaveLength(2)
+
+    const event = structuredClone(richActiveRunContractFixture.runtime_snapshot) as UIStreamEvent
+    for (const handler of handlers) handler(structuredClone(event))
+
+    const project = (store: ReturnType<typeof useChatStore>) => store.messages.map((turn) => {
+      if (turn.role === 'user') {
+        return {
+          role: turn.role,
+          text: turn.text,
+          externalMessageId: turn.externalMessageId,
+          attachments: turn.attachments.map(attachment => attachment.name),
+        }
+      }
+      if (turn.role === 'assistant') {
+        return {
+          role: turn.role,
+          streaming: turn.streaming,
+          blocks: turn.messages.map(block => block.type),
+        }
+      }
+      return { role: turn.role }
+    })
+    expect(project(first)).toEqual(project(second))
+    expect(project(first)).toEqual([
+      {
+        role: 'user',
+        text: 'Inspect the workspace',
+        externalMessageId: 'stream-rich',
+        attachments: ['notes.txt'],
+      },
+      {
+        role: 'assistant',
+        streaming: true,
+        blocks: ['reasoning', 'text', 'tool', 'tool', 'tool'],
+      },
+    ])
+
+    for (const handler of handlers) handler(structuredClone(event))
+    expect(first.messages).toHaveLength(2)
+    expect(second.messages).toHaveLength(2)
+
+    first.abort()
+    const runtimeGeneration = richActiveRunContractFixture.runtime_snapshot.snapshot.current_run_view?.generation
+    expect(outboundMessages[0]?.filter(message => message.type === 'abort')).toEqual([
+      expect.objectContaining({
+        type: 'abort',
+        session_id: 'session-1',
+        stream_id: 'stream-rich',
+        generation: runtimeGeneration,
+      }),
+    ])
+    expect(outboundMessages[1]?.filter(message => message.type === 'abort')).toEqual([])
+
+    const aborted = structuredClone(event) as unknown as {
+      type: string
+      seq: number
+      snapshot: SessionruntimeSnapshot
+    }
+    aborted.type = 'runtime_snapshot'
+    aborted.seq = 12
+    aborted.snapshot.seq = 12
+    if (!aborted.snapshot.current_run_view) throw new Error('missing generated current run fixture')
+    aborted.snapshot.current_run_view.status = 'aborted'
+    for (const handler of handlers) handler(structuredClone(aborted) as UIStreamEvent)
+
+    const abortBlocks = (store: ReturnType<typeof useChatStore>) => store.messages.flatMap(turn =>
+      turn.role === 'assistant'
+        ? turn.messages.filter(block => block.type === 'error').map(block => block.content)
+        : [],
+    )
+    expect(abortBlocks(first)).toEqual(['Response stopped'])
+    expect(abortBlocks(second)).toEqual(abortBlocks(first))
+  })
+
+  it('reconciles persisted ordinary turns in every subscribed store after terminal runtime', async () => {
+    const runtimeHandlers: UIStreamEventHandler[] = []
+    const historyHandlers: Array<(event: SessionMessageStreamEvent) => void> = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      runtimeHandlers.push(onStreamEvent)
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn(),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.streamSessionMessageEvents.mockImplementation((_botId: string, _sessionId: string, signal: AbortSignal, onEvent: (event: SessionMessageStreamEvent) => void) => new Promise<void>((resolve) => {
+      historyHandlers.push(onEvent)
+      signal.addEventListener('abort', () => resolve(), { once: true })
+    }))
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+
+    const first = useChatStore(createTestPinia())
+    const second = useChatStore(createTestPinia())
+    await first.selectBot('bot-1')
+    await second.selectBot('bot-1')
+    await flushPromises()
+    expect(runtimeHandlers).toHaveLength(2)
+    expect(historyHandlers).toHaveLength(2)
+
+    const streamId = 'stream-shared-completion'
+    const running = runtimeSnapshotFromScript(
+      [{
+        type: 'message',
+        data: { id: 0, stable_id: 'assistant-shared-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'shared answer' },
+      } as UIStreamEvent],
+      'session-1',
+      streamId,
+      'running',
+      10,
+      '',
+      {
+        id: 'user-shared-server',
+        role: 'user',
+        text: 'shared prompt',
+        timestamp: new Date().toISOString(),
+        external_message_id: streamId,
+        turn_position: 1,
+        turn_message_seq: 1,
+      },
+    )
+    for (const handler of runtimeHandlers) {
+      handler({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 10, snapshot: structuredClone(running) } as UIStreamEvent)
+    }
+
+    api.fetchMessagesUI.mockResolvedValue([
+      {
+        id: 'user-shared-server', role: 'user', text: 'shared prompt', attachments: [], timestamp: new Date().toISOString(),
+        external_message_id: streamId, turn_position: 1, turn_message_seq: 1,
+      },
+      {
+        id: 'assistant-shared-server',
+        role: 'assistant',
+        messages: [{ id: 0, stable_id: 'assistant-shared-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'shared answer' }],
+        timestamp: new Date().toISOString(),
+      },
+    ])
+    for (const handler of historyHandlers) {
+      handler({
+        type: 'message_created',
+        bot_id: 'bot-1',
+        message: { id: 'assistant-shared-server', bot_id: 'bot-1', session_id: 'session-1', role: 'assistant', content: 'shared answer', created_at: new Date().toISOString() },
+      } as SessionMessageStreamEvent)
+    }
+    const completed = structuredClone(running)
+    completed.seq = 11
+    completed.current_run_view!.status = 'completed'
+    for (const handler of runtimeHandlers) {
+      handler({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 11, snapshot: structuredClone(completed) } as UIStreamEvent)
+    }
+
+    await vi.waitFor(() => {
+      for (const store of [first, second]) {
+        expect(store.messages[0]?.serverId ?? store.messages[0]?.id).toBe('user-shared-server')
+        expect(store.messages[1]?.serverId ?? store.messages[1]?.id).toBe('assistant-shared-server')
+        expect(store.messages.some(turn => turn.__optimistic)).toBe(false)
+      }
+    })
+  })
+
+  it('restores a replaced tail when a runtime operation aborts without visible output', async () => {
+    const persistedTurns = [
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-12T00:00:01.000Z',
+      },
+    ]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
+    streamHandler?.(runtimeReplacementSnapshot('stream-empty-retry', operation, [], 'running', 10, 'session-1', false, false))
+    expect(store.messages.map(turn => turn.id)).toContain('assistant-old')
+
+    api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
+    streamHandler?.(runtimeReplacementSnapshot('stream-empty-retry', operation, [], 'aborted', 11, 'session-1', false, false))
+    await flushPromises()
+
+    expect(store.streaming).toBe(false)
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages.map(turn => turn.id)).toEqual(['user-1', 'assistant-old'])
+    const restoredAssistant = store.messages[1]
+    expect(restoredAssistant).toMatchObject({ role: 'assistant', streaming: false })
+    if (restoredAssistant?.role !== 'assistant') throw new Error('missing restored assistant turn')
+    expect(restoredAssistant.messages).toEqual([{ id: 0, type: 'text', content: 'old answer' }])
+  })
+
+  it.each([
+    { kind: 'retry', status: 'errored' },
+    { kind: 'retry', status: 'interrupted' },
+    { kind: 'edit', status: 'errored' },
+    { kind: 'edit', status: 'interrupted' },
+  ])('restores a replaced tail when an empty $kind operation becomes $status', async ({ kind, status }) => {
+    const persistedTurns = [
+      { id: 'user-old', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-12T00:00:01.000Z',
+      },
+    ]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const operation = kind === 'edit'
+      ? replacementOperationsContractFixture.edit_snapshot.snapshot.current_run_view?.operation
+      : ({ kind: 'retry', replace_from_message_id: 'assistant-old' } satisfies SessionruntimeRunOperationView)
+    if (!operation) throw new Error('missing replacement operation')
+    const streamId = `stream-empty-${kind}-${status}`
+    streamHandler?.(runtimeReplacementSnapshot(streamId, operation, [], 'running', 10, 'session-1', false, false))
+    api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
+    const terminal = runtimeReplacementSnapshot(streamId, operation, [], status, 11, 'session-1', false, false)
+    if (terminal.type === 'runtime_snapshot' && terminal.snapshot?.current_run_view) {
+      terminal.snapshot.current_run_view.error = `replacement ${status}`
+    }
+    streamHandler?.(terminal)
+    await flushPromises()
+
+    expect(store.streaming).toBe(false)
+    expect(store.messages.slice(0, 2).map(turn => turn.id)).toEqual(['user-old', 'assistant-old'])
+    expect(store.messages.at(-1)).toMatchObject({ role: 'assistant', streaming: false })
+    expect(store.messages.flatMap(turn => turn.role === 'assistant'
+      ? turn.messages.filter(block => block.type === 'error')
+      : [])).toEqual([])
+  })
+
+  it.each([
+    { kind: 'retry', status: 'errored' },
+    { kind: 'retry', status: 'aborted' },
+    { kind: 'edit', status: 'errored' },
+    { kind: 'edit', status: 'aborted' },
+  ])('settles an initiating $kind when an empty run becomes $status and history refresh fails', async ({ kind, status }) => {
+    sendEvents = []
+    const persistedTurns = [
+      { id: 'user-old', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-12T00:00:01.000Z',
+      },
+    ]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const pending = kind === 'retry'
+      ? store.retryLatestAssistant('assistant-old')
+      : store.editLatestUser('user-old', 'edited prompt')
+    await flushPromises()
+    const streamId = lastStreamId
+    const operation = kind === 'edit'
+      ? replacementOperationsContractFixture.edit_snapshot.snapshot.current_run_view?.operation
+      : ({ kind: 'retry', replace_from_message_id: 'assistant-old' } satisfies SessionruntimeRunOperationView)
+    if (!operation) throw new Error('missing replacement operation')
+    streamHandler?.(runtimeReplacementSnapshot(streamId, operation))
+    api.fetchMessagesUI.mockRejectedValueOnce(new Error('history unavailable'))
+    const terminal = runtimeReplacementSnapshot(streamId, operation, [], status, 11)
+    if (terminal.type === 'runtime_snapshot' && terminal.snapshot?.current_run_view) {
+      terminal.snapshot.current_run_view.error = `replacement ${status}`
+      terminal.snapshot.current_run_view.history_committed = true
+    }
+    streamHandler?.(terminal)
+
+    await expect(pending).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    await flushPromises()
+    expect(store.messages.some(turn => turn.id === 'assistant-old')).toBe(false)
+    expect(store.messages[0]).toMatchObject({
+      role: 'user',
+      text: kind === 'edit' ? 'edited prompt' : 'old prompt',
+    })
+    if (status === 'aborted') {
+      expect(store.messages).toHaveLength(2)
+      expect(store.messages.at(-1)).toMatchObject({
+        role: 'assistant',
+        streaming: false,
+        messages: [expect.objectContaining({ type: 'error' })],
+      })
+      return
+    }
+    expect(store.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      streaming: false,
+      messages: [expect.objectContaining({
+        type: 'error',
+        content: `replacement ${status}`,
+      })],
+    })
+  })
+
+  it('keeps a replacement projection and reports errors after visible partial output', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-12T00:00:01.000Z',
+      },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
+    const partial = [{ id: 0, type: 'text', content: 'new partial answer' }] as ConversationUiMessage[]
+    streamHandler?.(runtimeReplacementSnapshot('stream-partial-retry', operation, partial))
+    const refreshCallsBefore = api.fetchMessagesUI.mock.calls.length
+    const failed = runtimeReplacementSnapshot('stream-partial-retry', operation, partial, 'errored', 11)
+    if (failed.type === 'runtime_snapshot' && failed.snapshot?.current_run_view) {
+      failed.snapshot.current_run_view.error = 'replacement failed'
+    }
+    streamHandler?.(failed)
+    await flushPromises()
+
+    expect(store.messages.map(turn => turn.id)).not.toContain('assistant-old')
+    const assistant = store.messages.at(-1)
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing replacement assistant')
+    expect(assistant.streaming).toBe(false)
+    expect(assistant.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'text', content: 'new partial answer' }),
+      expect.objectContaining({ type: 'error', content: 'replacement failed' }),
+    ]))
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(refreshCallsBefore + 1)
+  })
+
+  it('completes a retry in the background without leaking loading into the active session', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    let replacementCompleted = false
+    api.fetchMessagesUI.mockImplementation((_botId: string, sessionId: string) => {
+      if (sessionId === 'session-a') {
+        return Promise.resolve(replacementCompleted
+          ? [
+              { id: 'user-a', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+              { id: 'assistant-new', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'new answer' }], timestamp: '2026-07-12T00:00:02.000Z' },
+            ]
+          : [
+              { id: 'user-a', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+              { id: 'assistant-old', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-12T00:00:01.000Z' },
+            ])
+      }
+      return Promise.resolve([
+        { id: 'user-b', role: 'user', text: 'other session', attachments: [], timestamp: '2026-07-12T01:00:00.000Z' },
+      ])
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const retry = store.retryLatestAssistant('assistant-old')
+    await flushPromises()
+    const retryStreamId = lastStreamId
+    await store.selectSession('session-b')
+    await flushPromises()
+    expect(store.loading).toBe(false)
+
+    const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
+    streamHandler?.(runtimeReplacementSnapshot(retryStreamId, operation, [{ id: 0, type: 'text', content: 'partial' }], 'running', 10, 'session-a'))
+    replacementCompleted = true
+    streamHandler?.(runtimeReplacementSnapshot(retryStreamId, operation, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11, 'session-a'))
+
+    await expect(retry).resolves.toMatchObject({ ok: true })
+    expect(store.sessionId).toBe('session-b')
+    expect(store.loading).toBe(false)
+    expect(store.messages).toMatchObject([{ role: 'user', text: 'other session' }])
+
+    await store.selectSession('session-a')
+    await flushPromises()
+    expect(store.messages.map(message => message.serverId ?? message.id)).toEqual(['user-a', 'assistant-new'])
+  })
+
+  it('keeps a completed retry successful when REST reconciliation fails', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      { id: 'assistant-old', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-12T00:00:01.000Z' },
+    ])
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const retry = store.retryLatestAssistant('assistant-old')
+    await flushPromises()
+    const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, operation, [{ id: 0, type: 'text', content: 'new answer' }]))
+    api.fetchMessagesUI.mockRejectedValueOnce(new Error('history unavailable'))
+    streamHandler?.(runtimeReplacementSnapshot(lastStreamId, operation, [{ id: 0, type: 'text', content: 'new answer' }], 'completed', 11))
+
+    await expect(retry).resolves.toMatchObject({ ok: true })
+    expect(store.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      messages: [{ type: 'text', content: 'new answer' }],
+    })
+    consoleError.mockRestore()
+  })
+
+  it.each(['retry', 'edit'] as const)('does not restore stale history when an empty completed %s cannot reconcile', async (kind) => {
+    sendEvents = []
+    const persistedTurns = [
+      { id: 'user-old', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-12T00:00:01.000Z',
+      },
+    ]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const pending = kind === 'retry'
+      ? store.retryLatestAssistant('assistant-old')
+      : store.editLatestUser('user-old', 'edited prompt')
+    await flushPromises()
+    const streamId = lastStreamId
+    const operation = kind === 'retry'
+      ? ({ kind: 'retry', replace_from_message_id: 'assistant-old' } satisfies SessionruntimeRunOperationView)
+      : ({
+          kind: 'edit',
+          replace_from_message_id: 'user-old',
+          replacement_user_turn: {
+            role: 'user',
+            text: 'edited prompt',
+            timestamp: '2026-07-12T00:00:02.000Z',
+            platform: 'local',
+          },
+        } satisfies SessionruntimeRunOperationView)
+    streamHandler?.(runtimeReplacementSnapshot(streamId, operation))
+    api.fetchMessagesUI.mockRejectedValue(new Error('history unavailable'))
+    streamHandler?.(runtimeReplacementSnapshot(streamId, operation, [], 'completed', 11, 'session-1', true))
+
+    await expect(pending).resolves.toMatchObject({ ok: true })
+    await flushPromises()
+    expect(store.messages.some(turn => turn.id === 'assistant-old')).toBe(false)
+    expect(store.messages.some(turn => turn.role === 'assistant')).toBe(false)
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({
+      role: 'user',
+      text: kind === 'edit' ? 'edited prompt' : 'old prompt',
+    })
+    consoleError.mockRestore()
+  })
+
+  it.each(['retry', 'edit'] as const)('projects an empty completed %s on a passive client before history reconciliation', async (kind) => {
+    const persistedTurns = [
+      { id: 'user-old', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-12T00:00:01.000Z',
+      },
+    ]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const operation = kind === 'retry'
+      ? ({ kind: 'retry', replace_from_message_id: 'assistant-old' } satisfies SessionruntimeRunOperationView)
+      : ({
+          kind: 'edit',
+          replace_from_message_id: 'user-old',
+          replacement_user_turn: {
+            role: 'user',
+            text: 'edited prompt',
+            timestamp: '2026-07-12T00:00:02.000Z',
+            platform: 'local',
+          },
+        } satisfies SessionruntimeRunOperationView)
+    api.fetchMessagesUI.mockRejectedValue(new Error('history unavailable'))
+    streamHandler?.(runtimeReplacementSnapshot(`stream-passive-empty-${kind}`, operation, [], 'completed', 11, 'session-1', true))
+    await flushPromises()
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({
+      role: 'user',
+      text: kind === 'edit' ? 'edited prompt' : 'old prompt',
+    })
+    expect(store.messages.some(turn => turn.id === 'assistant-old')).toBe(false)
+    consoleError.mockRestore()
+  })
+
+  it.each(['retry', 'edit'] as const)('reconciles a committed empty aborted %s on a passive client', async (kind) => {
+    const streamId = `stream-passive-abort-${kind}`
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-old', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      { id: 'assistant-old', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-12T00:00:01.000Z' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const replacementText = kind === 'edit' ? 'edited prompt' : 'old prompt'
+    const operation = kind === 'retry'
+      ? ({ kind: 'retry', replace_from_message_id: 'assistant-old' } satisfies SessionruntimeRunOperationView)
+      : ({
+          kind: 'edit',
+          replace_from_message_id: 'user-old',
+          replacement_user_turn: {
+            role: 'user',
+            text: replacementText,
+            timestamp: '2026-07-12T00:00:02.000Z',
+            platform: 'local',
+            external_message_id: streamId,
+          },
+        } satisfies SessionruntimeRunOperationView)
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-new', role: 'user', text: replacementText, attachments: [], timestamp: '2026-07-12T00:00:02.000Z', external_message_id: streamId },
+    ])
+    streamHandler?.(runtimeReplacementSnapshot(streamId, operation, [], 'aborted', 11))
+
+    await vi.waitFor(() => {
+      expect(store.messages.some(turn => turn.id === 'assistant-old')).toBe(false)
+      expect(store.messages[0]?.serverId ?? store.messages[0]?.id).toBe('user-new')
+      expect(store.messages[0]).toMatchObject({ role: 'user', text: replacementText })
+      expect(store.messages.at(-1)).toMatchObject({
+        role: 'assistant',
+        streaming: false,
+        messages: [expect.objectContaining({ type: 'error', content: 'Response stopped' })],
+      })
+    })
+  })
+
+  it('does not carry runtime ownership from a successful retry into a reused stream id', async () => {
+    sendEvents = []
+    const sharedStreamId = '00000000-0000-4000-8000-000000000099' as `${string}-${string}-${string}-${string}-${string}`
+    const uuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(sharedStreamId)
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      { id: 'assistant-old', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-12T00:00:01.000Z' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
+    const first = store.retryLatestAssistant('assistant-old')
+    await flushPromises()
+    const runtimeMessages = [{
+      id: 0,
+      stable_id: `${sharedStreamId}-row-0`,
+      turn_position: 2,
+      turn_message_seq: 2,
+      type: 'text' as const,
+      content: 'new answer',
+    }]
+    const settledAssistantId = `${sharedStreamId}-row-0`
+    streamHandler?.(runtimeReplacementSnapshot(sharedStreamId, operation, runtimeMessages))
+    const liveAssistant = store.messages.at(-1)
+    if (liveAssistant?.role !== 'assistant') throw new Error('missing live replacement assistant')
+    const liveRenderId = liveAssistant.id
+    api.fetchMessagesUI.mockResolvedValue([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      { id: settledAssistantId, role: 'assistant', messages: runtimeMessages, timestamp: '2026-07-12T00:00:02.000Z' },
+    ])
+    streamHandler?.(runtimeReplacementSnapshot(sharedStreamId, operation, runtimeMessages, 'completed', 11))
+    await expect(first).resolves.toMatchObject({ ok: true })
+    await flushPromises()
+
+    sendEvents = [{ type: 'error', message: 'second command rejected' } as UIStreamEvent]
+    await expect(store.retryLatestAssistant(settledAssistantId)).resolves.toMatchObject({
+      ok: false,
+      stage: 'startup',
+    })
+    expect(store.messages[0]?.id).toBe('user-1')
+    expect(store.messages[1]).toMatchObject({
+      id: liveRenderId,
+      role: 'assistant',
+      serverId: settledAssistantId,
+      streaming: false,
+    })
+    uuid.mockRestore()
+  })
+
+  it('replays failed replacement partial output after switching back to the session', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    let replacementPersisted = false
+    let replacementStreamId = ''
+    api.fetchMessagesUI.mockImplementation((_botId: string, sessionId: string) => Promise.resolve(sessionId === 'session-a'
+      ? replacementPersisted
+        ? [
+            { id: 'user-a', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z', external_message_id: replacementStreamId },
+            { id: 'assistant-new', role: 'assistant', messages: [{ id: 0, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'partial replacement' }], timestamp: '2026-07-12T00:00:02.000Z' },
+          ]
+        : [
+            { id: 'user-a', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+            { id: 'assistant-old', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-12T00:00:01.000Z' },
+          ]
+      : [
+          { id: 'user-b', role: 'user', text: 'other session', attachments: [], timestamp: '2026-07-12T01:00:00.000Z' },
+        ]))
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const retry = store.retryLatestAssistant('assistant-old')
+    await flushPromises()
+    const retryStreamId = lastStreamId
+    replacementStreamId = retryStreamId
+    const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
+    const partial = [{ id: 0, stable_id: 'assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'partial replacement' }] as ConversationUiMessage[]
+    streamHandler?.(runtimeReplacementSnapshot(retryStreamId, operation, partial, 'running', 10, 'session-a'))
+    await store.selectSession('session-b')
+    await flushPromises()
+
+    const failed = runtimeReplacementSnapshot(retryStreamId, operation, partial, 'errored', 11, 'session-a')
+    if (failed.type === 'runtime_snapshot' && failed.snapshot?.current_run_view) {
+      failed.snapshot.current_run_view.error = 'replacement failed'
+      failed.snapshot.current_run_view.history_committed = true
+    }
+    replacementPersisted = true
+    streamHandler?.(failed)
+    await expect(retry).resolves.toMatchObject({ ok: false, stage: 'stream' })
+
+    await store.selectSession('session-a')
+    await flushPromises()
+    const replay = structuredClone(failed)
+    replay.type = 'runtime_snapshot'
+    streamHandler?.(replay)
+    await flushPromises()
+
+    expect(store.messages.map(message => message.serverId ?? message.id)).toEqual(['user-a', 'assistant-new'])
+    expect(store.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      messages: expect.arrayContaining([
+        expect.objectContaining({ type: 'text', content: 'partial replacement' }),
+        expect.objectContaining({ type: 'error', content: 'replacement failed' }),
+      ]),
+    })
+  })
+
+  it('hydrates an edit operation from a runtime snapshot and replays it idempotently', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-old', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-12T00:00:01.000Z',
+      },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const operation = replacementOperationsContractFixture.edit_snapshot.snapshot.current_run_view?.operation
+    if (!operation) throw new Error('missing generated edit operation fixture')
+    const snapshot = runtimeReplacementSnapshot(
+      'stream-snapshot-edit',
+      operation,
+      [{ id: 0, type: 'text', content: 'snapshot partial' }],
+    )
+    snapshot.type = 'runtime_snapshot'
+    streamHandler?.(snapshot)
+
+    expect(store.messages).toMatchObject([
+      {
+        role: 'user',
+        text: 'edited prompt',
+        __optimistic: false,
+        syncState: expect.objectContaining({ presence: 'live', persistence: 'unknown' }),
+      },
+      {
+        role: 'assistant',
+        streaming: true,
+        messages: [{ type: 'text', content: 'snapshot partial' }],
+      },
+    ])
+
+    streamHandler?.(runtimeReplacementSnapshot(
+      'stream-snapshot-edit',
+      operation,
+      [{ id: 0, type: 'text', content: 'snapshot partial updated' }],
+      'running',
+      11,
+    ))
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages).toMatchObject([
+      { role: 'user', text: 'edited prompt' },
+      { role: 'assistant', messages: [{ type: 'text', content: 'snapshot partial updated' }] },
+    ])
+  })
+
+  it('replays an early runtime operation after session history hydration', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    let resolveHistory: ((turns: unknown[]) => void) | undefined
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => {
+      resolveHistory = resolve
+    }))
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const operation: SessionruntimeRunOperationView = {
+      kind: 'retry',
+      replace_from_message_id: 'assistant-old',
+    }
+    const earlySnapshot = runtimeReplacementSnapshot(
+      'stream-early-retry',
+      operation,
+      [{ id: 0, type: 'text', content: 'early partial' }],
+    )
+    earlySnapshot.type = 'runtime_snapshot'
+    streamHandler?.(earlySnapshot)
+    expect(store.streaming).toBe(true)
+    expect(store.messages).toEqual([])
+
+    resolveHistory?.([
+      { id: 'user-1', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-12T00:00:01.000Z',
+      },
+    ])
+    await flushPromises()
+    await flushPromises()
+
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages.map(turn => turn.id)).not.toContain('assistant-old')
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+      messages: [{ type: 'text', content: 'early partial' }],
+    })
+  })
+
+  it('reuses the in-flight A history before replaying an A to B to A runtime replacement', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const historyA1 = deferred<UITurn[]>()
+    let sessionAFetches = 0
+    api.fetchMessagesUI.mockImplementation((_botId: string, targetSessionId: string) => {
+      if (targetSessionId === 'session-b') return Promise.resolve([])
+      sessionAFetches += 1
+      return historyA1.promise
+    })
+    const store = useChatStore()
+    const selectionA1 = store.selectBot('bot-1')
+    await vi.waitFor(() => {
+      expect(streamHandler).not.toBeNull()
+      expect(sessionAFetches).toBeGreaterThan(0)
+    })
+    const sessionAFetchesBeforeSwitch = sessionAFetches
+
+    streamHandler?.(runtimeReplacementSnapshot(
+      'stream-a-b-a-retry',
+      { kind: 'retry', replace_from_message_id: 'assistant-old' },
+      [{ id: 0, type: 'text', content: 'replacement partial' }],
+      'running',
+      1,
+      'session-a',
+    ))
+    await store.selectSession('session-b')
+    const selectionA2 = store.selectSession('session-a')
+    expect(sessionAFetches).toBe(sessionAFetchesBeforeSwitch)
+
+    historyA1.resolve([
+      { id: 'user-old', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-14T00:00:00Z' },
+      { id: 'assistant-old', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-14T00:00:01Z' },
+    ])
+    await selectionA1
+    await selectionA2
+    await flushPromises()
+    expect(store.streaming).toBe(true)
+
+    expect(store.messages).toMatchObject([
+      { role: 'user', text: 'old prompt' },
+      { role: 'assistant', streaming: true, messages: [{ type: 'text', content: 'replacement partial' }] },
+    ])
+  })
+
+  it('rejects an early runtime replacement stream when history hydration fails', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    let rejectHistory: ((reason?: unknown) => void) | undefined
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>((_resolve, reject) => {
+      rejectHistory = reject
+    }))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const store = useChatStore()
+    void store.selectBot('bot-1')
+    await flushPromises()
+
+    streamHandler?.(runtimeReplacementSnapshot(
+      'stream-hydration-failure',
+      { kind: 'retry', replace_from_message_id: 'assistant-old' },
+      [{ id: 0, type: 'text', content: 'early partial' }],
+    ))
+    expect(store.streaming).toBe(true)
+
+    rejectHistory?.(new Error('history unavailable'))
+    await flushPromises()
+    await flushPromises()
+
+    expect(store.streaming).toBe(false)
+    expect(store.loading).toBe(false)
+    expect(store.messages).toEqual([])
+    consoleError.mockRestore()
+  })
+
+  it('completes an initiating send through runtime deltas without legacy stream frames', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const staleHistory = deferred<UITurn[]>()
+    const historyCallsBeforeRace = api.fetchMessagesUI.mock.calls.length
+    api.fetchMessagesUI.mockImplementationOnce(() => staleHistory.promise)
+    _sessionMessageHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: { id: 'older-message', bot_id: 'bot-1', session_id: 'session-1', role: 'assistant', content: 'older', created_at: new Date().toISOString() },
+    } as SessionMessageStreamEvent)
+    await vi.waitFor(() => {
+      expect(api.fetchMessagesUI).toHaveBeenCalledTimes(historyCallsBeforeRace + 1)
+    })
+
+    const send = store.sendMessage('hello runtime')
+    await flushPromises()
+    const optimisticUserId = store.messages[0]?.id
+    expect(store.messages[0]).toMatchObject({
+      role: 'user',
+      text: 'hello runtime',
+      externalMessageId: lastStreamId,
+    })
+    const runtimeScript = [{
+      type: 'message',
+      stream_id: lastStreamId,
+      session_id: 'session-1',
+      data: { id: 0, stable_id: 'assistant-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'runtime response' },
+    }] as UIStreamEvent[]
+    const requestUserTurn: ConversationUiTurn = {
+      id: 'user-server',
+      role: 'user',
+      text: 'hello runtime',
+      timestamp: new Date().toISOString(),
+      platform: 'local',
+      external_message_id: lastStreamId,
+      turn_position: 1,
+      turn_message_seq: 1,
+    }
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 11,
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', lastStreamId, 'running', 11, '', requestUserTurn),
+    } as UIStreamEvent)
+
+    expect(store.messages).toMatchObject([
+      { role: 'user', text: 'hello runtime' },
+      { role: 'assistant', streaming: true, messages: [{ type: 'text', content: 'runtime response' }] },
+    ])
+    expect(store.messages[0]?.id).toBe(optimisticUserId)
+    expect(store.messages).toHaveLength(2)
+
+    api.fetchMessagesUI.mockResolvedValue([
+      {
+        id: 'user-server', role: 'user', text: 'hello runtime', attachments: [], timestamp: new Date().toISOString(),
+        external_message_id: lastStreamId, turn_position: 1, turn_message_seq: 1,
+      },
+      {
+        id: 'assistant-server',
+        role: 'assistant',
+        messages: [{ id: 0, stable_id: 'assistant-server', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'runtime response' }],
+        timestamp: new Date().toISOString(),
+      },
+    ])
+    _sessionMessageHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: 'assistant-server',
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        role: 'assistant',
+        content: 'runtime response',
+        created_at: new Date().toISOString(),
+      },
+    } as SessionMessageStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 12,
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', lastStreamId, 'completed', 12, '', requestUserTurn),
+    } as UIStreamEvent)
+    staleHistory.resolve([])
+    const result = await send
+    await vi.waitFor(() => {
+      expect(api.fetchMessagesUI).toHaveBeenCalledTimes(historyCallsBeforeRace + 2)
+    })
+
+    expect(result).toEqual({ ok: true })
+    expect(store.streaming).toBe(false)
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages[0]).toMatchObject({ role: 'user' })
+    expect(store.messages[0]?.serverId ?? store.messages[0]?.id).toBe('user-server')
+    expect(store.messages[0]?.__optimistic).not.toBe(true)
+    expect(store.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      streaming: false,
+      messages: [{ type: 'text', content: 'runtime response' }],
+    })
+    expect(store.messages.at(-1)?.serverId ?? store.messages.at(-1)?.id).toBe('assistant-server')
+    expect(store.messages.at(-1)?.__optimistic).not.toBe(true)
+  })
+
+  it('keeps a completed send successful when its terminal history refresh fails', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const send = store.sendMessage('successful runtime')
+    await flushPromises()
+    const streamId = lastStreamId
+    const runtimeScript = [{
+      type: 'message',
+      data: { id: 0, type: 'text', content: 'completed answer' },
+    }] as UIStreamEvent[]
+    const requestUserTurn: ConversationUiTurn = {
+      role: 'user',
+      text: 'successful runtime',
+      timestamp: new Date().toISOString(),
+      external_message_id: streamId,
+    }
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', streamId, 'running', 1, '', requestUserTurn),
+    } as UIStreamEvent)
+
+    const historyCallsBeforeTerminal = api.fetchMessagesUI.mock.calls.length
+    api.fetchMessagesUI.mockRejectedValueOnce(new Error('history temporarily unavailable'))
+    _sessionMessageHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: { id: 'assistant-success-server', bot_id: 'bot-1', session_id: 'session-1', role: 'assistant', content: 'completed answer', created_at: new Date().toISOString() },
+    } as SessionMessageStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 2,
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', streamId, 'completed', 2, '', requestUserTurn),
+    } as UIStreamEvent)
+
+    await expect(send).resolves.toEqual({ ok: true })
+    await vi.waitFor(() => {
+      expect(api.fetchMessagesUI).toHaveBeenCalledTimes(historyCallsBeforeTerminal + 1)
+    })
+    expect(store.messages[0]?.serverId ?? store.messages[0]?.id).not.toBe('user-success-server')
+    expect(store.messages[1]?.serverId ?? store.messages[1]?.id).not.toBe('assistant-success-server')
+    expect(store.messages.flatMap(turn => turn.role === 'assistant'
+      ? turn.messages.filter(block => block.type === 'error')
+      : [])).toEqual([])
+    consoleError.mockRestore()
+  })
+
+  it('subscribes a newly created session before waiting for its first runtime response', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({ items: [], nextCursor: null })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+
+    const send = store.sendMessage('first prompt')
+    await flushPromises()
+
+    expect(lastSessionId).toBe('session-1')
+    expect(runtimeSubscribeMessages).toContainEqual(expect.objectContaining({
+      type: 'runtime_subscribe',
+      session_id: 'session-1',
+    }))
+    const firstSessionTimeline = wsOutboundTimeline.filter(message => message.session_id === 'session-1')
+    expect(firstSessionTimeline.map(message => message.type)).toEqual(['runtime_subscribe', 'message'])
+    expect(runtimeSubscribeMessages).toHaveLength(1)
+    expect(runtimeSubscribeMessages[0]?.invocation_id).toEqual(expect.any(String))
+    expect(runtimeSubscribeMessages[0]?.invocation_id).not.toBe('')
+    expect(api.fetchSessionRuntime).not.toHaveBeenCalled()
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-first-send',
+      seq: 2,
+      snapshot: {
+        ...runtimeSnapshotFromScript([], 'session-1', lastStreamId, 'completed', 2),
+        epoch: 'epoch-first-send',
+      },
+    } as UIStreamEvent)
+    expect(await send).toEqual({ ok: true })
+  })
+
+  it('reconnect contract: hydrates rich active-run state from runtime snapshot', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 10,
+      snapshot: richActiveRunRuntimeSnapshot(),
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(true)
+    expect(store.messages[0]).toMatchObject({
+      role: 'user',
+      text: 'Inspect the workspace',
+      externalMessageId: 'stream-rich',
+      attachments: [{ name: 'notes.txt', content_hash: 'sha256:notes' }],
+    })
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+
+    expect(assistant.messages.find(block => block.type === 'reasoning')).toMatchObject({
+      content: 'I need to inspect the workspace.',
+    })
+    expect(assistant.messages.find(block => block.type === 'text')).toMatchObject({
+      content: 'I will check the current state.',
+    })
+    expect(assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-exec')).toMatchObject({
+      type: 'tool',
+      toolName: 'exec',
+      done: true,
+      running: false,
+    })
+    expect(assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-approval')).toMatchObject({
+      approval: {
+        approval_id: 'approval-1',
+        status: 'pending',
+      },
+    })
+    expect(assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-ask')).toMatchObject({
+      userInput: {
+        user_input_id: 'input-1',
+        status: 'pending',
+      },
+    })
+  })
+
+  it('does not carry an abort request into a reused stream id with a new generation', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-reused-generation'
+    const oldSnapshot = runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 1)
+    oldSnapshot.current_run_view!.generation = 'generation-old'
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: oldSnapshot,
+    } as UIStreamEvent)
+    store.abort()
+    expect(sentAbortMessages()).toEqual([expect.objectContaining({
+      stream_id: streamId,
+      session_id: 'session-1',
+      generation: 'generation-old',
+    })])
+
+    const newSnapshot = runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 2)
+    newSnapshot.current_run_view!.generation = 'generation-new'
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: newSnapshot,
+    } as UIStreamEvent)
+    await flushPromises()
+
+    expect(sentAbortMessages()).toHaveLength(1)
+    expect(store.streaming).toBe(true)
+    expect(store.messages.some(turn => turn.role === 'assistant' && turn.id === `runtime-${streamId}` && turn.streaming)).toBe(true)
+  })
+
+  it('does not carry assistant output into a reused active stream generation', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-active-generation-rollover'
+    const first = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'old generation text' } } as UIStreamEvent,
+      { type: 'message', data: { id: 1, type: 'reasoning', content: 'old generation reasoning' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 1)
+    first.current_run_view!.generation = 'generation-old'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: first } as UIStreamEvent)
+
+    const second = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'new generation text' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 2)
+    second.current_run_view!.generation = 'generation-new'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: second } as UIStreamEvent)
+    await flushPromises()
+
+    const activeAssistant = store.messages.find(turn => turn.role === 'assistant' && turn.streaming)
+    expect(activeAssistant?.role).toBe('assistant')
+    if (activeAssistant?.role !== 'assistant') throw new Error('missing active assistant')
+    expect(activeAssistant.messages).toHaveLength(1)
+    expect(activeAssistant.messages).toMatchObject([
+      { id: 0, type: 'text', content: 'new generation text' },
+    ])
+  })
+
+  it('matches the initiating optimistic request after a delayed runtime timestamp', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    sendEvents = []
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const sendPromise = store.sendMessage('hello delayed runtime')
+    await flushPromises()
+    const streamId = lastStreamId
+    const running = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'delayed partial' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 1, '', {
+      role: 'user',
+      text: 'hello delayed runtime',
+      timestamp: new Date(Date.now() + 6_000).toISOString(),
+      external_message_id: streamId,
+    })
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: running } as UIStreamEvent)
+
+    expect(store.messages.filter(turn => turn.role === 'user')).toHaveLength(1)
+    expect(store.messages.filter(turn => turn.role === 'assistant')).toHaveLength(1)
+
+    const completed = structuredClone(running)
+    completed.seq = 2
+    completed.current_run_view!.status = 'completed'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: completed } as UIStreamEvent)
+    await sendPromise
+  })
+
+  it('observes a reused stream id generation after its reducer state was evicted', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-reused-after-eviction'
+    const first = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'old generation text' } } as UIStreamEvent,
+      { type: 'message', data: { id: 1, type: 'reasoning', content: 'old generation reasoning' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 1)
+    first.current_run_view!.generation = 'generation-1'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: first } as UIStreamEvent)
+    const completed = structuredClone(first)
+    completed.seq = 2
+    completed.current_run_view!.status = 'completed'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: completed } as UIStreamEvent)
+    await flushPromises()
+    expect(store.streaming).toBe(false)
+
+    await store.selectSession('session-2')
+    await flushPromises()
+    await store.selectSession('session-1')
+    await flushPromises()
+
+    const second = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'new generation text' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 3)
+    second.current_run_view!.generation = 'generation-2'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3, snapshot: second } as UIStreamEvent)
+    await vi.waitFor(() => {
+      expect(store.streaming).toBe(true)
+      expect(store.messages.find(turn => turn.role === 'assistant' && turn.streaming)).toBeDefined()
+    })
+
+    const activeAssistant = store.messages.find(turn => turn.role === 'assistant' && turn.streaming)
+    expect(activeAssistant?.role).toBe('assistant')
+    if (activeAssistant?.role !== 'assistant') throw new Error('missing active assistant')
+    expect(activeAssistant.messages).toHaveLength(1)
+    expect(activeAssistant.messages).toMatchObject([
+      { id: 0, type: 'text', content: 'new generation text' },
+    ])
+  })
+
+  it('keeps persisted history separate from a reused stream id generation', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const streamId = 'stream-reused-persisted-history'
+    const persistedHistory: UITurn[] = [
+      {
+        id: 'db-user-old',
+        role: 'user',
+        text: 'old prompt',
+        attachments: [],
+        timestamp: '2026-07-14T00:00:00Z',
+        external_message_id: streamId,
+        turn_position: 1,
+        turn_message_seq: 1,
+      },
+      {
+        id: 'db-assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, stable_id: 'db-assistant-old', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'old final' }],
+        timestamp: '2026-07-14T00:00:01Z',
+      },
+    ]
+    let oldRunPersisted = false
+    api.fetchMessagesUI.mockImplementation((_botId: string, sessionId: string) => Promise.resolve(
+      sessionId === 'session-1' && oldRunPersisted ? structuredClone(persistedHistory) : [],
+    ))
+
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const first = runtimeSnapshotFromScript([
+      {
+        type: 'message',
+        data: { id: 0, stable_id: 'db-assistant-old', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'old partial' },
+      } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 1, '', {
+      id: 'db-user-old',
+      role: 'user',
+      text: 'old prompt',
+      timestamp: '2026-07-14T00:00:00Z',
+      external_message_id: streamId,
+      turn_position: 1,
+      turn_message_seq: 1,
+    })
+    first.current_run_view!.generation = 'generation-old'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: first } as UIStreamEvent)
+
+    oldRunPersisted = true
+    const completed = structuredClone(first)
+    completed.seq = 2
+    completed.current_run_view!.status = 'completed'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: completed } as UIStreamEvent)
+    await vi.waitFor(() => {
+      expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+        'old prompt',
+        'old final',
+      ])
+    })
+
+    await store.selectSession('session-2')
+    await store.selectSession('session-1')
+    await flushPromises()
+
+    const second = runtimeSnapshotFromScript([
+      {
+        type: 'message',
+        data: { id: 0, stable_id: 'db-assistant-new', turn_position: 2, turn_message_seq: 2, type: 'text', content: 'new partial' },
+      } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 3, '', {
+      id: 'db-user-new',
+      role: 'user',
+      text: 'new prompt',
+      timestamp: '2026-07-14T00:01:00Z',
+      external_message_id: streamId,
+      turn_position: 2,
+      turn_message_seq: 1,
+    })
+    second.current_run_view!.generation = 'generation-new'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3, snapshot: second } as UIStreamEvent)
+    // Session hydration and runtime events share one serialized queue. Wait for
+    // the accepted checkpoint to project instead of assuming one microtask turn.
+    await vi.waitFor(() => {
+      expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+        'old prompt',
+        'old final',
+        'new prompt',
+        'new partial',
+      ])
+    })
+    expect(store.messages[0]).toMatchObject({ serverId: 'db-user-old', externalMessageId: streamId })
+    expect(store.messages[1]).toMatchObject({ serverId: 'db-assistant-old', streaming: false })
+    expect(store.messages[3]).toMatchObject({ role: 'assistant', streaming: true })
+  })
+
+  it('separates a fresh client from persisted history that reused the stream id', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const streamId = 'stream-reused-fresh-client'
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'db-user-old',
+        role: 'user',
+        text: 'inspect',
+        attachments: [{ type: 'file', name: 'old.txt', content_hash: 'sha256:old' }],
+        timestamp: '2026-07-14T00:00:00Z',
+        external_message_id: streamId,
+      },
+      {
+        id: 'db-assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-14T00:00:01Z',
+      },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const running = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'new partial' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 1, '', {
+      role: 'user',
+      text: 'inspect',
+      attachments: [{ type: 'file', name: 'new.txt', content_hash: 'sha256:new' }],
+      timestamp: '2026-07-14T00:00:01Z',
+      external_message_id: streamId,
+    })
+    running.current_run_view!.generation = 'generation-new'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: running } as UIStreamEvent)
+    await flushPromises()
+
+    expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+      'inspect',
+      'old answer',
+      'inspect',
+      'new partial',
+    ])
+    expect(store.messages[0]).toMatchObject({
+      id: 'db-user-old',
+      externalMessageId: streamId,
+      attachments: [{ name: 'old.txt', content_hash: 'sha256:old' }],
+    })
+    expect(store.messages[1]).toMatchObject({ id: 'db-assistant-old', streaming: false })
+    expect(store.messages[2]).toMatchObject({
+      role: 'user',
+      attachments: [{ name: 'new.txt', content_hash: 'sha256:new' }],
+    })
+  })
+
+  it('places a fresh-client abort after the current reused-stream request', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const streamId = 'stream-reused-fresh-abort'
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'db-user-old',
+        role: 'user',
+        text: 'old prompt',
+        attachments: [],
+        timestamp: '2026-07-14T00:00:00Z',
+        external_message_id: streamId,
+      },
+      {
+        id: 'db-assistant-old',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'old answer' }],
+        timestamp: '2026-07-14T00:00:01Z',
+      },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const running = runtimeSnapshotFromScript([], 'session-1', streamId, 'running', 1, '', {
+      role: 'user',
+      text: 'new prompt',
+      timestamp: '2026-07-14T00:01:00Z',
+      external_message_id: streamId,
+    })
+    running.current_run_view!.generation = 'generation-new'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: running } as UIStreamEvent)
+
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<UITurn[]>(() => {}))
+    const aborted = structuredClone(running)
+    aborted.seq = 2
+    aborted.current_run_view!.status = 'aborted'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: aborted } as UIStreamEvent)
+    await flushPromises()
+
+    expect(store.messages.map((turn) => {
+      if (turn.role === 'user') return turn.text
+      return turn.messages[0]?.content
+    })).toEqual([
+      'old prompt',
+      'old answer',
+      'new prompt',
+      'Response stopped',
+    ])
+  })
+
+  it('replays an empty terminal runtime failure after initial history hydration', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    let resolveHistory: ((turns: unknown[]) => void) | undefined
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => {
+      resolveHistory = resolve
+    }))
+    const store = useChatStore()
+    const selection = store.selectBot('bot-1')
+    await vi.waitFor(() => {
+      expect(streamHandler).not.toBeNull()
+      expect(store.sessionId).toBe('session-1')
+    })
+
+    const streamId = 'stream-empty-terminal-hydration'
+    const terminal = runtimeSnapshotFromScript([], 'session-1', streamId, 'errored', 3, 'runtime failed before output', {
+      role: 'user',
+      text: 'hello runtime',
+      timestamp: new Date().toISOString(),
+      platform: 'local',
+      external_message_id: streamId,
+    })
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3, snapshot: terminal,
+    } as UIStreamEvent)
+    await flushPromises()
+    expect(store.messages.flatMap(turn => turn.role === 'assistant'
+      ? turn.messages.filter(block => block.type === 'error' && block.content === 'runtime failed before output')
+      : [])).toHaveLength(1)
+    resolveHistory?.([
+      { id: 'user-server', role: 'user', text: 'hello runtime', attachments: [], timestamp: new Date().toISOString(), external_message_id: streamId },
+    ])
+    await selection
+    await flushPromises()
+
+    const errors = store.messages.flatMap(turn => turn.role === 'assistant'
+      ? turn.messages.filter(block => block.type === 'error' && block.content === 'runtime failed before output')
+      : [])
+    expect(errors).toHaveLength(1)
+    const ephemeralTurn = store.messages.find(turn => turn.role === 'assistant' && turn.__ephemeral)
+    expect(ephemeralTurn).toBeDefined()
+    const sentBeforeRetry = sentWSMessages.length
+    await expect(store.retryLatestAssistant(ephemeralTurn!.id)).resolves.toMatchObject({ ok: false, stage: 'startup' })
+    expect(sentWSMessages).toHaveLength(sentBeforeRetry)
+    expect(store.streaming).toBe(false)
+  })
+
+  it('reattaches the runtime request turn after older history hydration completes', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const history = deferred<UITurn[]>()
+    api.fetchMessagesUI.mockImplementationOnce(() => history.promise)
+    const store = useChatStore()
+    const selection = store.selectBot('bot-1')
+    await vi.waitFor(() => {
+      expect(streamHandler).not.toBeNull()
+      expect(store.sessionId).toBe('session-1')
+    })
+
+    const streamId = 'stream-running-during-history'
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 2,
+      snapshot: runtimeSnapshotFromScript(
+        [{ type: 'message', data: { id: 0, type: 'text', content: 'new partial answer' } } as UIStreamEvent],
+        'session-1',
+        streamId,
+        'running',
+        2,
+        '',
+        {
+          role: 'user',
+          text: 'new prompt',
+          timestamp: '2026-07-14T00:01:00Z',
+          platform: 'local',
+          external_message_id: streamId,
+        },
+      ),
+    } as UIStreamEvent)
+    expect(store.messages).toMatchObject([
+      { role: 'user', text: 'new prompt' },
+      { role: 'assistant', streaming: true },
+    ])
+
+    history.resolve([
+      { id: 'old-user', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-14T00:00:00Z' },
+      { id: 'old-assistant', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-14T00:00:10Z' },
+    ])
+    await selection
+    await flushPromises()
+
+    expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+      'old prompt',
+      'old answer',
+      'new prompt',
+      'new partial answer',
+    ])
+    expect(store.streaming).toBe(true)
+  })
+
+  it('settles the next runtime turn without replacing a full 30-turn history page', async () => {
+    const existing = Array.from({ length: 30 }, (_, index) => ({
+      id: `existing-${index + 1}`,
+      role: 'user' as const,
+      text: `existing ${index + 1}`,
+      attachments: [],
+      timestamp: `2026-07-14T00:00:${String(index).padStart(2, '0')}Z`,
+      turn_position: index + 1,
+      turn_message_seq: 1,
+    }))
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce(existing)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-turn-31'
+    const turnId = 'turn-31'
+    const userId = 'user-31'
+    const assistantId = 'assistant-31'
+    const runtimeMessage: ConversationUiMessage = {
+      id: 0,
+      type: 'text',
+      content: 'answer 31',
+      stable_id: assistantId,
+      turn_position: 31,
+      turn_message_seq: 2,
+      row_identities: [{
+        stable_id: assistantId,
+        role: 'assistant',
+        turn_id: turnId,
+        turn_position: 31,
+        turn_message_seq: 2,
+      }],
+    }
+    const requestUserTurn: ConversationUiTurn = {
+      id: userId,
+      role: 'user',
+      text: 'prompt 31',
+      timestamp: '2026-07-14T00:01:00Z',
+      external_message_id: streamId,
+      turn_position: 31,
+      turn_message_seq: 1,
+    }
+    const rowLedger = [
+      { stable_id: userId, role: 'user', turn_id: turnId, turn_position: 31, turn_message_seq: 1 },
+      { stable_id: assistantId, role: 'assistant', turn_id: turnId, turn_position: 31, turn_message_seq: 2 },
+    ]
+    const running = runtimeSnapshotFromScript(
+      [{ type: 'message', data: runtimeMessage } as UIStreamEvent],
+      'session-1',
+      streamId,
+      'running',
+      31,
+      '',
+      requestUserTurn,
+    )
+    running.current_run_view!.row_ledger = rowLedger
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 31, snapshot: running,
+    } as UIStreamEvent)
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { ...requestUserTurn, attachments: [] },
+      {
+        id: assistantId,
+        role: 'assistant',
+        messages: [runtimeMessage],
+        timestamp: '2026-07-14T00:01:01Z',
+        turn_position: 31,
+        turn_message_seq: 2,
+      },
+    ])
+    const completed = structuredClone(running)
+    completed.seq = 32
+    completed.current_run_view!.status = 'completed'
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 32, snapshot: completed,
+    } as UIStreamEvent)
+
+    await vi.waitFor(() => {
+      expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', { turnId })
+      expect(store.messages).toHaveLength(32)
+    })
+    expect(store.messages.slice(0, 30).map(turn => turn.id)).toEqual(existing.map(turn => turn.id))
+    expect(store.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      streaming: false,
+      messages: [{ content: 'answer 31' }],
+    })
+  })
+
+  it('fetches fresh history after a completed snapshot races an older hydration', async () => {
+    const streamId = 'stream-completed-during-history'
+    const runtimeScript = [{
+      type: 'message',
+      data: { id: 0, stable_id: 'persisted-assistant', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'completed answer' },
+    } as UIStreamEvent]
+    const requestUserTurn: ConversationUiTurn = {
+      id: 'persisted-user', role: 'user', text: 'completed prompt', timestamp: '2026-07-14T00:01:00Z',
+      external_message_id: streamId, turn_position: 1, turn_message_seq: 1,
+    }
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const staleHistory = deferred<UITurn[]>()
+    api.fetchMessagesUI
+      .mockImplementationOnce(() => staleHistory.promise)
+      .mockResolvedValueOnce([
+        { ...requestUserTurn, attachments: [] },
+        { id: 'persisted-assistant', role: 'assistant', messages: runtimeScript.map(event => event.type === 'message' ? event.data : null).filter(Boolean), timestamp: '2026-07-14T00:01:10Z' },
+      ])
+    const store = useChatStore()
+    const selection = store.selectBot('bot-1')
+    await vi.waitFor(() => {
+      expect(streamHandler).not.toBeNull()
+      expect(api.fetchMessagesUI).toHaveBeenCalledTimes(1)
+    })
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', streamId, 'completed', 3, '', requestUserTurn),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 4,
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', streamId, 'completed', 4, '', requestUserTurn),
+    } as UIStreamEvent)
+    staleHistory.resolve([
+      { id: 'old-user', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-14T00:00:00Z' },
+    ])
+    await selection
+    await flushPromises()
+
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(2)
+    expect(store.messages).toMatchObject([
+      { role: 'user', text: 'completed prompt' },
+      { role: 'assistant', messages: [{ type: 'text', content: 'completed answer' }] },
+    ])
+  })
+
+  it('reprojects a newer run after an older terminal history refresh applies', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const terminalHistory = deferred<UITurn[]>()
+    api.fetchMessagesUI.mockImplementationOnce(() => terminalHistory.promise)
+    const firstRun = runtimeSnapshotFromScript(
+      [{ type: 'message', data: { id: 0, type: 'text', content: 'first answer' } } as UIStreamEvent],
+      'session-1',
+      'stream-generation-1',
+      'running',
+      1,
+      '',
+      { role: 'user', text: 'first prompt', external_message_id: 'stream-generation-1' },
+    )
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: firstRun } as UIStreamEvent)
+    const completedFirstRun = structuredClone(firstRun)
+    completedFirstRun.seq = 2
+    completedFirstRun.current_run_view!.status = 'completed'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: completedFirstRun } as UIStreamEvent)
+    await vi.waitFor(() => expect(api.fetchMessagesUI).toHaveBeenCalledTimes(2))
+
+    const secondRun = runtimeSnapshotFromScript(
+      [{ type: 'message', data: { id: 0, type: 'text', content: 'second partial' } } as UIStreamEvent],
+      'session-1',
+      'stream-generation-2',
+      'running',
+      3,
+      '',
+      { role: 'user', text: 'second prompt', external_message_id: 'stream-generation-2' },
+    )
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3, snapshot: secondRun } as UIStreamEvent)
+
+    terminalHistory.resolve([
+      { id: 'persisted-user-1', role: 'user', text: 'first prompt', attachments: [], timestamp: '2026-07-14T00:00:00Z', external_message_id: 'stream-generation-1' },
+      { id: 'persisted-assistant-1', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'first answer' }], timestamp: '2026-07-14T00:00:01Z' },
+    ])
+    await flushPromises()
+    await flushPromises()
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: secondRun.epoch,
+      stream_id: 'stream-generation-2',
+      seq: 4,
+      delta: { message_appends: [{ id: 0, type: 'text', content: ' tail' }] },
+    } as UIStreamEvent)
+
+    expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+      'first prompt',
+      'first answer',
+      'second prompt',
+      'second partial tail',
+    ])
+    expect(store.messages.at(-1)).toMatchObject({ role: 'assistant', streaming: true })
+  })
+
+  it('hands off a completed run after a newer run becomes current', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const target = { botId: 'bot-1', sessionId: 'session-1', viewId: 'chat' }
+
+    const firstSend = store.sendMessage('first prompt')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(1))
+    const firstStreamId = String(sentWSMessages.find(message => message.type === 'message')?.stream_id ?? '')
+    const firstScript = [{
+      type: 'message', data: { id: 0, type: 'text', content: 'first answer' },
+    } as UIStreamEvent]
+    const firstRequest = { role: 'user', text: 'first prompt', external_message_id: firstStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1,
+      snapshot: runtimeSnapshotFromScript(firstScript, 'session-1', firstStreamId, 'running', 1, '', firstRequest),
+    } as UIStreamEvent)
+
+    const firstHistory = deferred<UITurn[]>()
+    const callsBeforeTerminal = api.fetchMessagesUI.mock.calls.length
+    api.fetchMessagesUI.mockImplementationOnce(() => firstHistory.promise)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2,
+      snapshot: runtimeSnapshotFromScript(firstScript, 'session-1', firstStreamId, 'completed', 2, '', firstRequest),
+    } as UIStreamEvent)
+    await vi.waitFor(() => expect(api.fetchMessagesUI).toHaveBeenCalledTimes(callsBeforeTerminal + 1))
+    await expect(firstSend).resolves.toEqual({ ok: true })
+
+    const secondSend = store.sendMessage('second prompt')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(2))
+    const secondStreamId = String(sentWSMessages.filter(message => message.type === 'message').at(-1)?.stream_id ?? '')
+    const secondScript = [{
+      type: 'message', data: { id: 0, type: 'text', content: 'second partial' },
+    } as UIStreamEvent]
+    const secondRequest = { role: 'user', text: 'second prompt', external_message_id: secondStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3,
+      snapshot: runtimeSnapshotFromScript(secondScript, 'session-1', secondStreamId, 'running', 3, '', secondRequest),
+    } as UIStreamEvent)
+
+    firstHistory.resolve([
+      {
+        id: `${firstStreamId}-user-row`, role: 'user', text: 'first prompt', attachments: [],
+        timestamp: '2026-07-16T00:00:00.000Z', external_message_id: firstStreamId,
+        turn_position: 1, turn_message_seq: 1,
+      },
+      {
+        id: `${firstStreamId}-assistant-row`, role: 'assistant', timestamp: '2026-07-16T00:00:01.000Z',
+        messages: [{
+          id: 0, stable_id: `${firstStreamId}-row-0`, turn_position: 1, turn_message_seq: 2,
+          type: 'text', content: 'first answer',
+        }],
+      },
+    ])
+
+    await vi.waitFor(() => {
+      const turns = store.chatView(target).transcript.messages
+      expect(turns.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+        'first prompt',
+        'first answer',
+        'second prompt',
+        'second partial',
+      ])
+      expect(turns[0]?.__optimistic).not.toBe(true)
+      expect(turns[1]?.__optimistic).not.toBe(true)
+      expect(turns.at(-1)).toMatchObject({ role: 'assistant', streaming: true })
+    })
+
+    const secondAborted = runtimeSnapshotFromScript([], 'session-1', secondStreamId, 'aborted', 4, 'aborted', secondRequest)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 4, snapshot: secondAborted,
+    } as UIStreamEvent)
+    await expect(secondSend).resolves.toMatchObject({ ok: false, stage: 'stream' })
+  })
+
+  it('restores an aborted run draft after a newer run becomes current', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const target = { botId: 'bot-1', sessionId: 'session-1', viewId: 'chat' }
+    const composerScope = 'chat'
+
+    const firstSend = store.sendMessage('restore first draft')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(1))
+    const firstStreamId = String(sentWSMessages.find(message => message.type === 'message')?.stream_id ?? '')
+    const firstRequest = { role: 'user', text: 'restore first draft', external_message_id: firstStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', firstStreamId, 'running', 1, '', firstRequest),
+    } as UIStreamEvent)
+
+    const firstHistory = deferred<UITurn[]>()
+    const callsBeforeTerminal = api.fetchMessagesUI.mock.calls.length
+    api.fetchMessagesUI.mockImplementationOnce(() => firstHistory.promise)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', firstStreamId, 'aborted', 2, 'aborted', firstRequest),
+    } as UIStreamEvent)
+    await vi.waitFor(() => expect(api.fetchMessagesUI).toHaveBeenCalledTimes(callsBeforeTerminal + 1))
+    await expect(firstSend).resolves.toMatchObject({ ok: false, stage: 'stream' })
+
+    const secondSend = store.sendMessage('second prompt')
+    await vi.waitFor(() => expect(sentWSMessages.filter(message => message.type === 'message')).toHaveLength(2))
+    const secondStreamId = String(sentWSMessages.filter(message => message.type === 'message').at(-1)?.stream_id ?? '')
+    const secondRequest = { role: 'user', text: 'second prompt', external_message_id: secondStreamId } as ConversationUiTurn
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3,
+      snapshot: runtimeSnapshotFromScript(
+        [{ type: 'message', data: { id: 0, type: 'text', content: 'second partial' } } as UIStreamEvent],
+        'session-1', secondStreamId, 'running', 3, '', secondRequest,
+      ),
+    } as UIStreamEvent)
+
+    firstHistory.resolve([])
+    await vi.waitFor(() => {
+      expect(store.composerDraftRestoreFor(target, composerScope)?.text).toBe('restore first draft')
+      expect(store.chatView(target).transcript.messages.at(-1)).toMatchObject({
+        role: 'assistant', streaming: true, messages: [{ type: 'text', content: 'second partial' }],
+      })
+    })
+
+    const restore = store.composerDraftRestoreFor(target, composerScope)
+    if (!restore) throw new Error('missing aborted draft restore')
+    store.clearComposerDraftRestore(restore.seq)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 4,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', secondStreamId, 'aborted', 4, 'aborted', secondRequest),
+    } as UIStreamEvent)
+    await expect(secondSend).resolves.toMatchObject({ ok: false, stage: 'stream' })
+  })
+
+  it('fetches fresh history when the hydration preceding a completed snapshot fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const streamId = 'stream-completed-after-history-error'
+    const runtimeScript = [{
+      type: 'message',
+      data: { id: 0, stable_id: 'persisted-assistant', turn_position: 1, turn_message_seq: 2, type: 'text', content: 'completed answer' },
+    } as UIStreamEvent]
+    const requestUserTurn: ConversationUiTurn = {
+      id: 'persisted-user', role: 'user', text: 'completed prompt', timestamp: '2026-07-14T00:01:00Z',
+      external_message_id: streamId, turn_position: 1, turn_message_seq: 1,
+    }
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const failedHistory = deferred<UITurn[]>()
+    api.fetchMessagesUI
+      .mockImplementationOnce(() => failedHistory.promise)
+      .mockResolvedValueOnce([
+        { ...requestUserTurn, attachments: [] },
+        { id: 'persisted-assistant', role: 'assistant', messages: runtimeScript.map(event => event.type === 'message' ? event.data : null).filter(Boolean), timestamp: '2026-07-14T00:01:10Z' },
+      ])
+    const store = useChatStore()
+    const selection = store.selectBot('bot-1')
+    await vi.waitFor(() => {
+      expect(streamHandler).not.toBeNull()
+      expect(api.fetchMessagesUI).toHaveBeenCalledTimes(1)
+    })
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript(runtimeScript, 'session-1', streamId, 'completed', 3, '', requestUserTurn),
+    } as UIStreamEvent)
+    failedHistory.reject(new Error('transient history failure'))
+    await selection
+    await flushPromises()
+
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(2)
+    expect(store.messages).toMatchObject([
+      { role: 'user', text: 'completed prompt' },
+      { role: 'assistant', messages: [{ type: 'text', content: 'completed answer' }] },
+    ])
+    consoleError.mockRestore()
+  })
+
+  it('keeps a queued terminal refresh scoped to its session after switching sessions', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const sessionAHistory = deferred<UITurn[]>()
+    const sessionBHistory = deferred<UITurn[]>()
+    api.fetchMessagesUI.mockImplementation((_botId: string, sid: string) => {
+      return sid === 'session-1' ? sessionAHistory.promise : sessionBHistory.promise
+    })
+    const store = useChatStore()
+    const selectionA = store.selectBot('bot-1')
+    await vi.waitFor(() => {
+      expect(api.fetchMessagesUI).toHaveBeenCalledWith('bot-1', 'session-1', expect.anything())
+    })
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 3,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', 'stream-completed-before-switch', 'completed', 3),
+    } as UIStreamEvent)
+    const selectionB = store.selectSession('session-2')
+    await vi.waitFor(() => {
+      expect(api.fetchMessagesUI).toHaveBeenCalledWith('bot-1', 'session-2', expect.anything())
+    })
+
+    sessionAHistory.resolve([])
+    await selectionA
+    await flushPromises()
+    expect(api.fetchMessagesUI.mock.calls.filter(([, sid]) => sid === 'session-1')).toHaveLength(2)
+
+    sessionBHistory.resolve([])
+    await selectionB
+    expect(store.sessionId).toBe('session-2')
+    expect(store.messages).toEqual([])
+  })
+
+  it('reconnect contract: hydrates interrupted terminal state from the shared runtime snapshot', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const refreshCallsBefore = api.fetchMessagesUI.mock.calls.length
+    streamHandler?.(structuredClone(interruptedRunContractFixture.runtime_snapshot) as UIStreamEvent)
+    await flushPromises()
+
+    expect(store.streaming).toBe(false)
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+    expect(assistant.streaming).toBe(false)
+    expect(assistant.messages.some(block => block.type === 'text' && block.content === 'partial output')).toBe(true)
+    expect(assistant.messages.some(block => block.type === 'error' && block.content === 'runtime interrupted')).toBe(true)
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(refreshCallsBefore + 1)
+  })
+
+  it('reconnect contract: empty runtime snapshot clears stale local pending streams', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      seq: 19,
+      stream_id: 'stream-stale-runtime',
+      session_id: 'session-1',
+      snapshot: runtimeSnapshotFromScript(
+        [{
+          type: 'message',
+          stream_id: 'stream-stale-runtime',
+          session_id: 'session-1',
+          data: { id: 0, type: 'text', content: 'stale local output' },
+        } as UIStreamEvent],
+        'session-1',
+        'stream-stale-runtime',
+        'running',
+        19,
+      ),
+    } as UIStreamEvent)
+    expect(store.streaming).toBe(true)
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+    expect(assistant.streaming).toBe(true)
+
+    let resolveRefresh: ((turns: unknown[]) => void) | undefined
+    const refreshCallsBefore = api.fetchMessagesUI.mock.calls.length
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => {
+      resolveRefresh = resolve
+    }))
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      seq: 20,
+      snapshot: {
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        epoch: 'epoch-session-1',
+        seq: 20,
+        queue: [],
+      },
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(false)
+    expect(assistant.streaming).toBe(false)
+    expect(api.fetchMessagesUI.mock.calls.length).toBeGreaterThanOrEqual(refreshCallsBefore)
+    resolveRefresh?.([])
+    await flushPromises()
+  })
+
+  it('reconnect contract: lower-seq empty runtime snapshot clears state after backend reset', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-runtime-reset'
+    const runningSnapshot = runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, 'running', 11)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: runningSnapshot.epoch,
+      seq: 11,
+      snapshot: runningSnapshot,
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(true)
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+    expect(assistant.streaming).toBe(true)
+
+    const refreshCallsBefore = api.fetchMessagesUI.mock.calls.length
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-runtime-reset',
+      seq: 0,
+      snapshot: {
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        epoch: 'epoch-runtime-reset',
+        seq: 0,
+        queue: [],
+      },
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(false)
+    expect(assistant.streaming).toBe(false)
+    expect(api.fetchMessagesUI.mock.calls.length).toBe(refreshCallsBefore)
+  })
+
+  it('reconnect contract: lower-seq authoritative snapshot starts a new runtime sequence epoch', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-old',
+      seq: 100,
+      snapshot: {
+        ...runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', 'stream-old-epoch'), 'session-1', 'stream-old-epoch', 'running', 100),
+        epoch: 'epoch-old',
+      },
+    } as UIStreamEvent)
+    expect(store.streaming).toBe(true)
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-old',
+      seq: 1,
+      snapshot: {
+        ...runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', 'stream-stale-same-epoch'), 'session-1', 'stream-stale-same-epoch', 'running', 1),
+        epoch: 'epoch-old',
+      },
+    } as UIStreamEvent)
+    expect(store.messages.some(turn => turn.role === 'assistant' && turn.id === 'runtime-stream-stale-same-epoch')).toBe(false)
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-new',
+      seq: 1,
+      snapshot: {
+        ...runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', 'stream-new-epoch'), 'session-1', 'stream-new-epoch', 'running', 1),
+        epoch: 'epoch-new',
+      },
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(true)
+    const assistants = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistants.some(turn => turn.id === 'runtime-stream-new-epoch' && turn.streaming)).toBe(true)
+    expect(assistants.some(turn => turn.id === 'runtime-stream-old-epoch' && turn.streaming)).toBe(false)
+  })
+
+  it('applies a checkpoint that changes identity at the same sequence', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const epoch = 'epoch-equal-seq-convergence'
+    const oldSnapshot = runtimeSnapshotFromScript([], 'session-1', 'stream-old', 'running', 10)
+    oldSnapshot.epoch = epoch
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-old',
+      epoch,
+      seq: 10,
+      snapshot: oldSnapshot,
+    } as UIStreamEvent)
+    expect(store.messages.find(turn => turn.id === 'runtime-stream-old')).toMatchObject({ streaming: true })
+
+    runtimeSubscribeMessages = []
+    const newSnapshot = runtimeSnapshotFromScript([], 'session-1', 'stream-new', 'running', 10)
+    newSnapshot.epoch = epoch
+    const replacement = {
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-new',
+      epoch,
+      seq: 10,
+      snapshot: newSnapshot,
+    } as UIStreamEvent
+    streamHandler?.(structuredClone(replacement))
+
+    expect(runtimeSubscribeMessages).toHaveLength(0)
+    expect(store.messages.some(turn => turn.id === 'runtime-stream-old' && turn.streaming)).toBe(false)
+    expect(store.messages.find(turn => turn.id === 'runtime-stream-new')).toMatchObject({ streaming: true })
+  })
+
+  it('forces resync instead of applying an epochless event after the store establishes an epoch', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-current',
+      seq: 1,
+      snapshot: {
+        ...runtimeSnapshotFromScript([], 'session-1', 'stream-current', 'running', 1),
+        epoch: 'epoch-current',
+      },
+    } as UIStreamEvent)
+    runtimeSubscribeMessages = []
+
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-current',
+      seq: 2,
+      delta: { message_appends: [{ id: 0, type: 'text', content: 'must not apply' }] },
+    } as UIStreamEvent)
+
+    expect(runtimeSubscribeMessages).toEqual([expect.objectContaining({
+      type: 'runtime_subscribe',
+      session_id: 'session-1',
+    })])
+    expect(api.fetchSessionRuntime).not.toHaveBeenCalled()
+    const assistant = store.messages.find(turn => turn.role === 'assistant' && turn.id === 'runtime-stream-current')
+    expect(assistant?.role === 'assistant' ? assistant.messages : []).toEqual([])
+  })
+
+  it('does not recreate an assistant turn when runtime terminal state follows a legacy error', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    sendEvents = richActiveRunStoreScript('session-1', 'stream-terminal-order')
+    const sendPromise = store.sendMessage('test terminal ordering')
+    await flushPromises()
+    streamHandler?.({ type: 'error', stream_id: lastStreamId, session_id: lastSessionId, message: 'runtime failed' } as UIStreamEvent)
+    await sendPromise
+    const assistantCount = store.messages.filter(turn => turn.role === 'assistant').length
+
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>(() => {}))
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 12,
+      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', lastStreamId), 'session-1', lastStreamId, 'errored', 12, 'runtime failed'),
+    } as UIStreamEvent)
+
+    expect(store.messages.filter(turn => turn.role === 'assistant')).toHaveLength(assistantCount)
+  })
+
+  it('does not reuse a terminal projection for a different runtime generation', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-terminal-reused'
+    const oldRequest: ConversationUiTurn = {
+      id: 'old-user-row',
+      role: 'user',
+      text: 'old prompt',
+      timestamp: '2026-07-14T00:00:00Z',
+      external_message_id: streamId,
+      turn_position: 1,
+      turn_message_seq: 1,
+    }
+    const oldMessages: ConversationUiMessage[] = [{
+      id: 0,
+      stable_id: 'old-assistant-row',
+      turn_position: 1,
+      turn_message_seq: 2,
+      type: 'text',
+      content: 'old partial',
+    }]
+    const oldRunning = runtimeSnapshotFromScript(
+      [{ type: 'message', data: oldMessages[0] } as UIStreamEvent],
+      'session-1',
+      streamId,
+      'running',
+      1,
+      '',
+      oldRequest,
+    )
+    oldRunning.current_run_view!.generation = 'generation-old'
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: oldRunning,
+    } as UIStreamEvent)
+    expect(store.messages.find(turn => turn.role === 'assistant')).toMatchObject({
+      role: 'assistant',
+      messages: [expect.objectContaining({ type: 'text', content: 'old partial' })],
+    })
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { ...oldRequest, attachments: [] },
+      {
+        id: 'old-assistant-row',
+        role: 'assistant',
+        messages: oldMessages,
+        timestamp: '2026-07-14T00:00:01Z',
+      },
+    ])
+    const oldErrored = structuredClone(oldRunning)
+    oldErrored.seq = 2
+    oldErrored.current_run_view!.status = 'errored'
+    oldErrored.current_run_view!.error = 'old runtime failed'
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: oldErrored,
+    } as UIStreamEvent)
+    await vi.waitFor(() => {
+      expect(store.messages).toHaveLength(2)
+      expect(store.messages[0]).toMatchObject({ role: 'user', text: 'old prompt' })
+      expect(store.messages[1]).toMatchObject({
+        role: 'assistant',
+        streaming: false,
+        messages: expect.arrayContaining([
+          expect.objectContaining({ type: 'text', content: 'old partial' }),
+          expect.objectContaining({ type: 'error', content: 'old runtime failed' }),
+        ]),
+      })
+    })
+
+    const running = runtimeSnapshotFromScript([
+      {
+        type: 'message',
+        data: {
+          id: 0,
+          stable_id: 'new-assistant-row',
+          turn_position: 2,
+          turn_message_seq: 2,
+          type: 'text',
+          content: 'new partial',
+        },
+      } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 3, '', {
+      id: 'new-user-row',
+      role: 'user',
+      text: 'new prompt',
+      timestamp: '2026-07-14T00:01:00Z',
+      external_message_id: streamId,
+      turn_position: 2,
+      turn_message_seq: 1,
+    })
+    running.current_run_view!.generation = 'generation-new'
+    streamHandler?.({ type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 3, snapshot: running } as UIStreamEvent)
+    await flushPromises()
+
+    expect(store.messages).toHaveLength(4)
+    expect(store.messages[0]).toMatchObject({ role: 'user', text: 'old prompt' })
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      streaming: false,
+      messages: [
+        expect.objectContaining({ type: 'text', content: 'old partial' }),
+        expect.objectContaining({ type: 'error', content: 'old runtime failed' }),
+      ],
+    })
+    expect(store.messages[2]).toMatchObject({ role: 'user', text: 'new prompt' })
+    expect(store.messages[3]).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+      messages: [{ id: 0, type: 'text', content: 'new partial' }],
+    })
+  })
+
+  it('resubscribes active and background running sessions when the websocket reconnects', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    streamHandler?.({ type: 'start', stream_id: 'stream-background', session_id: 'session-1' } as UIStreamEvent)
+    api.fetchMessagesUI.mockResolvedValueOnce([])
+    store.selectSession('session-2')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+
+    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as { onOpen?: (() => void) | null }
+    websocket.onOpen?.()
+
+    expect(runtimeSubscribeMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' }),
+      expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-2' }),
+    ]))
+  })
+
+  it('retries a failed runtime subscription immediately on a new websocket generation', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const failedSubscription = runtimeSubscribeMessages.at(-1)
+    const failedInvocationId = String(failedSubscription?.invocation_id ?? '')
+    expect(failedInvocationId).not.toBe('')
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: failedInvocationId,
+      error: { code: 'runtime_subscription_failed', message: 'temporary failure' },
+    } as UIStreamEvent)
+    runtimeSubscribeMessages = []
+
+    const websocket = api.connectWebSocket.mock.results.at(-1)?.value as {
+      onClose?: (() => void) | null
+      onOpen?: (() => void) | null
+    }
+    websocket.onClose?.()
+    websocket.onOpen?.()
+
+    expect(runtimeSubscribeMessages).toEqual([
+      expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' }),
+    ])
+    consoleError.mockRestore()
+  })
+
+  it('applies runtime snapshots for running and completed state through the store reducer', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-runtime-delta'
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 11,
+      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, 'running', 11),
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(true)
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+    expect(assistant.streaming).toBe(true)
+    expect(assistant.messages.find(block => block.type === 'text')).toMatchObject({
+      content: 'I will check the current state.',
+    })
+    expect(assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-approval')).toMatchObject({
+      approval: {
+        approval_id: 'approval-1',
+        status: 'pending',
+      },
+    })
+
+    let resolveRefresh: ((turns: unknown[]) => void) | undefined
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => {
+      resolveRefresh = resolve
+    }))
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 12,
+      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, 'completed', 12),
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(false)
+    expect(assistant.streaming).toBe(false)
+    expect(assistant.messages.some(block => block.type === 'error')).toBe(false)
+    resolveRefresh?.([])
+    await flushPromises()
+  })
+
+  it('ignores out-of-order runtime state for the active session', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-runtime-ordering'
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 11,
+      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, 'running', 11),
+    } as UIStreamEvent)
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+
+    let resolveRefresh: ((turns: unknown[]) => void) | undefined
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => {
+      resolveRefresh = resolve
+    }))
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 12,
+      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, 'completed', 12),
+    } as UIStreamEvent)
+    expect(store.streaming).toBe(false)
+    expect(assistant.streaming).toBe(false)
+    const messageCount = store.messages.length
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 11,
+      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, 'running', 11),
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(false)
+    expect(assistant.streaming).toBe(false)
+    expect(store.messages).toHaveLength(messageCount)
+    resolveRefresh?.([])
+    await flushPromises()
+  })
+
+  it.each([
+    { status: 'aborted', error: '', wantError: 'Response stopped' },
+    { status: 'errored', error: 'runtime failed', wantError: 'runtime failed' },
+    { status: 'lost', error: 'runtime owner lease expired', wantError: 'runtime owner lease expired' },
+  ])('applies runtime snapshot terminal state $status through the store reducer', async ({ status, error, wantError }) => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = `stream-runtime-${status}`
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 11,
+      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, 'running', 11),
+    } as UIStreamEvent)
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+
+    let resolveRefresh: ((turns: unknown[]) => void) | undefined
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => {
+      resolveRefresh = resolve
+    }))
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 12,
+      snapshot: runtimeSnapshotFromScript(richActiveRunStoreScript('session-1', streamId), 'session-1', streamId, status, 12, error),
+    } as UIStreamEvent)
+    await flushPromises()
+
+    expect(store.streaming).toBe(false)
+    expect(assistant.streaming).toBe(false)
+    const errorBlocks = assistant.messages.filter(block => block.type === 'error')
+    expect(errorBlocks).toContainEqual(expect.objectContaining({ content: wantError }))
+    resolveRefresh?.([])
+    await flushPromises()
+  })
+
+  it('applies the Go-generated rich runtime delta stream through successful completion', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const stream = structuredClone(richActiveRunContractFixture.runtime_stream)
+    for (const event of stream) streamHandler?.(event)
+
+    const user = store.messages.find(turn => turn.role === 'user')
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(user).toMatchObject({ role: 'user', text: 'Inspect the workspace' })
+    expect(assistant).toMatchObject({ role: 'assistant', streaming: true })
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+    expect(assistant.messages.find(block => block.type === 'reasoning')).toMatchObject({
+      content: 'I need to inspect the workspace.',
+    })
+    expect(assistant.messages.find(block => block.type === 'text')).toMatchObject({
+      content: 'I will check the current state.',
+    })
+    expect(assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-exec')).toMatchObject({
+      progress: ['queued', { stdout: '/workspace\n' }],
+      done: true,
+    })
+    expect(assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-approval')).toMatchObject({
+      approval: { approval_id: 'approval-1', status: 'pending' },
+    })
+    expect(assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-ask')).toMatchObject({
+      userInput: { user_input_id: 'input-1', status: 'pending' },
+    })
+
+    const deltas = stream.filter(event => event.type === 'runtime_delta')
+    expect(deltas).not.toHaveLength(0)
+    for (const event of deltas) {
+      expect(event).not.toHaveProperty('snapshot')
+      expect(event).toHaveProperty('delta')
+    }
+
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>(() => {}))
+    const terminalStream = structuredClone(richActiveRunContractFixture.runtime_terminal_stream ?? [])
+    expect(terminalStream).not.toHaveLength(0)
+    for (const event of terminalStream) streamHandler?.(event)
+    await flushPromises()
+
+    expect(terminalStream.every(event => event.type === 'runtime_delta')).toBe(true)
+    expect(terminalStream.some(event => event.type === 'runtime_delta' && event.delta.run?.status === 'completed')).toBe(true)
+    expect(assistant).toMatchObject({ role: 'assistant', streaming: false })
+    expect(assistant.messages.some(block => block.type === 'error')).toBe(false)
+  })
+
+  it('recovers the chat projection from the Go-generated runtime checkpoint', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+
+    const fixture = structuredClone(runtimeRecoveryContractFixture)
+    streamHandler?.(fixture.runtime_snapshot)
+    streamHandler?.(fixture.gap_delta)
+    expect(runtimeSubscribeMessages).toEqual([
+      expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' }),
+    ])
+
+    streamHandler?.(fixture.delayed_delta)
+    expect(runtimeSubscribeMessages).toHaveLength(1)
+
+    streamHandler?.(fixture.runtime_checkpoint)
+    streamHandler?.(fixture.post_recovery_delta)
+
+    expect(store.messages.find(turn => turn.role === 'user')).toMatchObject({
+      text: 'Inspect the workspace',
+      externalMessageId: 'stream-recovery',
+    })
+    expect(store.messages.find(turn => turn.role === 'assistant')).toMatchObject({
+      streaming: true,
+      messages: [expect.objectContaining({ type: 'text', content: 'missing checkpoint continued' })],
+    })
+    expect(store.streaming).toBe(true)
+  })
+
+  it('replays the complete Go-generated generation rollover delta stream', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    api.fetchMessagesUI.mockImplementation(() => new Promise<UITurn[]>(() => {}))
+
+    const stream = structuredClone(generationReuseContractFixture.runtime_stream)
+    const terminalIndex = stream.findIndex(event =>
+      event.type === 'runtime_delta' && event.delta.run?.status === 'completed')
+    expect(terminalIndex).toBeGreaterThan(0)
+    for (const event of stream.slice(0, terminalIndex + 1)) streamHandler?.(event)
+
+    expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+      'old prompt',
+      'old answer',
+    ])
+    expect(store.streaming).toBe(false)
+
+    for (const event of stream.slice(terminalIndex + 1)) streamHandler?.(event)
+
+    expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+      'old prompt',
+      'old answer',
+      'new prompt',
+      'new partial',
+    ])
+    expect(store.messages[1]).toMatchObject({ id: 'runtime-stream-generation-reuse', streaming: false })
+    expect(store.messages[3]).toMatchObject({
+      id: 'runtime-stream-generation-reuse-generation-b',
+      role: 'assistant',
+      streaming: true,
+    })
+  })
+
+  it('keeps persisted output separate when attaching to a Go-generated reused stream snapshot', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    seedTranscript(store, {
+      id: 'user-generation-a',
+      role: 'user',
+      text: 'old prompt',
+      attachments: [],
+      timestamp: '2026-07-10T00:00:00Z',
+      externalMessageId: 'stream-generation-reuse',
+      streaming: false,
+      isSelf: true,
+    }, {
+      id: 'assistant-generation-a',
+      role: 'assistant',
+      messages: [{ id: 0, type: 'text', content: 'old answer' }],
+      timestamp: '2026-07-10T00:00:10Z',
+      streaming: false,
+    })
+
+    const stream = structuredClone(generationReuseContractFixture.runtime_stream)
+    expect(stream.some(event => event.type === 'runtime_delta'
+      && event.delta.current_run_view?.generation === 'generation-a')).toBe(true)
+    expect(stream.some(event => event.type === 'runtime_delta'
+      && event.delta.current_run_view?.generation === 'generation-b')).toBe(true)
+    streamHandler?.(structuredClone(generationReuseContractFixture.runtime_snapshot) as UIStreamEvent)
+
+    expect(store.messages.map(turn => turn.role === 'user' ? turn.text : turn.messages[0]?.content)).toEqual([
+      'old prompt',
+      'old answer',
+      'new prompt',
+      'new partial',
+    ])
+    expect(store.messages[1]).toMatchObject({ id: 'assistant-generation-a', streaming: false })
+    expect(store.messages[3]).toMatchObject({
+      id: 'runtime-stream-generation-reuse',
+      role: 'assistant',
+      streaming: true,
+    })
+  })
+
+  it('projects the Go-generated admission checkpoints without requesting a resync', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+
+    const stream = structuredClone(richActiveRunContractFixture.runtime_admission_stream ?? [])
+    expect(stream).toHaveLength(3)
+    for (const event of stream) streamHandler?.(event)
+
+    expect(runtimeSubscribeMessages).toEqual([])
+    expect(store.streaming).toBe(true)
+    expect(store.messages.find(turn => turn.role === 'user')).toMatchObject({
+      text: 'Inspect the workspace',
+      externalMessageId: 'stream-admission',
+    })
+    expect(store.messages.find(turn => turn.id === 'runtime-stream-admission')).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+    })
+  })
+
+  it('projects the Go-generated retry reset without retaining discarded output', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+
+    const stream = structuredClone(richActiveRunContractFixture.runtime_reset_stream ?? [])
+    expect(stream).toHaveLength(4)
+    for (const event of stream) streamHandler?.(event)
+
+    expect(runtimeSubscribeMessages).toEqual([])
+    const assistant = store.messages.find(turn => turn.id === 'runtime-stream-reset')
+    expect(assistant?.role === 'assistant' ? assistant.messages : []).toEqual([
+      {
+        id: 1,
+        type: 'text',
+        content: 'replacement draft',
+        stable_id: 'turn-stream-reset-1-row-02',
+        turn_message_seq: 4,
+        turn_position: 1,
+        row_identities: [
+          {
+            role: 'assistant',
+            stable_id: 'turn-stream-reset-1-row-02',
+            turn_id: 'turn-stream-reset-1',
+            turn_message_seq: 4,
+            turn_position: 1,
+          },
+        ],
+      },
+    ])
+  })
+
+  it('accepts the complete Go-generated steer lifecycle without requesting a resync', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+
+    const stream = structuredClone(richActiveRunContractFixture.runtime_steer_stream ?? [])
+    expect(stream).toHaveLength(4)
+    for (const event of stream) streamHandler?.(event)
+
+    expect(runtimeSubscribeMessages).toEqual([])
+    expect(store.messages.find(turn => turn.id === 'runtime-stream-steer')).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+    })
+  })
+
+  it('applies the Go-generated interrupted runtime delta stream as a terminal failure', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    api.fetchMessagesUI.mockImplementationOnce(() => new Promise<unknown[]>(() => {}))
+
+    for (const event of structuredClone(interruptedRunContractFixture.runtime_stream)) {
+      streamHandler?.(event)
+    }
+    await flushPromises()
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant' && turn.messages.some(block => block.type === 'text' && block.content === 'partial output'))
+    expect(assistant).toMatchObject({ role: 'assistant', streaming: false })
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+    expect(assistant.messages.find(block => block.type === 'text')).toMatchObject({ content: 'partial output' })
+    expect(assistant.messages.find(block => block.type === 'error')).toMatchObject({ content: 'runtime interrupted' })
+  })
+
+  it('waits for a checkpoint after a runtime delta gap and ignores delayed deltas', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const stream = structuredClone(richActiveRunContractFixture.runtime_stream)
+    streamHandler?.(stream[0]!)
+    runtimeSubscribeMessages = []
+    for (const event of stream.slice(2, 5)) streamHandler?.(event)
+
+    expect(runtimeSubscribeMessages).toEqual([expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' })])
+    expect(api.fetchSessionRuntime).not.toHaveBeenCalled()
+    const beforeRecovery = store.messages.find(turn => turn.role === 'assistant')
+    expect(beforeRecovery?.role === 'assistant' ? beforeRecovery.messages : []).toEqual([])
+
+    streamHandler?.(stream[1]!)
+    const afterDelayedDelta = store.messages.find(turn => turn.role === 'assistant')
+    expect(afterDelayedDelta?.role === 'assistant' ? afterDelayedDelta.messages : []).toEqual([])
+
+    streamHandler?.(structuredClone(richActiveRunContractFixture.runtime_snapshot) as UIStreamEvent)
+    const recovered = store.messages.find(turn => turn.role === 'assistant')
+    expect(recovered?.role === 'assistant' ? recovered.messages.find(block => block.type === 'text') : null).toMatchObject({
+      content: 'I will check the current state.',
+    })
+  })
+
+  it('resyncs after a malformed runtime snapshot without poisoning later deltas', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+
+    const malformed = {
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-malformed',
+      epoch: 'epoch-session-1',
+      seq: 1,
+      snapshot: {
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        epoch: 'epoch-session-1',
+        seq: 1,
+        queue: [],
+        current_run_view: {
+          stream_id: 'stream-malformed',
+          status: 'running',
+          messages: [null],
+        },
+      },
+    } as unknown as UIStreamEvent
+    expect(() => streamHandler?.(malformed)).not.toThrow()
+    await flushPromises()
+    expect(runtimeSubscribeMessages).toEqual([expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' })])
+    expect(store.messages).toEqual([])
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-recovered',
+      epoch: 'epoch-session-1',
+      seq: 2,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', 'stream-recovered', 'running', 2),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-recovered',
+      epoch: 'epoch-session-1',
+      seq: 3,
+      delta: { message_appends: [{ id: 0, type: 'text', content: 'recovered' }] },
+    } as UIStreamEvent)
+
+    const assistant = store.messages.find(turn => turn.id === 'runtime-stream-recovered')
+    expect(assistant?.role === 'assistant' ? assistant.messages : []).toContainEqual({
+      id: 0,
+      type: 'text',
+      content: 'recovered',
+    })
+  })
+
+  it('rejects a runtime snapshot whose envelope and payload target different sessions', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-wrong-session',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript(
+        [{ type: 'message', data: { id: 0, type: 'text', content: 'must not render' } } as UIStreamEvent],
+        'session-2',
+        'stream-wrong-session',
+        'running',
+        1,
+      ),
+    } as UIStreamEvent)
+
+    await flushPromises()
+    expect(store.messages).toEqual([])
+    expect(runtimeSubscribeMessages).toEqual([
+      expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' }),
+    ])
+  })
+
+  it('rejects runtime state whose declared bot conflicts with the websocket source bot', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    runtimeSubscribeMessages = []
+    const snapshot = runtimeSnapshotFromScript(
+      [{ type: 'message', data: { id: 0, type: 'text', content: 'must not render' } } as UIStreamEvent],
+      'session-1',
+      'stream-wrong-bot',
+      'running',
+      1,
+    )
+    snapshot.bot_id = 'bot-2'
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-2',
+      session_id: 'session-1',
+      stream_id: 'stream-wrong-bot',
+      seq: 1,
+      snapshot,
+    } as UIStreamEvent)
+
+    await flushPromises()
+    expect(store.messages).toEqual([])
+    expect(runtimeSubscribeMessages).toEqual([
+      expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' }),
+    ])
+  })
+
+  it('rejects an empty snapshot that carries a stream envelope without terminating the active run', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-active',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', 'stream-active', 'running', 1),
+    } as UIStreamEvent)
+    const assistant = store.messages.find(turn => turn.role === 'assistant' && turn.id === 'runtime-stream-active')
+    expect(assistant).toMatchObject({ role: 'assistant', streaming: true })
+    runtimeSubscribeMessages = []
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: 'stream-active',
+      seq: 2,
+      snapshot: { bot_id: 'bot-1', session_id: 'session-1', seq: 2, queue: [] },
+    } as UIStreamEvent)
+
+    expect(assistant).toMatchObject({ role: 'assistant', streaming: true })
+    expect(store.streaming).toBe(true)
+    expect(runtimeSubscribeMessages).toEqual([
+      expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' }),
+    ])
+  })
+
+  it('waits for an admission checkpoint when a current-run delta skips a sequence', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const epoch = 'epoch-session-1'
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      seq: 0,
+      snapshot: { bot_id: 'bot-1', session_id: 'session-1', epoch, seq: 0, queue: [] },
+    } as UIStreamEvent)
+    runtimeSubscribeMessages = []
+    const baseline = richActiveRunContractFixture.runtime_stream[0]
+    if (baseline?.type !== 'runtime_snapshot' || !baseline.snapshot?.current_run_view) {
+      throw new Error('missing generated admission snapshot')
+    }
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      stream_id: baseline.snapshot.current_run_view.stream_id,
+      seq: 2,
+      delta: { current_run_view: structuredClone(baseline.snapshot.current_run_view) },
+    } as UIStreamEvent)
+
+    expect(runtimeSubscribeMessages).toEqual([
+      expect.objectContaining({ type: 'runtime_subscribe', session_id: 'session-1' }),
+    ])
+    expect(store.streaming).toBe(false)
+
+    const checkpoint = {
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      seq: 2,
+      queue: [],
+      current_run_view: structuredClone(baseline.snapshot.current_run_view),
+    }
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      stream_id: baseline.snapshot.current_run_view.stream_id,
+      seq: 2,
+      snapshot: checkpoint,
+    } as UIStreamEvent)
+
+    expect(store.streaming).toBe(true)
+    expect(store.messages.find(turn => turn.role === 'user')).toMatchObject({ text: 'Inspect the workspace' })
+  })
+
+  it('removes stale assistant blocks from authoritative checkpoints and snapshots', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const baseline = structuredClone(richActiveRunContractFixture.runtime_snapshot)
+    const run = baseline.snapshot.current_run_view
+    if (!run) throw new Error('missing generated current run')
+    streamHandler?.({
+      type: 'start',
+      stream_id: run.stream_id,
+      session_id: 'session-1',
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'message',
+      stream_id: run.stream_id,
+      session_id: 'session-1',
+      data: { id: 99, type: 'text', content: 'discarded legacy output' },
+    } as UIStreamEvent)
+    const legacyAssistant = store.messages.find(turn => turn.role === 'assistant'
+      && turn.messages.some(block => block.id === 99))
+    if (!legacyAssistant || legacyAssistant.role !== 'assistant') throw new Error('missing legacy assistant turn')
+    expect(legacyAssistant.messages.map(block => block.id)).toContain(99)
+
+    streamHandler?.(baseline as UIStreamEvent)
+    const assistant = legacyAssistant
+    expect(assistant.messages.map(block => block.id)).not.toContain(99)
+    expect(assistant.messages.map(block => block.id)).toContain(0)
+
+    const checkpointRun = structuredClone(run)
+    checkpointRun.messages = checkpointRun.messages?.filter(message => message.id !== 0)
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: run.stream_id,
+      epoch: baseline.epoch,
+      seq: baseline.seq + 1,
+      delta: { current_run_view: checkpointRun },
+    } as UIStreamEvent)
+    expect(assistant.messages.map(block => block.id)).not.toContain(0)
+    expect(assistant.messages.map(block => block.id)).toContain(1)
+
+    const snapshot = structuredClone(baseline)
+    snapshot.seq = baseline.seq + 2
+    snapshot.snapshot.seq = snapshot.seq
+    snapshot.snapshot.current_run_view!.messages = checkpointRun.messages?.filter(message => message.id !== 1)
+    streamHandler?.(snapshot as UIStreamEvent)
+    expect(assistant.messages.map(block => block.id)).not.toContain(1)
+  })
+
+  it('ignores delayed deltas until a checkpoint recovers a gap and detects a later gap', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const epoch = 'epoch-session-1'
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      seq: 0,
+      snapshot: { bot_id: 'bot-1', session_id: 'session-1', epoch, seq: 0, queue: [] },
+    } as UIStreamEvent)
+    runtimeSubscribeMessages = []
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      stream_id: 'stream-gap',
+      seq: 2,
+      delta: { message_appends: [{ id: 0, type: 'text', content: 'unusable gap' }] },
+    } as UIStreamEvent)
+    expect(runtimeSubscribeMessages).toHaveLength(1)
+
+    const active = structuredClone(richActiveRunContractFixture.runtime_snapshot.snapshot.current_run_view)
+    if (!active) throw new Error('missing generated current run')
+    runtimeSubscribeMessages = []
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      stream_id: active.stream_id,
+      seq: 1,
+      delta: { current_run_view: active },
+    } as UIStreamEvent)
+    expect(runtimeSubscribeMessages).toEqual([])
+    expect(store.streaming).toBe(false)
+
+    const checkpoint = {
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      seq: 2,
+      queue: [],
+      current_run_view: active,
+    }
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      stream_id: active.stream_id,
+      seq: 2,
+      snapshot: checkpoint,
+    } as UIStreamEvent)
+    expect(store.streaming).toBe(true)
+
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch,
+      stream_id: active.stream_id,
+      seq: 4,
+      delta: { message_appends: [{ id: 0, type: 'text', content: 'second gap' }] },
+    } as UIStreamEvent)
+    expect(runtimeSubscribeMessages).toHaveLength(1)
+  })
+
+  it('finalizes a superseded local stream when a new run checkpoint arrives', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript(
+        [{ type: 'message', data: { id: 0, type: 'text', content: 'old output' } } as UIStreamEvent],
+        'session-1',
+        'stream-old-checkpoint',
+        'running',
+        1,
+      ),
+    } as UIStreamEvent)
+    const oldAssistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(oldAssistant).toMatchObject({ role: 'assistant', streaming: true })
+
+    const nextSnapshot = runtimeSnapshotFromScript(
+      [],
+      'session-1',
+      'stream-new-checkpoint',
+      'running',
+      3,
+    )
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: nextSnapshot.epoch,
+      stream_id: 'stream-new-checkpoint',
+      seq: 3,
+      snapshot: nextSnapshot,
+    } as UIStreamEvent)
+
+    expect(oldAssistant).toMatchObject({ role: 'assistant', streaming: false })
+    expect(store.messages.filter(turn => turn.role === 'assistant' && turn.streaming)).toHaveLength(1)
+    expect(store.messages.find(turn => turn.id === 'runtime-stream-new-checkpoint')).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+    })
+  })
+
+  it('projects batched message and progress appends without duplicating newly created blocks', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const baseline = runtimeSnapshotFromScript([], 'session-1', 'stream-batch', 'running', 2)
+    baseline.current_run_view!.messages = [{ id: 1, type: 'tool', name: 'exec', tool_call_id: 'call-1' }]
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: baseline.epoch,
+      stream_id: 'stream-batch',
+      seq: 2,
+      snapshot: baseline,
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: baseline.epoch,
+      stream_id: 'stream-batch',
+      seq: 3,
+      delta: {
+        message_appends: [
+          { id: 0, type: 'text', content: 'hello' },
+          { id: 0, type: 'text', content: ' world' },
+        ],
+        progress_appends: [
+          { id: 1, progress: 'queued' },
+          { id: 1, progress: 'done' },
+        ],
+      },
+    } as UIStreamEvent)
+
+    const assistant = store.messages.find(turn => turn.id === 'runtime-stream-batch')
+    expect(assistant?.role === 'assistant' ? assistant.messages : []).toContainEqual({
+      id: 0,
+      type: 'text',
+      content: 'hello world',
+    })
+    expect(assistant?.role === 'assistant' ? assistant.messages : []).toContainEqual(expect.objectContaining({
+      id: 1,
+      type: 'tool',
+      progress: ['queued', 'done'],
+    }))
+  })
+
+  it('keeps canonical runtime ownership when a late legacy end arrives', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const send = store.sendMessage('keep running')
+    await flushPromises()
+    const streamId = lastStreamId
+    const running = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'partial' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 1)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: running,
+    } as UIStreamEvent)
+
+    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-1' } as UIStreamEvent)
+    expect(store.streaming).toBe(true)
+    expect(store.messages.find(turn => turn.role === 'assistant')).toMatchObject({ streaming: true })
+
+    const aborted = structuredClone(running)
+    aborted.seq = 2
+    aborted.current_run_view!.status = 'aborted'
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 2, snapshot: aborted,
+    } as UIStreamEvent)
+
+    await expect(send).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    expect(store.streaming).toBe(false)
+  })
+
+  it('does not revive checkpoint-reset blocks from a late legacy message', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-late-legacy-message'
+    const running = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'canonical' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 1)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-1', seq: 1, snapshot: running,
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: running.epoch,
+      stream_id: streamId,
+      seq: 2,
+      delta: { reset_messages: true },
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'message',
+      stream_id: streamId,
+      session_id: 'session-1',
+      data: { id: 99, type: 'text', content: 'stale legacy output' },
+    } as UIStreamEvent)
+
+    const assistant = store.messages.find(turn => turn.id === `runtime-${streamId}`)
+    expect(assistant?.role === 'assistant' ? assistant.messages : []).toEqual([])
+    expect(assistant).toMatchObject({ streaming: true })
+  })
+
+  it('sends an early abort before runtime generation hydration', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const send = store.sendMessage('abort before admission')
+    await flushPromises()
+    const streamId = lastStreamId
+    store.abort()
+
+    expect(sentAbortMessages()).toEqual([expect.objectContaining({
+      stream_id: streamId,
+      session_id: 'session-1',
+    })])
+    expect(sentAbortMessages()[0]).not.toHaveProperty('generation')
+    expect(store.streaming).toBe(true)
+
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([], 'session-1', streamId, 'aborted', 1),
+    } as UIStreamEvent)
+    await expect(send).resolves.toMatchObject({ ok: false })
+    expect(store.streaming).toBe(false)
+  })
+
+  it('isolates the same runtime stream id across two sessions', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    store.bindChatView('chat:shared-runtime-b', {
+      botId: 'bot-1', sessionId: 'session-2', viewId: 'chat:shared-runtime-b',
+    }, true)
+    await flushPromises()
+
+    const streamId = 'shared-runtime-stream'
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([
+        { type: 'message', data: { id: 0, type: 'text', content: 'answer A' } } as UIStreamEvent,
+      ], 'session-1', streamId, 'running', 1),
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-2',
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([
+        { type: 'message', data: { id: 0, type: 'text', content: 'answer B' } } as UIStreamEvent,
+      ], 'session-2', streamId, 'running', 1),
+    } as UIStreamEvent)
+
+    expect(store.isSessionStreaming('bot-1', 'session-1')).toBe(true)
+    expect(store.isSessionStreaming('bot-1', 'session-2')).toBe(true)
+    expect(store.messages.flatMap(turn => turn.role === 'assistant' ? turn.messages : []))
+      .toContainEqual(expect.objectContaining({ content: 'answer A' }))
+
+    await store.selectSession('session-2')
+    await flushPromises()
+    expect(store.messages.flatMap(turn => turn.role === 'assistant' ? turn.messages : []))
+      .toContainEqual(expect.objectContaining({ content: 'answer B' }))
+
+    const completedB = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'answer B' } } as UIStreamEvent,
+    ], 'session-2', streamId, 'completed', 2)
+    streamHandler?.({
+      type: 'runtime_snapshot', bot_id: 'bot-1', session_id: 'session-2', seq: 2, snapshot: completedB,
+    } as UIStreamEvent)
+    expect(store.isSessionStreaming('bot-1', 'session-2')).toBe(false)
+    expect(store.isSessionStreaming('bot-1', 'session-1')).toBe(true)
+  })
 })

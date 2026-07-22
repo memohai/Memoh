@@ -2,6 +2,8 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -19,6 +21,84 @@ type recordingMessageService struct {
 	persisted []messagepkg.PersistInput
 	replaced  int
 	deleted   [][]string
+}
+
+func TestSendWSAgentEventWaitsForTerminalConsumerAfterExecutionCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = WithTerminalEventDeliveryTimeout(ctx, time.Second)
+	cancel()
+	eventCh := make(chan WSStreamEvent)
+	event := agentpkg.StreamEvent{Type: agentpkg.EventAgentAbort, HistoryCommitted: true}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal terminal event: %v", err)
+	}
+
+	delivered := make(chan bool, 1)
+	go func() {
+		delivered <- sendWSAgentEvent(ctx, eventCh, event, data)
+	}()
+	select {
+	case result := <-delivered:
+		t.Fatalf("terminal delivery returned before a consumer was available: %v", result)
+	case <-time.After(25 * time.Millisecond):
+	}
+	var got agentpkg.StreamEvent
+	if err := json.Unmarshal(<-eventCh, &got); err != nil {
+		t.Fatalf("unmarshal delivered terminal event: %v", err)
+	}
+	if !<-delivered {
+		t.Fatal("terminal event was dropped after execution cancellation")
+	}
+	if got.Type != agentpkg.EventAgentAbort || !got.HistoryCommitted {
+		t.Fatalf("delivered terminal event = %#v", got)
+	}
+}
+
+func TestSendWSAgentEventBoundsTerminalDeliveryWithoutConsumer(t *testing.T) {
+	t.Parallel()
+
+	ctx := WithTerminalEventDeliveryTimeout(context.Background(), 25*time.Millisecond)
+	event := agentpkg.StreamEvent{Type: agentpkg.EventAgentEnd, HistoryCommitted: true}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal terminal event: %v", err)
+	}
+	started := time.Now()
+	if sendWSAgentEvent(ctx, make(chan WSStreamEvent), event, data) {
+		t.Fatal("terminal event unexpectedly reached a missing consumer")
+	}
+	if elapsed := time.Since(started); elapsed < 20*time.Millisecond || elapsed > time.Second {
+		t.Fatalf("terminal delivery bound elapsed = %s", elapsed)
+	}
+}
+
+func TestPrepareRunConfigCarriesTerminalHookAuthority(t *testing.T) {
+	t.Parallel()
+
+	authorityCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	validated := false
+	authority := agentpkg.TerminalHookAuthority{
+		Context: authorityCtx,
+		Validate: func(context.Context) error {
+			validated = true
+			return nil
+		},
+	}
+	resolver := &Resolver{}
+	got := resolver.prepareRunConfig(WithTerminalHookAuthority(context.Background(), authority), agentpkg.RunConfig{})
+	if got.TerminalHookAuthority.Context != authorityCtx || got.TerminalHookAuthority.Validate == nil {
+		t.Fatalf("terminal hook authority = %#v", got.TerminalHookAuthority)
+	}
+	if err := got.TerminalHookAuthority.Validate(context.Background()); err != nil {
+		t.Fatalf("validate terminal hook authority: %v", err)
+	}
+	if !validated {
+		t.Fatal("prepared terminal hook authority did not retain its validator")
+	}
 }
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
@@ -78,7 +158,11 @@ func (*recordingMessageService) GetByIDBySession(context.Context, string, string
 	return messagepkg.Message{}, nil
 }
 
-func (*recordingMessageService) ListVisibleFromBySession(context.Context, string, string) ([]messagepkg.Message, error) {
+func (*recordingMessageService) ListVisibleFromBySession(context.Context, string, string, int32) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*recordingMessageService) ListVisibleMessagesByTurnIDBySession(context.Context, string, string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
@@ -90,8 +174,7 @@ func (*recordingMessageService) GetLatestVisibleTurnBySession(context.Context, s
 	return messagepkg.HistoryTurn{}, nil
 }
 
-func (s *recordingMessageService) ReplaceTurn(context.Context, string, string, string, string, string) (messagepkg.HistoryTurn, error) {
-	s.replaced++
+func (*recordingMessageService) ReplaceTurn(context.Context, string, string, string, string, string) (messagepkg.HistoryTurn, error) {
 	return messagepkg.HistoryTurn{}, nil
 }
 
@@ -121,7 +204,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 		logger:         slog.New(slog.DiscardHandler),
 	}
 
-	resolver.persistPartialResult(
+	_, _ = resolver.persistPartialResult(
 		context.Background(),
 		conversation.ChatRequest{
 			BotID:     "bot-1",
@@ -129,7 +212,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 			Query:     "hello",
 		},
 		resolvedContext{},
-		nil,
+		terminalSnapshot{},
 		0,
 		false,
 		true,
@@ -137,6 +220,62 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 
 	if len(messages.persisted) != 0 {
 		t.Fatalf("expected failed stream not to persist user-only history, got %#v", messages.persisted)
+	}
+}
+
+func TestPersistPartialResultCarriesBoundRuntimeRows(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	tracker := newRuntimeRowTracker(turn)
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	delta := agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "partial answer"}
+	tracker.Annotate(&delta)
+
+	sdkMessages := []sdk.Message{sdk.AssistantMessage("partial answer")}
+	snap := terminalSnapshot{
+		sdkMessages:   sdkMessages,
+		runtimeRows:   tracker.bindTerminalRows(sdkMessages),
+		visibleOutput: true,
+	}
+
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	if _, err := resolver.persistPartialResult(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:                "bot-1",
+			SessionID:            "session-1",
+			Query:                "hello",
+			RuntimeTurn:          turn,
+			SkipMemoryExtraction: true,
+		},
+		resolvedContext{},
+		snap,
+		0,
+		false,
+		true,
+	); err != nil {
+		t.Fatalf("persistPartialResult returned error: %v", err)
+	}
+
+	if len(messages.roundInputs) != 2 {
+		t.Fatalf("expected user and assistant messages to persist, got %#v", messages.roundInputs)
+	}
+	user, assistant := messages.roundInputs[0], messages.roundInputs[1]
+	if user.TurnMessageSeq != 1 || user.MessageID != turn.Request.MessageID {
+		t.Fatalf("user row reservation = %#v, want turn request row", user)
+	}
+	// The assistant row must land on the identity the live stream announced;
+	// dropping snap.runtimeRows would leave it unreserved and break the
+	// turn's row-ledger ordering.
+	if assistant.MessageID != delta.StableID || assistant.TurnID != turn.TurnID ||
+		assistant.TurnPosition != turn.TurnPosition || assistant.TurnMessageSeq != 2 {
+		t.Fatalf("assistant row = %#v, want live identity %q at sequence 2", assistant, delta.StableID)
 	}
 }
 
@@ -257,6 +396,188 @@ func TestPersistTerminalSnapshotStoresAssistantOutput(t *testing.T) {
 	}
 	if messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" {
 		t.Fatalf("unexpected persisted roles: %q, %q", messages.persisted[0].Role, messages.persisted[1].Role)
+	}
+}
+
+func TestRuntimeInjectedMessagePersistsInReservedTurnOrder(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	tracker := newRuntimeRowTracker(turn)
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventToolCallEnd})
+
+	records := make([]conversation.InjectedMessageRecord, 0, 1)
+	rc := resolvedContext{
+		injectedRecords: &records,
+		recordInjectedMessage: func(record conversation.InjectedMessageRecord) {
+			records = append(records, record)
+		},
+	}
+	cfg := agentpkg.RunConfig{
+		InjectedRecorder: func(string, int) {
+			t.Fatal("runtime recorder did not replace the unreserved recorder")
+		},
+	}
+	bindRuntimeInjectedRecorder(&cfg, rc, tracker)
+	cfg.InjectedRecorder("---\nsource: web\n---\nchange direction", 2)
+
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	sdkMessages := []sdk.Message{
+		{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ToolCallPart{
+				ToolCallID: "read-1",
+				ToolName:   "read",
+				Input:      map[string]any{"path": "README.md"},
+			}},
+		},
+		sdk.ToolMessage(sdk.ToolResultPart{
+			ToolCallID: "read-1",
+			ToolName:   "read",
+			Result:     "contents",
+		}),
+		sdk.AssistantMessage("updated answer"),
+	}
+	runtimeRows := tracker.bindTerminalRows(sdkMessages)
+
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	_, err := resolver.persistTerminalSnapshotResult(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:                storeRoundBotID,
+			SessionID:            "33333333-3333-3333-3333-333333333333",
+			Query:                "initial request",
+			RuntimeTurn:          turn,
+			SkipMemoryExtraction: true,
+		},
+		rc,
+		terminalSnapshot{
+			sdkMessages:   sdkMessages,
+			runtimeRows:   runtimeRows,
+			visibleOutput: true,
+		},
+	)
+	if err != nil {
+		t.Fatalf("persistTerminalSnapshotResult() error = %v", err)
+	}
+
+	if len(messages.roundInputs) != 5 {
+		t.Fatalf("persisted rows = %d, want 5", len(messages.roundInputs))
+	}
+	wantRoles := []string{"user", "assistant", "tool", "user", "assistant"}
+	for i, input := range messages.roundInputs {
+		if input.Role != wantRoles[i] {
+			t.Fatalf("row %d role = %q, want %q", i, input.Role, wantRoles[i])
+		}
+		if input.MessageID == "" || input.TurnID != turn.TurnID || input.TurnPosition != turn.TurnPosition || input.TurnMessageSeq != int64(i+1) {
+			t.Fatalf("row %d reservation = %#v, want complete sequence %d", i, input, i+1)
+		}
+	}
+}
+
+func TestRuntimeReadMediaSyntheticUserPersistsInReservedTurnOrder(t *testing.T) {
+	t.Parallel()
+
+	turn := runtimeRowTestTurn()
+	tracker := newRuntimeRowTracker(turn)
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventToolCallEnd})
+	cfg := agentpkg.RunConfig{}
+	bindRuntimeSyntheticRowRecorder(&cfg, tracker)
+	cfg.SyntheticRowRecorder("user")
+	tracker.Annotate(&agentpkg.StreamEvent{Type: agentpkg.EventModelStepStart})
+
+	sdkMessages := []sdk.Message{
+		{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ToolCallPart{
+				ToolCallID: "read-1",
+				ToolName:   "read",
+				Input:      map[string]any{"path": "diagram.png"},
+			}},
+		},
+		sdk.ToolMessage(sdk.ToolResultPart{
+			ToolCallID: "read-1",
+			ToolName:   "read",
+			Result:     map[string]any{"ok": true},
+		}),
+		{
+			Role: sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{sdk.ImagePart{
+				Image:     "data:image/png;base64,cGl4ZWxz",
+				MediaType: "image/png",
+			}},
+		},
+		sdk.AssistantMessage("the diagram is valid"),
+	}
+	runtimeRows := tracker.bindTerminalRows(sdkMessages)
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	_, err := resolver.persistTerminalSnapshotResult(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID: storeRoundBotID, SessionID: "33333333-3333-3333-3333-333333333333",
+			Query: "inspect the diagram", RuntimeTurn: turn, SkipMemoryExtraction: true,
+		},
+		resolvedContext{},
+		terminalSnapshot{sdkMessages: sdkMessages, runtimeRows: runtimeRows, visibleOutput: true},
+	)
+	if err != nil {
+		t.Fatalf("persistTerminalSnapshotResult() error = %v", err)
+	}
+
+	if len(messages.roundInputs) != 5 {
+		t.Fatalf("persisted rows = %d, want 5", len(messages.roundInputs))
+	}
+	wantRoles := []string{"user", "assistant", "tool", "user", "assistant"}
+	for i, input := range messages.roundInputs {
+		if input.Role != wantRoles[i] || input.MessageID == "" || input.TurnMessageSeq != int64(i+1) {
+			t.Fatalf("persisted row %d = %#v, want %s sequence %d", i, input, wantRoles[i], i+1)
+		}
+	}
+}
+
+func TestBindRuntimeInjectedRecorderLeavesNonRuntimeRecorderUntouched(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	cfg := agentpkg.RunConfig{InjectedRecorder: func(string, int) { called = true }}
+	bindRuntimeInjectedRecorder(&cfg, resolvedContext{}, nil)
+	cfg.InjectedRecorder("ordinary injection", 0)
+	if !called {
+		t.Fatal("non-runtime injection recorder was replaced")
+	}
+}
+
+func TestPersistTerminalSnapshotStopsBeforeWriteWhenPersistenceGuardFails(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	ownershipLost := errors.New("runtime ownership lost")
+	ctx := WithPersistenceGuard(context.Background(), func(context.Context) error {
+		return ownershipLost
+	})
+
+	err := resolver.persistTerminalSnapshot(
+		ctx,
+		conversation.ChatRequest{BotID: "bot-1", SessionID: "session-1", Query: "hello"},
+		resolvedContext{},
+		terminalSnapshot{
+			sdkMessages:   []sdk.Message{sdk.AssistantMessage("late output")},
+			visibleOutput: true,
+		},
+	)
+	if !errors.Is(err, ownershipLost) {
+		t.Fatalf("persist terminal snapshot error = %v, want ownership loss", err)
+	}
+	if len(messages.persisted) != 0 {
+		t.Fatalf("ownership-lost stream persisted messages: %#v", messages.persisted)
 	}
 }
 
@@ -431,30 +752,5 @@ func TestPersistTerminalSnapshotSkillActivationWithoutPromptDoesNotStoreModelMar
 	}
 	if user.Metadata["user_message_kind"] != conversation.UserMessageKindSkillActivation {
 		t.Fatalf("metadata kind = %#v, want skill_activation", user.Metadata["user_message_kind"])
-	}
-}
-
-func TestReplacePersistedTurnErrorsWhenNoReplacementPersisted(t *testing.T) {
-	t.Parallel()
-
-	messages := &recordingMessageService{}
-	resolver := &Resolver{
-		messageService: messages,
-		logger:         slog.New(slog.DiscardHandler),
-	}
-
-	err := resolver.replacePersistedTurn(
-		context.Background(),
-		conversation.ChatRequest{SessionID: "session-1"},
-		"turn-1",
-		"request-1",
-		"retry",
-		nil,
-	)
-	if err == nil {
-		t.Fatal("expected replacement error, got nil")
-	}
-	if messages.replaced != 0 {
-		t.Fatalf("ReplaceTurn called %d times, want 0", messages.replaced)
 	}
 }
