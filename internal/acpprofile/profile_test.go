@@ -14,6 +14,9 @@ func TestListIncludesClaudeCode(t *testing.T) {
 	if profile.Command != "claude-agent-acp" {
 		t.Fatalf("Claude Code command = %q", profile.Command)
 	}
+	if profile.DynamicCommand != "npx" || len(profile.DynamicArgs) != 1 || profile.DynamicArgs[0] != "-y" || profile.DynamicPackage != "@agentclientprotocol/claude-agent-acp" {
+		t.Fatalf("Claude Code dynamic launcher = %q %#v package %q", profile.DynamicCommand, profile.DynamicArgs, profile.DynamicPackage)
+	}
 	if len(profile.ManagedFields) == 0 || !profile.ManagedFields[0].Required {
 		t.Fatalf("Claude Code profile should expose required API key field: %#v", profile.ManagedFields)
 	}
@@ -32,6 +35,19 @@ func TestListIncludesClaudeCode(t *testing.T) {
 	}
 	if len(codex.LocalArgs) != 2 || codex.LocalArgs[1] != "@agentclientprotocol/codex-acp@1.1.4" {
 		t.Fatalf("Codex local args = %#v", codex.LocalArgs)
+	}
+}
+
+func TestCodexUsesControlledACPAdapterUpgradeWithPinnedFallback(t *testing.T) {
+	profile, ok := Lookup(AgentCodexID)
+	if !ok {
+		t.Fatal("Codex profile was not registered")
+	}
+	if profile.DynamicCommand != "npx" || len(profile.DynamicArgs) != 1 || profile.DynamicArgs[0] != "-y" || profile.DynamicPackage != "@agentclientprotocol/codex-acp" {
+		t.Fatalf("Codex dynamic launcher = %q %#v package %q", profile.DynamicCommand, profile.DynamicArgs, profile.DynamicPackage)
+	}
+	if profile.Command != "codex-acp" || profile.LocalCommand != "npx" || len(profile.LocalArgs) != 2 || profile.LocalArgs[1] != "@agentclientprotocol/codex-acp@1.1.4" {
+		t.Fatalf("Codex fallback launcher = command %q, local %q %#v", profile.Command, profile.LocalCommand, profile.LocalArgs)
 	}
 }
 

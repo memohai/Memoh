@@ -122,6 +122,36 @@ func TestPrepareProcessEnvLocalSelfHasNoOverrides(t *testing.T) {
 	}
 }
 
+func TestPrepareProcessEnvLocalSelfPreservesNPMCacheOnly(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
+		Backend:       WorkspaceBackendLocal,
+		AgentID:       "codex",
+		SetupMode:     SetupModeSelf,
+		WorkspaceRoot: "/home/user/ws",
+		Env: []string{
+			"NPM_CONFIG_CACHE=/memoh/acp/npm-cache",
+			"OPENAI_API_KEY=sk-should-not-pass",
+			"CODEX_HOME=/managed/codex",
+			"CUSTOM_FLAG=should-not-pass",
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		t.Fatalf("local cleanup should be nil")
+	}
+	if got := envValue(env, "NPM_CONFIG_CACHE"); got != "/memoh/acp/npm-cache" {
+		t.Fatalf("local self NPM_CONFIG_CACHE = %q, env=%v", got, env)
+	}
+	for _, key := range []string{"OPENAI_API_KEY", "CODEX_HOME", "CUSTOM_FLAG"} {
+		if envHasKey(env, key) {
+			t.Fatalf("local self env unexpectedly preserved %s: %v", key, env)
+		}
+	}
+}
+
 func TestPrepareProcessEnvLocalCodexSetsScopedCodexHome(t *testing.T) {
 	client, _ := newRecordingBridgeClient(t)
 	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
@@ -966,13 +996,14 @@ type writeRecord struct {
 type recordingBridgeServer struct {
 	pb.UnimplementedContainerServiceServer
 
-	mu    sync.Mutex
-	execs []execRecord
-	files []writeRecord
-	reads []string
-	dirs_ []string
-	exits map[string]int32
-	seqs  map[string][]int32
+	mu     sync.Mutex
+	execs  []execRecord
+	files  []writeRecord
+	reads  []string
+	dirs_  []string
+	exits  map[string]int32
+	seqs   map[string][]int32
+	stdout map[string]string
 }
 
 func (s *recordingBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.ExecInput, pb.ExecOutput]) error {
@@ -982,6 +1013,7 @@ func (s *recordingBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.ExecInpu
 	}
 	s.mu.Lock()
 	exitCode := s.exits[input.GetCommand()]
+	stdout := s.stdout[input.GetCommand()]
 	if len(s.seqs[input.GetCommand()]) > 0 {
 		exitCode = s.seqs[input.GetCommand()][0]
 		s.seqs[input.GetCommand()] = s.seqs[input.GetCommand()][1:]
@@ -995,6 +1027,11 @@ func (s *recordingBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.ExecInpu
 		Timeout:  input.GetTimeoutSeconds(),
 	})
 	s.mu.Unlock()
+	if stdout != "" {
+		if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_STDOUT, Data: []byte(stdout)}); err != nil {
+			return err
+		}
+	}
 	if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT, ExitCode: exitCode}); err != nil {
 		return err
 	}
@@ -1017,6 +1054,15 @@ func (s *recordingBridgeServer) setExitCode(command string, code int32) {
 		s.exits = make(map[string]int32)
 	}
 	s.exits[command] = code
+}
+
+func (s *recordingBridgeServer) setStdout(command, output string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stdout == nil {
+		s.stdout = make(map[string]string)
+	}
+	s.stdout[command] = output
 }
 
 func (s *recordingBridgeServer) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {

@@ -22,13 +22,23 @@ const (
 )
 
 type Profile struct {
-	ID           string
-	DisplayName  string
-	Description  string
-	Command      string
-	Args         []string
-	LocalCommand string
-	LocalArgs    []string
+	ID          string
+	DisplayName string
+	Description string
+	// DynamicCommand, DynamicArgs, and DynamicPackage describe an npm-backed
+	// launcher whose version can be refreshed independently of Memoh. The
+	// session pool resolves the dist-tag once per bot for the lifetime of the
+	// server process, launches the resulting exact package version, and falls
+	// back to Command/Args (or
+	// LocalCommand/LocalArgs) when lookup or startup fails. DynamicArgs are the
+	// arguments inserted before the exact package spec.
+	DynamicCommand string
+	DynamicArgs    []string
+	DynamicPackage string
+	Command        string
+	Args           []string
+	LocalCommand   string
+	LocalArgs      []string
 	// SessionModeID, when set, is the ACP session mode Memoh pins right after
 	// session/new so tool permissions flow through ACP regardless of ambient
 	// agent-side configuration (e.g. a host ~/.claude/settings.json).
@@ -194,9 +204,14 @@ func Register(profile Profile) {
 
 func codexProfile() Profile {
 	return Profile{
-		ID:                     AgentCodexID,
-		DisplayName:            AgentCodexName,
-		Description:            "OpenAI Codex ACP adapter",
+		ID:             AgentCodexID,
+		DisplayName:    AgentCodexName,
+		Description:    "OpenAI Codex ACP adapter",
+		DynamicCommand: "npx",
+		DynamicArgs: []string{
+			"-y",
+		},
+		DynamicPackage:         "@agentclientprotocol/codex-acp",
 		Command:                "codex-acp",
 		LocalCommand:           "npx",
 		DefaultReasoningEffort: "medium",
@@ -228,10 +243,15 @@ func codexProfile() Profile {
 
 func claudeCodeProfile() Profile {
 	return Profile{
-		ID:          AgentClaudeCodeID,
-		DisplayName: AgentClaudeCodeName,
-		Description: "Claude Code ACP adapter",
-		Command:     "claude-agent-acp",
+		ID:             AgentClaudeCodeID,
+		DisplayName:    AgentClaudeCodeName,
+		Description:    "Claude Code ACP adapter",
+		DynamicCommand: "npx",
+		DynamicArgs: []string{
+			"-y",
+		},
+		DynamicPackage: "@agentclientprotocol/claude-agent-acp",
+		Command:        "claude-agent-acp",
 		// "default" routes every gated tool through session/request_permission;
 		// without the pin a host-level Claude settings file (defaultMode auto /
 		// acceptEdits) silently bypasses Memoh's approval flow.
