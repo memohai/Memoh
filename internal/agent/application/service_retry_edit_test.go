@@ -184,12 +184,8 @@ func TestACPRetryReusesUserAndReplacesLatestTurn(t *testing.T) {
 		t.Fatalf("replacement = %#v, want %#v", messages.replacement, wantReplacement)
 	}
 	pool := resolver.acpPool.(*recordingACPPrompter)
-	if !strings.Contains(pool.input.ContextMarkdown, "## Turn Replacement") ||
-		!strings.Contains(pool.input.ContextMarkdown, "fresh answer") {
-		t.Fatalf("retry context = %q, want turn replacement notice", pool.input.ContextMarkdown)
-	}
-	if !strings.Contains(pool.input.Prompt, "original") || strings.Contains(pool.input.Prompt, "retracted") {
-		t.Fatalf("retry prompt = %q, want unmodified user text", pool.input.Prompt)
+	if !strings.Contains(pool.input.Prompt, "original") {
+		t.Fatalf("retry prompt = %q, want original user text", pool.input.Prompt)
 	}
 }
 
@@ -233,12 +229,8 @@ func TestACPEditPersistsHiddenUserAndReplacesLatestTurn(t *testing.T) {
 		t.Fatalf("replacement = %#v, want %#v", messages.replacement, wantReplacement)
 	}
 	pool := resolver.acpPool.(*recordingACPPrompter)
-	if !strings.Contains(pool.input.ContextMarkdown, "## Turn Replacement") ||
-		!strings.Contains(pool.input.ContextMarkdown, "revised") {
-		t.Fatalf("edit context = %q, want turn replacement notice", pool.input.ContextMarkdown)
-	}
 	if pool.input.Prompt != "edited" {
-		t.Fatalf("edit prompt = %q, want unmodified user text", pool.input.Prompt)
+		t.Fatalf("edit prompt = %q, want edited user text", pool.input.Prompt)
 	}
 }
 

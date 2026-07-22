@@ -112,9 +112,6 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	if pool.input.ContextURI != acpContextURI || !strings.Contains(pool.input.ContextMarkdown, "## Current Runtime") || !strings.Contains(pool.input.ContextMarkdown, "Bot ID: bot-1") {
 		t.Fatalf("ACP context = uri %q markdown %q, want dynamic Memoh context", pool.input.ContextURI, pool.input.ContextMarkdown)
 	}
-	if strings.Contains(pool.input.ContextMarkdown, "## Turn Replacement") {
-		t.Fatalf("ACP context = %q, want no turn replacement notice on a normal send", pool.input.ContextMarkdown)
-	}
 	if len(pool.input.Images) != 1 || pool.input.Images[0].Data != "aW1hZ2U=" || pool.input.Images[0].MimeType != "image/png" {
 		t.Fatalf("ACP prompt images = %#v, want inline PNG", pool.input.Images)
 	}

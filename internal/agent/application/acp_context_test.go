@@ -68,38 +68,6 @@ func TestRenderACPContextMarkdownIncludesDynamicRuntimeAndMemory(t *testing.T) {
 	if strings.Contains(got, "Do not inject normal tool prompt.") {
 		t.Fatalf("TOOLS.md content should not be injected into ACP context:\n%s", got)
 	}
-	if strings.Contains(got, "## Turn Replacement") {
-		t.Fatalf("context should not carry a turn replacement notice by default:\n%s", got)
-	}
-}
-
-func TestRenderACPContextMarkdownTurnReplacementNotice(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		reason string
-		want   string
-	}{
-		{reason: "retry", want: "fresh answer"},
-		{reason: "edit", want: "revised"},
-	}
-	for _, tt := range tests {
-		got := renderACPContextMarkdown(acpContextRenderInput{
-			BotID:                 "bot-1",
-			SessionID:             "session-1",
-			TurnReplacementReason: tt.reason,
-		})
-		if !strings.Contains(got, "## Turn Replacement") || !strings.Contains(got, tt.want) {
-			t.Fatalf("reason %q context missing notice %q:\n%s", tt.reason, tt.want, got)
-		}
-		if !strings.Contains(got, "retracted") || !strings.Contains(got, "hidden from the conversation") {
-			t.Fatalf("reason %q notice should explain retraction:\n%s", tt.reason, got)
-		}
-	}
-	fixed := time.Date(2026, 6, 1, 9, 30, 0, 0, time.UTC)
-	if renderACPContextMarkdown(acpContextRenderInput{Now: fixed, TurnReplacementReason: "unknown"}) != renderACPContextMarkdown(acpContextRenderInput{Now: fixed}) {
-		t.Fatal("unknown replacement reason should render no notice")
-	}
 }
 
 func TestRenderACPContextMarkdownRespectsSystemFilesBudget(t *testing.T) {
