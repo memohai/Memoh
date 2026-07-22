@@ -12,7 +12,7 @@ import (
 
 func runtimeDeltaForAgentEvent(event agentpkg.StreamEvent, messages []conversation.UIMessage) (RuntimeDelta, bool) {
 	switch event.Type {
-	case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort, agentpkg.EventError:
+	case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort, agentpkg.EventError, agentpkg.EventHistoryCommit:
 		return RuntimeDelta{MessageUpserts: append([]conversation.UIMessage(nil), messages...)}, true
 	case agentpkg.EventRetry:
 		return RuntimeDelta{ResetMessages: true}, true

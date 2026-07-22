@@ -25,6 +25,67 @@ func (q *Queries) AllocateSessionTurnPosition(ctx context.Context, sessionID pgt
 	return position, err
 }
 
+const appendMessageToCanonicalHistoryTurn = `-- name: AppendMessageToCanonicalHistoryTurn :one
+WITH target AS (
+  SELECT request.turn_id, request.session_id, request.turn_position
+  FROM bot_history_messages request
+  WHERE request.team_id = public.memoh_current_team_id()
+    AND request.session_id = $2
+    AND request.id = $3
+    AND request.turn_id = $4
+    AND request.turn_position IS NOT NULL
+    AND request.turn_visible = true
+    AND request.turn_superseded_at IS NULL
+  LIMIT 1
+  FOR UPDATE
+),
+next_seq AS (
+  SELECT
+    target.turn_id,
+    target.session_id,
+    target.turn_position,
+    COALESCE(MAX(existing.turn_message_seq), 0) + 1 AS turn_message_seq
+  FROM target
+  JOIN bot_history_messages existing
+    ON existing.team_id = public.memoh_current_team_id()
+   AND existing.turn_id = target.turn_id
+  GROUP BY target.turn_id, target.session_id, target.turn_position
+)
+UPDATE bot_history_messages message
+SET turn_id = next_seq.turn_id,
+    turn_position = next_seq.turn_position,
+    turn_visible = true,
+    turn_message_seq = next_seq.turn_message_seq,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
+FROM next_seq
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.id = $1
+  AND message.session_id = next_seq.session_id
+  AND message.turn_id IS NULL
+RETURNING message.id
+`
+
+type AppendMessageToCanonicalHistoryTurnParams struct {
+	MessageID        pgtype.UUID `json:"message_id"`
+	SessionID        pgtype.UUID `json:"session_id"`
+	RequestMessageID pgtype.UUID `json:"request_message_id"`
+	TurnID           pgtype.UUID `json:"turn_id"`
+}
+
+func (q *Queries) AppendMessageToCanonicalHistoryTurn(ctx context.Context, arg AppendMessageToCanonicalHistoryTurnParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, appendMessageToCanonicalHistoryTurn,
+		arg.MessageID,
+		arg.SessionID,
+		arg.RequestMessageID,
+		arg.TurnID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const appendMessageToHistoryTurnByRequest = `-- name: AppendMessageToHistoryTurnByRequest :one
 WITH target AS (
   SELECT request.turn_id, request.session_id, request.turn_position
@@ -5586,6 +5647,17 @@ updated AS (
     AND m.turn_id = $5
     AND m.session_id = owner.id
     AND m.turn_superseded_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM bot_history_messages newer
+      WHERE newer.team_id = public.memoh_current_team_id()
+        AND newer.session_id = owner.id
+        AND newer.turn_id IS NOT NULL
+        AND newer.turn_id IS DISTINCT FROM $2
+        AND newer.turn_position > m.turn_position
+        AND newer.turn_visible = true
+        AND newer.turn_superseded_at IS NULL
+    )
   RETURNING
     m.turn_id,
     m.bot_id,

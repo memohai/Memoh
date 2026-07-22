@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -490,6 +491,7 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 		agenttools.NewContainerProvider(nil, bp, nil, "/data"),
 	})
 
+	var completedStepMessages []sdk.Message
 	var terminal StreamEvent
 	for event := range a.Stream(context.Background(), RunConfig{
 		Model:              &sdk.Model{ID: "mock-model", Provider: modelProvider},
@@ -498,6 +500,10 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 		SupportsToolCall:   true,
 		Identity: SessionContext{
 			BotID: "bot-1",
+		},
+		OnStepCompleted: func(_ context.Context, step *sdk.StepResult) error {
+			completedStepMessages = append(completedStepMessages, step.Messages...)
+			return nil
 		},
 	}) {
 		if event.IsTerminal() {
@@ -519,5 +525,100 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 	assertInjectedReadMediaMessage(t, messages[2], expectedDataURL, "image/png")
 	if messages[3].Role != sdk.MessageRoleAssistant {
 		t.Fatalf("expected final persisted message to be assistant, got %s", messages[3].Role)
+	}
+	var injectedAtStepBoundary int
+	for _, message := range completedStepMessages {
+		if message.Role == sdk.MessageRoleUser && len(message.Content) == 1 {
+			if _, ok := message.Content[0].(sdk.ImagePart); ok {
+				injectedAtStepBoundary++
+			}
+		}
+	}
+	if injectedAtStepBoundary != 1 {
+		t.Fatalf("read_media messages at completed-step boundaries = %d, want 1", injectedAtStepBoundary)
+	}
+}
+
+func TestAgentStreamReadMediaPreservesCompletedStepsAcrossMidStreamRetry(t *testing.T) {
+	t.Parallel()
+
+	pngBytes := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00payload")
+	expectedDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes)
+	modelProvider := &agentReadMediaMockProvider{
+		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			switch call {
+			case 1:
+				return &sdk.GenerateResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					Usage:        sdk.Usage{InputTokens: 10, TotalTokens: 10},
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: "call-retry",
+						ToolName:   "read",
+						Input:      map[string]any{"path": "/data/images/retry.png"},
+					}},
+				}, nil
+			case 2:
+				return nil, errors.New("api error 500")
+			default:
+				return &sdk.GenerateResult{
+					Text:         "recovered",
+					FinishReason: sdk.FinishReasonStop,
+					Usage:        sdk.Usage{InputTokens: 20, OutputTokens: 3, TotalTokens: 23},
+				}, nil
+			}
+		},
+	}
+	bp := newAgentReadMediaBridgeProvider(t, map[string][]byte{"images/retry.png": pngBytes})
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{agenttools.NewContainerProvider(nil, bp, nil, "/data")})
+
+	completedMessages := 0
+	var terminal StreamEvent
+	for event := range a.Stream(context.Background(), RunConfig{
+		Model:              &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages:           []sdk.Message{sdk.UserMessage("read and retry")},
+		SupportsImageInput: true,
+		SupportsToolCall:   true,
+		Identity:           SessionContext{BotID: "bot-1", SessionID: "session-1"},
+		OnStepCompleted: func(_ context.Context, step *sdk.StepResult) error {
+			completedMessages += len(step.Messages)
+			return nil
+		},
+	}) {
+		if event.IsTerminal() {
+			terminal = event
+		}
+	}
+	if terminal.Type != EventAgentEnd {
+		t.Fatalf("terminal event = %q, want %q", terminal.Type, EventAgentEnd)
+	}
+	var messages []sdk.Message
+	if err := json.Unmarshal(terminal.Messages, &messages); err != nil {
+		t.Fatalf("unmarshal terminal messages: %v", err)
+	}
+	if len(messages) != completedMessages {
+		t.Fatalf("terminal messages = %d, completed-step messages = %d", len(messages), completedMessages)
+	}
+	injected := 0
+	for _, message := range messages {
+		if message.Role != sdk.MessageRoleUser || len(message.Content) != 1 {
+			continue
+		}
+		if image, ok := message.Content[0].(sdk.ImagePart); ok {
+			injected++
+			if image.Image != expectedDataURL {
+				t.Fatalf("retry image payload = %q", image.Image)
+			}
+		}
+	}
+	if injected != 1 {
+		t.Fatalf("terminal injected read-media messages = %d, want 1", injected)
+	}
+	var usage sdk.Usage
+	if err := json.Unmarshal(terminal.Usage, &usage); err != nil {
+		t.Fatalf("unmarshal terminal usage: %v", err)
+	}
+	if usage.InputTokens != 30 || usage.OutputTokens != 3 || usage.TotalTokens != 33 {
+		t.Fatalf("terminal retry usage = %#v", usage)
 	}
 }

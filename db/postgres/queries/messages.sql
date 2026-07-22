@@ -917,6 +917,47 @@ WHERE m.team_id = public.memoh_current_team_id() AND m.id = sqlc.arg(message_id)
   AND m.turn_id IS NULL
 RETURNING m.id;
 
+-- name: AppendMessageToCanonicalHistoryTurn :one
+WITH target AS (
+  SELECT request.turn_id, request.session_id, request.turn_position
+  FROM bot_history_messages request
+  WHERE request.team_id = public.memoh_current_team_id()
+    AND request.session_id = sqlc.arg(session_id)
+    AND request.id = sqlc.arg(request_message_id)
+    AND request.turn_id = sqlc.arg(turn_id)
+    AND request.turn_position IS NOT NULL
+    AND request.turn_visible = true
+    AND request.turn_superseded_at IS NULL
+  LIMIT 1
+  FOR UPDATE
+),
+next_seq AS (
+  SELECT
+    target.turn_id,
+    target.session_id,
+    target.turn_position,
+    COALESCE(MAX(existing.turn_message_seq), 0) + 1 AS turn_message_seq
+  FROM target
+  JOIN bot_history_messages existing
+    ON existing.team_id = public.memoh_current_team_id()
+   AND existing.turn_id = target.turn_id
+  GROUP BY target.turn_id, target.session_id, target.turn_position
+)
+UPDATE bot_history_messages message
+SET turn_id = next_seq.turn_id,
+    turn_position = next_seq.turn_position,
+    turn_visible = true,
+    turn_message_seq = next_seq.turn_message_seq,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
+FROM next_seq
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.id = sqlc.arg(message_id)
+  AND message.session_id = next_seq.session_id
+  AND message.turn_id IS NULL
+RETURNING message.id;
+
 -- name: AppendMessageToLatestHistoryTurn :one
 WITH latest AS (
   SELECT visible.turn_id, visible.session_id, visible.turn_position
@@ -1345,6 +1386,17 @@ updated AS (
     AND m.turn_id = sqlc.arg(old_turn_id)
     AND m.session_id = owner.id
     AND m.turn_superseded_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM bot_history_messages newer
+      WHERE newer.team_id = public.memoh_current_team_id()
+        AND newer.session_id = owner.id
+        AND newer.turn_id IS NOT NULL
+        AND newer.turn_id IS DISTINCT FROM sqlc.arg(superseded_by_turn_id)
+        AND newer.turn_position > m.turn_position
+        AND newer.turn_visible = true
+        AND newer.turn_superseded_at IS NULL
+    )
   RETURNING
     m.turn_id,
     m.bot_id,

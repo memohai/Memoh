@@ -253,11 +253,29 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, true)
 	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
 	modelStepIndex := 0
-	opts = append(opts, sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
+	stepCompletionErr := newLoopAbortState()
+	onStep := func(step *sdk.StepResult) *sdk.GenerateParams {
 		a.runAfterModelCallHook(streamCtx, cfg, step, modelStepIndex)
+		if readMediaState != nil {
+			step = readMediaState.completeStep(modelStepIndex, step)
+		}
 		modelStepIndex++
+		if cfg.OnStepCompleted != nil {
+			if err := cfg.OnStepCompleted(streamCtx, step); err != nil {
+				stepCompletionErr.Set(err)
+				if a != nil && a.logger != nil {
+					a.logger.Error("agent step completion callback failed",
+						slog.String("bot_id", cfg.Identity.BotID),
+						slog.String("session_id", cfg.Identity.SessionID),
+						slog.Any("error", err),
+					)
+				}
+				cancel(err)
+			}
+		}
 		return nil
-	}))
+	}
+	opts = append(opts, sdk.WithOnStep(onStep))
 
 	retryCfg := cfg.Retry
 	if retryCfg.MaxAttempts <= 0 {
@@ -505,7 +523,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if isRetryableStreamError(p.Error) {
 				streamResult, aborted = a.runMidStreamRetry(
 					ctx, streamCtx, cancel, toolLoopAbortCallIDs,
-					ch, cfg, sdkTools, approvalTools, prepareStep, streamResult,
+					ch, cfg, sdkTools, approvalTools, prepareStep, onStep, streamResult,
 					stepNumber, errMsg, &allText, textLoopProbeBuffer,
 				)
 				if !aborted {
@@ -530,6 +548,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if aborted {
 		for range streamResult.Stream {
 		}
+	}
+	if stepCompletionErr.Err() != nil {
+		aborted = true
+		turnError = "agent step completion failed"
+		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 	}
 	aborted = streamEndedAborted(ctx, aborted, finished)
 
@@ -645,7 +668,7 @@ func (a *Agent) wrapPrepareStepWithInjectedMessages(cfg RunConfig, initialMsgCou
 						injected.Applied()
 					}
 					if cfg.InjectedRecorder != nil {
-						cfg.InjectedRecorder(text, insertAfter)
+						cfg.InjectedRecorder(text, append([]sdk.ImagePart(nil), injected.ImageParts...), insertAfter)
 					}
 					if a != nil && a.logger != nil {
 						a.logger.Info("injected user message into agent stream",
@@ -738,10 +761,21 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, false)
 	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
 	modelStepIndex := 0
+	stepCompletionErr := newLoopAbortState()
 	opts = append(opts,
 		sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
 			a.runAfterModelCallHook(genCtx, cfg, step, modelStepIndex)
+			if readMediaState != nil {
+				step = readMediaState.completeStep(modelStepIndex, step)
+			}
 			modelStepIndex++
+			if cfg.OnStepCompleted != nil {
+				if err := cfg.OnStepCompleted(genCtx, step); err != nil {
+					stepCompletionErr.Set(err)
+					cancel(err)
+					return nil
+				}
+			}
 			if cfg.LoopDetection.Enabled {
 				if toolLoopAbortCallIDs.Any() {
 					loopAbort.Set(ErrToolLoopDetected)
@@ -762,6 +796,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	)
 
 	genResult, err := a.client.GenerateTextResult(genCtx, opts...)
+	if stepErr := stepCompletionErr.Err(); stepErr != nil {
+		return nil, fmt.Errorf("complete agent step: %w", stepErr)
+	}
 	if err != nil {
 		if loopErr := detectGenerateLoopAbort(genCtx, err); loopErr != nil {
 			return nil, loopErr
@@ -1371,6 +1408,7 @@ func (a *Agent) runMidStreamRetry(
 	sdkTools []sdk.Tool,
 	approvalTools []sdk.Tool,
 	prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams,
+	onStep func(*sdk.StepResult) *sdk.GenerateParams,
 	prevResult *sdk.StreamResult,
 	stepNumber int,
 	errMsg string,
@@ -1415,6 +1453,9 @@ func (a *Agent) runMidStreamRetry(
 		retryCfgCopy.Messages = prevResult.Messages
 		retryCfgCopy = retryCfgCopy.RefreshContextFrag()
 		retryOpts := a.buildGenerateOptions(retryCfgCopy, sdkTools, approvalTools, prepareStep)
+		if onStep != nil {
+			retryOpts = append(retryOpts, sdk.WithOnStep(onStep))
+		}
 
 		retryResult, retryErr := a.client.StreamText(streamCtx, retryOpts...)
 		if retryErr != nil {
@@ -1552,6 +1593,12 @@ func (a *Agent) runMidStreamRetry(
 			merged = append(merged, prevResult.Messages...)
 			merged = append(merged, retryResult.Messages...)
 			retryResult.Messages = merged
+		}
+		if len(prevResult.Steps) > 0 {
+			merged := make([]sdk.StepResult, 0, len(prevResult.Steps)+len(retryResult.Steps))
+			merged = append(merged, prevResult.Steps...)
+			merged = append(merged, retryResult.Steps...)
+			retryResult.Steps = merged
 		}
 		return retryResult, aborted || detectGenerateLoopAbort(streamCtx, streamCtx.Err()) != nil
 	}

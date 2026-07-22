@@ -508,6 +508,23 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
 	cfg = r.prepareRunConfig(streamCtx, cfg)
+	canonicalSteps, err := r.beginCanonicalStepPersistence(streamCtx, req, rc)
+	if err != nil {
+		return nil, err
+	}
+	if canonicalSteps != nil {
+		committed := agentpkg.StreamEvent{Type: agentpkg.EventHistoryCommit, HistoryCommitted: true}
+		data, marshalErr := json.Marshal(committed)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("marshal canonical history commit: %w", marshalErr)
+		}
+		select {
+		case eventCh <- json.RawMessage(data):
+		case <-streamCtx.Done():
+			return nil, context.Cause(streamCtx)
+		}
+	}
+	cfg = canonicalSteps.attachToRunConfig(cfg)
 
 	// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
 	idleCtx, idleCancel := withIdleTimeout(streamCtx)
@@ -522,6 +539,7 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 	var toolCallCount int
 	var hasVisibleOutput bool
 	var persistedMessages []messagepkg.Message
+	canonicalFinalized := false
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
 
@@ -548,7 +566,26 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 			continue
 		}
 
-		if event.IsTerminal() && len(event.Messages) > 0 {
+		if event.IsTerminal() && canonicalSteps != nil {
+			if !stored {
+				if snap, ok := extractTerminalSnapshot(data); ok {
+					snap.visibleOutput = hasVisibleOutput
+					lastSnapshot = snap
+					hasSnapshot = true
+					if err := canonicalSteps.appendTerminalSnapshot(context.WithoutCancel(ctx), snap); err != nil {
+						return persistedMessages, fmt.Errorf("persist terminal canonical step: %w", err)
+					}
+					r.finalizeCanonicalStepPersistence(context.WithoutCancel(ctx), req, rc, canonicalSteps, snap)
+					canonicalFinalized = true
+				}
+				persistedMessages, event.HistoryCommitted = canonicalSteps.result()
+				stored = true
+				data, err = json.Marshal(event)
+				if err != nil {
+					return persistedMessages, fmt.Errorf("marshal terminal canonical result: %w", err)
+				}
+			}
+		} else if event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.visibleOutput = hasVisibleOutput
 				lastSnapshot = snap
@@ -583,6 +620,18 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 	}
 
 	// Intermediate persistence on abort/error
+	if canonicalSteps != nil && !stored {
+		if hasSnapshot {
+			if err := canonicalSteps.appendTerminalSnapshot(context.WithoutCancel(ctx), lastSnapshot); err != nil {
+				return persistedMessages, fmt.Errorf("persist final canonical step: %w", err)
+			}
+		}
+		if !canonicalFinalized {
+			r.finalizeCanonicalStepPersistence(context.WithoutCancel(ctx), req, rc, canonicalSteps, lastSnapshot)
+		}
+		persistedMessages, _ = canonicalSteps.result()
+		stored = true
+	}
 	if !stored {
 		switch {
 		case hasSnapshot:
@@ -625,6 +674,46 @@ func (r *Resolver) streamChatWSResultWithHooksAndTurn(
 	}
 
 	return persistedMessages, nil
+}
+
+func (r *Resolver) finalizeCanonicalStepPersistence(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	rc resolvedContext,
+	state *canonicalStepPersistenceState,
+	snap terminalSnapshot,
+) {
+	if state == nil {
+		return
+	}
+	if err := runPersistenceGuard(ctx); err != nil {
+		r.logger.Warn("skip canonical ancillary finalization after ownership loss",
+			slog.String("bot_id", req.BotID),
+			slog.String("session_id", req.SessionID),
+			slog.Any("error", err),
+		)
+		return
+	}
+	if err := r.persistSessionWorkspaceTarget(ctx, req); err != nil {
+		r.logger.Error("persist canonical workspace target failed",
+			slog.String("bot_id", req.BotID),
+			slog.String("session_id", req.SessionID),
+			slog.Any("error", err),
+		)
+	}
+	if state.hasAssistant() && !req.SkipMemoryExtraction {
+		outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
+		roundMessages := prependTurnUserMessage(req, outputMessages)
+		if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
+			roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
+		}
+		go r.storeMemory(context.WithoutCancel(ctx), req, roundMessages)
+	}
+	if inputTokens := extractInputTokensFromUsage(snap.usage); inputTokens > 0 {
+		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
+	} else if snap.aborted && rc.estimatedTokens > 0 {
+		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, rc.estimatedTokens)
+	}
 }
 
 // persistTerminalSnapshot stores the SDK messages produced by an agent run

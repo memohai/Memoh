@@ -1085,7 +1085,7 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 
 	var messages []conversation.UIMessage
 	switch event.Type {
-	case agentpkg.EventAgentStart:
+	case agentpkg.EventAgentStart, agentpkg.EventHistoryCommit:
 	case agentpkg.EventError:
 	default:
 		messages = ctrl.converter.HandleEvent(conversation.UIStreamEventFromAgentEvent(event))
@@ -1128,10 +1128,16 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 				run.Error = "stream error"
 			}
 		}
+		if event.Type == agentpkg.EventHistoryCommit {
+			run.HistoryCommitted = true
+		}
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
-		if event.Type == agentpkg.EventError {
+		switch event.Type {
+		case agentpkg.EventError:
 			delta.Run = runtimeRunPatch(snapshot, false, true, false, false).Run
+		case agentpkg.EventHistoryCommit:
+			delta.Run = runtimeRunPatch(snapshot, true, false, false, false).Run
 		}
 		return delta
 	})

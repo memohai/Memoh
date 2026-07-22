@@ -33,6 +33,23 @@ func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.C
 }
 
 func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.Message, error) {
+	filtered := r.prepareRoundMessagesForPersistence(req, messages, opts)
+	if len(filtered) == 0 {
+		return nil, nil
+	}
+
+	persisted, err := r.storeMessages(ctx, req, filtered, modelID, opts)
+	if err != nil {
+		return nil, err
+	}
+	if !opts.SkipMemory && !req.SkipMemoryExtraction {
+		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
+	}
+
+	return persisted, nil
+}
+
+func (r *Resolver) prepareRoundMessagesForPersistence(req conversation.ChatRequest, messages []conversation.ModelMessage, opts storeRoundOptions) []conversation.ModelMessage {
 	fullRound := make([]conversation.ModelMessage, 0, len(messages))
 
 	// When the user message was already persisted by a channel adapter, skip
@@ -66,18 +83,9 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 	}
 
 	if len(filtered) == 0 {
-		return nil, nil
+		return nil
 	}
-
-	persisted, err := r.storeMessages(ctx, req, filtered, modelID, opts)
-	if err != nil {
-		return nil, err
-	}
-	if !opts.SkipMemory && !req.SkipMemoryExtraction {
-		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
-	}
-
-	return persisted, nil
+	return filtered
 }
 
 // isEmptyAssistantMessage returns true if an assistant message has no
@@ -124,6 +132,48 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		return nil, errors.New("bot id is required for message persistence")
 	}
 
+	persistInputs, turnRequestMessageID, err := r.buildPersistInputs(ctx, req, messages, modelID, opts)
+	if err != nil {
+		return nil, err
+	}
+	replacement := replacementPersistenceFromContext(ctx)
+	_, fenced := runtimefence.FromContext(ctx)
+	if fenced || replacement != nil {
+		roundPersister, ok := r.messageService.(messagepkg.AtomicRoundPersister)
+		if !ok {
+			if replacement != nil {
+				return nil, errors.New("message service does not support atomic replacement persistence")
+			}
+			return nil, errors.New("message service does not support runtime-fenced round persistence")
+		}
+		persistenceOptions, err := r.buildRoundPersistenceOptions(ctx, req, replacement)
+		if err != nil {
+			return nil, err
+		}
+		persisted, handled, err := roundPersister.PersistRound(ctx, persistInputs, persistenceOptions)
+		if err != nil {
+			return nil, fmt.Errorf("persist atomic message round: %w", err)
+		}
+		if !handled {
+			return nil, errors.New("message service declined atomic round persistence")
+		}
+		if replacement != nil {
+			replacement.atomicCommitted = true
+		}
+		return persisted, nil
+	}
+	if batcher, ok := r.messageService.(messagepkg.ToolTailRoundPersister); ok {
+		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
+			if err != nil {
+				return nil, fmt.Errorf("persist tool tail round: %w", err)
+			}
+			return persisted, nil
+		}
+	}
+	return r.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+}
+
+func (r *Resolver) buildPersistInputs(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.PersistInput, string, error) {
 	// Check bot setting for full tool result persistence.
 	pruneToolResults := true
 	if botSettings, err := r.loadBotSettings(ctx, req.BotID); err == nil {
@@ -167,7 +217,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 
 		content, err := json.Marshal(msg)
 		if err != nil {
-			return nil, fmt.Errorf("marshal %s message: %w", msg.Role, err)
+			return nil, "", fmt.Errorf("marshal %s message: %w", msg.Role, err)
 		}
 		messageSenderChannelIdentityID := ""
 		messageSenderUserID := ""
@@ -253,56 +303,31 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			SkipHistoryTurn:         req.SkipHistoryTurn,
 		})
 	}
-	replacement := replacementPersistenceFromContext(ctx)
-	_, fenced := runtimefence.FromContext(ctx)
-	if fenced || replacement != nil {
-		roundPersister, ok := r.messageService.(messagepkg.AtomicRoundPersister)
-		if !ok {
-			if replacement != nil {
-				return nil, errors.New("message service does not support atomic replacement persistence")
-			}
-			return nil, errors.New("message service does not support runtime-fenced round persistence")
-		}
-		persistenceOptions := messagepkg.RoundPersistenceOptions{}
-		if replacement != nil {
-			if !replacement.forkAnchorPrepared {
-				forkAnchor, err := r.prepareForkAnchorUpdate(ctx, req.SessionID, replacement.replacedTailStartMessageID)
-				if err != nil {
-					return nil, fmt.Errorf("prepare replacement fork anchor: %w", err)
-				}
-				replacement.forkAnchor = forkAnchor
-				replacement.forkAnchorPrepared = true
-			}
-			persistenceOptions.Replacement = &messagepkg.TurnReplacement{
-				OldTurnID:        replacement.oldTurnID,
-				RequestMessageID: replacement.requestMessageID,
-				Reason:           replacement.reason,
-			}
-			if replacement.forkAnchor != nil {
-				persistenceOptions.Replacement.SessionMetadata = replacement.forkAnchor.metadata
-			}
-		}
-		persisted, handled, err := roundPersister.PersistRound(ctx, persistInputs, persistenceOptions)
+	return persistInputs, turnRequestMessageID, nil
+}
+
+func (r *Resolver) buildRoundPersistenceOptions(ctx context.Context, req conversation.ChatRequest, replacement *replacementPersistenceState) (messagepkg.RoundPersistenceOptions, error) {
+	options := messagepkg.RoundPersistenceOptions{}
+	if replacement == nil {
+		return options, nil
+	}
+	if !replacement.forkAnchorPrepared {
+		forkAnchor, err := r.prepareForkAnchorUpdate(ctx, req.SessionID, replacement.replacedTailStartMessageID)
 		if err != nil {
-			return nil, fmt.Errorf("persist atomic message round: %w", err)
+			return options, fmt.Errorf("prepare replacement fork anchor: %w", err)
 		}
-		if !handled {
-			return nil, errors.New("message service declined atomic round persistence")
-		}
-		if replacement != nil {
-			replacement.atomicCommitted = true
-		}
-		return persisted, nil
+		replacement.forkAnchor = forkAnchor
+		replacement.forkAnchorPrepared = true
 	}
-	if batcher, ok := r.messageService.(messagepkg.ToolTailRoundPersister); ok {
-		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
-			if err != nil {
-				return nil, fmt.Errorf("persist tool tail round: %w", err)
-			}
-			return persisted, nil
-		}
+	options.Replacement = &messagepkg.TurnReplacement{
+		OldTurnID:        replacement.oldTurnID,
+		RequestMessageID: replacement.requestMessageID,
+		Reason:           replacement.reason,
 	}
-	return r.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+	if replacement.forkAnchor != nil {
+		options.Replacement.SessionMetadata = replacement.forkAnchor.metadata
+	}
+	return options, nil
 }
 
 func workspaceTargetMetadata(target *conversation.WorkspaceTarget) map[string]any {

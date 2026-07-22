@@ -215,6 +215,8 @@ function runtimeReplacementSnapshot(
   status = 'running',
   seq = 10,
   sessionId = 'session-1',
+  canonicalReady = false,
+  historyCommitted = true,
 ): UIStreamEvent {
   const epoch = `epoch-${sessionId}`
   return {
@@ -234,6 +236,8 @@ function runtimeReplacementSnapshot(
         status,
         messages,
         operation,
+        ...(historyCommitted ? { history_committed: true } : {}),
+        ...(canonicalReady ? { canonical_ready: true } : {}),
       },
       queue: [],
     },
@@ -9172,12 +9176,11 @@ describe('chat-list store', () => {
     await flushPromises()
 
     const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
-    streamHandler?.(runtimeReplacementSnapshot('stream-empty-retry', operation))
-    expect(store.messages.map(turn => turn.id)).not.toContain('assistant-old')
-    expect(store.messages.at(-1)).toMatchObject({ role: 'assistant', messages: [], streaming: true })
+    streamHandler?.(runtimeReplacementSnapshot('stream-empty-retry', operation, [], 'running', 10, 'session-1', false, false))
+    expect(store.messages.map(turn => turn.id)).toContain('assistant-old')
 
     api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
-    streamHandler?.(runtimeReplacementSnapshot('stream-empty-retry', operation, [], 'aborted', 11))
+    streamHandler?.(runtimeReplacementSnapshot('stream-empty-retry', operation, [], 'aborted', 11, 'session-1', false, false))
     await flushPromises()
 
     expect(store.streaming).toBe(false)
@@ -9221,9 +9224,9 @@ describe('chat-list store', () => {
       : ({ kind: 'retry', replace_from_message_id: 'assistant-old' } satisfies SessionruntimeRunOperationView)
     if (!operation) throw new Error('missing replacement operation')
     const streamId = `stream-empty-${kind}-${status}`
-    streamHandler?.(runtimeReplacementSnapshot(streamId, operation))
+    streamHandler?.(runtimeReplacementSnapshot(streamId, operation, [], 'running', 10, 'session-1', false, false))
     api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
-    const terminal = runtimeReplacementSnapshot(streamId, operation, [], status, 11)
+    const terminal = runtimeReplacementSnapshot(streamId, operation, [], status, 11, 'session-1', false, false)
     if (terminal.type === 'runtime_snapshot' && terminal.snapshot?.current_run_view) {
       terminal.snapshot.current_run_view.error = `replacement ${status}`
     }
@@ -9232,11 +9235,10 @@ describe('chat-list store', () => {
 
     expect(store.streaming).toBe(false)
     expect(store.messages.slice(0, 2).map(turn => turn.id)).toEqual(['user-old', 'assistant-old'])
-    expect(store.messages.at(-1)).toMatchObject({
-      role: 'assistant',
-      streaming: false,
-      messages: [expect.objectContaining({ type: 'error', content: `replacement ${status}` })],
-    })
+    expect(store.messages.at(-1)).toMatchObject({ role: 'assistant', streaming: false })
+    expect(store.messages.flatMap(turn => turn.role === 'assistant'
+      ? turn.messages.filter(block => block.type === 'error')
+      : [])).toEqual([])
   })
 
   it.each([
@@ -9278,17 +9280,24 @@ describe('chat-list store', () => {
     const terminal = runtimeReplacementSnapshot(streamId, operation, [], status, 11)
     if (terminal.type === 'runtime_snapshot' && terminal.snapshot?.current_run_view) {
       terminal.snapshot.current_run_view.error = `replacement ${status}`
+      terminal.snapshot.current_run_view.history_committed = true
     }
     streamHandler?.(terminal)
 
     await expect(pending).resolves.toMatchObject({ ok: false, stage: 'stream' })
     await flushPromises()
-    expect(store.messages.slice(0, 2).map(turn => turn.id)).toEqual(['user-old', 'assistant-old'])
+    expect(store.messages.some(turn => turn.id === 'assistant-old')).toBe(false)
+    expect(store.messages[0]).toMatchObject({
+      role: 'user',
+      text: kind === 'edit' ? 'edited prompt' : 'old prompt',
+    })
     if (status === 'aborted') {
       expect(store.messages).toHaveLength(2)
-      expect(store.messages.flatMap(turn => turn.role === 'assistant'
-        ? turn.messages.filter(block => block.type === 'error')
-        : [])).toEqual([])
+      expect(store.messages.at(-1)).toMatchObject({
+        role: 'assistant',
+        streaming: false,
+        messages: [expect.objectContaining({ type: 'error' })],
+      })
       return
     }
     expect(store.messages.at(-1)).toMatchObject({
@@ -9464,7 +9473,7 @@ describe('chat-list store', () => {
         } satisfies SessionruntimeRunOperationView)
     streamHandler?.(runtimeReplacementSnapshot(streamId, operation))
     api.fetchMessagesUI.mockRejectedValue(new Error('history unavailable'))
-    streamHandler?.(runtimeReplacementSnapshot(streamId, operation, [], 'completed', 11))
+    streamHandler?.(runtimeReplacementSnapshot(streamId, operation, [], 'completed', 11, 'session-1', true))
 
     await expect(pending).resolves.toMatchObject({ ok: true })
     await flushPromises()
@@ -9511,7 +9520,7 @@ describe('chat-list store', () => {
           },
         } satisfies SessionruntimeRunOperationView)
     api.fetchMessagesUI.mockRejectedValue(new Error('history unavailable'))
-    streamHandler?.(runtimeReplacementSnapshot(`stream-passive-empty-${kind}`, operation, [], 'completed', 11))
+    streamHandler?.(runtimeReplacementSnapshot(`stream-passive-empty-${kind}`, operation, [], 'completed', 11, 'session-1', true))
     await flushPromises()
 
     expect(store.messages).toHaveLength(1)
@@ -9521,6 +9530,51 @@ describe('chat-list store', () => {
     })
     expect(store.messages.some(turn => turn.id === 'assistant-old')).toBe(false)
     consoleError.mockRestore()
+  })
+
+  it.each(['retry', 'edit'] as const)('reconciles a committed empty aborted %s on a passive client', async (kind) => {
+    const streamId = `stream-passive-abort-${kind}`
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-old', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+      { id: 'assistant-old', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-12T00:00:01.000Z' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const replacementText = kind === 'edit' ? 'edited prompt' : 'old prompt'
+    const operation = kind === 'retry'
+      ? ({ kind: 'retry', replace_from_message_id: 'assistant-old' } satisfies SessionruntimeRunOperationView)
+      : ({
+          kind: 'edit',
+          replace_from_message_id: 'user-old',
+          replacement_user_turn: {
+            role: 'user',
+            text: replacementText,
+            timestamp: '2026-07-12T00:00:02.000Z',
+            platform: 'local',
+            external_message_id: streamId,
+          },
+        } satisfies SessionruntimeRunOperationView)
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'user-new', role: 'user', text: replacementText, attachments: [], timestamp: '2026-07-12T00:00:02.000Z', external_message_id: streamId },
+    ])
+    streamHandler?.(runtimeReplacementSnapshot(streamId, operation, [], 'aborted', 11))
+
+    await vi.waitFor(() => {
+      expect(store.messages.some(turn => turn.id === 'assistant-old')).toBe(false)
+      expect(store.messages[0]?.serverId ?? store.messages[0]?.id).toBe('user-new')
+      expect(store.messages[0]).toMatchObject({ role: 'user', text: replacementText })
+      expect(store.messages.at(-1)).toMatchObject({
+        role: 'assistant',
+        streaming: false,
+        messages: [expect.objectContaining({ type: 'error', content: 'Response stopped' })],
+      })
+    })
   })
 
   it('does not carry runtime ownership from a successful retry into a reused stream id', async () => {
@@ -9570,10 +9624,11 @@ describe('chat-list store', () => {
       nextCursor: null,
     })
     let replacementPersisted = false
+    let replacementStreamId = ''
     api.fetchMessagesUI.mockImplementation((_botId: string, sessionId: string) => Promise.resolve(sessionId === 'session-a'
       ? replacementPersisted
         ? [
-            { id: 'user-a', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z' },
+            { id: 'user-a', role: 'user', text: 'hello', attachments: [], timestamp: '2026-07-12T00:00:00.000Z', external_message_id: replacementStreamId },
             { id: 'assistant-new', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'partial replacement' }], timestamp: '2026-07-12T00:00:02.000Z' },
           ]
         : [
@@ -9590,6 +9645,7 @@ describe('chat-list store', () => {
     const retry = store.retryLatestAssistant('assistant-old')
     await flushPromises()
     const retryStreamId = lastStreamId
+    replacementStreamId = retryStreamId
     const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
     const partial = [{ id: 0, type: 'text', content: 'partial replacement' }] as ConversationUiMessage[]
     streamHandler?.(runtimeReplacementSnapshot(retryStreamId, operation, partial, 'running', 10, 'session-a'))
@@ -9599,6 +9655,7 @@ describe('chat-list store', () => {
     const failed = runtimeReplacementSnapshot(retryStreamId, operation, partial, 'errored', 11, 'session-a')
     if (failed.type === 'runtime_snapshot' && failed.snapshot?.current_run_view) {
       failed.snapshot.current_run_view.error = 'replacement failed'
+      failed.snapshot.current_run_view.history_committed = true
     }
     replacementPersisted = true
     streamHandler?.(failed)

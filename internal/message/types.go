@@ -117,6 +117,25 @@ type TurnReplacement struct {
 	SessionMetadata  map[string]any
 }
 
+type CanonicalTurn struct {
+	ID               string
+	BotID            string
+	SessionID        string
+	RequestMessageID string
+}
+
+type CanonicalTurnStart struct {
+	Request     PersistInput
+	Replacement *TurnReplacement
+}
+
+// CanonicalTurnPersister writes completed agent work directly into visible
+// history. It does not model a durable run lifecycle.
+type CanonicalTurnPersister interface {
+	StartCanonicalTurn(ctx context.Context, start CanonicalTurnStart) (CanonicalTurn, Message, error)
+	AppendCanonicalTurn(ctx context.Context, turn CanonicalTurn, inputs []PersistInput) ([]Message, error)
+}
+
 type RoundPersistenceOptions struct {
 	Replacement *TurnReplacement
 }

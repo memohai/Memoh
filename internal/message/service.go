@@ -342,6 +342,224 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 	return nil, true, lastErr
 }
 
+func (s *DBService) StartCanonicalTurn(ctx context.Context, start CanonicalTurnStart) (CanonicalTurn, Message, error) {
+	if s == nil || s.queries == nil {
+		return CanonicalTurn{}, Message{}, errors.New("message service is not configured")
+	}
+	input := start.Request
+	if !strings.EqualFold(strings.TrimSpace(input.Role), "user") {
+		return CanonicalTurn{}, Message{}, errors.New("canonical turn must start with a user message")
+	}
+	input.SkipHistoryTurn = false
+	input.TurnRequestMessageID = ""
+	botID := strings.TrimSpace(input.BotID)
+	sessionID := strings.TrimSpace(input.SessionID)
+	if botID == "" || sessionID == "" {
+		return CanonicalTurn{}, Message{}, errors.New("canonical turn requires bot and session ids")
+	}
+
+	var persisted Message
+	var turn HistoryTurn
+	err := s.withCanonicalTurnTransaction(ctx, botID, sessionID, func(queries dbstore.Queries) error {
+		txService := *s
+		txService.queries = queries
+		txService.publisher = nil
+		var err error
+		persisted, err = txService.persist(ctx, input)
+		if err != nil {
+			return err
+		}
+		pgSessionID, err := dbpkg.ParseUUID(sessionID)
+		if err != nil {
+			return err
+		}
+		pgMessageID, err := dbpkg.ParseUUID(persisted.ID)
+		if err != nil {
+			return err
+		}
+		row, err := queries.GetVisibleHistoryTurnByMessage(ctx, sqlc.GetVisibleHistoryTurnByMessageParams{
+			SessionID: pgSessionID,
+			MessageID: pgMessageID,
+		})
+		if err != nil {
+			return fmt.Errorf("load created canonical turn: %w", err)
+		}
+		turn = toHistoryTurn(row)
+		if start.Replacement == nil {
+			return nil
+		}
+		pgOldTurnID, err := dbpkg.ParseUUID(start.Replacement.OldTurnID)
+		if err != nil {
+			return fmt.Errorf("invalid replaced turn id: %w", err)
+		}
+		pgNewTurnID, err := dbpkg.ParseUUID(turn.ID)
+		if err != nil {
+			return fmt.Errorf("invalid replacement turn id: %w", err)
+		}
+		reason := strings.TrimSpace(start.Replacement.Reason)
+		if reason == "" {
+			reason = "replace"
+		}
+		if _, err := queries.SupersedeHistoryTurn(ctx, sqlc.SupersedeHistoryTurnParams{
+			SupersededByTurnID: pgNewTurnID,
+			SupersededAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			SupersededReason:   pgtype.Text{String: reason, Valid: true},
+			OldTurnID:          pgOldTurnID,
+			SessionID:          pgSessionID,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("replacement target is no longer the latest visible turn")
+		} else if err != nil {
+			return fmt.Errorf("supersede replaced turn: %w", err)
+		}
+		pgBotID, err := dbpkg.ParseUUID(botID)
+		if err != nil {
+			return fmt.Errorf("invalid canonical bot id: %w", err)
+		}
+		var runtimeToken pgtype.Int8
+		if fence, fenced := runtimefence.FromContext(ctx); fenced {
+			runtimeToken = pgtype.Int8{Int64: fence.Token, Valid: true}
+		}
+		if _, err := queries.CancelPendingToolApprovalsBySession(ctx, sqlc.CancelPendingToolApprovalsBySessionParams{
+			BotID:               pgBotID,
+			SessionID:           pgSessionID,
+			Reason:              "tool approval cancelled: superseded by a replacement turn",
+			RuntimeFencingToken: runtimeToken,
+		}); err != nil {
+			return fmt.Errorf("cancel superseded tool approvals: %w", err)
+		}
+		canceledInput, err := json.Marshal(map[string]any{
+			"status": "canceled",
+			"reason": "user input cancelled: superseded by a replacement turn",
+		})
+		if err != nil {
+			return fmt.Errorf("marshal superseded user input result: %w", err)
+		}
+		if _, err := queries.CancelPendingUserInputsBySession(ctx, sqlc.CancelPendingUserInputsBySessionParams{
+			BotID:               pgBotID,
+			SessionID:           pgSessionID,
+			ResultJson:          canceledInput,
+			RuntimeFencingToken: runtimeToken,
+		}); err != nil {
+			return fmt.Errorf("cancel superseded user inputs: %w", err)
+		}
+		if start.Replacement.SessionMetadata == nil {
+			return nil
+		}
+		metadata, err := json.Marshal(start.Replacement.SessionMetadata)
+		if err != nil {
+			return fmt.Errorf("marshal replacement session metadata: %w", err)
+		}
+		if _, err := queries.UpdateSessionMetadata(ctx, sqlc.UpdateSessionMetadataParams{
+			Metadata: metadata,
+			ID:       pgSessionID,
+		}); err != nil {
+			return fmt.Errorf("update replacement session metadata: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return CanonicalTurn{}, Message{}, err
+	}
+	s.publishMessageCreated(persisted)
+	return CanonicalTurn{
+		ID:               turn.ID,
+		BotID:            turn.BotID,
+		SessionID:        turn.SessionID,
+		RequestMessageID: persisted.ID,
+	}, persisted, nil
+}
+
+func (s *DBService) AppendCanonicalTurn(ctx context.Context, turn CanonicalTurn, inputs []PersistInput) ([]Message, error) {
+	if s == nil || s.queries == nil {
+		return nil, errors.New("message service is not configured")
+	}
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+	botID := strings.TrimSpace(turn.BotID)
+	sessionID := strings.TrimSpace(turn.SessionID)
+	requestMessageID := strings.TrimSpace(turn.RequestMessageID)
+	if strings.TrimSpace(turn.ID) == "" || botID == "" || sessionID == "" || requestMessageID == "" {
+		return nil, errors.New("canonical turn reference is incomplete")
+	}
+	for _, input := range inputs {
+		if strings.TrimSpace(input.BotID) != botID || strings.TrimSpace(input.SessionID) != sessionID {
+			return nil, errors.New("canonical turn append spans multiple sessions")
+		}
+	}
+
+	persisted := make([]Message, 0, len(inputs))
+	err := s.withCanonicalTurnTransaction(ctx, botID, sessionID, func(queries dbstore.Queries) error {
+		txService := *s
+		txService.queries = queries
+		txService.publisher = nil
+		pgTurnID, err := dbpkg.ParseUUID(turn.ID)
+		if err != nil {
+			return fmt.Errorf("invalid canonical turn id: %w", err)
+		}
+		pgSessionID, err := dbpkg.ParseUUID(sessionID)
+		if err != nil {
+			return fmt.Errorf("invalid canonical session id: %w", err)
+		}
+		pgRequestMessageID, err := dbpkg.ParseUUID(requestMessageID)
+		if err != nil {
+			return fmt.Errorf("invalid canonical request message id: %w", err)
+		}
+		for _, original := range inputs {
+			input := original
+			input.SkipHistoryTurn = true
+			input.TurnRequestMessageID = ""
+			message, err := txService.persist(ctx, input)
+			if err != nil {
+				return err
+			}
+			pgMessageID, err := dbpkg.ParseUUID(message.ID)
+			if err != nil {
+				return fmt.Errorf("invalid canonical appended message id: %w", err)
+			}
+			if _, err := queries.AppendMessageToCanonicalHistoryTurn(ctx, sqlc.AppendMessageToCanonicalHistoryTurnParams{
+				SessionID:        pgSessionID,
+				RequestMessageID: pgRequestMessageID,
+				TurnID:           pgTurnID,
+				MessageID:        pgMessageID,
+			}); errors.Is(err, pgx.ErrNoRows) {
+				return errors.New("canonical turn is no longer visible")
+			} else if err != nil {
+				return fmt.Errorf("append message to canonical turn: %w", err)
+			}
+			persisted = append(persisted, message)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, message := range persisted {
+		s.publishMessageCreated(message)
+	}
+	return persisted, nil
+}
+
+func (s *DBService) withCanonicalTurnTransaction(
+	ctx context.Context,
+	botID string,
+	sessionID string,
+	run func(dbstore.Queries) error,
+) error {
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		return runtimefence.InTransaction(ctx, s.queries, botID, sessionID, run)
+	}
+	txer, ok := s.queries.(transactionalQueries)
+	if !ok {
+		return runtimefence.ErrTransactionsUnsupported
+	}
+	capability, ok := s.queries.(interface{ SupportsTransactions() bool })
+	if !ok || !capability.SupportsTransactions() {
+		return runtimefence.ErrTransactionsUnsupported
+	}
+	return txer.InTx(ctx, run)
+}
+
 func isToolTailRoundShape(inputs []PersistInput) bool {
 	if len(inputs) != 4 {
 		return false
