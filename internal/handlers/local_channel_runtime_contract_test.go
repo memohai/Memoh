@@ -3453,25 +3453,6 @@ func readRuntimeContractEventUntil(t *testing.T, client *websocket.Conn, pred fu
 	}
 }
 
-func readRuntimeWireEventUntil(t *testing.T, client *websocket.Conn, pred func(runtimeWireEvent) bool) runtimeWireEvent {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	var events []runtimeWireEvent
-	for {
-		if err := client.SetReadDeadline(deadline); err != nil {
-			t.Fatalf("set read deadline: %v", err)
-		}
-		var event runtimeWireEvent
-		if err := client.ReadJSON(&event); err != nil {
-			t.Fatalf("read runtime wire event: %v; events=%#v", err, events)
-		}
-		events = append(events, event)
-		if pred(event) {
-			return event
-		}
-	}
-}
-
 func readCommandEventUntil(t *testing.T, client *websocket.Conn, invocationID string) CommandEventResponse {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
