@@ -7,16 +7,16 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/media"
+	"github.com/memohai/memoh/internal/messaging"
 )
 
 func TestChannelAttachmentsToToolAttachments_NormalizesLocalPath(t *testing.T) {
 	t.Parallel()
 
-	atts := channelAttachmentsToToolAttachments([]channel.Attachment{
+	atts := channelAttachmentsToToolAttachments([]messaging.Attachment{
 		{
-			Type: channel.AttachmentImage,
+			Type: messaging.AttachmentImage,
 			URL:  "/data/images/demo.png",
 			Mime: "IMAGE/PNG; charset=utf-8",
 		},
@@ -38,9 +38,9 @@ func TestChannelAttachmentsToToolAttachments_NormalizesLocalPath(t *testing.T) {
 func TestChannelAttachmentsToToolAttachments_PreservesRemoteURL(t *testing.T) {
 	t.Parallel()
 
-	atts := channelAttachmentsToToolAttachments([]channel.Attachment{
+	atts := channelAttachmentsToToolAttachments([]messaging.Attachment{
 		{
-			Type: channel.AttachmentFile,
+			Type: messaging.AttachmentFile,
 			URL:  "https://example.com/demo.pdf",
 			Name: "demo.pdf",
 		},
@@ -62,9 +62,9 @@ func TestChannelAttachmentsToToolAttachments_PreservesRemoteURL(t *testing.T) {
 func TestChannelAttachmentsToToolAttachments_PreservesInlineBase64(t *testing.T) {
 	t.Parallel()
 
-	atts := channelAttachmentsToToolAttachments([]channel.Attachment{
+	atts := channelAttachmentsToToolAttachments([]messaging.Attachment{
 		{
-			Type:        channel.AttachmentImage,
+			Type:        messaging.AttachmentImage,
 			Base64:      "data:image/png;base64,AAAA",
 			PlatformKey: "native-ref",
 			Mime:        "image/png",
@@ -109,10 +109,10 @@ func TestExecReactSameConversationRequiresMessageID(t *testing.T) {
 
 type recordingSender struct {
 	called int
-	req    channel.SendRequest
+	req    messaging.SendRequest
 }
 
-func (s *recordingSender) Send(_ context.Context, _ string, _ channel.ChannelType, req channel.SendRequest) error {
+func (s *recordingSender) Send(_ context.Context, _ string, _ messaging.Platform, req messaging.SendRequest) error {
 	s.called++
 	s.req = req
 	return nil
@@ -348,10 +348,10 @@ func TestExecSendCurrentConversationLiveStreamAttachmentWithTextEmitsAndFlagsTex
 
 type recordingReactor struct {
 	called int
-	req    channel.ReactRequest
+	req    messaging.ReactRequest
 }
 
-func (r *recordingReactor) React(_ context.Context, _ string, _ channel.ChannelType, req channel.ReactRequest) error {
+func (r *recordingReactor) React(_ context.Context, _ string, _ messaging.Platform, req messaging.ReactRequest) error {
 	r.called++
 	r.req = req
 	return nil

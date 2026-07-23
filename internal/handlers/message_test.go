@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 	session "github.com/memohai/memoh/internal/chat/thread"
-	chatview "github.com/memohai/memoh/internal/chat/view"
 )
 
 type testFlusher struct{}

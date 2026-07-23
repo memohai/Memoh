@@ -8,7 +8,6 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/messaging"
 )
 
@@ -20,15 +19,17 @@ func NewMessageProvider(log *slog.Logger, sender messaging.Sender, reactor messa
 	if log == nil {
 		log = slog.Default()
 	}
-	return &MessageProvider{
-		exec: &messaging.Executor{
-			Sender:        sender,
-			Reactor:       reactor,
-			Resolver:      resolver,
-			AssetResolver: assetResolver,
-			Logger:        log.With(slog.String("tool", "message")),
-		},
+	exec := &messaging.Executor{
+		Sender:        sender,
+		Reactor:       reactor,
+		Resolver:      resolver,
+		AssetResolver: assetResolver,
+		Logger:        log.With(slog.String("tool", "message")),
 	}
+	if promoter, ok := sender.(messaging.AttachmentPromoter); ok {
+		exec.Promoter = promoter
+	}
+	return &MessageProvider{exec: exec}
 }
 
 func (*MessageProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
@@ -197,12 +198,12 @@ func sendAttachmentObjectSchema() map[string]any {
 			"type": map[string]any{
 				"type": "string",
 				"enum": []any{
-					string(channel.AttachmentImage),
-					string(channel.AttachmentAudio),
-					string(channel.AttachmentVideo),
-					string(channel.AttachmentVoice),
-					string(channel.AttachmentFile),
-					string(channel.AttachmentGIF),
+					string(messaging.AttachmentImage),
+					string(messaging.AttachmentAudio),
+					string(messaging.AttachmentVideo),
+					string(messaging.AttachmentVoice),
+					string(messaging.AttachmentFile),
+					string(messaging.AttachmentGIF),
 				},
 			},
 			"base64":          map[string]any{"type": "string"},
@@ -387,7 +388,7 @@ func messageDeliveryLabel(session SessionContext, platform, target string) strin
 	return "target"
 }
 
-func channelAttachmentsToToolAttachments(atts []channel.Attachment) []Attachment {
+func channelAttachmentsToToolAttachments(atts []messaging.Attachment) []Attachment {
 	if len(atts) == 0 {
 		return nil
 	}

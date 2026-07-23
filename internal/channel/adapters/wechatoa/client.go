@@ -15,6 +15,7 @@ import (
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/common"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 type apiResponse struct {
@@ -44,7 +45,7 @@ func (a *WeChatOAAdapter) clientForConfig(raw map[string]any) (*apiClient, error
 	if err != nil {
 		return nil, err
 	}
-	channel.SetIMErrorSecrets("wechatoa:"+cfg.AppID, cfg.AppSecret, cfg.Token, cfg.EncodingAESKey)
+	redact.SetSecrets("wechatoa:"+cfg.AppID, cfg.AppSecret, cfg.Token, cfg.EncodingAESKey)
 	key := strings.Join([]string{
 		strings.TrimSpace(cfg.AppID),
 		strings.TrimSpace(cfg.AppSecret),

@@ -11,6 +11,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -18,11 +19,11 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func TestDiscordOutboundStream_PushErrorEventRedactsSecrets(t *testing.T) {
-	channel.ResetIMErrorSecretsForTest()
-	t.Cleanup(channel.ResetIMErrorSecretsForTest)
+	redact.ResetForTest()
+	t.Cleanup(redact.ResetForTest)
 
 	const token = "discord-token-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	channel.SetIMErrorSecrets("test", token)
+	redact.SetSecrets("test", token)
 	prefixHalf := token[:len(token)/2]
 
 	var sentBody string

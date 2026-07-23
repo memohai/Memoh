@@ -92,9 +92,8 @@ func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.Even
 	return timeline.NewEventStore(log, queries)
 }
 
-func provideDiscussDriver(log *slog.Logger, pipeline *timeline.Pipeline, eventStore *timeline.EventStore, msgService *message.DBService) *discuss.DiscussDriver {
+func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService) *discuss.DiscussDriver {
 	return discuss.NewDiscussDriver(discuss.DiscussDriverDeps{
-		Pipeline:       pipeline,
 		MessageService: msgService,
 		CursorStore:    eventStore,
 		Logger:         log,
@@ -232,8 +231,9 @@ func provideChannelRouter(
 	qqAdapter.SetChannelIdentityResolver(identityService)
 	qqAdapter.SetRouteResolver(routeService)
 
+	threadCoordinator := route.NewThreadCoordinator(log, routeService, sessionService)
 	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, turnService, identityService, policyService, cfg.Auth.JWTSecret, 5*time.Minute)
-	processor.SetSessionEnsurer(&sessionEnsurerAdapter{svc: sessionService})
+	processor.SetSessionEnsurer(&sessionEnsurerAdapter{coordinator: threadCoordinator})
 	processor.SetPipeline(pipeline, eventStore, discussDriver)
 	discussDriver.SetTurnService(turnService)
 	discussDriver.SetBroadcaster(hub)
@@ -374,11 +374,11 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 }
 
 type sessionEnsurerAdapter struct {
-	svc *sessionpkg.Service
+	coordinator *route.ThreadCoordinator
 }
 
 func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (inbound.SessionResult, error) {
-	sess, err := a.svc.EnsureActiveThread(ctx, botID, routeID, channelType)
+	sess, err := a.coordinator.EnsureActive(ctx, botID, routeID, channelType)
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
@@ -386,7 +386,7 @@ func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, 
 }
 
 func (a *sessionEnsurerAdapter) GetActiveSession(ctx context.Context, routeID string) (inbound.SessionResult, error) {
-	sess, err := a.svc.GetActiveForRoute(ctx, routeID)
+	sess, err := a.coordinator.GetActive(ctx, routeID)
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
@@ -395,7 +395,7 @@ func (a *sessionEnsurerAdapter) GetActiveSession(ctx context.Context, routeID st
 
 func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, routeID, channelType string, spec inbound.NewSessionSpec) (inbound.SessionResult, error) {
 	createdByUserID := newSessionCreatedByUserID(spec)
-	sess, err := a.svc.CreateNewThreadWithInput(ctx, sessionpkg.CreateInput{
+	sess, err := a.coordinator.CreateNew(ctx, sessionpkg.CreateInput{
 		BotID:           botID,
 		RouteID:         routeID,
 		ChannelType:     channelType,

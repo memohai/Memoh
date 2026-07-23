@@ -20,11 +20,11 @@ import (
 	"github.com/memohai/memoh/internal/agent/background"
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 	"github.com/memohai/memoh/internal/bots"
 	messageevent "github.com/memohai/memoh/internal/chat/event"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	session "github.com/memohai/memoh/internal/chat/thread"
-	chatview "github.com/memohai/memoh/internal/chat/view"
 	"github.com/memohai/memoh/internal/media"
 )
 

@@ -9,24 +9,24 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/messaging"
 )
 
 type usageTestResolver struct{}
 
-func (usageTestResolver) ParseChannelType(raw string) (channel.ChannelType, error) {
-	return channel.ChannelType(raw), nil
+func (usageTestResolver) ParseChannelType(raw string) (messaging.Platform, error) {
+	return messaging.Platform(raw), nil
 }
 
 type usageTestSender struct{}
 
-func (usageTestSender) Send(context.Context, string, channel.ChannelType, channel.SendRequest) error {
+func (usageTestSender) Send(context.Context, string, messaging.Platform, messaging.SendRequest) error {
 	return nil
 }
 
 type usageTestReactor struct{}
 
-func (usageTestReactor) React(context.Context, string, channel.ChannelType, channel.ReactRequest) error {
+func (usageTestReactor) React(context.Context, string, messaging.Platform, messaging.ReactRequest) error {
 	return nil
 }
 

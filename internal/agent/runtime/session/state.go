@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/internal/agent/runtime/native"
-	chatview "github.com/memohai/memoh/internal/chat/view"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 )
 
 func runtimeDeltaForAgentEvent(event native.StreamEvent, messages []chatview.UIMessage) (RuntimeDelta, bool) {

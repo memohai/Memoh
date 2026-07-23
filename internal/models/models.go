@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 var (
@@ -594,7 +594,7 @@ func FetchProviderByID(ctx context.Context, queries dbstore.Queries, providerID 
 	}
 	apiKey := providerConfigString(provider.Config, "api_key")
 	if strings.TrimSpace(apiKey) != "" {
-		channel.SetIMErrorSecrets("provider:"+providerID, apiKey)
+		redact.SetSecrets("provider:"+providerID, apiKey)
 	}
 	return provider, nil
 }

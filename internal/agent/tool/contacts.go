@@ -8,21 +8,21 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/channel/route"
+	"github.com/memohai/memoh/internal/messaging"
 )
 
 type ContactsProvider struct {
-	routeService route.Service
-	logger       *slog.Logger
+	contacts messaging.ContactReader
+	logger   *slog.Logger
 }
 
-func NewContactsProvider(log *slog.Logger, routeService route.Service) *ContactsProvider {
+func NewContactsProvider(log *slog.Logger, contacts messaging.ContactReader) *ContactsProvider {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &ContactsProvider{
-		routeService: routeService,
-		logger:       log.With(slog.String("tool", "contacts")),
+		contacts: contacts,
+		logger:   log.With(slog.String("tool", "contacts")),
 	}
 }
 
@@ -53,7 +53,7 @@ func (*ContactsProvider) Usage(_ context.Context, session SessionContext, availa
 }
 
 func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if p.routeService == nil {
+	if p.contacts == nil {
 		return nil, nil
 	}
 	sess := session
@@ -77,7 +77,7 @@ func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]s
 				if botID == "" {
 					return nil, errors.New("bot_id is required")
 				}
-				routes, err := p.routeService.List(ctx.Context, botID)
+				routes, err := p.contacts.ListContacts(ctx.Context, botID)
 				if err != nil {
 					return nil, err
 				}
@@ -88,7 +88,7 @@ func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]s
 						continue
 					}
 					entry := map[string]any{
-						"route_id":          r.ID,
+						"route_id":          r.RouteID,
 						"platform":          r.Platform,
 						"conversation_type": r.ConversationType,
 						"target":            r.ReplyTarget,

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 // SessionHandler handles bot session CRUD endpoints.
 type SessionHandler struct {
 	sessionService *session.Service
+	threadEnricher threadEnricher
 	acpPool        acpSessionCloser
 	botService     *bots.Service
 	accountService *accounts.Service
@@ -32,6 +34,10 @@ type acpSessionCloser interface {
 	BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error
 }
 
+type threadEnricher interface {
+	EnrichThreads(ctx context.Context, botID string, threads []session.Thread) ([]session.Thread, error)
+}
+
 // NewSessionHandler creates a SessionHandler.
 func NewSessionHandler(log *slog.Logger, sessionService *session.Service, acpPool acpSessionCloser, botService *bots.Service, accountService *accounts.Service) *SessionHandler {
 	return &SessionHandler{
@@ -41,6 +47,12 @@ func NewSessionHandler(log *slog.Logger, sessionService *session.Service, acpPoo
 		accountService: accountService,
 		logger:         log.With(slog.String("handler", "session")),
 	}
+}
+
+// SetThreadEnricher installs the Channel-owned route projection used by list
+// responses. Thread persistence stays independent from the route table.
+func (h *SessionHandler) SetThreadEnricher(enricher threadEnricher) {
+	h.threadEnricher = enricher
 }
 
 // Register registers session routes.
@@ -305,6 +317,12 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if h.threadEnricher != nil {
+		sessions, err = h.threadEnricher.EnrichThreads(c.Request().Context(), bot.ID, sessions)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 	}
 
 	encoded := ""

@@ -25,6 +25,7 @@ import (
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/media"
+	"github.com/memohai/memoh/internal/redact"
 	"github.com/memohai/memoh/internal/textutil"
 )
 
@@ -125,7 +126,7 @@ func (a *TelegramAdapter) SetAssetOpener(opener assetOpener) {
 var getOrCreateBotForTest func(a *TelegramAdapter, token, configID string) (*tele.Bot, error)
 
 func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tele.Bot, error) {
-	channel.SetIMErrorSecrets("telegram:"+configID, cfg.BotToken)
+	redact.SetSecrets("telegram:"+configID, cfg.BotToken)
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, cfg.BotToken, configID)
 	}
@@ -1333,7 +1334,7 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 	if err != nil {
 		return nil, fmt.Errorf("telegram open stream: %w", err)
 	}
-	channel.SetIMErrorSecrets("telegram:"+cfg.ID, telegramCfg.BotToken)
+	redact.SetSecrets("telegram:"+cfg.ID, telegramCfg.BotToken)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

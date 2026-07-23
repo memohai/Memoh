@@ -15,6 +15,7 @@ import (
 	identitypkg "github.com/memohai/memoh/internal/channel/identities"
 	routepkg "github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/media"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 const (
@@ -245,7 +246,7 @@ func (*QQAdapter) ProcessingFailed(context.Context, channel.ChannelConfig, chann
 }
 
 func (a *QQAdapter) getOrCreateClient(cfg channel.ChannelConfig, parsed Config) *qqClient {
-	channel.SetIMErrorSecrets("qq:"+parsed.AppID, parsed.AppSecret)
+	redact.SetSecrets("qq:"+parsed.AppID, parsed.AppSecret)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

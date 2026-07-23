@@ -17,9 +17,9 @@ import (
 	readability "github.com/go-shiori/go-readability"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/fetchproviders"
+	"github.com/memohai/memoh/internal/redact"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -395,7 +395,7 @@ func registerFetchProviderSecrets(provider sqlc.FetchProvider) {
 		}
 	}
 	if len(secrets) > 0 {
-		channel.SetIMErrorSecrets("fetch:"+provider.ID.String(), secrets...)
+		redact.SetSecrets("fetch:"+provider.ID.String(), secrets...)
 	}
 }
 

@@ -59,7 +59,7 @@ func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 		},
 	}
 	svc := &fakeTurnService{}
-	driver := NewDiscussDriver(DiscussDriverDeps{Pipeline: timeline.NewPipeline(timeline.RenderParams{})})
+	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
 		config:          DiscussSessionConfig{TeamID: "team-1", BotID: "bot-1", ThreadID: "sess-1"},
 		lastProcessedMs: 0,
@@ -94,7 +94,7 @@ func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 		},
 	}
 	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent}
-	driver := NewDiscussDriver(DiscussDriverDeps{Pipeline: timeline.NewPipeline(timeline.RenderParams{})})
+	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
 		config: DiscussSessionConfig{
 			BotID:             "bot-1",
@@ -131,9 +131,7 @@ func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 }
 
 func TestNotifyRCRefreshesExistingDiscussSessionConfig(t *testing.T) {
-	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline: timeline.NewPipeline(timeline.RenderParams{}),
-	})
+	driver := NewDiscussDriver(DiscussDriverDeps{})
 	defer driver.StopSession("sess-1")
 
 	driver.NotifyRC(context.Background(), "sess-1", timeline.RenderedContext{}, DiscussSessionConfig{
@@ -173,7 +171,7 @@ func TestHandleReplyWithTurnReadsConfigUnderDriverLock(t *testing.T) {
 	svc := &fakeTurnService{onStart: func(cmd turn.StartTurnCommand) {
 		calls <- cmd.BotID
 	}}
-	driver := NewDiscussDriver(DiscussDriverDeps{Pipeline: timeline.NewPipeline(timeline.RenderParams{})})
+	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
 		config: DiscussSessionConfig{
 			BotID:    "bot-old",
@@ -225,7 +223,7 @@ func TestHandleReplyWithTurn_NoCursorAdvanceOnStartError(t *testing.T) {
 		},
 	}
 	svc := &fakeTurnService{startErr: errors.New("discuss runtime not configured")}
-	driver := NewDiscussDriver(DiscussDriverDeps{Pipeline: timeline.NewPipeline(timeline.RenderParams{})})
+	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
 		config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"},
 	}
@@ -246,7 +244,7 @@ func TestHandleReplyWithTurn_ACPDoesNotAdvanceCursorOnRuntimeError(t *testing.T)
 		},
 	}
 	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent, streamErr: errors.New("runtime failed")}
-	driver := NewDiscussDriver(DiscussDriverDeps{Pipeline: timeline.NewPipeline(timeline.RenderParams{})})
+	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
 		config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"},
 	}
@@ -274,7 +272,7 @@ func TestHandleReplyWithTurn_ACPSkipsRuntimeForPassiveMessage(t *testing.T) {
 		},
 	}
 	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent}
-	driver := NewDiscussDriver(DiscussDriverDeps{Pipeline: timeline.NewPipeline(timeline.RenderParams{})})
+	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
 		config: DiscussSessionConfig{
 			BotID:            "bot-1",
@@ -305,7 +303,7 @@ func TestHandleReplyWithTurn_ACPRepliesInDirectConversation(t *testing.T) {
 		},
 	}
 	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent}
-	driver := NewDiscussDriver(DiscussDriverDeps{Pipeline: timeline.NewPipeline(timeline.RenderParams{})})
+	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
 		config: DiscussSessionConfig{
 			BotID:            "bot-1",
@@ -374,7 +372,6 @@ func TestHandleReplyWithTurn_ColdStartAnchoredByTR(t *testing.T) {
 	}
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:       timeline.NewPipeline(timeline.RenderParams{}),
 		MessageService: nil,
 	})
 	sess := &discussSession{
@@ -407,7 +404,7 @@ func TestHandleReplyWithTurn_CursorAdvancesToRCNotWallClock(t *testing.T) {
 		},
 	}
 	svc := &fakeTurnService{}
-	driver := NewDiscussDriver(DiscussDriverDeps{Pipeline: timeline.NewPipeline(timeline.RenderParams{})})
+	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
 		config:          DiscussSessionConfig{BotID: "b", ThreadID: "s"},
 		lastProcessedMs: 0,
@@ -427,7 +424,6 @@ func TestHandleReplyWithTurn_UsesPersistedDiscussCursor(t *testing.T) {
 	store := &fakeDiscussCursorStore{cursor: 500}
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:    timeline.NewPipeline(timeline.RenderParams{}),
 		CursorStore: store,
 	})
 	sess := &discussSession{

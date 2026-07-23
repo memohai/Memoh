@@ -168,6 +168,31 @@ type subagentTransactionalQueries interface {
 	InTx(context.Context, func(dbstore.Queries) error) error
 }
 
+// Queries is the storage surface owned by the Thread domain. Route lookup and
+// route activation intentionally stay outside this contract.
+type Queries interface {
+	CountMessagesBySession(context.Context, pgtype.UUID) (int64, error)
+	CreateSession(context.Context, sqlc.CreateSessionParams) (sqlc.BotSession, error)
+	CreateSubagentConfig(context.Context, sqlc.CreateSubagentConfigParams) (sqlc.SubagentConfig, error)
+	CreateSubagentForkContext(context.Context, sqlc.CreateSubagentForkContextParams) (sqlc.CreateSubagentForkContextRow, error)
+	ForkSessionFromAssistantMessage(context.Context, sqlc.ForkSessionFromAssistantMessageParams) (sqlc.ForkSessionFromAssistantMessageRow, error)
+	GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error)
+	GetSessionByID(context.Context, pgtype.UUID) (sqlc.BotSession, error)
+	GetSubagentConfig(context.Context, pgtype.UUID) (sqlc.SubagentConfig, error)
+	ListSessionsByBot(context.Context, pgtype.UUID) ([]sqlc.ListSessionsByBotRow, error)
+	ListSessionsByBotAndCreatedByUser(context.Context, sqlc.ListSessionsByBotAndCreatedByUserParams) ([]sqlc.ListSessionsByBotAndCreatedByUserRow, error)
+	ListSessionsByBotAndCreatedByUserPaged(context.Context, sqlc.ListSessionsByBotAndCreatedByUserPagedParams) ([]sqlc.ListSessionsByBotAndCreatedByUserPagedRow, error)
+	ListSessionsByBotPaged(context.Context, sqlc.ListSessionsByBotPagedParams) ([]sqlc.ListSessionsByBotPagedRow, error)
+	ListSessionsByRoute(context.Context, pgtype.UUID) ([]sqlc.BotSession, error)
+	ListSubagentForkContext(context.Context, pgtype.UUID) ([]sqlc.ListSubagentForkContextRow, error)
+	ListSubagentSessionsByParent(context.Context, pgtype.UUID) ([]sqlc.BotSession, error)
+	SoftDeleteSession(context.Context, pgtype.UUID) error
+	TouchSession(context.Context, pgtype.UUID) error
+	UpdateSessionMetadata(context.Context, sqlc.UpdateSessionMetadataParams) (sqlc.BotSession, error)
+	UpdateSessionTitle(context.Context, sqlc.UpdateSessionTitleParams) (sqlc.BotSession, error)
+	UpdateSessionTypeAndMetadata(context.Context, sqlc.UpdateSessionTypeAndMetadataParams) (sqlc.BotSession, error)
+}
+
 // ForkFromAssistantInput creates a new chat thread from the source thread's
 // visible history through the assistant message's turn.
 type ForkFromAssistantInput struct {
@@ -180,7 +205,7 @@ type ForkFromAssistantInput struct {
 
 // Service manages bot chat threads.
 type Service struct {
-	queries           dbstore.Queries
+	queries           Queries
 	hookService       *hooks.Service
 	publisher         event.Publisher
 	acpSetupValidator ACPSetupValidator
@@ -204,7 +229,7 @@ type ACPSetupValidator interface {
 // NewService creates a thread service. publisher may be nil — thread
 // creation still succeeds when there is no event hub wired in (tests, or any
 // caller that doesn't surface activity events).
-func NewService(log *slog.Logger, queries dbstore.Queries, publisher event.Publisher) *Service {
+func NewService(log *slog.Logger, queries Queries, publisher event.Publisher) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -373,7 +398,7 @@ func (s *Service) CreateSubagent(ctx context.Context, input CreateSubagentInput)
 
 	var created Thread
 	var config SubagentConfig
-	create := func(queries dbstore.Queries) error {
+	create := func(queries Queries) error {
 		service := *s
 		service.queries = queries
 		service.publisher = nil
@@ -419,7 +444,9 @@ func (s *Service) CreateSubagent(ctx context.Context, input CreateSubagentInput)
 	}
 
 	if tx, ok := s.queries.(subagentTransactionalQueries); ok {
-		err = tx.InTx(ctx, create)
+		err = tx.InTx(ctx, func(queries dbstore.Queries) error {
+			return create(queries)
+		})
 	} else {
 		err = create(s.queries)
 	}
@@ -939,19 +966,6 @@ func (s *Service) ListSubagentsByParent(ctx context.Context, parentSessionID str
 	return threads, nil
 }
 
-// GetActiveForRoute returns the active session for a route.
-func (s *Service) GetActiveForRoute(ctx context.Context, routeID string) (Thread, error) {
-	pgRouteID, err := dbpkg.ParseUUID(routeID)
-	if err != nil {
-		return Thread{}, fmt.Errorf("invalid route id: %w", err)
-	}
-	row, err := s.queries.GetActiveSessionForRoute(ctx, pgRouteID)
-	if err != nil {
-		return Thread{}, err
-	}
-	return toThread(row), nil
-}
-
 // UpdateTitle updates a session's title.
 func (s *Service) UpdateTitle(ctx context.Context, sessionID, title string) (Thread, error) {
 	pgID, err := dbpkg.ParseUUID(sessionID)
@@ -1063,77 +1077,6 @@ func (s *Service) Touch(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("invalid session id: %w", err)
 	}
 	return s.queries.TouchSession(ctx, pgID)
-}
-
-// SetRouteActiveThread sets the active thread for a route.
-func (s *Service) SetRouteActiveThread(ctx context.Context, routeID, sessionID string) error {
-	pgRouteID, err := dbpkg.ParseUUID(routeID)
-	if err != nil {
-		return fmt.Errorf("invalid route id: %w", err)
-	}
-	pgSessionID, err := parseOptionalUUID(sessionID)
-	if err != nil {
-		return fmt.Errorf("invalid session id: %w", err)
-	}
-	return s.queries.SetRouteActiveSession(ctx, sqlc.SetRouteActiveSessionParams{
-		ID:              pgRouteID,
-		ActiveSessionID: pgSessionID,
-	})
-}
-
-// CreateNewThread always creates a fresh thread and sets it as the active
-// session for the given route, replacing any previous active session.
-// sessionType defaults to TypeChat if empty.
-func (s *Service) CreateNewThread(ctx context.Context, botID, routeID, channelType, sessionType string) (Thread, error) {
-	if strings.TrimSpace(sessionType) == "" {
-		sessionType = TypeChat
-	}
-	return s.CreateNewThreadWithInput(ctx, CreateInput{
-		BotID:       botID,
-		RouteID:     routeID,
-		ChannelType: channelType,
-		Type:        sessionType,
-	})
-}
-
-// CreateNewThreadWithInput creates a fresh active route thread from a full
-// CreateInput. The route and bot identity are taken from input, so callers can
-// pass ACP metadata and descriptor fields without overloading the legacy type.
-func (s *Service) CreateNewThreadWithInput(ctx context.Context, input CreateInput) (Thread, error) {
-	if strings.TrimSpace(input.Type) == "" {
-		input.Type = TypeChat
-	}
-	thread, err := s.Create(ctx, input)
-	if err != nil {
-		return Thread{}, fmt.Errorf("create new session: %w", err)
-	}
-
-	if err := s.SetRouteActiveThread(ctx, input.RouteID, thread.ID); err != nil {
-		s.logger.Warn("failed to set active session on route", slog.Any("error", err))
-	}
-	return thread, nil
-}
-
-// EnsureActiveThread returns the active thread for a route, creating one if it doesn't exist.
-func (s *Service) EnsureActiveThread(ctx context.Context, botID, routeID, channelType string) (Thread, error) {
-	thread, err := s.GetActiveForRoute(ctx, routeID)
-	if err == nil {
-		return thread, nil
-	}
-
-	thread, err = s.Create(ctx, CreateInput{
-		BotID:       botID,
-		RouteID:     routeID,
-		ChannelType: channelType,
-	})
-	if err != nil {
-		return Thread{}, fmt.Errorf("auto-create session: %w", err)
-	}
-
-	if err := s.SetRouteActiveThread(ctx, routeID, thread.ID); err != nil {
-		s.logger.Warn("failed to set active session on route", slog.Any("error", err))
-	}
-	return thread, nil
 }
 
 func toThread(row sqlc.BotSession) Thread {
@@ -1459,23 +1402,21 @@ func toThreadFromListRow(row sqlc.ListSessionsByBotRow) Thread {
 	}
 	sessionMode := normalizeSessionMode(row.SessionMode, row.Type)
 	return Thread{
-		ID:                    row.ID.String(),
-		BotID:                 row.BotID.String(),
-		RouteID:               row.RouteID.String(),
-		ChannelType:           dbpkg.TextToString(row.ChannelType),
-		Type:                  row.Type,
-		SessionMode:           sessionMode,
-		RuntimeType:           normalizeRuntimeType(row.RuntimeType, row.Type),
-		RuntimeMetadata:       parseJSONMap(row.RuntimeMetadata),
-		Title:                 row.Title,
-		Metadata:              parseJSONMap(row.Metadata),
-		ParentThreadID:        parentID,
-		CreatedByUserID:       createdByUserID,
-		CreatedAt:             row.CreatedAt.Time,
-		UpdatedAt:             row.UpdatedAt.Time,
-		RouteMetadata:         parseJSONMap(row.RouteMetadata),
-		RouteConversationType: dbpkg.TextToString(row.RouteConversationType),
-		Visibility:            visibilityForMode(sessionMode),
+		ID:              row.ID.String(),
+		BotID:           row.BotID.String(),
+		RouteID:         row.RouteID.String(),
+		ChannelType:     dbpkg.TextToString(row.ChannelType),
+		Type:            row.Type,
+		SessionMode:     sessionMode,
+		RuntimeType:     normalizeRuntimeType(row.RuntimeType, row.Type),
+		RuntimeMetadata: parseJSONMap(row.RuntimeMetadata),
+		Title:           row.Title,
+		Metadata:        parseJSONMap(row.Metadata),
+		ParentThreadID:  parentID,
+		CreatedByUserID: createdByUserID,
+		CreatedAt:       row.CreatedAt.Time,
+		UpdatedAt:       row.UpdatedAt.Time,
+		Visibility:      visibilityForMode(sessionMode),
 	}
 }
 
@@ -1490,23 +1431,21 @@ func toThreadFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Thre
 	}
 	sessionMode := normalizeSessionMode(row.SessionMode, row.Type)
 	return Thread{
-		ID:                    row.ID.String(),
-		BotID:                 row.BotID.String(),
-		RouteID:               row.RouteID.String(),
-		ChannelType:           dbpkg.TextToString(row.ChannelType),
-		Type:                  row.Type,
-		SessionMode:           sessionMode,
-		RuntimeType:           normalizeRuntimeType(row.RuntimeType, row.Type),
-		RuntimeMetadata:       parseJSONMap(row.RuntimeMetadata),
-		Title:                 row.Title,
-		Metadata:              parseJSONMap(row.Metadata),
-		ParentThreadID:        parentID,
-		CreatedByUserID:       createdByUserID,
-		CreatedAt:             row.CreatedAt.Time,
-		UpdatedAt:             row.UpdatedAt.Time,
-		RouteMetadata:         parseJSONMap(row.RouteMetadata),
-		RouteConversationType: dbpkg.TextToString(row.RouteConversationType),
-		Visibility:            visibilityForMode(sessionMode),
+		ID:              row.ID.String(),
+		BotID:           row.BotID.String(),
+		RouteID:         row.RouteID.String(),
+		ChannelType:     dbpkg.TextToString(row.ChannelType),
+		Type:            row.Type,
+		SessionMode:     sessionMode,
+		RuntimeType:     normalizeRuntimeType(row.RuntimeType, row.Type),
+		RuntimeMetadata: parseJSONMap(row.RuntimeMetadata),
+		Title:           row.Title,
+		Metadata:        parseJSONMap(row.Metadata),
+		ParentThreadID:  parentID,
+		CreatedByUserID: createdByUserID,
+		CreatedAt:       row.CreatedAt.Time,
+		UpdatedAt:       row.UpdatedAt.Time,
+		Visibility:      visibilityForMode(sessionMode),
 	}
 }
 
@@ -1517,7 +1456,6 @@ func toThreadFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Thread {
 		Title: row.Title, Metadata: row.Metadata,
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
-		RouteMetadata: row.RouteMetadata, RouteConversationType: row.RouteConversationType,
 	})
 }
 
@@ -1528,7 +1466,6 @@ func toThreadFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow
 		Title: row.Title, Metadata: row.Metadata,
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
-		RouteMetadata: row.RouteMetadata, RouteConversationType: row.RouteConversationType,
 	})
 }
 
@@ -1537,22 +1474,20 @@ func toThreadFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow
 // happen to be structurally identical; centralizing the projection here
 // keeps the conversion logic in one place.
 type pagedColumns struct {
-	ID                    pgtype.UUID
-	BotID                 pgtype.UUID
-	RouteID               pgtype.UUID
-	ChannelType           pgtype.Text
-	Type                  string
-	SessionMode           string
-	RuntimeType           string
-	RuntimeMetadata       []byte
-	Title                 string
-	Metadata              []byte
-	ParentThreadID        pgtype.UUID
-	CreatedByUserID       pgtype.UUID
-	CreatedAt             pgtype.Timestamptz
-	UpdatedAt             pgtype.Timestamptz
-	RouteMetadata         []byte
-	RouteConversationType pgtype.Text
+	ID              pgtype.UUID
+	BotID           pgtype.UUID
+	RouteID         pgtype.UUID
+	ChannelType     pgtype.Text
+	Type            string
+	SessionMode     string
+	RuntimeType     string
+	RuntimeMetadata []byte
+	Title           string
+	Metadata        []byte
+	ParentThreadID  pgtype.UUID
+	CreatedByUserID pgtype.UUID
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 func threadFromPagedColumns(c pagedColumns) Thread {
@@ -1566,22 +1501,20 @@ func threadFromPagedColumns(c pagedColumns) Thread {
 	}
 	sessionMode := normalizeSessionMode(c.SessionMode, c.Type)
 	return Thread{
-		ID:                    c.ID.String(),
-		BotID:                 c.BotID.String(),
-		RouteID:               c.RouteID.String(),
-		ChannelType:           dbpkg.TextToString(c.ChannelType),
-		Type:                  c.Type,
-		SessionMode:           sessionMode,
-		RuntimeType:           normalizeRuntimeType(c.RuntimeType, c.Type),
-		RuntimeMetadata:       parseJSONMap(c.RuntimeMetadata),
-		Title:                 c.Title,
-		Metadata:              parseJSONMap(c.Metadata),
-		ParentThreadID:        parentID,
-		CreatedByUserID:       createdByUserID,
-		CreatedAt:             c.CreatedAt.Time,
-		UpdatedAt:             c.UpdatedAt.Time,
-		RouteMetadata:         parseJSONMap(c.RouteMetadata),
-		RouteConversationType: dbpkg.TextToString(c.RouteConversationType),
-		Visibility:            visibilityForMode(sessionMode),
+		ID:              c.ID.String(),
+		BotID:           c.BotID.String(),
+		RouteID:         c.RouteID.String(),
+		ChannelType:     dbpkg.TextToString(c.ChannelType),
+		Type:            c.Type,
+		SessionMode:     sessionMode,
+		RuntimeType:     normalizeRuntimeType(c.RuntimeType, c.Type),
+		RuntimeMetadata: parseJSONMap(c.RuntimeMetadata),
+		Title:           c.Title,
+		Metadata:        parseJSONMap(c.Metadata),
+		ParentThreadID:  parentID,
+		CreatedByUserID: createdByUserID,
+		CreatedAt:       c.CreatedAt.Time,
+		UpdatedAt:       c.UpdatedAt.Time,
+		Visibility:      visibilityForMode(sessionMode),
 	}
 }

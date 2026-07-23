@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 type qqOutboundStream struct {
@@ -28,7 +29,7 @@ func (a *QQAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, tar
 	if err != nil {
 		return nil, fmt.Errorf("qq open stream: %w", err)
 	}
-	channel.SetIMErrorSecrets("qq:"+parsed.AppID, parsed.AppSecret)
+	redact.SetSecrets("qq:"+parsed.AppID, parsed.AppSecret)
 	return &qqOutboundStream{
 		target: target,
 		reply:  opts.Reply,
@@ -96,7 +97,7 @@ func (s *qqOutboundStream) Push(ctx context.Context, event channel.PreparedStrea
 		s.mu.Unlock()
 		return nil
 	case channel.StreamEventError:
-		errText := channel.RedactIMErrorText(strings.TrimSpace(event.Error))
+		errText := redact.Text(strings.TrimSpace(event.Error))
 		if errText == "" {
 			return nil
 		}

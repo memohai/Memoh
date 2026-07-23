@@ -151,6 +151,20 @@ func TestChatStorageDomainsDoNotDependOnUpperLayers(t *testing.T) {
 	}
 }
 
+// TestApplicationDoesNotDependOnChannel keeps use-case orchestration on
+// neutral Agent/Chat ports. Platform identity and conversation vocabulary
+// must enter through adapters at the composition root.
+func TestApplicationDoesNotDependOnChannel(t *testing.T) {
+	root := repoRoot(t)
+	for _, file := range allGoFiles(t, root, "internal/agent/application") {
+		for _, imp := range imports(t, root, file) {
+			if isPackageOrChild(imp, modulePrefix+"internal/channel") {
+				t.Errorf("%s imports %s: Agent application must consume neutral ports, not Channel", file, imp)
+			}
+		}
+	}
+}
+
 // TestAgentContextDoesNotDependOnExecutionOrDelivery keeps context assembly
 // reusable by application and runtimes without creating a reverse dependency.
 // Persistence-backed compaction is intentionally allowed to use db/sqlc until
@@ -198,20 +212,66 @@ func TestNativeRuntimeStaysBelowApplicationAndDelivery(t *testing.T) {
 	}
 }
 
-// TestAgentToolDoesNotDependOnApplicationOrHandlers prevents tool providers
-// from reaching back into orchestration or HTTP delivery. Some providers
-// still consume channel-owned messaging ports; that boundary is retained
-// until those ports receive a lower-level home of their own.
-func TestAgentToolDoesNotDependOnApplicationOrHandlers(t *testing.T) {
+// TestAgentToolStaysOnNeutralPorts prevents tool providers from reaching into
+// orchestration or either delivery implementation.
+func TestAgentToolStaysOnNeutralPorts(t *testing.T) {
 	root := repoRoot(t)
-	for _, file := range goFiles(t, root, "internal/agent/tool") {
+	for _, file := range allGoFiles(t, root, "internal/agent/tool") {
 		for _, imp := range imports(t, root, file) {
 			switch {
 			case isPackageOrChild(imp, modulePrefix+"internal/agent/application"):
 				t.Errorf("%s imports %s: Agent tools must not depend on application orchestration", file, imp)
+			case isPackageOrChild(imp, modulePrefix+"internal/channel"):
+				t.Errorf("%s imports %s: Agent tools must use neutral messaging/contact ports", file, imp)
 			case isPackageOrChild(imp, modulePrefix+"internal/handlers"):
 				t.Errorf("%s imports %s: Agent tools must not depend on HTTP handlers", file, imp)
 			}
+		}
+	}
+}
+
+// TestAgentRuntimeDoesNotDependOnChat keeps runtime snapshots and execution
+// independent from Thread/Message/view implementations.
+func TestAgentRuntimeDoesNotDependOnChat(t *testing.T) {
+	root := repoRoot(t)
+	for _, file := range allGoFiles(t, root, "internal/agent/runtime") {
+		for _, imp := range imports(t, root, file) {
+			if isPackageOrChild(imp, modulePrefix+"internal/chat") {
+				t.Errorf("%s imports %s: Agent runtime must consume Agent-owned contracts", file, imp)
+			}
+		}
+	}
+}
+
+// TestThreadStorageDoesNotReachRouteDB pins the ownership split: Thread may
+// carry an opaque route_id, while Channel owns active-thread selection and
+// route metadata projection.
+func TestThreadStorageDoesNotReachRouteDB(t *testing.T) {
+	root := repoRoot(t)
+	forbidden := []string{
+		"bot_channel_routes",
+		"GetActiveSessionForRoute",
+		"SetRouteActiveSession",
+	}
+	for _, file := range allGoFiles(t, root, "internal/chat/thread") {
+		data, err := os.ReadFile(filepath.Join(root, file)) //nolint:gosec // guard reads repository sources
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		for _, token := range forbidden {
+			if strings.Contains(string(data), token) {
+				t.Errorf("%s contains %q: route DB ownership belongs to internal/channel/route", file, token)
+			}
+		}
+	}
+	queryFile := filepath.Join(root, "db/postgres/queries/sessions.sql")
+	data, err := os.ReadFile(queryFile) //nolint:gosec // fixed repository path
+	if err != nil {
+		t.Fatalf("read sessions.sql: %v", err)
+	}
+	for _, token := range forbidden {
+		if strings.Contains(string(data), token) {
+			t.Errorf("db/postgres/queries/sessions.sql contains %q: Thread queries must not join or mutate Route DB", token)
 		}
 	}
 }

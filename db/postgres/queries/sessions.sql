@@ -264,11 +264,8 @@ FOR UPDATE;
 -- name: ListSessionsByBot :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = public.memoh_current_team_id()
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
   AND s.deleted_at IS NULL
@@ -277,11 +274,8 @@ ORDER BY s.updated_at DESC;
 -- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = public.memoh_current_team_id()
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
   AND s.created_by_user_id = sqlc.arg(created_by_user_id)
@@ -294,11 +288,8 @@ ORDER BY s.updated_at DESC;
 -- filtering, pass every known type.
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = public.memoh_current_team_id()
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
   AND s.deleted_at IS NULL
@@ -317,11 +308,8 @@ LIMIT sqlc.arg(limit_count)::int;
 -- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = public.memoh_current_team_id()
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
   AND s.created_by_user_id = sqlc.arg(created_by_user_id)
@@ -447,15 +435,6 @@ SET route_id = COALESCE(EXCLUDED.route_id, bot_session_discuss_cursors.route_id)
     consumed_cursor = GREATEST(bot_session_discuss_cursors.consumed_cursor, EXCLUDED.consumed_cursor),
     updated_at = now()
 RETURNING *;
-
--- name: GetActiveSessionForRoute :one
-SELECT s.*
-FROM bot_sessions s
-JOIN bot_channel_routes r ON r.active_session_id = s.id
-WHERE s.team_id = public.memoh_current_team_id()
-  AND r.team_id = public.memoh_current_team_id()
-  AND r.id = sqlc.arg(route_id)
-  AND s.deleted_at IS NULL;
 
 -- name: ListSubagentSessionsByParent :many
 SELECT *

@@ -1,4 +1,4 @@
-package channel
+package redact
 
 import (
 	"net/url"
@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 )
 
-var imErrorRedactionRegistry = struct {
+var registry = struct {
 	mu     sync.RWMutex
 	groups map[string][]string // key → variants
 	cache  []string            // deduplicated, sorted longest-first
@@ -17,7 +17,7 @@ var imErrorRedactionRegistry = struct {
 	groups: map[string][]string{},
 }
 
-// SetIMErrorSecrets associates a set of secrets with the given key.
+// SetSecrets associates a set of secrets with the given key.
 // Calling again with the same key replaces the previous secrets,
 // so rotating credentials (e.g. access tokens) are handled naturally
 // without explicit unregistration.
@@ -26,42 +26,41 @@ var imErrorRedactionRegistry = struct {
 // or "telegram:<configID>". For multiple instances of the same adapter,
 // include a stable instance identifier in the key.
 //
-// This is intentionally scoped to IM error rendering only: logs and
-// normal outbound messages keep their original text so operators can
-// debug issues and user content is not mutated.
-func SetIMErrorSecrets(key string, secrets ...string) {
+// Callers decide where redaction is appropriate. Logs and normal outbound
+// messages should retain their original text unless their own contract says
+// otherwise.
+func SetSecrets(key string, secrets ...string) {
 	var variants []string
 	for _, secret := range secrets {
-		variants = append(variants, imErrorRedactionVariants(secret)...)
+		variants = append(variants, variantsFor(secret)...)
 	}
 
-	imErrorRedactionRegistry.mu.Lock()
-	defer imErrorRedactionRegistry.mu.Unlock()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
 
 	if len(variants) == 0 {
-		if _, exists := imErrorRedactionRegistry.groups[key]; !exists {
+		if _, exists := registry.groups[key]; !exists {
 			return
 		}
-		delete(imErrorRedactionRegistry.groups, key)
+		delete(registry.groups, key)
 	} else {
-		if slices.Equal(imErrorRedactionRegistry.groups[key], variants) {
+		if slices.Equal(registry.groups[key], variants) {
 			return
 		}
-		imErrorRedactionRegistry.groups[key] = variants
+		registry.groups[key] = variants
 	}
-	imErrorRedactionRegistry.cache = rebuildSecretCache(imErrorRedactionRegistry.groups)
+	registry.cache = rebuildSecretCache(registry.groups)
 }
 
-// RedactIMErrorText masks registered secrets from error text that is about to
-// be rendered back into an IM conversation.
-func RedactIMErrorText(text string) string {
+// Text masks registered secrets in text selected by the caller.
+func Text(text string) string {
 	if strings.TrimSpace(text) == "" {
 		return text
 	}
 
-	imErrorRedactionRegistry.mu.RLock()
-	cache := imErrorRedactionRegistry.cache
-	imErrorRedactionRegistry.mu.RUnlock()
+	registry.mu.RLock()
+	cache := registry.cache
+	registry.mu.RUnlock()
 
 	result := text
 	for _, secret := range cache {
@@ -70,7 +69,7 @@ func RedactIMErrorText(text string) string {
 	return result
 }
 
-func imErrorRedactionVariants(secret string) []string {
+func variantsFor(secret string) []string {
 	secret = strings.TrimSpace(secret)
 	if secret == "" {
 		return nil
@@ -111,15 +110,15 @@ func rebuildSecretCache(groups map[string][]string) []string {
 	return all
 }
 
-func resetIMErrorSecretsForTest() {
-	imErrorRedactionRegistry.mu.Lock()
-	defer imErrorRedactionRegistry.mu.Unlock()
-	imErrorRedactionRegistry.groups = map[string][]string{}
-	imErrorRedactionRegistry.cache = nil
+func resetForTest() {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	registry.groups = map[string][]string{}
+	registry.cache = nil
 }
 
-// ResetIMErrorSecretsForTest clears the IM error redaction registry.
+// ResetForTest clears the error redaction registry.
 // It is intended for tests in other packages that need deterministic state.
-func ResetIMErrorSecretsForTest() {
-	resetIMErrorSecretsForTest()
+func ResetForTest() {
+	resetForTest()
 }

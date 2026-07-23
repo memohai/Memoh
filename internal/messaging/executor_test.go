@@ -6,16 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/media"
 )
 
 type testSender struct {
 	called int
-	req    channel.SendRequest
+	req    SendRequest
 }
 
-func (s *testSender) Send(_ context.Context, _ string, _ channel.ChannelType, req channel.SendRequest) error {
+func (s *testSender) Send(_ context.Context, _ string, _ Platform, req SendRequest) error {
 	s.called++
 	s.req = req
 	return nil
@@ -23,8 +22,8 @@ func (s *testSender) Send(_ context.Context, _ string, _ channel.ChannelType, re
 
 type testResolver struct{}
 
-func (testResolver) ParseChannelType(raw string) (channel.ChannelType, error) {
-	return channel.ChannelType(raw), nil
+func (testResolver) ParseChannelType(raw string) (Platform, error) {
+	return Platform(raw), nil
 }
 
 type testAssetResolver struct {
@@ -139,7 +138,7 @@ func TestSendSameConversationWithAttachmentsUsesLocalResult(t *testing.T) {
 	if att.Path != "/data/screenshot.png" {
 		t.Fatalf("unexpected local attachment path: %q", att.Path)
 	}
-	if att.Type != channel.AttachmentImage {
+	if att.Type != AttachmentImage {
 		t.Fatalf("unexpected local attachment type: %q", att.Type)
 	}
 }
@@ -219,7 +218,7 @@ func TestSendSameConversationStructuredMessageAttachmentsAreNormalized(t *testin
 	if att.Path != "/data/screenshot.png" {
 		t.Fatalf("unexpected local attachment path: %q", att.Path)
 	}
-	if att.Type != channel.AttachmentImage {
+	if att.Type != AttachmentImage {
 		t.Fatalf("unexpected local attachment type: %q", att.Type)
 	}
 }
@@ -473,13 +472,13 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseOutboundMessage returned error: %v", err)
 	}
-	if msg.Format != channel.MessageFormatRich || len(msg.Parts) != 6 {
+	if msg.Format != MessageFormatRich || len(msg.Parts) != 6 {
 		t.Fatalf("unexpected parsed message: %#v", msg)
 	}
-	if got := msg.Parts[0]; got.Type != channel.MessagePartText || len(got.Styles) != 1 || got.Styles[0] != channel.MessageStyleBold {
+	if got := msg.Parts[0]; got.Type != MessagePartText || len(got.Styles) != 1 || got.Styles[0] != MessageStyleBold {
 		t.Fatalf("unexpected first part: %#v", got)
 	}
-	if got := msg.Parts[5]; got.Type != channel.MessagePartText || len(got.Styles) != 2 || got.Styles[0] != channel.MessageStyleUnderline || got.Styles[1] != channel.MessageStyleSpoiler {
+	if got := msg.Parts[5]; got.Type != MessagePartText || len(got.Styles) != 2 || got.Styles[0] != MessageStyleUnderline || got.Styles[1] != MessageStyleSpoiler {
 		t.Fatalf("unexpected styled part: %#v", got)
 	}
 
@@ -674,7 +673,7 @@ func TestParseOutboundMessageAllowsURLOnlyLinkPart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseOutboundMessage returned error: %v", err)
 	}
-	if len(msg.Parts) != 1 || msg.Parts[0].Type != channel.MessagePartLink || msg.Parts[0].URL != "https://example.com" || msg.Parts[0].Text != "" {
+	if len(msg.Parts) != 1 || msg.Parts[0].Type != MessagePartLink || msg.Parts[0].URL != "https://example.com" || msg.Parts[0].Text != "" {
 		t.Fatalf("unexpected parsed parts: %#v", msg.Parts)
 	}
 }
@@ -928,10 +927,10 @@ func TestSendCannotDefaultTargetWhenSessionDisallowsOmission(t *testing.T) {
 
 type testReactor struct {
 	called int
-	req    channel.ReactRequest
+	req    ReactRequest
 }
 
-func (r *testReactor) React(_ context.Context, _ string, _ channel.ChannelType, req channel.ReactRequest) error {
+func (r *testReactor) React(_ context.Context, _ string, _ Platform, req ReactRequest) error {
 	r.called++
 	r.req = req
 	return nil

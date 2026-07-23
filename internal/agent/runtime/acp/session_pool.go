@@ -27,8 +27,8 @@ import (
 	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/bots"
-	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/runtimefence"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -85,7 +85,7 @@ type SessionPool struct {
 	logger    *slog.Logger
 	runner    sessionRunner
 	bots      botGetter
-	store     sessionGetter
+	store     SessionDescriptorReader
 	tools     *mcp.ToolGatewayService
 	contexts  *mcp.ToolSessionContextStore
 	approval  client.ToolApprovalService
@@ -118,8 +118,20 @@ type botGetter interface {
 	Get(ctx context.Context, botID string) (bots.Bot, error)
 }
 
-type sessionGetter interface {
-	Get(ctx context.Context, sessionID string) (session.Thread, error)
+// SessionDescriptor contains the minimal persisted session metadata required
+// to launch an ACP runtime. The Chat domain supplies it through an adapter.
+type SessionDescriptor struct {
+	BotID           string
+	SessionType     string
+	Metadata        map[string]any
+	RuntimeMetadata map[string]any
+	IsACP           bool
+}
+
+// SessionDescriptorReader resolves runtime metadata without exposing Chat
+// domain types to the ACP runtime.
+type SessionDescriptorReader interface {
+	Get(ctx context.Context, sessionID string) (SessionDescriptor, error)
 }
 
 // runtimeHandle is the single owner of one agent process. All internal code
@@ -216,19 +228,19 @@ type RuntimeStatus struct {
 	DefaultModelID        string                 `json:"default_model_id,omitempty"`
 } // @name acpagent.RuntimeStatus
 
-func NewSessionPool(log *slog.Logger, runner *client.Runner, botService *bots.Service, sessionServices ...*session.Service) *SessionPool {
-	var sessionService sessionGetter
+func NewSessionPool(log *slog.Logger, runner *client.Runner, botService *bots.Service, sessionServices ...SessionDescriptorReader) *SessionPool {
+	var sessionService SessionDescriptorReader
 	if len(sessionServices) > 0 {
 		sessionService = sessionServices[0]
 	}
 	return newSessionPool(log, runner, botService, sessionService)
 }
 
-func newSessionPool(log *slog.Logger, runner sessionRunner, botService botGetter, sessionServices ...sessionGetter) *SessionPool {
+func newSessionPool(log *slog.Logger, runner sessionRunner, botService botGetter, sessionServices ...SessionDescriptorReader) *SessionPool {
 	if log == nil {
 		log = slog.Default()
 	}
-	var sessionService sessionGetter
+	var sessionService SessionDescriptorReader
 	if len(sessionServices) > 0 {
 		sessionService = sessionServices[0]
 	}
@@ -1445,7 +1457,7 @@ func (p *SessionPool) resolveSessionMetadata(ctx context.Context, input PromptIn
 	if err != nil {
 		return input, fmt.Errorf("load ACP session metadata: %w", err)
 	}
-	if !session.IsACPRuntime(sess) {
+	if !sess.IsACP {
 		return input, fmt.Errorf("session %s is not an ACP agent session", input.SessionID)
 	}
 	if input.BotID != "" && sess.BotID != "" && input.BotID != sess.BotID {
@@ -1454,7 +1466,7 @@ func (p *SessionPool) resolveSessionMetadata(ctx context.Context, input PromptIn
 	if input.BotID == "" {
 		input.BotID = sess.BotID
 	}
-	input.SessionType = sess.Type
+	input.SessionType = sess.SessionType
 	if sess.Metadata == nil {
 		sess.Metadata = map[string]any{}
 	}
@@ -1581,7 +1593,7 @@ func (h *runtimeHandle) stableToolIdentity() client.ToolSessionContext {
 		ChatID:       h.botID,
 		RuntimeID:    h.id,
 		RuntimeToken: h.toolToken,
-		SessionType:  session.TypeACPAgent,
+		SessionType:  sessionmode.ACPAgent,
 	}
 }
 
@@ -1596,7 +1608,7 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 		ChatID:           h.botID,
 		RuntimeID:        h.id,
 		SessionID:        h.boundSession,
-		SessionType:      session.TypeACPAgent,
+		SessionType:      sessionmode.ACPAgent,
 		CanListUserInput: true,
 	}
 	if h.active == nil {
@@ -1659,7 +1671,7 @@ func toolSessionContext(ctx context.Context, input PromptInput, h *runtimeHandle
 		RuntimeID:           h.id,
 		SessionID:           strings.TrimSpace(input.SessionID),
 		StreamID:            strings.TrimSpace(input.StreamID),
-		SessionType:         firstNonEmpty(input.SessionType, session.TypeACPAgent),
+		SessionType:         firstNonEmpty(input.SessionType, sessionmode.ACPAgent),
 		RouteID:             input.RouteID,
 		ChannelIdentityID:   input.ChannelIdentityID,
 		SessionToken:        input.SessionToken,

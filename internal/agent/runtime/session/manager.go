@@ -13,7 +13,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/agent/turn"
-	chatview "github.com/memohai/memoh/internal/chat/view"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 )
 
 type Manager struct {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	chatview "github.com/memohai/memoh/internal/chat/view"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 )
 
 type afterFuncTrackingContext struct {

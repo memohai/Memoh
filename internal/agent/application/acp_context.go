@@ -52,8 +52,8 @@ func (s *Service) buildACPContextMarkdown(ctx context.Context, req ChatRequest, 
 	}
 
 	platformIdentitiesSection := ""
-	if s != nil && s.channelStore != nil {
-		channelConfigs, err := s.channelStore.ListBotConfigs(ctx, req.BotID)
+	if s != nil && s.platformIdentities != nil {
+		identities, err := s.platformIdentities.ListPlatformIdentities(ctx, req.BotID)
 		if err != nil {
 			if s.logger != nil {
 				s.logger.Warn("load bot platform identities for ACP context failed",
@@ -62,7 +62,7 @@ func (s *Service) buildACPContextMarkdown(ctx context.Context, req ChatRequest, 
 				)
 			}
 		} else {
-			platformIdentitiesSection = buildPlatformIdentitiesSection(channelConfigs)
+			platformIdentitiesSection = buildPlatformIdentitiesSection(identities)
 		}
 	}
 

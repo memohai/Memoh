@@ -8,8 +8,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/memohai/memoh/internal/channel"
 )
 
 const platformIdentitiesIntro = "## Platform Identities\n\nThese XML tags describe your own known account identities across connected platforms.\n"
@@ -19,7 +17,7 @@ type identityAttr struct {
 	Value string
 }
 
-func buildPlatformIdentitiesSection(configs []channel.ChannelConfig) string {
+func buildPlatformIdentitiesSection(configs []PlatformIdentity) string {
 	xmlBlock := buildPlatformIdentitiesXML(configs)
 	if xmlBlock == "" {
 		return ""
@@ -27,16 +25,16 @@ func buildPlatformIdentitiesSection(configs []channel.ChannelConfig) string {
 	return platformIdentitiesIntro + "\n" + xmlBlock
 }
 
-func buildPlatformIdentitiesXML(configs []channel.ChannelConfig) string {
+func buildPlatformIdentitiesXML(configs []PlatformIdentity) string {
 	if len(configs) == 0 {
 		return ""
 	}
-	sorted := make([]channel.ChannelConfig, len(configs))
+	sorted := make([]PlatformIdentity, len(configs))
 	copy(sorted, configs)
 	sort.Slice(sorted, func(i, j int) bool {
 		left := sorted[i]
 		right := sorted[j]
-		if cmp := strings.Compare(left.ChannelType.String(), right.ChannelType.String()); cmp != 0 {
+		if cmp := strings.Compare(left.Platform, right.Platform); cmp != 0 {
 			return cmp < 0
 		}
 		if cmp := strings.Compare(left.ExternalIdentity, right.ExternalIdentity); cmp != 0 {
@@ -56,8 +54,8 @@ func buildPlatformIdentitiesXML(configs []channel.ChannelConfig) string {
 	return strings.Join(lines, "\n")
 }
 
-func buildPlatformIdentityLine(cfg channel.ChannelConfig) string {
-	channelName := strings.TrimSpace(cfg.ChannelType.String())
+func buildPlatformIdentityLine(cfg PlatformIdentity) string {
+	channelName := strings.TrimSpace(cfg.Platform)
 	if channelName == "" {
 		return ""
 	}

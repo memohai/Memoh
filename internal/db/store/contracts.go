@@ -237,8 +237,6 @@ type SessionRepository interface {
 	GetByID(ctx context.Context, sessionID ID) (Record, error)
 	ListByBot(ctx context.Context, botID ID) ([]Record, error)
 	ListByRoute(ctx context.Context, routeID ID) ([]Record, error)
-	GetActiveForRoute(ctx context.Context, routeID ID) (Record, error)
-	SetRouteActiveSession(ctx context.Context, routeID ID, sessionID ID) error
 	UpdateTitle(ctx context.Context, sessionID ID, title string) (Record, error)
 	UpdateMetadata(ctx context.Context, sessionID ID, metadata JSON) (Record, error)
 	Touch(ctx context.Context, sessionID ID) error

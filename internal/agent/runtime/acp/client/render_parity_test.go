@@ -10,7 +10,7 @@ import (
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	"github.com/memohai/memoh/internal/agent/event"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	chatview "github.com/memohai/memoh/internal/chat/view"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 )
 
 // renderScript renders a sequence of runtime events to final UI messages.

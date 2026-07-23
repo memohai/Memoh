@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	chatview "github.com/memohai/memoh/internal/chat/view"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 )
 
 const (

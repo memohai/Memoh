@@ -11,22 +11,13 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/messaging"
 	"github.com/memohai/memoh/internal/settings"
 )
 
 const ttsMaxTextLen = 500
 
 // TTSSender sends outbound messages through the channel manager.
-type TTSSender interface {
-	Send(ctx context.Context, botID string, channelType channel.ChannelType, req channel.SendRequest) error
-}
-
-// TTSChannelResolver parses platform name to channel type.
-type TTSChannelResolver interface {
-	ParseChannelType(raw string) (channel.ChannelType, error)
-}
-
 type ttsSettings interface {
 	GetBot(ctx context.Context, botID string) (settings.Settings, error)
 }
@@ -39,11 +30,11 @@ type TTSProvider struct {
 	logger   *slog.Logger
 	settings ttsSettings
 	audio    ttsAudio
-	sender   TTSSender
-	resolver TTSChannelResolver
+	sender   messaging.Sender
+	resolver messaging.ChannelTypeResolver
 }
 
-func NewTTSProvider(log *slog.Logger, settingsSvc *settings.Service, audioSvc *audiopkg.Service, sender TTSSender, resolver TTSChannelResolver) *TTSProvider {
+func NewTTSProvider(log *slog.Logger, settingsSvc *settings.Service, audioSvc *audiopkg.Service, sender messaging.Sender, resolver messaging.ChannelTypeResolver) *TTSProvider {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -187,13 +178,13 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, too
 			"delivered": "current_conversation",
 		}, nil
 	}
-	msg := channel.Message{
-		Attachments: []channel.Attachment{{Type: channel.AttachmentVoice, URL: dataURL, Mime: contentType, Size: int64(len(audioData))}},
+	msg := messaging.Message{
+		Attachments: []messaging.Attachment{{Type: messaging.AttachmentVoice, URL: dataURL, Mime: contentType, Size: int64(len(audioData))}},
 	}
 	if replyTo := FirstStringArg(args, "reply_to"); replyTo != "" {
-		msg.Reply = &channel.ReplyRef{MessageID: replyTo}
+		msg.Reply = &messaging.ReplyRef{MessageID: replyTo}
 	}
-	if err := p.sender.Send(ctx, botID, channelType, channel.SendRequest{Target: target, Message: msg}); err != nil {
+	if err := p.sender.Send(ctx, botID, channelType, messaging.SendRequest{Target: target, Message: msg}); err != nil {
 		return nil, err
 	}
 	return map[string]any{
@@ -202,7 +193,7 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, too
 	}, nil
 }
 
-func defaultSpeakTargetForPlatform(args map[string]any, session SessionContext, channelType channel.ChannelType) string {
+func defaultSpeakTargetForPlatform(args map[string]any, session SessionContext, channelType messaging.Platform) string {
 	if !session.CanOmitMessagingTarget() {
 		return ""
 	}
@@ -212,7 +203,7 @@ func defaultSpeakTargetForPlatform(args map[string]any, session SessionContext, 
 	return strings.TrimSpace(session.ReplyTarget)
 }
 
-func (p *TTSProvider) resolvePlatform(args map[string]any, session SessionContext) (channel.ChannelType, error) {
+func (p *TTSProvider) resolvePlatform(args map[string]any, session SessionContext) (messaging.Platform, error) {
 	platform := FirstStringArg(args, "platform")
 	if platform == "" {
 		platform = strings.TrimSpace(session.CurrentPlatform)

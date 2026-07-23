@@ -17,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/common"
 	"github.com/memohai/memoh/internal/media"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 const (
@@ -111,7 +112,7 @@ func (*DiscordAdapter) Descriptor() channel.Descriptor {
 }
 
 func (a *DiscordAdapter) getOrCreateSession(token, configID string) (*discordgo.Session, error) {
-	channel.SetIMErrorSecrets("discord:"+configID, token)
+	redact.SetSecrets("discord:"+configID, token)
 	cacheKey := discordSessionCacheKey(configID, token)
 	a.mu.RLock()
 	session, ok := a.sessions[cacheKey]

@@ -1337,7 +1337,7 @@ func TestChannelInboundProcessorDiscussACPAllowsNonOwnerMemberThroughACL(t *test
 		"bot-1:" + actorID + ":" + bots.PermissionWorkspaceExec: true,
 	}})
 	pipeline := timeline.NewPipeline(timeline.RenderParams{})
-	driver := discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Pipeline: pipeline})
+	driver := discuss.NewDiscussDriver(discuss.DiscussDriverDeps{})
 	defer driver.StopAll()
 	processor.SetPipeline(pipeline, nil, driver)
 	sender := &fakeReplySender{}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel"
+	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	messageevent "github.com/memohai/memoh/internal/chat/event"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
@@ -90,7 +90,7 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 		StreamID:                     strings.TrimSpace(input.StreamID),
 		UserID:                       strings.TrimSpace(input.ActorUserID),
 		SourceChannelIdentityID:      strings.TrimSpace(input.ActorChannelIdentityID),
-		ConversationType:             channel.ConversationTypePrivate,
+		ConversationType:             turnpkg.ConversationTypePrivate,
 		Query:                        visibleMessageText(requestMessage),
 		RawQuery:                     visibleMessageText(requestMessage),
 		Token:                        strings.TrimSpace(input.ChatToken),
@@ -149,7 +149,7 @@ func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessa
 		StreamID:                     strings.TrimSpace(input.StreamID),
 		UserID:                       strings.TrimSpace(input.ActorUserID),
 		SourceChannelIdentityID:      strings.TrimSpace(input.ActorChannelIdentityID),
-		ConversationType:             channel.ConversationTypePrivate,
+		ConversationType:             turnpkg.ConversationTypePrivate,
 		Query:                        text,
 		RawQuery:                     text,
 		Token:                        strings.TrimSpace(input.ChatToken),

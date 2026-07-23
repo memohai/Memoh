@@ -24,8 +24,8 @@ import (
 	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/bots"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/runtimefence"
@@ -2324,10 +2324,10 @@ func TestSessionPoolUsesSessionMetadataAsRuntimeTruth(t *testing.T) {
 		nil,
 		runner,
 		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
-		fakeSessionGetter{session: sessionpkg.Thread{
-			ID:    "session-1",
-			BotID: "bot-1",
-			Type:  sessionpkg.TypeACPAgent,
+		fakeSessionGetter{session: SessionDescriptor{
+			BotID:       "bot-1",
+			SessionType: sessionmode.ACPAgent,
+			IsACP:       true,
 			Metadata: map[string]any{
 				"acp_agent_id":             "codex",
 				"project_path":             "/data/from-session",
@@ -2395,7 +2395,7 @@ func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 	// per-prompt fields (stream, token, reply target...) change every turn
 	// and are resolved live from the handle instead.
 	baked := runner.req.ToolSession
-	if baked.BotID != "bot-1" || !strings.HasPrefix(baked.RuntimeID, runtimeIDPrefix) || baked.RuntimeToken == "" || baked.SessionType != sessionpkg.TypeACPAgent {
+	if baked.BotID != "bot-1" || !strings.HasPrefix(baked.RuntimeID, runtimeIDPrefix) || baked.RuntimeToken == "" || baked.SessionType != sessionmode.ACPAgent {
 		t.Fatalf("baked identity = %#v, want stable runtime identity", baked)
 	}
 	if baked.SessionID != "" || baked.StreamID != "" || baked.SessionToken != "" || baked.ReplyTarget != "" || baked.RouteID != "" || baked.ChannelIdentityID != "" {
@@ -2433,7 +2433,7 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 
 	// Idle: stable identity plus the binding.
 	ctx := h.toolContext()
-	if ctx.BotID != "bot-1" || ctx.RuntimeID != "rt_test" || ctx.SessionID != "session-1" || ctx.SessionType != sessionpkg.TypeACPAgent {
+	if ctx.BotID != "bot-1" || ctx.RuntimeID != "rt_test" || ctx.SessionID != "session-1" || ctx.SessionType != sessionmode.ACPAgent {
 		t.Fatalf("idle tool context = %#v", ctx)
 	}
 	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.IsSubagent {
@@ -2837,11 +2837,11 @@ func (g fakeBotGetter) Get(context.Context, string) (bots.Bot, error) {
 }
 
 type fakeSessionGetter struct {
-	session sessionpkg.Thread
+	session SessionDescriptor
 	err     error
 }
 
-func (g fakeSessionGetter) Get(context.Context, string) (sessionpkg.Thread, error) {
+func (g fakeSessionGetter) Get(context.Context, string) (SessionDescriptor, error) {
 	return g.session, g.err
 }
 

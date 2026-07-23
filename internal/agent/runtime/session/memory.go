@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	chatview "github.com/memohai/memoh/internal/chat/view"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 )
 
 // subscriberSet tracks per-key subscriber channels. All methods must be called

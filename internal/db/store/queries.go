@@ -147,7 +147,6 @@ type Queries interface {
 	FindChatRoute(ctx context.Context, arg dbsqlc.FindChatRouteParams) (dbsqlc.FindChatRouteRow, error)
 	GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (dbsqlc.TeamAccount, error)
 	GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (dbsqlc.TeamAccount, error)
-	GetActiveSessionForRoute(ctx context.Context, routeID pgtype.UUID) (dbsqlc.BotSession, error)
 	GetBotACLDefaultEffect(ctx context.Context, id pgtype.UUID) (string, error)
 	GetBotByID(ctx context.Context, id pgtype.UUID) (dbsqlc.GetBotByIDRow, error)
 	GetBotByName(ctx context.Context, name string) (dbsqlc.GetBotByNameRow, error)

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 func preparedQQEvent(event channel.StreamEvent) channel.PreparedStreamEvent {
@@ -204,11 +205,11 @@ func TestQQOutboundStreamRejectsAfterClose(t *testing.T) {
 }
 
 func TestQQOutboundStreamErrorRedactsRegisteredTokenFragments(t *testing.T) {
-	channel.ResetIMErrorSecretsForTest()
-	t.Cleanup(channel.ResetIMErrorSecretsForTest)
+	redact.ResetForTest()
+	t.Cleanup(redact.ResetForTest)
 
 	const token = "qq-token-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	channel.SetIMErrorSecrets("test", token)
+	redact.SetSecrets("test", token)
 	prefixHalf := token[:len(token)/2]
 
 	var sent []channel.OutboundMessage

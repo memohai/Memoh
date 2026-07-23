@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/media"
 )
 
@@ -23,30 +22,8 @@ type SessionContext struct {
 	ReplyTarget        string
 }
 
-// Sender sends outbound messages through a channel manager.
-type Sender interface {
-	Send(ctx context.Context, botID string, channelType channel.ChannelType, req channel.SendRequest) error
-}
-
-// Reactor adds or removes emoji reactions through a channel manager.
-type Reactor interface {
-	React(ctx context.Context, botID string, channelType channel.ChannelType, req channel.ReactRequest) error
-}
-
-// ChannelTypeResolver parses a platform name to a channel type.
-type ChannelTypeResolver interface {
-	ParseChannelType(raw string) (channel.ChannelType, error)
-}
-
 // AssetMeta holds resolved metadata for a media asset.
 type AssetMeta = media.Asset
-
-// AssetResolver looks up persisted media assets by storage key and can
-// optionally ingest files from a bot's container filesystem.
-type AssetResolver interface {
-	channel.OutboundAttachmentStore
-	channel.ContainerAttachmentIngester
-}
 
 // Executor provides send and react operations for channel messaging.
 type Executor struct {
@@ -54,6 +31,7 @@ type Executor struct {
 	Reactor       Reactor
 	Resolver      ChannelTypeResolver
 	AssetResolver AssetResolver
+	Promoter      AttachmentPromoter
 	Logger        *slog.Logger
 }
 
@@ -66,7 +44,7 @@ type SendResult struct {
 	// Local is true when the message targets the current conversation.
 	// The caller should emit the resolved attachments as stream events.
 	Local            bool
-	LocalAttachments []channel.Attachment
+	LocalAttachments []Attachment
 	// LocalTextOmitted is true when the local shortcut delivered the
 	// attachments but dropped accompanying text/parts; the caller should tell
 	// the model to restate that text in its assistant reply.
@@ -94,10 +72,10 @@ type sendMode struct {
 
 type sendPlan struct {
 	botID       string
-	channelType channel.ChannelType
+	channelType Platform
 	target      string
 	sameConv    bool
-	message     channel.Message
+	message     Message
 }
 
 var errOutboundMessageRequired = errors.New("message is required")
@@ -154,7 +132,7 @@ func (e *Executor) sendWithMode(
 		e.promoteDataPathAttachmentsToAssets(ctx, plan.botID, plan.channelType, &plan.message)
 	}
 
-	if err := e.Sender.Send(ctx, plan.botID, plan.channelType, channel.SendRequest{
+	if err := e.Sender.Send(ctx, plan.botID, plan.channelType, SendRequest{
 		Target:  plan.target,
 		Message: plan.message,
 	}); err != nil {
@@ -252,14 +230,14 @@ func validateSendArguments(args map[string]any) error {
 // nothing that requires a real channel send (actions, reply refs, forwards).
 // Text and parts are tolerated but not delivered — the model is told to
 // restate them in its assistant reply (see SendResult.LocalTextOmitted).
-func localShortcutCanRepresent(msg channel.Message) bool {
+func localShortcutCanRepresent(msg Message) bool {
 	return len(msg.Attachments) > 0 &&
 		len(msg.Actions) == 0 &&
 		msg.Reply == nil &&
 		msg.Forward == nil
 }
 
-func localShortcutOmitsText(msg channel.Message) bool {
+func localShortcutOmitsText(msg Message) bool {
 	return strings.TrimSpace(msg.Text) != "" || len(msg.Parts) > 0
 }
 
@@ -267,11 +245,11 @@ func (e *Executor) buildOutboundMessage(
 	ctx context.Context,
 	botID string,
 	session SessionContext,
-	channelType channel.ChannelType,
+	channelType Platform,
 	target string,
 	args map[string]any,
 	isSameConv bool,
-) (channel.Message, error) {
+) (Message, error) {
 	messageText := firstStringArg(args, "text")
 	messageAttachments := messageAttachmentsArg(args)
 	messageArgs := args
@@ -283,34 +261,34 @@ func (e *Executor) buildOutboundMessage(
 		rawAtt, hasTopLevelAttachments := args["attachments"]
 		hasAttachments := (hasTopLevelAttachments && rawAtt != nil) || messageAttachments != nil
 		if !hasAttachments || !errors.Is(parseErr, errOutboundMessageRequired) {
-			return channel.Message{}, parseErr
+			return Message{}, parseErr
 		}
-		outboundMessage = channel.Message{Text: strings.TrimSpace(messageText)}
+		outboundMessage = Message{Text: strings.TrimSpace(messageText)}
 	}
 
 	if messageAttachments != nil {
 		outboundMessage.Attachments = nil
 		attachments, err := e.resolveOutboundAttachments(ctx, botID, session, channelType, target, messageAttachments, isSameConv)
 		if err != nil {
-			return channel.Message{}, err
+			return Message{}, err
 		}
 		outboundMessage.Attachments = append(outboundMessage.Attachments, attachments...)
 	}
 	if rawAttachments, ok := args["attachments"]; ok && rawAttachments != nil {
 		attachments, err := e.resolveOutboundAttachments(ctx, botID, session, channelType, target, rawAttachments, isSameConv)
 		if err != nil {
-			return channel.Message{}, err
+			return Message{}, err
 		}
 		outboundMessage.Attachments = append(outboundMessage.Attachments, attachments...)
 	}
 	if outboundMessage.IsEmpty() {
-		return channel.Message{}, errors.New("message or attachments required")
+		return Message{}, errors.New("message or attachments required")
 	}
 	if replyTo := firstStringArg(args, "reply_to"); replyTo != "" {
-		outboundMessage.Reply = &channel.ReplyRef{MessageID: replyTo}
+		outboundMessage.Reply = &ReplyRef{MessageID: replyTo}
 	}
-	if outboundMessage.Format == "" && channel.ContainsMarkdown(outboundMessage.Text) {
-		outboundMessage.Format = channel.MessageFormatMarkdown
+	if outboundMessage.Format == "" && ContainsMarkdown(outboundMessage.Text) {
+		outboundMessage.Format = MessageFormatMarkdown
 	}
 	return outboundMessage, nil
 }
@@ -361,11 +339,11 @@ func (e *Executor) resolveOutboundAttachments(
 	ctx context.Context,
 	botID string,
 	_ SessionContext,
-	_ channel.ChannelType,
+	_ Platform,
 	_ string,
 	rawAttachments any,
 	allowSameConversationShortcut bool,
-) ([]channel.Attachment, error) {
+) ([]Attachment, error) {
 	if err := validateOutboundAttachmentInput(rawAttachments); err != nil {
 		return nil, err
 	}
@@ -437,8 +415,8 @@ func validateOutboundAttachmentObject(location string, raw map[string]any) error
 			return fmt.Errorf("attachment type must be string%s", location)
 		}
 		attType = strings.TrimSpace(attType)
-		switch channel.AttachmentType(attType) {
-		case "", channel.AttachmentImage, channel.AttachmentAudio, channel.AttachmentVideo, channel.AttachmentVoice, channel.AttachmentFile, channel.AttachmentGIF:
+		switch AttachmentType(attType) {
+		case "", AttachmentImage, AttachmentAudio, AttachmentVideo, AttachmentVoice, AttachmentFile, AttachmentGIF:
 			raw["type"] = attType
 		default:
 			return fmt.Errorf("unsupported attachment type %q%s", attType, location)
@@ -450,7 +428,7 @@ func validateOutboundAttachmentObject(location string, raw map[string]any) error
 			return fmt.Errorf("attachment url must be string%s", location)
 		}
 		url = strings.TrimSpace(url)
-		if url != "" && !channel.IsHTTPURL(url) && !attachmentpkg.IsDataURL(url) {
+		if url != "" && !attachmentpkg.IsHTTPURL(url) && !attachmentpkg.IsDataURL(url) {
 			return fmt.Errorf("attachment url must be http(s) or data URL%s", location)
 		}
 		raw["url"] = url
@@ -468,7 +446,7 @@ func stringMapValue(raw map[string]any, key string) string {
 	return value
 }
 
-func dropUnresolvedDataPathAttachments(attachments []channel.Attachment) []channel.Attachment {
+func dropUnresolvedDataPathAttachments(attachments []Attachment) []Attachment {
 	if len(attachments) == 0 {
 		return nil
 	}
@@ -486,13 +464,13 @@ func dropUnresolvedDataPathAttachments(attachments []channel.Attachment) []chann
 	return filtered
 }
 
-func resolveSameConversationAttachments(bundles []attachmentpkg.Bundle) []channel.Attachment {
+func resolveSameConversationAttachments(bundles []attachmentpkg.Bundle) []Attachment {
 	if len(bundles) == 0 {
 		return nil
 	}
-	result := make([]channel.Attachment, 0, len(bundles))
+	result := make([]Attachment, 0, len(bundles))
 	for _, bundle := range bundles {
-		result = append(result, channel.AttachmentFromBundle(bundle))
+		result = append(result, AttachmentFromBundle(bundle))
 	}
 	return result
 }
@@ -500,20 +478,15 @@ func resolveSameConversationAttachments(bundles []attachmentpkg.Bundle) []channe
 // promoteDataPathAttachmentsToAssets converts /data/* attachment references
 // into content_hash-backed attachments before channel send.
 // This avoids adapters treating local container paths as HTTP URLs.
-func (e *Executor) promoteDataPathAttachmentsToAssets(ctx context.Context, botID string, channelType channel.ChannelType, msg *channel.Message) {
-	if e.AssetResolver == nil || msg == nil || len(msg.Attachments) == 0 {
+func (e *Executor) promoteDataPathAttachmentsToAssets(ctx context.Context, botID string, platform Platform, msg *Message) {
+	if e.Promoter == nil || msg == nil || len(msg.Attachments) == 0 {
 		return
 	}
-	prepared, err := channel.PrepareOutboundMessage(ctx, e.AssetResolver, channel.ChannelConfig{
-		BotID:       botID,
-		ChannelType: channelType,
-	}, channel.OutboundMessage{
-		Message: *msg,
-	})
+	prepared, err := e.Promoter.PromoteAttachments(ctx, botID, platform, *msg)
 	if err != nil {
 		return
 	}
-	msg.Attachments = prepared.Message.Message.Attachments
+	*msg = prepared
 }
 
 // React executes a react action. args are the tool call arguments.
@@ -553,7 +526,7 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 			MessageID: messageID, Emoji: emoji, Action: action, Local: true, Remove: remove,
 		}, nil
 	}
-	if err := e.Reactor.React(ctx, botID, channelType, channel.ReactRequest{
+	if err := e.Reactor.React(ctx, botID, channelType, ReactRequest{
 		Target: target, MessageID: messageID, Emoji: emoji, Remove: remove,
 	}); err != nil {
 		if e.Logger != nil {
@@ -571,7 +544,7 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 	}, nil
 }
 
-func defaultReplyTargetForPlatform(args map[string]any, session SessionContext, channelType channel.ChannelType) string {
+func defaultReplyTargetForPlatform(args map[string]any, session SessionContext, channelType Platform) string {
 	if !session.CanOmitTarget {
 		return ""
 	}
@@ -618,7 +591,7 @@ func (*Executor) resolveBotID(args map[string]any, session SessionContext) (stri
 	return botID, nil
 }
 
-func (e *Executor) resolvePlatform(args map[string]any, session SessionContext) (channel.ChannelType, error) {
+func (e *Executor) resolvePlatform(args map[string]any, session SessionContext) (Platform, error) {
 	platform := firstStringArg(args, "platform")
 	if platform == "" {
 		platform = strings.TrimSpace(session.CurrentPlatform)
@@ -629,9 +602,9 @@ func (e *Executor) resolvePlatform(args map[string]any, session SessionContext) 
 	return e.Resolver.ParseChannelType(platform)
 }
 
-// ResolveAttachments converts raw attachment arguments into channel.Attachment values.
-func (e *Executor) ResolveAttachments(ctx context.Context, botID string, bundles []attachmentpkg.Bundle) []channel.Attachment {
-	var result []channel.Attachment
+// ResolveAttachments converts raw attachment arguments into Attachment values.
+func (e *Executor) ResolveAttachments(ctx context.Context, botID string, bundles []attachmentpkg.Bundle) []Attachment {
+	var result []Attachment
 	for _, bundle := range bundles {
 		if att := e.resolveAttachmentBundle(ctx, botID, bundle); att != nil {
 			result = append(result, *att)
@@ -640,10 +613,10 @@ func (e *Executor) ResolveAttachments(ctx context.Context, botID string, bundles
 	return result
 }
 
-func (e *Executor) resolveAttachmentBundle(ctx context.Context, botID string, bundle attachmentpkg.Bundle) *channel.Attachment {
-	att := channel.AttachmentFromBundle(bundle)
+func (e *Executor) resolveAttachmentBundle(ctx context.Context, botID string, bundle attachmentpkg.Bundle) *Attachment {
+	att := AttachmentFromBundle(bundle)
 	if att.Type == "" {
-		att.Type = channel.AttachmentFile
+		att.Type = AttachmentFile
 	}
 	if strings.TrimSpace(att.ContentHash) != "" {
 		return &att
@@ -681,32 +654,32 @@ func (e *Executor) resolveAttachmentBundle(ctx context.Context, botID string, bu
 }
 
 // ParseOutboundMessage parses a message from tool call arguments.
-func ParseOutboundMessage(arguments map[string]any, fallbackText string) (channel.Message, error) {
-	var msg channel.Message
+func ParseOutboundMessage(arguments map[string]any, fallbackText string) (Message, error) {
+	var msg Message
 	if raw, ok := arguments["message"]; ok && raw != nil {
 		switch value := raw.(type) {
 		case string:
 			msg.Text = strings.TrimSpace(value)
 		case map[string]any:
 			if err := validateOutboundMessageObject(value); err != nil {
-				return channel.Message{}, err
+				return Message{}, err
 			}
 			data, err := json.Marshal(value)
 			if err != nil {
-				return channel.Message{}, err
+				return Message{}, err
 			}
 			if err := json.Unmarshal(data, &msg); err != nil {
-				return channel.Message{}, err
+				return Message{}, err
 			}
 		default:
-			return channel.Message{}, errors.New("message must be object or string")
+			return Message{}, errors.New("message must be object or string")
 		}
 	}
 	if msg.IsEmpty() && strings.TrimSpace(fallbackText) != "" {
 		msg.Text = strings.TrimSpace(fallbackText)
 	}
 	if msg.IsEmpty() {
-		return channel.Message{}, errOutboundMessageRequired
+		return Message{}, errOutboundMessageRequired
 	}
 	return msg, nil
 }
@@ -750,13 +723,13 @@ func validateOutboundMessageObject(raw map[string]any) error {
 	return nil
 }
 
-func validateOutboundMessageFormat(raw any) (channel.MessageFormat, error) {
+func validateOutboundMessageFormat(raw any) (MessageFormat, error) {
 	value, ok := raw.(string)
 	if !ok {
 		return "", errors.New("message format must be string")
 	}
-	switch format := channel.MessageFormat(strings.TrimSpace(value)); format {
-	case channel.MessageFormatPlain, channel.MessageFormatMarkdown, channel.MessageFormatRich:
+	switch format := MessageFormat(strings.TrimSpace(value)); format {
+	case MessageFormatPlain, MessageFormatMarkdown, MessageFormatRich:
 		return format, nil
 	default:
 		return "", fmt.Errorf("unsupported message format %q", value)
@@ -837,7 +810,7 @@ func validateOutboundMessageAction(index int, raw map[string]any) error {
 	if rawURL == "" {
 		return fmt.Errorf("message action url is required at index %d", index)
 	}
-	if !channel.IsHTTPURL(rawURL) {
+	if !attachmentpkg.IsHTTPURL(rawURL) {
 		return fmt.Errorf("message action url must be http(s) at index %d", index)
 	}
 	return nil
@@ -854,9 +827,9 @@ func validateOutboundMessagePart(index int, raw map[string]any) error {
 		}
 	}
 	partType, _ := raw["type"].(string)
-	normalizedType := channel.MessagePartType(strings.TrimSpace(partType))
+	normalizedType := MessagePartType(strings.TrimSpace(partType))
 	switch normalizedType {
-	case channel.MessagePartText, channel.MessagePartLink, channel.MessagePartCodeBlock, channel.MessagePartMention, channel.MessagePartEmoji, channel.MessagePartHeading, channel.MessagePartBlockquote, channel.MessagePartListItem:
+	case MessagePartText, MessagePartLink, MessagePartCodeBlock, MessagePartMention, MessagePartEmoji, MessagePartHeading, MessagePartBlockquote, MessagePartListItem:
 		raw["type"] = string(normalizedType)
 	default:
 		return fmt.Errorf("unsupported message part type %q at index %d", partType, index)
@@ -876,9 +849,9 @@ func normalizeOutboundMessagePartStyles(index int, styles any) error {
 	case []any:
 		for i, rawStyle := range styleItems {
 			style, _ := rawStyle.(string)
-			normalizedStyle := channel.MessageTextStyle(strings.TrimSpace(style))
+			normalizedStyle := MessageTextStyle(strings.TrimSpace(style))
 			switch normalizedStyle {
-			case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode, channel.MessageStyleUnderline, channel.MessageStyleSpoiler:
+			case MessageStyleBold, MessageStyleItalic, MessageStyleStrikethrough, MessageStyleCode, MessageStyleUnderline, MessageStyleSpoiler:
 				styleItems[i] = string(normalizedStyle)
 			default:
 				return fmt.Errorf("unsupported message part style %q at index %d", style, index)
@@ -886,9 +859,9 @@ func normalizeOutboundMessagePartStyles(index int, styles any) error {
 		}
 	case []string:
 		for i, style := range styleItems {
-			normalizedStyle := channel.MessageTextStyle(strings.TrimSpace(style))
+			normalizedStyle := MessageTextStyle(strings.TrimSpace(style))
 			switch normalizedStyle {
-			case channel.MessageStyleBold, channel.MessageStyleItalic, channel.MessageStyleStrikethrough, channel.MessageStyleCode, channel.MessageStyleUnderline, channel.MessageStyleSpoiler:
+			case MessageStyleBold, MessageStyleItalic, MessageStyleStrikethrough, MessageStyleCode, MessageStyleUnderline, MessageStyleSpoiler:
 				styleItems[i] = string(normalizedStyle)
 			default:
 				return fmt.Errorf("unsupported message part style %q at index %d", style, index)
@@ -900,24 +873,24 @@ func normalizeOutboundMessagePartStyles(index int, styles any) error {
 	return nil
 }
 
-func validateOutboundMessagePartContent(index int, partType channel.MessagePartType, raw map[string]any) error {
+func validateOutboundMessagePartContent(index int, partType MessagePartType, raw map[string]any) error {
 	text, _ := raw["text"].(string)
 	text = strings.TrimSpace(text)
 	switch partType {
-	case channel.MessagePartLink:
+	case MessagePartLink:
 		rawURL, _ := raw["url"].(string)
 		rawURL = strings.TrimSpace(rawURL)
 		if rawURL == "" {
 			return fmt.Errorf("message link part url is required at index %d", index)
 		}
-		if !channel.IsHTTPURL(rawURL) {
+		if !attachmentpkg.IsHTTPURL(rawURL) {
 			return fmt.Errorf("message link part url must be http(s) at index %d", index)
 		}
-	case channel.MessagePartMention:
+	case MessagePartMention:
 		if text == "" {
 			return fmt.Errorf("message mention part text is required at index %d", index)
 		}
-	case channel.MessagePartEmoji:
+	case MessagePartEmoji:
 		emoji, _ := raw["emoji"].(string)
 		if text == "" && strings.TrimSpace(emoji) == "" {
 			return fmt.Errorf("message emoji part text or emoji is required at index %d", index)
@@ -930,24 +903,24 @@ func validateOutboundMessagePartContent(index int, partType channel.MessagePartT
 	return nil
 }
 
-// AssetMetaToAttachment converts an AssetMeta to a channel.Attachment.
-func AssetMetaToAttachment(asset media.Asset, botID, attType, name string) *channel.Attachment {
+// AssetMetaToAttachment converts an AssetMeta to a Attachment.
+func AssetMetaToAttachment(asset media.Asset, botID, attType, name string) *Attachment {
 	bundle := attachmentpkg.Bundle{
 		Type: attType,
 		Name: name,
 	}.WithAsset(botID, asset)
-	att := channel.AttachmentFromBundle(bundle)
+	att := AttachmentFromBundle(bundle)
 	return &att
 }
 
 // InferAttachmentTypeFromMime infers attachment type from MIME type.
-func InferAttachmentTypeFromMime(mime string) channel.AttachmentType {
-	return channel.AttachmentType(attachmentpkg.InferTypeFromMime(mime))
+func InferAttachmentTypeFromMime(mime string) AttachmentType {
+	return AttachmentType(attachmentpkg.InferTypeFromMime(mime))
 }
 
 // InferAttachmentTypeFromExt infers attachment type from file extension.
-func InferAttachmentTypeFromExt(path string) channel.AttachmentType {
-	return channel.AttachmentType(attachmentpkg.InferTypeFromExt(path))
+func InferAttachmentTypeFromExt(path string) AttachmentType {
+	return AttachmentType(attachmentpkg.InferTypeFromExt(path))
 }
 
 func firstStringArg(args map[string]any, keys ...string) string {

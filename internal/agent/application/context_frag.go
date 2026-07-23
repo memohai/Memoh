@@ -6,7 +6,7 @@ import (
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/agent/turn"
 )
 
 func buildContextFragScope(req ChatRequest, displayName string, identity native.SessionContext) contextfrag.Scope {
@@ -62,10 +62,10 @@ func contextFragAttentionReasons(req ChatRequest) []contextfrag.AttentionReason 
 	if strings.HasPrefix(query, "/") {
 		add(contextfrag.AttentionCommand)
 	}
-	switch channel.NormalizeConversationType(req.ConversationType) {
-	case channel.ConversationTypePrivate:
+	switch turn.NormalizeConversationType(req.ConversationType) {
+	case turn.ConversationTypePrivate:
 		add(contextfrag.AttentionDirect)
-	case channel.ConversationTypeGroup, channel.ConversationTypeThread:
+	case turn.ConversationTypeGroup, turn.ConversationTypeThread:
 		if len(reasons) == 0 {
 			add(contextfrag.AttentionPassive)
 		}

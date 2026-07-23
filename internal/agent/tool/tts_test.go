@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/messaging"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -27,10 +27,10 @@ func (a *ttsTestAudio) Synthesize(context.Context, string, string, map[string]an
 
 type ttsRecordingSender struct {
 	called int
-	req    channel.SendRequest
+	req    messaging.SendRequest
 }
 
-func (s *ttsRecordingSender) Send(_ context.Context, _ string, _ channel.ChannelType, req channel.SendRequest) error {
+func (s *ttsRecordingSender) Send(_ context.Context, _ string, _ messaging.Platform, req messaging.SendRequest) error {
 	s.called++
 	s.req = req
 	return nil

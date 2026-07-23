@@ -8,7 +8,7 @@ import (
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/agent/turn"
 )
 
 func TestBuildContextFragScopePreservesIMTopology(t *testing.T) {
@@ -21,7 +21,7 @@ func TestBuildContextFragScopePreservesIMTopology(t *testing.T) {
 		SourceChannelIdentityID:   "identity-1",
 		DisplayName:               "ignored",
 		CurrentChannel:            "telegram",
-		ConversationType:          channel.ConversationTypeGroup,
+		ConversationType:          turn.ConversationTypeGroup,
 		ConversationName:          "Research Group",
 		ReplyTarget:               "group-1",
 		ExternalMessageID:         "msg-1",
@@ -39,7 +39,7 @@ func TestBuildContextFragScopePreservesIMTopology(t *testing.T) {
 	if scope.BotID != "bot-1" || scope.ChatID != "chat-1" || scope.SessionID != "sess-1" {
 		t.Fatalf("unexpected base scope: %#v", scope)
 	}
-	if scope.Platform != "telegram" || scope.ConversationType != channel.ConversationTypeGroup || scope.ConversationName != "Research Group" {
+	if scope.Platform != "telegram" || scope.ConversationType != turn.ConversationTypeGroup || scope.ConversationName != "Research Group" {
 		t.Fatalf("unexpected conversation scope: %#v", scope)
 	}
 	if scope.CurrentMessageID != "msg-1" || scope.EventID != "evt-1" || scope.ReplyToMessageID != "msg-0" {
@@ -69,7 +69,7 @@ func TestBuildContextFragScopeDoesNotInferDirectedReplyFromAnyReplyID(t *testing
 		BotID:                  "bot-1",
 		ChatID:                 "chat-1",
 		ThreadID:               "sess-1",
-		ConversationType:       channel.ConversationTypeGroup,
+		ConversationType:       turn.ConversationTypeGroup,
 		SourceReplyToMessageID: "someone-elses-message",
 		Query:                  "thread side comment",
 	}, "Bob", native.SessionContext{})

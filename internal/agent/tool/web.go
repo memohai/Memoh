@@ -24,8 +24,8 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/redact"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -821,7 +821,7 @@ func registerSearchProviderSecrets(provider sqlc.SearchProvider) {
 		}
 	}
 	if len(secrets) > 0 {
-		channel.SetIMErrorSecrets("search:"+provider.ID.String(), secrets...)
+		redact.SetSecrets("search:"+provider.ID.String(), secrets...)
 	}
 }
 

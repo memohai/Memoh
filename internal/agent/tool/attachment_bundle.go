@@ -2,7 +2,7 @@ package tools
 
 import (
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/messaging"
 )
 
 // toolAttachmentFromBundle converts a normalized bundle to a tools.Attachment.
@@ -22,6 +22,6 @@ func toolAttachmentFromBundle(bundle attachmentpkg.Bundle) Attachment {
 	}
 }
 
-func toolAttachmentFromChannelAttachment(att channel.Attachment) Attachment {
-	return toolAttachmentFromBundle(channel.BundleFromAttachment(att))
+func toolAttachmentFromChannelAttachment(att messaging.Attachment) Attachment {
+	return toolAttachmentFromBundle(messaging.BundleFromAttachment(att))
 }

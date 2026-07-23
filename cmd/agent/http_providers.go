@@ -75,8 +75,10 @@ func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sess
 	return h
 }
 
-func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service) *handlers.SessionHandler {
-	return handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService) *handlers.SessionHandler {
+	handler := handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
+	handler.SetThreadEnricher(routeService)
+	return handler
 }
 
 func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool) *handlers.UsersHandler {

@@ -31,7 +31,6 @@ import (
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	turnpkg "github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/channel"
 	messageevent "github.com/memohai/memoh/internal/chat/event"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
@@ -71,8 +70,19 @@ type gatewayAssetLoader interface {
 	AccessPathForGateway(ctx context.Context, botID, contentHash string) (string, error)
 }
 
-type botChannelConfigReader interface {
-	ListBotConfigs(ctx context.Context, botID string) ([]channel.ChannelConfig, error)
+// PlatformIdentity is the Agent-owned projection of a connected platform
+// account used while assembling the system prompt.
+type PlatformIdentity struct {
+	ID               string
+	Platform         string
+	ExternalIdentity string
+	SelfIdentity     map[string]any
+}
+
+// PlatformIdentitySource supplies connected platform identities without
+// exposing Channel configuration types to the application layer.
+type PlatformIdentitySource interface {
+	ListPlatformIdentities(ctx context.Context, botID string) ([]PlatformIdentity, error)
 }
 
 type botPermissionChecker interface {
@@ -98,7 +108,7 @@ type Service struct {
 	eventPublisher     messageevent.Publisher
 	skillLoader        SkillLoader
 	assetLoader        gatewayAssetLoader
-	channelStore       botChannelConfigReader
+	platformIdentities PlatformIdentitySource
 	botPermissions     botPermissionChecker
 	workspaceTargets   workspaceTargetResolver
 	pipeline           *timeline.Pipeline
@@ -209,10 +219,10 @@ func (s *Service) SetWorkspaceTargetResolver(resolver workspaceTargetResolver) {
 	s.workspaceTargets = resolver
 }
 
-// SetChannelStore configures the bot channel config store used to load
+// SetPlatformIdentitySource configures the neutral source used to load
 // platform identity metadata for system prompt generation.
-func (s *Service) SetChannelStore(store botChannelConfigReader) {
-	s.channelStore = store
+func (s *Service) SetPlatformIdentitySource(source PlatformIdentitySource) {
+	s.platformIdentities = source
 }
 
 // SetCompactionService configures the compaction service for context compaction.
@@ -1233,15 +1243,15 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		now = now.In(cfg.Identity.TimezoneLocation)
 	}
 	platformIdentitiesSection := ""
-	if s.channelStore != nil {
-		channelConfigs, err := s.channelStore.ListBotConfigs(ctx, cfg.Identity.BotID)
+	if s.platformIdentities != nil {
+		identities, err := s.platformIdentities.ListPlatformIdentities(ctx, cfg.Identity.BotID)
 		if err != nil {
 			s.logger.Warn("load bot platform identities failed",
 				slog.String("bot_id", cfg.Identity.BotID),
 				slog.Any("error", err),
 			)
 		} else {
-			platformIdentitiesSection = buildPlatformIdentitiesSection(channelConfigs)
+			platformIdentitiesSection = buildPlatformIdentitiesSection(identities)
 		}
 	}
 	cfg.System = native.GenerateSystemPrompt(native.SystemPromptParams{

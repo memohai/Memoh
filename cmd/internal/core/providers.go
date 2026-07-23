@@ -22,6 +22,11 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
 	acpprofileadapter "github.com/memohai/memoh/internal/agent/adapter/acpprofile"
+	acpsessionadapter "github.com/memohai/memoh/internal/agent/adapter/acpsession"
+	channelcontactadapter "github.com/memohai/memoh/internal/agent/adapter/channelcontact"
+	channelidentityadapter "github.com/memohai/memoh/internal/agent/adapter/channelidentity"
+	channelmessagingadapter "github.com/memohai/memoh/internal/agent/adapter/channelmessaging"
+	channelthreadadapter "github.com/memohai/memoh/internal/agent/adapter/channelthread"
 	"github.com/memohai/memoh/internal/agent/application"
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/agent/context/compaction"
@@ -451,7 +456,7 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 }
 
 func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
-	pool := acpagent.NewSessionPool(log, runner, botService, sessionService)
+	pool := acpagent.NewSessionPool(log, runner, botService, acpsessionadapter.NewSource(sessionService))
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
 	pool.SetToolApprovalService(toolApproval)
@@ -487,7 +492,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	service.SetMemoryRegistry(memoryRegistry)
 	service.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	service.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
-	service.SetChannelStore(channelStore)
+	service.SetPlatformIdentitySource(channelidentityadapter.NewSource(channelStore))
 	service.SetSessionService(sessionService)
 	service.SetEventPublisher(eventHub)
 	service.SetCompactionService(compactionService)
@@ -619,11 +624,12 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
+	channelMessaging := channelmessagingadapter.New(channelRuntime, registry, assetResolver)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
 	return []agenttools.ToolProvider{
 		agenttools.NewAskUserProvider(log),
-		agenttools.NewMessageProvider(log, channelRuntime, channelRuntime, registry, assetResolver),
-		agenttools.NewContactsProvider(log, routeService),
+		agenttools.NewMessageProvider(log, channelMessaging, channelMessaging, channelMessaging, assetResolver),
+		agenttools.NewContactsProvider(log, channelcontactadapter.NewSource(routeService)),
 		agenttools.NewScheduleProvider(log, scheduleService),
 		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
@@ -634,12 +640,12 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
 		agenttools.NewSkillProvider(log),
-		agenttools.NewTTSProvider(log, settingsService, audioService, channelRuntime, registry),
+		agenttools.NewTTSProvider(log, settingsService, audioService, channelMessaging, channelMessaging),
 		agenttools.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
 		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
 		agenttools.NewVideoGenProvider(log, settingsService, videoService, bgManager, manager, config.DefaultDataMount),
 		agenttools.NewFederationProvider(log, fedSource),
-		agenttools.NewHistoryProvider(log, sessionService, messageService, queries),
+		agenttools.NewHistoryProvider(log, channelthreadadapter.NewLister(sessionService, routeService), messageService, queries),
 	}
 }
 
