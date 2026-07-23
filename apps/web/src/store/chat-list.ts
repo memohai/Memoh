@@ -1869,7 +1869,10 @@ export const useChatStore = defineStore('chat', () => {
     }
     if (existing) {
       const id = existing.id
-      const serverId = reusesSupersededRetryRequest
+      const adoptsRuntimeIdentity = reusesSupersededRetryRequest
+        || existing.__optimistic === true
+        || runtimeUserGenerations.has(existing)
+      const serverId = adoptsRuntimeIdentity
         ? canonical.serverId ?? existing.serverId
         : existing.serverId ?? canonical.serverId
       const isSelf = existing.isSelf || canonical.isSelf
@@ -2226,15 +2229,14 @@ export const useChatStore = defineStore('chat', () => {
         stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn)
       }
     }
-    const replacementAwaitingCommit = Boolean(operation && run.history_committed !== true)
-    if (!stream && !replacementAwaitingCommit && !isTerminalStream(streamId, runGeneration, bid, sid) && (isRuntimeActiveStatus(status) || runtimeMessages.length > 0 || terminalFailure || preparedReplacement)) {
-      stream = ensureRuntimeStream(streamId, bid, sid, !operation, runGeneration, run.request_user_turn)
+    if (!stream && !isTerminalStream(streamId, runGeneration, bid, sid) && (isRuntimeActiveStatus(status) || runtimeMessages.length > 0 || terminalFailure || preparedReplacement)) {
+      stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn)
       if (stream) {
         markRuntimeStreamObserved(stream, run.generation ?? '')
         if (stream.runtimeGeneration) runtimeAssistantGenerations.set(stream.assistantTurn, stream.runtimeGeneration)
       }
     }
-    if (stream && preparedReplacement && run.history_committed === true) {
+    if (stream && preparedReplacement) {
       applyRuntimeReplacement(stream, preparedReplacement)
     }
     if (stream?.runtimeReplacement && run.history_committed === true) {
@@ -2246,7 +2248,7 @@ export const useChatStore = defineStore('chat', () => {
       && run.history_committed !== true
       && runtimeMessages.length === 0,
     )
-    if (stream && !uncommittedEmptyReplacement) {
+    if (stream) {
       const requestTurn = applyRuntimeRequestUserTurn(stream, run.request_user_turn)
       if (run.history_committed === true) {
         if (requestTurn?.serverId) requestTurn.__optimistic = false

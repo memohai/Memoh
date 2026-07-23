@@ -244,6 +244,41 @@ function runtimeReplacementSnapshot(
   } as UIStreamEvent
 }
 
+function runtimeStateSnapshot(
+  streamId: string,
+  messages: ConversationUiMessage[] = [],
+  status = 'running',
+  seq = 10,
+  sessionId = 'session-1',
+  canonicalReady = false,
+  historyCommitted = false,
+): UIStreamEvent {
+  const epoch = `epoch-${sessionId}`
+  return {
+    type: 'runtime_snapshot',
+    bot_id: 'bot-1',
+    session_id: sessionId,
+    epoch,
+    seq,
+    stream_id: streamId,
+    snapshot: {
+      bot_id: 'bot-1',
+      session_id: sessionId,
+      epoch,
+      seq,
+      current_run_view: {
+        stream_id: streamId,
+        generation: `generation-${streamId}`,
+        status,
+        messages,
+        ...(historyCommitted ? { history_committed: true } : {}),
+        ...(canonicalReady ? { canonical_ready: true } : {}),
+      },
+      queue: [],
+    },
+  } as UIStreamEvent
+}
+
 function richActiveRunRuntimeSnapshot(): SessionruntimeSnapshot {
   return structuredClone(richActiveRunContractFixture.runtime_snapshot.snapshot)
 }
@@ -8928,7 +8963,229 @@ describe('chat-list store', () => {
     await expect(send).resolves.toMatchObject({ ok: true })
   })
 
-  it('canonicalizes a committed retry in two passive stores when a system turn precedes the assistant', async () => {
+  it('projects a committed ask-user response once in active and passive stores without a false command error', async () => {
+    const handlers: UIStreamEventHandler[] = []
+    const outbound: Array<Array<Record<string, unknown>>> = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      const messages: Array<Record<string, unknown>> = []
+      handlers.push(onStreamEvent)
+      outbound.push(messages)
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn((message: Record<string, unknown>) => messages.push(message)),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+
+    const first = useChatStore(createTestPinia())
+    const second = useChatStore(createTestPinia())
+    await first.selectBot('bot-1')
+    await second.selectBot('bot-1')
+    await flushPromises()
+    expect(handlers).toHaveLength(2)
+
+    const userInput = singleSelectUserInput()
+    const pendingMessage: ConversationUiMessage = {
+      id: 1,
+      type: 'tool',
+      name: 'ask_user',
+      input: { questions: [{ text: 'Which plan?', kind: 'single_select' }] },
+      tool_call_id: 'call-shared-ask',
+      running: false,
+      user_input: userInput,
+    }
+    const initial = runtimeStateSnapshot('stream-shared-ask', [pendingMessage], 'running', 10)
+    for (const handler of handlers) handler(structuredClone(initial))
+
+    const activeBlock = first.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.userInput?.user_input_id === userInput.user_input_id)
+    if (activeBlock?.type !== 'tool' || !activeBlock.userInput) {
+      throw new Error('active ask-user block was not projected')
+    }
+    expect(await first.respondUserInput(activeBlock.userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })).toBe(true)
+    const response = outbound[0]?.find(message => message.type === 'user_input_response')
+    const invocationId = String(response?.stream_id ?? '')
+    expect(invocationId).not.toBe('')
+    expect(outbound[1]?.some(message => message.type === 'user_input_response')).toBe(false)
+
+    const committedMessage: ConversationUiMessage = {
+      ...pendingMessage,
+      user_input: { ...userInput, status: 'submitted', can_respond: false },
+    }
+    const projection = {
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      stream_id: 'stream-shared-ask',
+      seq: 11,
+      delta: { message_upserts: [committedMessage] },
+    } as UIStreamEvent
+    for (const handler of handlers) {
+      handler(structuredClone(projection))
+      handler(structuredClone(projection))
+    }
+    const commandResult = {
+      type: 'command_result',
+      invocation_id: invocationId,
+      session_id: 'session-1',
+      action_id: 'user_input_response',
+      terminal: true,
+    } as UIStreamEvent
+    handlers[0]?.(structuredClone(commandResult))
+    handlers[0]?.(structuredClone(commandResult))
+    await flushPromises()
+
+    for (const store of [first, second]) {
+      const assistantTurns = store.messages.filter(turn => turn.role === 'assistant')
+      const askBlocks = assistantTurns.flatMap(turn => turn.messages).filter(block =>
+        block.type === 'tool' && block.userInput?.user_input_id === userInput.user_input_id,
+      )
+      expect(assistantTurns).toHaveLength(1)
+      expect(askBlocks).toHaveLength(1)
+      expect(askBlocks[0]?.type === 'tool' ? askBlocks[0].userInput : undefined).toMatchObject({
+        status: 'submitted',
+        can_respond: false,
+      })
+      expect(assistantTurns[0]?.messages.some(block => block.type === 'error')).toBe(false)
+    }
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('projects send admission immediately and idempotently in two passive stores', async () => {
+    const handlers: UIStreamEventHandler[] = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      handlers.push(onStreamEvent)
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn(),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+
+    const first = useChatStore(createTestPinia())
+    const second = useChatStore(createTestPinia())
+    await first.selectBot('bot-1')
+    await second.selectBot('bot-1')
+    await flushPromises()
+    expect(handlers).toHaveLength(2)
+
+    const admission = runtimeStateSnapshot('stream-shared-send', [], 'running', 10)
+    if (admission.type !== 'runtime_snapshot' || !admission.snapshot.current_run_view) {
+      throw new Error('expected send admission snapshot')
+    }
+    admission.snapshot.current_run_view.history_committed = false
+    admission.snapshot.current_run_view.request_user_turn = {
+      role: 'user',
+      text: 'new shared prompt',
+      timestamp: '2026-07-12T00:00:02.000Z',
+      platform: 'local',
+      external_message_id: 'stream-shared-send',
+    }
+    for (const handler of handlers) {
+      handler(structuredClone(admission))
+      handler(structuredClone(admission))
+    }
+
+    for (const store of [first, second]) {
+      expect(store.messages).toHaveLength(2)
+      expect(store.messages[0]).toMatchObject({
+        role: 'user',
+        text: 'new shared prompt',
+        externalMessageId: 'stream-shared-send',
+      })
+      expect(store.messages[1]).toMatchObject({
+        role: 'assistant',
+        streaming: true,
+        messages: [],
+      })
+    }
+
+    const delta = {
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      stream_id: 'stream-shared-send',
+      seq: 11,
+      delta: {
+        message_appends: [{ id: 0, type: 'text', content: 'shared answer' }],
+      },
+    } as UIStreamEvent
+    for (const handler of handlers) {
+      handler(structuredClone(delta))
+      handler(structuredClone(delta))
+    }
+    for (const store of [first, second]) {
+      expect(store.messages).toHaveLength(2)
+      expect(store.messages[1]).toMatchObject({
+        role: 'assistant',
+        streaming: true,
+        messages: [{ type: 'text', content: 'shared answer' }],
+      })
+    }
+
+    const terminal = runtimeStateSnapshot(
+      'stream-shared-send',
+      [{ id: 0, type: 'text', content: 'shared answer' }],
+      'completed',
+      12,
+      'session-1',
+      true,
+      true,
+    )
+    if (terminal.type !== 'runtime_snapshot' || !terminal.snapshot.current_run_view) {
+      throw new Error('expected send terminal snapshot')
+    }
+    terminal.snapshot.current_run_view.request_user_turn = {
+      ...admission.snapshot.current_run_view.request_user_turn,
+      id: 'user-shared-send',
+    }
+    terminal.snapshot.current_run_view.history_assistant_message_id = 'assistant-shared-send'
+    for (const handler of handlers) {
+      handler(structuredClone(terminal))
+      handler(structuredClone(terminal))
+    }
+    for (const store of [first, second]) {
+      expect(store.messages.filter(turn => turn.role === 'user')).toHaveLength(1)
+      expect(store.messages.filter(turn => turn.role === 'assistant')).toHaveLength(1)
+      expect(store.messages[0]).toMatchObject({
+        role: 'user',
+        serverId: 'user-shared-send',
+      })
+      expect(store.messages[1]).toMatchObject({
+        role: 'assistant',
+        serverId: 'assistant-shared-send',
+        streaming: false,
+        messages: [{ type: 'text', content: 'shared answer' }],
+      })
+    }
+  })
+
+  it('projects retry admission immediately and idempotently in two passive stores', async () => {
     const handlers: UIStreamEventHandler[] = []
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
       handlers.push(onStreamEvent)
@@ -8973,19 +9230,30 @@ describe('chat-list store', () => {
 
     const retryOperation = replacementOperationsContractFixture.retry_snapshot.snapshot.current_run_view?.operation
     if (!retryOperation) throw new Error('missing generated retry operation fixture')
-    const event = runtimeReplacementSnapshot('stream-shared-retry', retryOperation, [{ id: 0, type: 'text', content: 'shared partial' }])
-    if (event.type !== 'runtime_snapshot' || !event.snapshot.current_run_view) {
-      throw new Error('expected committed retry snapshot')
+    const admission = runtimeReplacementSnapshot(
+      'stream-shared-retry',
+      retryOperation,
+      [],
+      'running',
+      10,
+      'session-1',
+      false,
+      false,
+    )
+    if (admission.type !== 'runtime_snapshot' || !admission.snapshot.current_run_view) {
+      throw new Error('expected retry admission snapshot')
     }
-    event.snapshot.current_run_view.request_user_turn = {
-      id: 'user-retry-canonical',
+    admission.snapshot.current_run_view.request_user_turn = {
       role: 'user',
       text: 'hello',
       timestamp: '2026-07-12T00:00:02.000Z',
       platform: 'local',
       external_message_id: 'stream-shared-retry',
     }
-    for (const handler of handlers) handler(structuredClone(event))
+    for (const handler of handlers) {
+      handler(structuredClone(admission))
+      handler(structuredClone(admission))
+    }
 
     const project = (store: ReturnType<typeof useChatStore>) => store.messages.map((turn) => {
       if (turn.role === 'user') return { role: turn.role, text: turn.text }
@@ -9005,6 +9273,44 @@ describe('chat-list store', () => {
       {
         role: 'assistant',
         streaming: true,
+        blocks: [],
+      },
+    ])
+    for (const store of [first, second]) {
+      expect(store.messages.some(turn => turn.id === 'assistant-old')).toBe(false)
+      expect(store.messages.filter(turn => turn.role === 'user')).toHaveLength(1)
+      expect(store.messages.filter(turn => turn.role === 'assistant')).toHaveLength(1)
+    }
+
+    const event = runtimeReplacementSnapshot(
+      'stream-shared-retry',
+      retryOperation,
+      [{ id: 0, type: 'text', content: 'shared partial' }],
+      'running',
+      11,
+    )
+    if (event.type !== 'runtime_snapshot' || !event.snapshot.current_run_view) {
+      throw new Error('expected committed retry snapshot')
+    }
+    event.snapshot.current_run_view.request_user_turn = {
+      id: 'user-retry-canonical',
+      role: 'user',
+      text: 'hello',
+      timestamp: '2026-07-12T00:00:02.000Z',
+      platform: 'local',
+      external_message_id: 'stream-shared-retry',
+    }
+    for (const handler of handlers) {
+      handler(structuredClone(event))
+      handler(structuredClone(event))
+    }
+    expect(project(first)).toEqual(project(second))
+    expect(project(first)).toEqual([
+      { role: 'user', text: 'hello' },
+      { role: 'system' },
+      {
+        role: 'assistant',
+        streaming: true,
         blocks: [{ type: 'text', content: 'shared partial' }],
       },
     ])
@@ -9014,31 +9320,49 @@ describe('chat-list store', () => {
       expect(users[0]?.serverId).toBe('user-retry-canonical')
     }
 
-    const replay = runtimeReplacementSnapshot('stream-shared-retry', {
-      kind: 'retry',
-      replace_from_message_id: 'assistant-old',
-    }, [{ id: 0, type: 'text', content: 'shared partial updated' }], 'running', 11)
-    if (replay.type !== 'runtime_snapshot' || !replay.snapshot.current_run_view) {
-      throw new Error('expected retry replay snapshot')
+    const delta = {
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      stream_id: 'stream-shared-retry',
+      seq: 12,
+      delta: {
+        message_appends: [{ id: 0, type: 'text', content: ' updated' }],
+      },
+    } as UIStreamEvent
+    for (const handler of handlers) {
+      handler(structuredClone(delta))
+      handler(structuredClone(delta))
     }
-    replay.snapshot.current_run_view.request_user_turn = event.snapshot.current_run_view.request_user_turn
-    for (const handler of handlers) handler(structuredClone(replay))
     expect(first.messages).toHaveLength(3)
     expect(second.messages).toHaveLength(3)
     expect(project(first)).toEqual(project(second))
+    for (const store of [first, second]) {
+      const assistant = store.messages.find(turn => turn.role === 'assistant')
+      expect(assistant).toMatchObject({
+        streaming: true,
+        messages: [{ type: 'text', content: 'shared partial updated' }],
+      })
+    }
 
     const terminal = runtimeReplacementSnapshot('stream-shared-retry', {
       kind: 'retry',
       replace_from_message_id: 'assistant-old',
-    }, [{ id: 0, type: 'text', content: 'shared final answer' }], 'completed', 12, 'session-1', true)
+    }, [{ id: 0, type: 'text', content: 'shared final answer' }], 'completed', 13, 'session-1', true)
     if (terminal.type !== 'runtime_snapshot' || !terminal.snapshot.current_run_view) {
       throw new Error('expected committed retry terminal snapshot')
     }
     terminal.snapshot.current_run_view.request_user_turn = event.snapshot.current_run_view.request_user_turn
     terminal.snapshot.current_run_view.history_assistant_message_id = 'assistant-shared-retry'
-    for (const handler of handlers) handler(structuredClone(terminal))
+    for (const handler of handlers) {
+      handler(structuredClone(terminal))
+      handler(structuredClone(terminal))
+    }
 
     for (const store of [first, second]) {
+      expect(store.messages.filter(turn => turn.role === 'user')).toHaveLength(1)
+      expect(store.messages.filter(turn => turn.role === 'assistant')).toHaveLength(1)
       const assistant = store.messages.find(turn => turn.role === 'assistant')
       expect(assistant).toMatchObject({
         serverId: 'assistant-shared-retry',
@@ -9246,7 +9570,9 @@ describe('chat-list store', () => {
 
     const operation: SessionruntimeRunOperationView = { kind: 'retry', replace_from_message_id: 'assistant-old' }
     streamHandler?.(runtimeReplacementSnapshot('stream-empty-retry', operation, [], 'running', 10, 'session-1', false, false))
-    expect(store.messages.map(turn => turn.id)).toContain('assistant-old')
+    expect(store.messages.map(turn => turn.id)).not.toContain('assistant-old')
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages[1]).toMatchObject({ role: 'assistant', streaming: true, messages: [] })
 
     api.fetchMessagesUI.mockResolvedValueOnce(structuredClone(persistedTurns))
     streamHandler?.(runtimeReplacementSnapshot('stream-empty-retry', operation, [], 'aborted', 11, 'session-1', false, false))
@@ -10850,6 +11176,161 @@ describe('chat-list store', () => {
         { type: 'reasoning', content: 'Working on step two' },
       ],
     })
+  })
+
+  it('keeps one assistant when persisted history wins a cold runtime refresh race', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const streamId = 'stream-history-before-runtime'
+    const requestTurn = {
+      id: 'canonical-race-user',
+      role: 'user' as const,
+      text: 'run several steps',
+      timestamp: '2026-07-14T00:04:00Z',
+      platform: 'local',
+      external_message_id: streamId,
+    }
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: requestTurn.id,
+        role: 'user',
+        text: requestTurn.text,
+        attachments: [],
+        timestamp: requestTurn.timestamp,
+        external_message_id: streamId,
+      },
+      {
+        id: 'persisted-race-assistant',
+        role: 'assistant',
+        messages: [{ id: 0, type: 'text', content: 'First step complete.' }],
+        timestamp: '2026-07-14T00:04:05Z',
+      },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    expect(store.messages.filter(turn => turn.role === 'assistant')).toHaveLength(1)
+    const running = runtimeSnapshotFromScript([
+      { type: 'message', data: { id: 0, type: 'text', content: 'First step complete.' } } as UIStreamEvent,
+      { type: 'message', data: { id: 1, type: 'reasoning', content: 'Working on step two' } } as UIStreamEvent,
+    ], 'session-1', streamId, 'running', 1, '', requestTurn, true)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      epoch: 'epoch-session-1',
+      seq: 1,
+      snapshot: running,
+    } as UIStreamEvent)
+
+    let assistants = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]).toMatchObject({
+      id: `runtime-${streamId}`,
+      streaming: true,
+      messages: [
+        { id: 0, type: 'text', content: 'First step complete.' },
+        { id: 1, type: 'reasoning', content: 'Working on step two' },
+      ],
+    })
+
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      epoch: 'epoch-session-1',
+      seq: 2,
+      delta: {
+        message_appends: [{ id: 1, type: 'reasoning', content: ' now' }],
+      },
+    } as UIStreamEvent)
+    assistants = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]).toMatchObject({
+      streaming: true,
+      messages: [
+        { id: 0, type: 'text', content: 'First step complete.' },
+        { id: 1, type: 'reasoning', content: 'Working on step two now' },
+      ],
+    })
+
+    api.fetchMessagesUI.mockResolvedValue([
+      {
+        id: requestTurn.id,
+        role: 'user',
+        text: requestTurn.text,
+        attachments: [],
+        timestamp: requestTurn.timestamp,
+        external_message_id: streamId,
+      },
+      {
+        id: 'persisted-race-assistant',
+        role: 'assistant',
+        messages: [
+          { id: 0, type: 'text', content: 'First step complete.' },
+          { id: 1, type: 'reasoning', content: 'Working on step two now' },
+          { id: 2, type: 'text', content: 'All steps complete.' },
+        ],
+        timestamp: '2026-07-14T00:04:05Z',
+      },
+    ])
+    const historyCallsBeforeTerminal = api.fetchMessagesUI.mock.calls.length
+    _sessionMessageHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: 'persisted-race-assistant',
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        role: 'assistant',
+        content: 'All steps complete.',
+        created_at: '2026-07-14T00:04:10Z',
+      },
+    } as SessionMessageStreamEvent)
+
+    const completed = structuredClone(running)
+    completed.seq = 3
+    completed.current_run_view!.status = 'completed'
+    completed.current_run_view!.messages = [
+      { id: 0, type: 'text', content: 'First step complete.' },
+      { id: 1, type: 'reasoning', content: 'Working on step two now' },
+      { id: 2, type: 'text', content: 'All steps complete.' },
+    ]
+    completed.current_run_view!.history_assistant_message_id = 'persisted-race-assistant'
+    completed.current_run_view!.canonical_ready = true
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: streamId,
+      epoch: 'epoch-session-1',
+      seq: 3,
+      snapshot: completed,
+    } as UIStreamEvent)
+
+    assistants = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]).toMatchObject({ streaming: false })
+
+    await new Promise(resolve => setTimeout(resolve, 150))
+    await flushPromises()
+    expect(api.fetchMessagesUI.mock.calls.length).toBeGreaterThanOrEqual(historyCallsBeforeTerminal + 2)
+    assistants = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]).toMatchObject({
+      streaming: false,
+      messages: [
+        { id: 0, type: 'text', content: 'First step complete.' },
+        { id: 1, type: 'reasoning', content: 'Working on step two now' },
+        { id: 2, type: 'text', content: 'All steps complete.' },
+      ],
+    })
+    expect(assistants[0]?.serverId ?? assistants[0]?.id).toBe('persisted-race-assistant')
   })
 
   it('projects a committed retry on a fresh passive client without the superseded target', async () => {
