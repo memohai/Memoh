@@ -327,9 +327,13 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 			err = txer.InTx(ctx, persist)
 		}
 		if err == nil {
-			for i, message := range persisted {
-				if !inputs[i].SkipHistoryTurn {
-					s.publishMessageCreated(message)
+			if options.Replacement != nil {
+				s.publishReplacementMessageCreated(persisted)
+			} else {
+				for i, message := range persisted {
+					if !inputs[i].SkipHistoryTurn {
+						s.publishMessageCreated(message)
+					}
 				}
 			}
 			return persisted, true, nil
@@ -2270,6 +2274,16 @@ func (s *DBService) publishMessageCreated(message Message) {
 		BotID: strings.TrimSpace(message.BotID),
 		Data:  payload,
 	})
+}
+
+func (s *DBService) publishReplacementMessageCreated(messages []Message) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.TrimSpace(messages[i].ID) == "" {
+			continue
+		}
+		s.publishMessageCreated(messages[i])
+		return
+	}
 }
 
 // enrichAssets batch-loads asset links for a list of messages (single-table query).

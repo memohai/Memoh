@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -228,6 +229,58 @@ type recordingPublisher struct {
 
 func (p *recordingPublisher) Publish(event messageevent.Event) {
 	p.events = append(p.events, event)
+}
+
+type replacementRoundQueries struct {
+	runtimeSnapshotQueries
+	replacement sqlc.ReplaceHistoryTurnParams
+}
+
+func (q *replacementRoundQueries) InTx(ctx context.Context, fn func(dbstore.Queries) error) error {
+	return fn(q)
+}
+
+func (q *replacementRoundQueries) ReplaceHistoryTurn(_ context.Context, arg sqlc.ReplaceHistoryTurnParams) (sqlc.ReplaceHistoryTurnRow, error) {
+	q.replacement = arg
+	return sqlc.ReplaceHistoryTurnRow{}, nil
+}
+
+func TestPersistRoundReplacementPublishesLatestMessageCreated(t *testing.T) {
+	queries := &replacementRoundQueries{}
+	publisher := &recordingPublisher{}
+	svc := NewService(nil, queries, publisher)
+
+	persisted, handled, err := svc.PersistRound(context.Background(), []PersistInput{{
+		BotID:           "11111111-1111-1111-1111-111111111111",
+		SessionID:       "22222222-2222-2222-2222-222222222222",
+		Role:            "assistant",
+		Content:         []byte(`{"role":"assistant","content":"replacement"}`),
+		SkipHistoryTurn: true,
+	}}, RoundPersistenceOptions{Replacement: &TurnReplacement{
+		OldTurnID:        "44444444-4444-4444-4444-444444444444",
+		RequestMessageID: "55555555-5555-5555-5555-555555555555",
+		Reason:           "retry",
+	}})
+	if err != nil || !handled || len(persisted) != 1 {
+		t.Fatalf("PersistRound() = (%d, %v, %v), want (1, true, nil)", len(persisted), handled, err)
+	}
+	if got := queries.replacement.AssistantMessageID.String(); got != persisted[0].ID {
+		t.Fatalf("replacement assistant id = %q, want %q", got, persisted[0].ID)
+	}
+	if len(publisher.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(publisher.events))
+	}
+	event := publisher.events[0]
+	if event.Type != messageevent.EventTypeMessageCreated {
+		t.Fatalf("event type = %q, want %q", event.Type, messageevent.EventTypeMessageCreated)
+	}
+	var published Message
+	if err := json.Unmarshal(event.Data, &published); err != nil {
+		t.Fatalf("decode published message: %v", err)
+	}
+	if published.ID != persisted[0].ID || published.Role != "assistant" {
+		t.Fatalf("published message = %#v, want replacement assistant %q", published, persisted[0].ID)
+	}
 }
 
 func TestPersistCleansUpMessageWhenHistoryTurnFails(t *testing.T) {
