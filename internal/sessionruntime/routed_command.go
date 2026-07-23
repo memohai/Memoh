@@ -56,7 +56,10 @@ func (m *Manager) DispatchActiveCommand(ctx context.Context, botID, sessionID, c
 		if loadErr != nil {
 			return true, loadErr
 		} else if ok {
-			return true, commandResultErrorFor(cmd, result)
+			resultErr := commandResultErrorFor(cmd, result)
+			if resultErr != nil || !userInputCommandProjectionPending(run, cmd) {
+				return true, resultErr
+			}
 		}
 	}
 	if !isActiveRunStatus(run.Status) {
@@ -348,19 +351,13 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 // the owner-local handler has successfully updated the durable request. It is
 // an observer projection, so a run that finishes concurrently is a safe no-op.
 func (m *Manager) projectUserInputCommandDecision(ctx context.Context, handle RunHandle, cmd Command) error {
-	if strings.TrimSpace(cmd.Type) != CommandUserInputResponse {
+	status, ok := userInputCommandDecisionStatus(cmd)
+	if !ok {
 		return nil
 	}
 	targetID := strings.TrimSpace(cmd.TargetID)
 	if targetID == "" {
 		return nil
-	}
-	status := "submitted"
-	var payload map[string]any
-	if err := unmarshalRuntimeJSON(cmd.Payload, &payload); err == nil {
-		if canceled, _ := runtimeCommandMapValue(payload, "canceled").(bool); canceled {
-			status = "canceled"
-		}
 	}
 	_, _, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
@@ -405,6 +402,60 @@ func (m *Manager) projectUserInputCommandDecision(ctx context.Context, handle Ru
 	return err
 }
 
+func userInputCommandDecisionStatus(cmd Command) (string, bool) {
+	if strings.TrimSpace(cmd.Type) != CommandUserInputResponse {
+		return "", false
+	}
+	var payload map[string]any
+	if err := unmarshalRuntimeJSON(cmd.Payload, &payload); err != nil {
+		return "", false
+	}
+	if canceled, _ := runtimeCommandMapValue(payload, "canceled").(bool); canceled {
+		return "canceled", true
+	}
+	return "submitted", true
+}
+
+func userInputCommandProjectionPending(run *CurrentRunView, cmd Command) bool {
+	expectedStatus, ok := userInputCommandDecisionStatus(cmd)
+	if !ok || run == nil {
+		return false
+	}
+	targetID := strings.TrimSpace(cmd.TargetID)
+	for _, message := range run.Messages {
+		userInput := message.UserInput
+		if userInput == nil || strings.TrimSpace(userInput.UserInputID) != targetID {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(userInput.Status))
+		if status == expectedStatus {
+			return userInput.CanRespond
+		}
+		return status == "" || status == "pending"
+	}
+	return false
+}
+
+func (m *Manager) replayStoredCommandProjection(ctx context.Context, cmd, result Command) Command {
+	resultErr := commandResultErrorFor(cmd, result)
+	if resultErr != nil {
+		if errors.Is(resultErr, ErrCommandPayloadConflict) {
+			return newCommandResult(cmd, ErrCommandPayloadConflict)
+		}
+		return result
+	}
+	projectionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.commandTimeout())
+	defer cancel()
+	if err := m.projectUserInputCommandDecision(projectionCtx, runHandleForCommand(cmd), cmd); err != nil && !errors.Is(err, ErrRunOwnershipLost) {
+		m.logger.Warn("replay stored user input projection failed",
+			slog.Any("error", err),
+			slog.String("stream_id", cmd.StreamID),
+			slog.String("target_id", cmd.TargetID),
+		)
+	}
+	return result
+}
+
 func (m *Manager) executeRoutedCommand(ctx context.Context, cmd Command) Command {
 	leader, executionDone := m.beginCommandExecution(cmd.ID)
 	if !leader {
@@ -416,10 +467,7 @@ func (m *Manager) executeRoutedCommand(ctx context.Context, cmd Command) Command
 		if result, ok, err := m.loadCommandResultForExecution(ctx, cmd.ID); err != nil {
 			return newCommandResult(cmd, err)
 		} else if ok {
-			if errors.Is(commandResultErrorFor(cmd, result), ErrCommandPayloadConflict) {
-				return newCommandResult(cmd, ErrCommandPayloadConflict)
-			}
-			return result
+			return m.replayStoredCommandProjection(ctx, cmd, result)
 		}
 		return newCommandResult(cmd, errors.New("runtime command result is unavailable"))
 	}
@@ -428,10 +476,7 @@ func (m *Manager) executeRoutedCommand(ctx context.Context, cmd Command) Command
 	if result, ok, err := m.loadCommandResultForExecution(ctx, cmd.ID); err != nil {
 		return newCommandResult(cmd, err)
 	} else if ok {
-		if errors.Is(commandResultErrorFor(cmd, result), ErrCommandPayloadConflict) {
-			return newCommandResult(cmd, ErrCommandPayloadConflict)
-		}
-		return result
+		return m.replayStoredCommandProjection(ctx, cmd, result)
 	}
 	commandCtx, cancel, err := m.activeCommandContext(ctx, cmd)
 	reconciled := false

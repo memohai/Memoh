@@ -1827,6 +1827,10 @@ func runDistributedRuntimeManagerContract(t *testing.T, suite distributedRuntime
 		t.Parallel()
 		runRuntimeManagerRoutesActiveResponsesAcrossManagersContract(t, suite)
 	})
+	t.Run("replays a committed user input projection on the run owner", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerReplaysCommittedUserInputProjectionContract(t, suite)
+	})
 	t.Run("preserves remote command deadline errors", func(t *testing.T) {
 		t.Parallel()
 		runRuntimeManagerPreservesRemoteCommandDeadlineError(t, suite)
@@ -3566,6 +3570,81 @@ func runRuntimeManagerRoutesActiveResponsesAcrossManagersContract(t *testing.T, 
 	}
 	if handled, err := remote.DispatchActiveCommand(context.Background(), testBotID, testSessionID, CommandToolApprovalResponse, "approval-old", nil); err != nil || handled {
 		t.Fatalf("unrelated target = handled:%v err:%v", handled, err)
+	}
+}
+
+func runRuntimeManagerReplaysCommittedUserInputProjectionContract(t *testing.T, suite distributedRuntimeBackendContractSuite) {
+	t.Helper()
+	backends := suite.newSharedBackends(t, 2)
+	owner := testRuntimeManager(t, backends[0], "response-projection-owner")
+	remote := testRuntimeManager(t, backends[1], "response-projection-remote")
+
+	sub, err := remote.Subscribe(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("subscribe projection observer: %v", err)
+	}
+	defer sub.Close()
+	_ = waitRuntimeEvent(t, sub.C, func(event Event) bool { return event.Type == EventRuntimeSnapshot })
+
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start projection run: %v", err)
+	}
+	handle := requireRunHandle(t, owner, testBotID, testSessionID, testStreamID)
+	if _, err := owner.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{
+		Type: agentpkg.EventUserInputRequest, ToolName: "ask_user", ToolCallID: "call-projection-replay",
+		UserInputID: "input-projection-replay", Status: "pending",
+	}); err != nil {
+		t.Fatalf("record projection request: %v", err)
+	}
+	_ = waitRuntimeEvent(t, sub.C, func(event Event) bool {
+		return event.Delta != nil && len(event.Delta.MessageUpserts) == 1 &&
+			event.Delta.MessageUpserts[0].UserInput != nil
+	})
+
+	var handlerCalls atomic.Int64
+	owner.SetCommandHandler(func(context.Context, Command) error {
+		handlerCalls.Add(1)
+		return errors.New("stored command result must not execute the decision twice")
+	})
+	payload := []byte(`{"canceled":false,"answers":[{"question_id":"q1","option_ids":["q1.o1"]}]}`)
+	snapshot, err := owner.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil || snapshot.CurrentRunView == nil {
+		t.Fatalf("load projection run: snapshot=%#v err=%v", snapshot, err)
+	}
+	cmd := Command{
+		Type: CommandUserInputResponse,
+		ID: activeCommandID(
+			testBotID, testSessionID, snapshot.CurrentRunView,
+			CommandUserInputResponse, "input-projection-replay",
+		),
+		BotID: testBotID, SessionID: testSessionID, StreamID: testStreamID,
+		Generation: handle.Generation, TargetID: "input-projection-replay",
+		Payload: payload, PayloadHash: activeCommandPayloadHash(CommandUserInputResponse, payload),
+	}
+	if err := backends[0].StoreCommandResult(context.Background(), newCommandResult(cmd, nil), time.Minute); err != nil {
+		t.Fatalf("store committed command result: %v", err)
+	}
+
+	handled, err := remote.DispatchActiveCommand(
+		context.Background(), testBotID, testSessionID,
+		CommandUserInputResponse, "input-projection-replay", payload,
+	)
+	if err != nil || !handled {
+		t.Fatalf("replay committed projection = handled:%v err:%v", handled, err)
+	}
+	event := waitRuntimeEvent(t, sub.C, func(event Event) bool {
+		if event.Delta == nil || len(event.Delta.MessageUpserts) != 1 {
+			return false
+		}
+		userInput := event.Delta.MessageUpserts[0].UserInput
+		return userInput != nil && userInput.UserInputID == "input-projection-replay" &&
+			userInput.Status == "submitted" && !userInput.CanRespond
+	})
+	if event.Type != EventRuntimeDelta {
+		t.Fatalf("projection replay event = %#v", event)
+	}
+	if calls := handlerCalls.Load(); calls != 0 {
+		t.Fatalf("decision handler calls = %d, want 0", calls)
 	}
 }
 
