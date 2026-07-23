@@ -105,7 +105,8 @@ func (m *Manager) steer(ctx context.Context, botID, sessionID, streamID, expecte
 			return steer, errors.New("active runtime is not local")
 		}
 		if err := m.distributed.PublishCommand(ctx, ownerID, cmd); err != nil {
-			_ = m.updateSteerStatus(context.WithoutCancel(ctx), handle, steer.ID, SteerStatusRejected, err.Error())
+			m.logger.Warn("publish runtime steer command failed", slog.Any("error", err), slog.String("stream_id", streamID))
+			_ = m.updateSteerStatus(context.WithoutCancel(ctx), handle, steer.ID, SteerStatusRejected, RuntimeErrorCodeUnavailable)
 			return steer, err
 		}
 	}
@@ -116,7 +117,7 @@ func (m *Manager) steer(ctx context.Context, botID, sessionID, streamID, expecte
 func (m *Manager) applySteerCommand(ctx context.Context, cmd Command) {
 	handle := runHandleForCommand(cmd)
 	if err := m.ValidateRunOwnership(ctx, handle); err != nil {
-		_ = m.updateSteerStatus(context.WithoutCancel(ctx), handle, cmd.SteerID, SteerStatusRejected, ErrRunOwnershipLost.Error())
+		_ = m.updateSteerStatus(context.WithoutCancel(ctx), handle, cmd.SteerID, SteerStatusRejected, RuntimeErrorCodeTargetInactive)
 		return
 	}
 	if !m.steerCommandIsPending(ctx, cmd) {
@@ -124,10 +125,10 @@ func (m *Manager) applySteerCommand(ctx context.Context, cmd Command) {
 	}
 	ctrl := m.localControlForScope(cmd.BotID, cmd.SessionID, cmd.StreamID)
 	if ctrl == nil || ctrl.generation != strings.TrimSpace(cmd.Generation) {
-		_ = m.updateSteerStatus(context.WithoutCancel(ctx), handle, cmd.SteerID, SteerStatusRejected, ErrRunOwnershipLost.Error())
+		_ = m.updateSteerStatus(context.WithoutCancel(ctx), handle, cmd.SteerID, SteerStatusRejected, RuntimeErrorCodeTargetInactive)
 		return
 	}
-	errText := ""
+	errorCode := RuntimeErrorCodeCommandFailed
 	if ctrl.injectCh != nil && strings.TrimSpace(cmd.Text) != "" {
 		queued, err := m.transitionSteerStatus(ctx, handle, cmd.SteerID, SteerStatusQueued, "")
 		if err != nil {
@@ -148,11 +149,13 @@ func (m *Manager) applySteerCommand(ctx context.Context, cmd Command) {
 		if sent {
 			return
 		}
-		errText = sendError
+		if sendError != "" {
+			m.logger.Warn("deliver runtime steer command failed", slog.String("error", sendError), slog.String("stream_id", cmd.StreamID))
+		}
 	} else {
-		errText = "active runtime is not available"
+		errorCode = RuntimeErrorCodeTargetInactive
 	}
-	if err := m.updateSteerStatus(context.WithoutCancel(ctx), handle, cmd.SteerID, SteerStatusRejected, errText); err != nil {
+	if err := m.updateSteerStatus(context.WithoutCancel(ctx), handle, cmd.SteerID, SteerStatusRejected, errorCode); err != nil {
 		m.logger.Warn("update steer status failed", slog.Any("error", err), slog.String("stream_id", cmd.StreamID))
 	}
 }
@@ -173,12 +176,12 @@ func (m *Manager) steerCommandIsPending(ctx context.Context, cmd Command) bool {
 	return steer != nil && steer.ID == strings.TrimSpace(cmd.SteerID) && strings.EqualFold(steer.Status, SteerStatusPending)
 }
 
-func (m *Manager) updateSteerStatus(ctx context.Context, handle RunHandle, steerID, status, errText string) error {
-	_, err := m.transitionSteerStatus(ctx, handle, steerID, status, errText)
+func (m *Manager) updateSteerStatus(ctx context.Context, handle RunHandle, steerID, status, errorCode string) error {
+	_, err := m.transitionSteerStatus(ctx, handle, steerID, status, errorCode)
 	return err
 }
 
-func (m *Manager) transitionSteerStatus(ctx context.Context, handle RunHandle, steerID, status, errText string) (bool, error) {
+func (m *Manager) transitionSteerStatus(ctx context.Context, handle RunHandle, steerID, status, errorCode string) (bool, error) {
 	_, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		if !runMatchesHandle(snapshot.CurrentRunView, handle) {
 			return snapshot, false, nil
@@ -194,7 +197,11 @@ func (m *Manager) transitionSteerStatus(ctx context.Context, handle RunHandle, s
 		snapshot.UpdatedAt = now
 		snapshot.CurrentRunView.UpdatedAt = now
 		snapshot.CurrentRunView.Steer.Status = status
-		snapshot.CurrentRunView.Steer.Error = strings.TrimSpace(errText)
+		if strings.EqualFold(status, SteerStatusRejected) {
+			setRuntimeSteerError(snapshot.CurrentRunView.Steer, errorCode)
+		} else {
+			clearRuntimeSteerError(snapshot.CurrentRunView.Steer)
+		}
 		snapshot.CurrentRunView.Steer.UpdatedAt = now
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
@@ -202,8 +209,6 @@ func (m *Manager) transitionSteerStatus(ctx context.Context, handle RunHandle, s
 	})
 	return changed, err
 }
-
-const steerNotAcknowledgedError = "runtime steer command was not acknowledged"
 
 func (m *Manager) rejectPendingSteerAfterTimeout(ctx context.Context, handle RunHandle, steerID string) {
 	timeout := m.commandAckTTL
@@ -236,7 +241,7 @@ func (m *Manager) rejectUnacknowledgedSteer(ctx context.Context, handle RunHandl
 		snapshot.UpdatedAt = now
 		snapshot.CurrentRunView.UpdatedAt = now
 		steer.Status = SteerStatusRejected
-		steer.Error = steerNotAcknowledgedError
+		setRuntimeSteerError(steer, RuntimeErrorCodeCommandFailed)
 		steer.UpdatedAt = now
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {

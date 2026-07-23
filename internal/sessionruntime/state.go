@@ -63,6 +63,10 @@ func runtimeRunPatch(snapshot Snapshot, status, runError, steer, lease bool) Run
 		patch.CanonicalReady = &canonicalReady
 	}
 	if runError {
+		if run.ErrorCode != "" {
+			code := run.ErrorCode
+			patch.ErrorCode = &code
+		}
 		value := run.Error
 		patch.Error = &value
 	}
@@ -105,7 +109,7 @@ func (m *Manager) markLostIfExpired(snapshot *Snapshot, now time.Time) bool {
 	snapshot.Seq++
 	snapshot.UpdatedAt = now
 	run.Status = RunStatusLost
-	run.Error = "runtime owner lease expired"
+	setRuntimeRunError(run, RunStatusLost)
 	run.UpdatedAt = now
 	run.OwnerLeaseExpiresAt = nil
 	return true

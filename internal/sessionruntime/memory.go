@@ -152,6 +152,7 @@ func (b *MemoryBackend) Update(ctx context.Context, key Key, update SnapshotUpda
 		return next, changed, err
 	}
 	next.Queue = nonNilQueue(next.Queue)
+	sanitizeSnapshotErrors(&next)
 	stored, err := cloneSnapshot(next)
 	if err != nil {
 		return Snapshot{}, false, err

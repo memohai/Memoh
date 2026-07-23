@@ -68,6 +68,38 @@ func TestNewWSAppErrorEventUsesPublicCatalogOnly(t *testing.T) {
 	}
 }
 
+func TestSessionRuntimeWebSocketErrorsDoNotExposePrivateCauses(t *testing.T) {
+	t.Parallel()
+
+	const privateDetail = "SECRET redis/postgres detail"
+	cause := errors.New(privateDetail)
+	event, ok := newWSAppErrorEvent(
+		"stream-1",
+		"session-1",
+		newSessionRuntimeAppError(cause, apperror.CodeSessionRuntimeUnavailable),
+	)
+	if !ok {
+		t.Fatal("runtime application error was not recognized")
+	}
+	commandError := newWSSidebandError(cause, apperror.CodeSessionRuntimeCommandFailed)
+	data, err := json.Marshal(struct {
+		Event        wsOutboundEvent     `json:"event"`
+		CommandError *CommandActionError `json:"command_error"`
+	}{Event: event, CommandError: commandError})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), privateDetail) {
+		t.Fatalf("runtime WebSocket envelope leaked private error: %s", data)
+	}
+	if commandError.Code != string(apperror.CodeSessionRuntimeCommandFailed) {
+		t.Fatalf("command error code = %q", commandError.Code)
+	}
+	if got := wsErrorMessage(cause); strings.Contains(got, privateDetail) {
+		t.Fatalf("legacy WebSocket fallback leaked private error: %q", got)
+	}
+}
+
 type closeTrackingWSConnection struct {
 	closed      chan struct{}
 	once        sync.Once

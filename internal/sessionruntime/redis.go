@@ -926,6 +926,7 @@ func (b *RedisBackend) StoreCommandResult(ctx context.Context, result Command, t
 	if ttl <= 0 {
 		return errors.New("command result ttl must be positive")
 	}
+	result = sanitizeCommandResult(result)
 	data, err := marshalRuntimeJSON(result)
 	if err != nil {
 		return err
@@ -952,7 +953,7 @@ func (b *RedisBackend) LoadCommandResult(ctx context.Context, commandID string) 
 	if strings.TrimSpace(result.Type) != CommandResult || strings.TrimSpace(result.ID) != commandID {
 		return Command{}, false, errors.New("stored runtime command result is invalid")
 	}
-	return result, true, nil
+	return sanitizeCommandResult(result), true, nil
 }
 
 func (b *RedisBackend) Close() error {
@@ -997,6 +998,7 @@ func loadRedisSnapshot(ctx context.Context, tx *redis.Tx, stateKey, contentKey, 
 		return Snapshot{}, false, err
 	}
 	hydrateRedisSnapshot(&snapshot, contents, revision)
+	sanitizeSnapshotErrors(&snapshot)
 	return snapshot, true, nil
 }
 
@@ -1022,6 +1024,7 @@ func prepareRedisSnapshot(snapshot Snapshot) (preparedRedisSnapshot, error) {
 		}
 		persisted.CurrentRunView = &run
 	}
+	sanitizeSnapshotErrors(&persisted)
 	stateData, err := marshalRuntimeJSON(persisted)
 	if err != nil {
 		return preparedRedisSnapshot{}, err

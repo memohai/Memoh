@@ -4713,6 +4713,8 @@ definitions:
         type: boolean
       error:
         type: string
+      error_code:
+        type: string
       generation:
         type: string
       history_committed:
@@ -4786,6 +4788,8 @@ definitions:
       created_at:
         type: string
       error:
+        type: string
+      error_code:
         type: string
       id:
         type: string
@@ -9910,10 +9914,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
+        "503":
+          description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get session runtime state
       tags:
       - sessions

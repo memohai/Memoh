@@ -2536,8 +2536,8 @@ func runRuntimeManagerRetriesTerminalUpdateBeforeDroppingOwnerRoute(t *testing.T
 	snapshot := waitRuntimeSnapshot(t, manager, testBotID, testSessionID, func(snapshot Snapshot) bool {
 		return snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status == RunStatusErrored
 	})
-	if snapshot.CurrentRunView.Error != "stream failed" {
-		t.Fatalf("terminal retry error = %q", snapshot.CurrentRunView.Error)
+	if snapshot.CurrentRunView.ErrorCode != RuntimeErrorCodeRunFailed || snapshot.CurrentRunView.Error != runtimeRunFailedMessage {
+		t.Fatalf("terminal retry error = %#v", snapshot.CurrentRunView)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -3859,7 +3859,7 @@ func runRuntimeManagerDroppedCommandAckContract(t *testing.T, suite distributedR
 			s.CurrentRunView.Steer.ID == steer.ID &&
 			s.CurrentRunView.Steer.Status == SteerStatusRejected
 	})
-	if snapshot.CurrentRunView.Steer.Error != "runtime steer command was not acknowledged" {
+	if snapshot.CurrentRunView.Steer.ErrorCode != RuntimeErrorCodeCommandFailed || snapshot.CurrentRunView.Steer.Error != runtimeCommandFailedMessage {
 		t.Fatalf("dropped steer state = %#v", snapshot.CurrentRunView.Steer)
 	}
 
@@ -4096,8 +4096,8 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterAbortContract(t *testing.T, 
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusErrored {
 		t.Fatalf("current run = %#v, want errored", snapshot.CurrentRunView)
 	}
-	if snapshot.CurrentRunView.Error != "runtime interrupted" {
-		t.Fatalf("error = %q, want runtime interrupted", snapshot.CurrentRunView.Error)
+	if snapshot.CurrentRunView.ErrorCode != RuntimeErrorCodeRunFailed || snapshot.CurrentRunView.Error != runtimeRunFailedMessage {
+		t.Fatalf("public error = %#v", snapshot.CurrentRunView)
 	}
 }
 
@@ -4125,8 +4125,8 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterEndContract(t *testing.T, su
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusErrored || snapshot.CurrentRunView.Error != "provider failed" {
-		t.Fatalf("current run = %#v, want errored provider failure", snapshot.CurrentRunView)
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusErrored || snapshot.CurrentRunView.ErrorCode != RuntimeErrorCodeRunFailed || snapshot.CurrentRunView.Error != runtimeRunFailedMessage {
+		t.Fatalf("current run = %#v, want safe errored state", snapshot.CurrentRunView)
 	}
 }
 

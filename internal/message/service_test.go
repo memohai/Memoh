@@ -236,7 +236,7 @@ type replacementRoundQueries struct {
 	replacement sqlc.ReplaceHistoryTurnParams
 }
 
-func (q *replacementRoundQueries) InTx(ctx context.Context, fn func(dbstore.Queries) error) error {
+func (q *replacementRoundQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
 	return fn(q)
 }
 

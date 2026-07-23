@@ -7229,10 +7229,10 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -20942,6 +20942,9 @@
                 "error": {
                     "type": "string"
                 },
+                "error_code": {
+                    "type": "string"
+                },
                 "generation": {
                     "type": "string"
                 },
@@ -21049,6 +21052,9 @@
                     "type": "string"
                 },
                 "error": {
+                    "type": "string"
+                },
+                "error_code": {
                     "type": "string"
                 },
                 "id": {

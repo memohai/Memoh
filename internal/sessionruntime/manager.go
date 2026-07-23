@@ -779,6 +779,7 @@ func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, messa
 
 type runFinalization struct {
 	Status           string
+	ErrorCode        string
 	Error            string
 	Messages         []conversation.UIMessage
 	HistoryCommitted bool
@@ -837,7 +838,7 @@ func (m *Manager) finalizeRun(ctx context.Context, handle RunHandle, outcome run
 		return ErrRunOwnershipLost
 	}
 	outcome.Status = strings.ToLower(strings.TrimSpace(outcome.Status))
-	outcome.Error = strings.TrimSpace(outcome.Error)
+	outcome = sanitizeRunFinalization(outcome)
 	if !isValidFinalRunStatus(outcome.Status) {
 		return fmt.Errorf("invalid runtime final status %q", outcome.Status)
 	}
@@ -876,14 +877,14 @@ func (m *Manager) finalizeRun(ctx context.Context, handle RunHandle, outcome run
 	return err
 }
 
-const steerRunFinishedError = "runtime run finished before steer was applied"
+const steerRunFinishedError = runtimeTargetInactiveMessage
 
 func rejectPendingSteerOnRunFinish(run *CurrentRunView, now time.Time) {
 	if run == nil || run.Steer == nil || !isPendingSteerStatus(run.Steer.Status) {
 		return
 	}
 	run.Steer.Status = SteerStatusRejected
-	run.Steer.Error = steerRunFinishedError
+	setRuntimeSteerError(run.Steer, RuntimeErrorCodeTargetInactive)
 	run.Steer.UpdatedAt = now
 }
 
@@ -892,6 +893,7 @@ func (m *Manager) finishRunState(ctx context.Context, handle RunHandle, status, 
 }
 
 func (m *Manager) finalizeRunState(ctx context.Context, handle RunHandle, outcome runFinalization) (bool, error) {
+	outcome = sanitizeRunFinalization(outcome)
 	admissionTerminal := false
 	_, changed, err := m.releaseActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
@@ -928,9 +930,10 @@ func (m *Manager) finalizeRunState(ctx context.Context, handle RunHandle, outcom
 		run.CanonicalReady = run.CanonicalReady || outcome.CanonicalReady
 		switch {
 		case outcome.Error != "":
+			run.ErrorCode = outcome.ErrorCode
 			run.Error = outcome.Error
 		case finalStatus == RunStatusCompleted || finalStatus == RunStatusAborted:
-			run.Error = ""
+			clearRuntimeRunError(run)
 		}
 		run.OwnerLeaseExpiresAt = nil
 		rejectPendingSteerOnRunFinish(run, now)
@@ -961,7 +964,7 @@ func (m *Manager) finalizationCommitted(ctx context.Context, handle RunHandle, o
 	if outcome.CanonicalReady && !run.CanonicalReady {
 		return false, nil
 	}
-	if outcome.Error != "" && run.Error != outcome.Error {
+	if outcome.Error != "" && (run.ErrorCode != outcome.ErrorCode || run.Error != outcome.Error) {
 		return false, nil
 	}
 	for _, expected := range outcome.Messages {
@@ -1123,10 +1126,10 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 			run.Messages = upsertUIMessage(run.Messages, msg)
 		}
 		if event.Type == agentpkg.EventError {
-			run.Error = strings.TrimSpace(event.Error)
-			if run.Error == "" {
-				run.Error = "stream error"
+			if detail := strings.TrimSpace(event.Error); detail != "" {
+				m.logger.Error("agent runtime event failed", slog.String("error", detail), slog.String("stream_id", handle.StreamID))
 			}
+			setRuntimeRunError(run, RunStatusErrored)
 		}
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
@@ -1208,6 +1211,7 @@ func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapsh
 		}
 		if !m.leaseExpired(snapshot.CurrentRunView, now) {
 			snapshot.Queue = nonNilQueue(snapshot.Queue)
+			sanitizeSnapshotErrors(&snapshot)
 			return snapshot, nil
 		}
 		lostRef := streamRefForRun(snapshot.BotID, snapshot.SessionID, snapshot.CurrentRunView)
@@ -1235,6 +1239,7 @@ func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapsh
 		}
 	}
 	snapshot.Queue = nonNilQueue(snapshot.Queue)
+	sanitizeSnapshotErrors(&snapshot)
 	return snapshot, nil
 }
 
@@ -1283,8 +1288,13 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		defer close(out)
 		defer backendSub.Close()
 		send := func(event Event) bool {
+			publicEvent, err := sanitizeRuntimeEventErrors(event)
+			if err != nil {
+				m.logger.Warn("sanitize runtime subscription event failed", slog.Any("error", err), slog.String("session_id", key.SessionID))
+				return false
+			}
 			select {
-			case out <- event:
+			case out <- publicEvent:
 				return true
 			case <-m.closeCh:
 				return false
@@ -1499,7 +1509,7 @@ func (m *Manager) publishRuntimeDelta(ctx context.Context, snapshot Snapshot, st
 	// No defensive clone here: both backends isolate on publish (memory clones
 	// the event once for its subscribers, redis marshals it immediately).
 	updatedAt := snapshot.UpdatedAt
-	return m.backend.Publish(ctx, Event{
+	event, err := sanitizeRuntimeEventErrors(Event{
 		Type:      EventRuntimeDelta,
 		BotID:     snapshot.BotID,
 		SessionID: snapshot.SessionID,
@@ -1509,4 +1519,8 @@ func (m *Manager) publishRuntimeDelta(ctx context.Context, snapshot Snapshot, st
 		UpdatedAt: &updatedAt,
 		Delta:     &delta,
 	})
+	if err != nil {
+		return err
+	}
+	return m.backend.Publish(ctx, event)
 }

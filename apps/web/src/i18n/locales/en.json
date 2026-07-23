@@ -123,6 +123,14 @@
       "template_bootstrap_failed": "The workspace files could not be initialized. Please try rebuilding the workspace.",
       "display_prepare_failed": "Display preparation failed."
     },
+    "session_runtime": {
+      "unavailable": "The session runtime is temporarily unavailable. Please try again.",
+      "run_failed": "The Agent run failed. Please try again.",
+      "interrupted": "The Agent run was interrupted.",
+      "target_not_active": "This Agent run is no longer active.",
+      "command_busy": "Another runtime action is still being processed. Please try again shortly.",
+      "command_failed": "The runtime action could not be completed. Please try again."
+    },
     "acp": {
       "runtime_not_found": "That Agent runtime is no longer available. It will be started again.",
       "model_selection_unsupported": "This external agent does not support model selection.",

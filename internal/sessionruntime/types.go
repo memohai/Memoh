@@ -31,6 +31,13 @@ const (
 	RunOperationRetry = "retry"
 	RunOperationEdit  = "edit"
 
+	RuntimeErrorCodeUnavailable    = "session_runtime.unavailable"
+	RuntimeErrorCodeRunFailed      = "session_runtime.run_failed"
+	RuntimeErrorCodeInterrupted    = "session_runtime.interrupted"
+	RuntimeErrorCodeTargetInactive = "session_runtime.target_not_active"
+	RuntimeErrorCodeCommandBusy    = "session_runtime.command_busy"
+	RuntimeErrorCodeCommandFailed  = "session_runtime.command_failed"
+
 	CommandAbort                = "abort"
 	CommandSteer                = "steer_current_run"
 	CommandToolApprovalResponse = "tool_approval_response"
@@ -132,6 +139,7 @@ type CurrentRunView struct {
 	RequestUserTurn     *conversation.UITurn     `json:"request_user_turn,omitempty"`
 	HistoryCommitted    bool                     `json:"history_committed,omitempty"`
 	CanonicalReady      bool                     `json:"canonical_ready"`
+	ErrorCode           string                   `json:"error_code,omitempty"`
 	Error               string                   `json:"error,omitempty"`
 	Steer               *SteerState              `json:"steer,omitempty"`
 	Operation           *RunOperationView        `json:"operation,omitempty"`
@@ -171,6 +179,7 @@ type SteerState struct {
 	ID        string    `json:"id"`
 	Status    string    `json:"status"`
 	Text      string    `json:"text,omitempty"`
+	ErrorCode string    `json:"error_code,omitempty"`
 	Error     string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -203,6 +212,7 @@ type RuntimeDelta struct {
 type CurrentRunPatch struct {
 	StreamID            string      `json:"stream_id"`
 	Status              *string     `json:"status,omitempty"`
+	ErrorCode           *string     `json:"error_code,omitempty"`
 	Error               *string     `json:"error,omitempty"`
 	HistoryCommitted    *bool       `json:"history_committed,omitempty"`
 	CanonicalReady      *bool       `json:"canonical_ready,omitempty"`

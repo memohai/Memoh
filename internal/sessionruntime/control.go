@@ -135,7 +135,7 @@ func (m *Manager) stopAllLocalControls(ctx context.Context) error {
 	return stopErr
 }
 
-const runtimeOwnerShutdownError = "runtime owner shut down"
+const runtimeOwnerShutdownError = runtimeInterruptedMessage
 
 func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 	if m == nil || m.distributed == nil {

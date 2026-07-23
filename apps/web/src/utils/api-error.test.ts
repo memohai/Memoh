@@ -124,6 +124,19 @@ describe('resolveApiErrorMessage', () => {
     }, 'fallback')).toBe(expected)
   })
 
+  it.each([
+    ['en', 'The Agent run failed. Please try again.'],
+    ['zh', 'Agent 运行失败，请重试。'],
+    ['ja', 'Agent の実行に失敗しました。もう一度お試しください。'],
+  ])('localizes session runtime errors for %s instead of using the wire fallback', (language, expected) => {
+    locale = language
+
+    expect(resolveApiErrorMessage({
+      code: 'session_runtime.run_failed',
+      message: 'The agent run failed.',
+    }, 'fallback')).toBe(expected)
+  })
+
   it('keeps unknown codes as open strings and uses their safe fallback', () => {
     const error = {
       code: 'future.new_condition',

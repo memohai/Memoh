@@ -2797,6 +2797,7 @@ export type SessionSession = {
 export type SessionruntimeCurrentRunView = {
     canonical_ready?: boolean;
     error?: string;
+    error_code?: string;
     generation: string;
     history_committed?: boolean;
     messages?: Array<ConversationUiMessage>;
@@ -2834,6 +2835,7 @@ export type SessionruntimeSnapshot = {
 export type SessionruntimeSteerState = {
     created_at?: string;
     error?: string;
+    error_code?: string;
     id?: string;
     status?: string;
     text?: string;
@@ -8967,9 +8969,9 @@ export type GetBotsByBotIdSessionsBySessionIdRuntimeErrors = {
      */
     404: HandlersErrorResponse;
     /**
-     * Internal Server Error
+     * Service Unavailable
      */
-    500: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdRuntimeError = GetBotsByBotIdSessionsBySessionIdRuntimeErrors[keyof GetBotsByBotIdSessionsBySessionIdRuntimeErrors];

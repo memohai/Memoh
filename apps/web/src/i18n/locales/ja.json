@@ -120,6 +120,14 @@
       "template_bootstrap_failed": "Workspace ファイルを初期化できませんでした。Workspace を再構築してからもう一度お試しください。",
       "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
     },
+    "session_runtime": {
+      "unavailable": "セッションランタイムに接続できません。しばらくしてからもう一度お試しください。",
+      "run_failed": "Agent の実行に失敗しました。もう一度お試しください。",
+      "interrupted": "Agent の実行が中断されました。",
+      "target_not_active": "この Agent の実行はすでに終了しているか、利用できません。",
+      "command_busy": "別のランタイム操作を処理中です。しばらくしてからもう一度お試しください。",
+      "command_failed": "ランタイム操作を完了できませんでした。もう一度お試しください。"
+    },
     "acp": {
       "runtime_not_found": "この Agent ランタイムは利用できなくなりました。再起動します。",
       "model_selection_unsupported": "この外部Agentはモデルの切り替えに対応していません。",

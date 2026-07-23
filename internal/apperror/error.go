@@ -35,6 +35,12 @@ const (
 	CodeACPReasoningEffortRequired       Code = "acp.reasoning_effort_required"
 	CodeACPReasoningUnavailable          Code = "acp.reasoning_effort_unavailable"
 	CodeACPConfigUpdateFailed            Code = "acp.config_update_failed"
+	CodeSessionRuntimeUnavailable        Code = "session_runtime.unavailable"
+	CodeSessionRuntimeRunFailed          Code = "session_runtime.run_failed"
+	CodeSessionRuntimeInterrupted        Code = "session_runtime.interrupted"
+	CodeSessionRuntimeTargetNotActive    Code = "session_runtime.target_not_active"
+	CodeSessionRuntimeCommandBusy        Code = "session_runtime.command_busy"
+	CodeSessionRuntimeCommandFailed      Code = "session_runtime.command_failed"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -147,6 +153,30 @@ var catalog = map[Code]Definition{
 	CodeACPConfigUpdateFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The external agent could not apply the selected settings. Please retry.",
+	},
+	CodeSessionRuntimeUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The session runtime is temporarily unavailable.",
+	},
+	CodeSessionRuntimeRunFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The agent run failed.",
+	},
+	CodeSessionRuntimeInterrupted: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The agent run was interrupted.",
+	},
+	CodeSessionRuntimeTargetNotActive: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The agent run is no longer active.",
+	},
+	CodeSessionRuntimeCommandBusy: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Another runtime command is already being processed.",
+	},
+	CodeSessionRuntimeCommandFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The runtime command could not be completed.",
 	},
 }
 

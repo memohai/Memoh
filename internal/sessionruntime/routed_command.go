@@ -245,7 +245,7 @@ func (m *Manager) applyCommand(ctx context.Context, cmd Command) {
 	case CommandSteer:
 		commandCtx, cancel, err := m.activeCommandContext(ctx, cmd)
 		if err != nil {
-			_ = m.updateSteerStatus(context.WithoutCancel(ctx), runHandleForCommand(cmd), cmd.SteerID, SteerStatusRejected, steerNotAcknowledgedError)
+			_ = m.updateSteerStatus(context.WithoutCancel(ctx), runHandleForCommand(cmd), cmd.SteerID, SteerStatusRejected, RuntimeErrorCodeCommandFailed)
 			return
 		}
 		m.applySteerCommand(commandCtx, cmd)
@@ -399,7 +399,6 @@ func newCommandResult(request Command, err error) Command {
 	if err == nil {
 		return result
 	}
-	result.Error = err.Error()
 	switch {
 	case errors.Is(err, ErrCommandTargetNotActive):
 		result.ErrorCode = "target_not_active"
@@ -416,7 +415,40 @@ func newCommandResult(request Command, err error) Command {
 	default:
 		result.ErrorCode = "runtime_command_failed"
 	}
+	result.Error = commandResultPublicMessage(result.ErrorCode)
 	return result
+}
+
+func sanitizeCommandResult(result Command) Command {
+	if strings.TrimSpace(result.Type) != CommandResult {
+		return result
+	}
+	if strings.TrimSpace(result.ErrorCode) == "" && strings.TrimSpace(result.Error) == "" {
+		return result
+	}
+	result.ErrorCode = strings.TrimSpace(result.ErrorCode)
+	result.Error = commandResultPublicMessage(result.ErrorCode)
+	if result.Error == runtimeCommandFailedMessage {
+		result.ErrorCode = "runtime_command_failed"
+	}
+	return result
+}
+
+func commandResultPublicMessage(code string) string {
+	switch strings.TrimSpace(code) {
+	case "target_not_active":
+		return runtimeTargetInactiveMessage
+	case "command_expired", "context_canceled", "deadline_exceeded":
+		return runtimeUnavailableMessage
+	case "command_busy":
+		return runtimeCommandBusyMessage
+	case "payload_conflict":
+		return "The runtime command conflicts with an earlier request."
+	case "runtime_command_failed":
+		return runtimeCommandFailedMessage
+	default:
+		return runtimeCommandFailedMessage
+	}
 }
 
 func (m *Manager) persistCommandResult(ctx context.Context, request Command, err error) Command {
@@ -425,6 +457,7 @@ func (m *Manager) persistCommandResult(ctx context.Context, request Command, err
 	// successful domain transition is safe to reuse without re-evaluation;
 	// conflicting retries are still rejected by the stored success hash.
 	if err != nil {
+		m.logger.Warn("runtime command failed", slog.Any("error", err), slog.String("command_id", request.ID), slog.String("command_type", request.Type))
 		return result
 	}
 	if m == nil || m.distributed == nil || strings.TrimSpace(request.ID) == "" {
@@ -477,10 +510,11 @@ func (m *Manager) publishStoredCommandResult(ctx context.Context, request, resul
 		result = Command{
 			Type: CommandResult, ID: request.ID, BotID: request.BotID, SessionID: request.SessionID,
 			StreamID: request.StreamID, Generation: request.Generation, TargetID: request.TargetID,
-			PayloadHash: request.PayloadHash, ErrorCode: "payload_conflict", Error: ErrCommandPayloadConflict.Error(),
+			PayloadHash: request.PayloadHash, ErrorCode: "payload_conflict", Error: commandResultPublicMessage("payload_conflict"),
 			CreatedAt: time.Now().UTC(),
 		}
 	}
+	result = sanitizeCommandResult(result)
 	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.commandTimeout())
 	defer cancel()
 	if err := m.distributed.PublishCommand(publishCtx, request.ReplyOwnerID, result); err != nil {
