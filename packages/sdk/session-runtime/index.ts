@@ -233,6 +233,17 @@ function isRuntimeOperation(value: unknown): boolean {
     && (value.replacement_user_turn === undefined || isRuntimeTurn(value.replacement_user_turn))
 }
 
+function isResolvedDecision(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  const kind = trimmedString(value.kind)
+  const status = trimmedString(value.status).toLowerCase()
+  const id = trimmedString(value.id)
+  if (!kind || !id || !status) return false
+  if (kind === 'user_input') return status === 'submitted' || status === 'canceled'
+  if (kind === 'tool_approval') return status === 'approved' || status === 'rejected'
+  return false
+}
+
 function isCurrentRunView(value: unknown): boolean {
   if (!isRecord(value)) return false
   return typeof value.stream_id === 'string'
@@ -248,6 +259,7 @@ function isCurrentRunView(value: unknown): boolean {
     && (value.messages === undefined || (Array.isArray(value.messages) && value.messages.every(isRuntimeMessage)))
     && (value.operation === undefined || isRuntimeOperation(value.operation))
     && (value.request_user_turn === undefined || isRuntimeTurn(value.request_user_turn))
+    && (value.resolved_decision === undefined || isResolvedDecision(value.resolved_decision))
     && isRuntimeSteer(value.steer)
 }
 

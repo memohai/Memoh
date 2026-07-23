@@ -14,6 +14,7 @@ import {
   isOptimisticTurn,
   isSameLogicalTurn,
   mergeApprovalState,
+  mergeUserInputState,
   nextId,
   normalizeAttachment,
   normalizeForwardRef,
@@ -794,8 +795,12 @@ export function createTranscriptController({
   }
 
   // Tool updates are partial snapshots. Preserve fields that an earlier stream
-  // already filled, and never let a stale pending approval undo a local decision.
+  // already filled, and never let a stale pending decision undo a terminal one.
   function mergeToolCallBlock(existing: ToolCallBlock, incoming: ToolCallBlock) {
+    const userInput = mergeUserInputState(
+      existing.userInput ?? existing.user_input,
+      incoming.userInput ?? incoming.user_input,
+    )
     Object.assign(existing, incoming, {
       id: existing.id,
       name: incoming.name || existing.name,
@@ -805,8 +810,8 @@ export function createTranscriptController({
       output: incoming.output ?? existing.output,
       approval: mergeApprovalState(existing.approval, incoming.approval),
       execution_location: incoming.execution_location ?? existing.execution_location,
-      userInput: incoming.userInput ?? existing.userInput,
-      user_input: incoming.user_input ?? existing.user_input,
+      userInput,
+      user_input: userInput,
       backgroundTask: incoming.backgroundTask ?? existing.backgroundTask,
       background_task: incoming.background_task ?? existing.background_task,
       progress: incoming.progress ?? existing.progress,
@@ -914,8 +919,11 @@ export function createTranscriptController({
 
   function restoreUserInputStates(snapshots: UserInputStateSnapshot[]) {
     for (const snapshot of snapshots) {
-      if (snapshot.block.userInput?.user_input_id !== snapshot.userInput.user_input_id) continue
-      snapshot.block.userInput = cloneUserInputState(snapshot.userInput)
+      const current = snapshot.block.userInput ?? snapshot.block.user_input
+      if (current?.user_input_id !== snapshot.userInput.user_input_id) continue
+      const restored = cloneUserInputState(snapshot.userInput)
+      snapshot.block.userInput = restored
+      snapshot.block.user_input = restored
     }
   }
 
@@ -1054,22 +1062,33 @@ export function createTranscriptController({
 
   function markToolApprovalDecision(approvalId: string, status: 'approved' | 'rejected' | 'pending') {
     const id = approvalId.trim()
-    if (!id) return
+    if (!id) return false
+    let changed = false
     forEachToolBlock((block) => {
       if (block.approval?.approval_id === id) {
+        changed = block.approval.status !== status
+          || block.approval.can_approve !== (status === 'pending')
+          || changed
         block.approval = { ...block.approval, status, can_approve: status === 'pending' }
       }
     })
+    return changed
   }
 
   function markUserInputDecision(userInputId: string, status: 'submitted' | 'canceled') {
     const id = userInputId.trim()
-    if (!id) return
+    if (!id) return false
+    let changed = false
     forEachToolBlock((block) => {
-      if (block.userInput?.user_input_id === id) {
-        block.userInput = { ...block.userInput, status, can_respond: false }
+      const existing = block.userInput ?? block.user_input
+      if (existing?.user_input_id === id) {
+        changed = existing.status !== status || existing.can_respond !== false || changed
+        const userInput = { ...existing, status, can_respond: false }
+        block.userInput = userInput
+        block.user_input = userInput
       }
     })
+    return changed
   }
 
   function resetUserScope() {

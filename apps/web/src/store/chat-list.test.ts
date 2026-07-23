@@ -988,7 +988,7 @@ describe('chat-list store', () => {
     })
   })
 
-  it('allows responding to ACP approval while the original stream is still active', async () => {
+  it('optimistically closes an ACP approval and confirms it from the shared runtime', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
       {
@@ -1055,6 +1055,36 @@ describe('chat-list store', () => {
 
     const originalStreamId = sentWSMessages[0]?.stream_id as string
     streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: originalStreamId,
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([{
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'approved',
+            can_approve: false,
+          },
+        },
+      } as UIStreamEvent], 'session-1', originalStreamId, 'running', 1),
+    } as UIStreamEvent)
+    expect(updatedTool?.approval).toMatchObject({
+      approval_id: 'approval-pwd',
+      status: 'approved',
+      can_approve: false,
+    })
+
+    streamHandler?.({
       type: 'message',
       stream_id: originalStreamId,
       session_id: 'session-1',
@@ -1084,11 +1114,33 @@ describe('chat-list store', () => {
       can_approve: false,
     })
 
-    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: originalStreamId,
+      seq: 2,
+      snapshot: runtimeSnapshotFromScript([{
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'approved',
+            can_approve: false,
+          },
+        },
+      } as UIStreamEvent], 'session-1', originalStreamId, 'completed', 2),
+    } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
-  it('rolls the optimistic approval back to pending when the response stream errors', async () => {
+  it('keeps approval pending when the response command fails', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
       {
@@ -1149,10 +1201,7 @@ describe('chat-list store', () => {
     const approvalResponses = sentWSMessages.filter(message => message.type === 'tool_approval_response')
     expect(approvalResponses).toHaveLength(2)
     const retriedTool = assistant.messages.find(block => block.type === 'tool')
-    expect(retriedTool?.approval).toMatchObject({
-      status: 'approved',
-      can_approve: false,
-    })
+    expect(retriedTool?.approval).toMatchObject({ status: 'approved', can_approve: false })
 
     const originalStreamId = sentWSMessages[0]?.stream_id as string
     streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
@@ -1530,6 +1579,7 @@ describe('chat-list store', () => {
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
       session_id: 'session-1',
+      epoch: snapshot.epoch,
       stream_id: 'stream-approval-reconnect',
       seq: 10,
       snapshot,
@@ -1576,6 +1626,30 @@ describe('chat-list store', () => {
       invocation_id: responseStreamId,
       action_id: 'tool_approval_response',
       terminal: true,
+    } as UIStreamEvent)
+    expect(unresolved.approval.status).toBe('approved')
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: snapshot.epoch,
+      stream_id: 'stream-approval-reconnect',
+      seq: 11,
+      delta: {
+        message_upserts: [{
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          tool_call_id: 'call-approval-reconnect',
+          running: false,
+          approval: {
+            approval_id: 'approval-reconnect',
+            short_id: 9,
+            status: 'approved',
+            can_approve: false,
+          },
+        }],
+      },
     } as UIStreamEvent)
     expect(unresolved.approval.status).toBe('approved')
   })
@@ -2500,7 +2574,7 @@ describe('chat-list store', () => {
     expect(api.closeACPRuntime).toHaveBeenCalledWith('bot-1', 'rt_late')
   })
 
-  it('responds to user input over websocket and marks the block answered', async () => {
+  it('optimistically marks user input answered and confirms it from the shared runtime', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
@@ -2534,10 +2608,33 @@ describe('chat-list store', () => {
       expect(block.userInput?.status).toBe('submitted')
       expect(block.userInput?.can_respond).toBe(false)
     }
-    expect(await store.respondUserInput(singleSelectUserInput(), {
+    const responseStreamId = String(sentWSMessages.at(-1)?.stream_id ?? '')
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: responseStreamId,
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([{
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'ask_user',
+          tool_call_id: 'call-ask',
+          running: false,
+          user_input: { ...userInput, status: 'submitted', can_respond: false },
+        },
+      } as UIStreamEvent], 'session-1', responseStreamId, 'running', 1),
+    } as UIStreamEvent)
+    if (block?.type === 'tool') {
+      expect(block.userInput?.status).toBe('submitted')
+      expect(block.userInput?.can_respond).toBe(false)
+    }
+    expect(await store.respondUserInput(block?.type === 'tool' ? block.userInput! : userInput, {
       answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
-    })).toBe(true)
-    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(2)
+    })).toBe(false)
+    expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(1)
   })
 
   it('sends only one response when user input is submitted twice', async () => {
@@ -2631,10 +2728,10 @@ describe('chat-list store', () => {
     const refreshed = store.messages
       .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
       .find(block => block.type === 'tool'
-        && block.userInput?.user_input_id === 'input-1'
-        && block.userInput.status === 'submitted')
+        && block.userInput?.user_input_id === 'input-1')
     expect(refreshed?.type).toBe('tool')
     if (refreshed?.type !== 'tool' || !refreshed.userInput) throw new Error('uncertain user input was not replayed')
+    expect(refreshed.userInput).toMatchObject({ status: 'submitted', can_respond: false })
     expect(await store.respondUserInput(refreshed.userInput, {
       answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
     })).toBe(false)
@@ -2764,9 +2861,9 @@ describe('chat-list store', () => {
     const restored = store.messages
       .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
       .find(block => block.type === 'tool'
-        && block.userInput?.user_input_id === 'input-1'
-        && block.userInput.status === 'submitted')
-    if (restored?.type !== 'tool' || !restored.userInput) throw new Error('checkpoint did not replay pending user input')
+        && block.userInput?.user_input_id === 'input-1')
+    if (restored?.type !== 'tool' || !restored.userInput) throw new Error('checkpoint did not replay user input')
+    expect(restored.userInput).toMatchObject({ status: 'submitted', can_respond: false })
     expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toEqual([
       expect.objectContaining({
         type: 'user_input_response',
@@ -2845,9 +2942,9 @@ describe('chat-list store', () => {
     const restored = store.messages
       .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
       .find(block => block.type === 'tool'
-        && block.userInput?.user_input_id === 'input-1'
-        && block.userInput.status === 'submitted')
-    if (restored?.type !== 'tool' || !restored.userInput) throw new Error('pending user input was not replayed after current checkpoint')
+        && block.userInput?.user_input_id === 'input-1')
+    if (restored?.type !== 'tool' || !restored.userInput) throw new Error('user input was not replayed after current checkpoint')
+    expect(restored.userInput).toMatchObject({ status: 'submitted', can_respond: false })
     expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(2)
     expect(await store.respondUserInput(restored.userInput, {
       answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
@@ -2907,9 +3004,9 @@ describe('chat-list store', () => {
     const restored = store.messages
       .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
       .find(block => block.type === 'tool'
-        && block.userInput?.user_input_id === 'input-1'
-        && block.userInput.status === 'submitted')
-    if (restored?.type !== 'tool' || !restored.userInput) throw new Error('pending user input was not replayed after bot switch')
+        && block.userInput?.user_input_id === 'input-1')
+    if (restored?.type !== 'tool' || !restored.userInput) throw new Error('user input was not replayed after bot switch')
+    expect(restored.userInput).toMatchObject({ status: 'submitted', can_respond: false })
     expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toEqual([
       expect.objectContaining({ stream_id: responseStreamId, user_input_id: 'input-1' }),
       expect.objectContaining({ stream_id: responseStreamId, user_input_id: 'input-1' }),
@@ -2920,7 +3017,7 @@ describe('chat-list store', () => {
     expect(sentWSMessages.filter(message => message.type === 'user_input_response')).toHaveLength(2)
   })
 
-  it('cancels user input over websocket and marks the block canceled', async () => {
+  it('optimistically marks user input canceled and confirms it from the shared runtime', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ], nextCursor: null })
@@ -2950,6 +3047,29 @@ describe('chat-list store', () => {
       ? store.messages[0].messages[0]
       : null
     expect(block?.type).toBe('tool')
+    if (block?.type === 'tool') {
+      expect(block.userInput?.status).toBe('canceled')
+      expect(block.userInput?.can_respond).toBe(false)
+    }
+    const responseStreamId = String(sentWSMessages.at(-1)?.stream_id ?? '')
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      stream_id: responseStreamId,
+      seq: 1,
+      snapshot: runtimeSnapshotFromScript([{
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'ask_user',
+          tool_call_id: 'call-ask',
+          running: false,
+          user_input: { ...userInput, status: 'canceled', can_respond: false },
+        },
+      } as UIStreamEvent], 'session-1', responseStreamId, 'running', 1),
+    } as UIStreamEvent)
     if (block?.type === 'tool') {
       expect(block.userInput?.status).toBe('canceled')
       expect(block.userInput?.can_respond).toBe(false)
@@ -5171,29 +5291,45 @@ describe('chat-list store', () => {
       answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
     })
     const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    const continuationSnapshot = runtimeSnapshotFromScript(
+      [{
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'ask_user',
+          tool_call_id: 'call-ask',
+          running: false,
+          user_input: { ...userInput, status: 'submitted', can_respond: false },
+        },
+      }],
+      'fork-session',
+      responseStreamId,
+      'running',
+      1,
+    )
+    if (!continuationSnapshot.current_run_view) throw new Error('missing continuation run')
+    continuationSnapshot.current_run_view.resolved_decision = {
+      kind: 'user_input', id: userInput.user_input_id, status: 'submitted',
+    }
     streamHandler?.({
       type: 'runtime_snapshot',
       bot_id: 'bot-1',
       session_id: 'fork-session',
+      epoch: 'epoch-fork-session',
       stream_id: responseStreamId,
       seq: 1,
-      snapshot: runtimeSnapshotFromScript(
-        [{ type: 'message', data: { id: 2, type: 'text', content: 'continuation' } }],
-        'fork-session',
-        responseStreamId,
-        'running',
-        1,
-      ),
+      snapshot: continuationSnapshot,
     } as UIStreamEvent)
     streamHandler?.({
       type: 'runtime_delta',
       bot_id: 'bot-1',
       session_id: 'fork-session',
+      epoch: 'epoch-fork-session',
       stream_id: responseStreamId,
       seq: 2,
       delta: {
-        reset_messages: true,
-        message_appends: [{ id: 2, type: 'text', content: 'continuation' }],
+        message_upserts: [{ id: 2, type: 'text', content: 'continuation' }],
       },
     } as UIStreamEvent)
 
@@ -9006,6 +9142,9 @@ describe('chat-list store', () => {
     }
     const initial = runtimeStateSnapshot('stream-shared-ask', [pendingMessage], 'running', 10)
     for (const handler of handlers) handler(structuredClone(initial))
+    for (const store of [first, second]) {
+      store.messages.push(askUserTurn(structuredClone(userInput), 'call-persisted-shared-ask'))
+    }
 
     const activeBlock = first.messages
       .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
@@ -9020,6 +9159,15 @@ describe('chat-list store', () => {
     const invocationId = String(response?.stream_id ?? '')
     expect(invocationId).not.toBe('')
     expect(outbound[1]?.some(message => message.type === 'user_input_response')).toBe(false)
+    for (const [store, expectedStatus] of [[first, 'submitted'], [second, 'pending']] as const) {
+      const askBlocks = store.messages
+        .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+        .filter(block => block.type === 'tool' && block.userInput?.user_input_id === userInput.user_input_id)
+      expect(askBlocks).toHaveLength(2)
+      expect(askBlocks.every(block => block.type === 'tool'
+        && block.userInput?.status === expectedStatus
+        && block.userInput.can_respond === (expectedStatus === 'pending'))).toBe(true)
+    }
 
     const committedMessage: ConversationUiMessage = {
       ...pendingMessage,
@@ -9038,15 +9186,16 @@ describe('chat-list store', () => {
       handler(structuredClone(projection))
       handler(structuredClone(projection))
     }
-    const commandResult = {
-      type: 'command_result',
+    const lateCommandError = {
+      type: 'command_error',
       invocation_id: invocationId,
       session_id: 'session-1',
       action_id: 'user_input_response',
       terminal: true,
+      error: { code: 'runtime_response_failed', message: 'late response failure' },
     } as UIStreamEvent
-    handlers[0]?.(structuredClone(commandResult))
-    handlers[0]?.(structuredClone(commandResult))
+    handlers[0]?.(structuredClone(lateCommandError))
+    handlers[0]?.(structuredClone(lateCommandError))
     await flushPromises()
 
     for (const store of [first, second]) {
@@ -9054,15 +9203,389 @@ describe('chat-list store', () => {
       const askBlocks = assistantTurns.flatMap(turn => turn.messages).filter(block =>
         block.type === 'tool' && block.userInput?.user_input_id === userInput.user_input_id,
       )
-      expect(assistantTurns).toHaveLength(1)
-      expect(askBlocks).toHaveLength(1)
-      expect(askBlocks[0]?.type === 'tool' ? askBlocks[0].userInput : undefined).toMatchObject({
-        status: 'submitted',
-        can_respond: false,
-      })
+      expect(askBlocks).toHaveLength(2)
+      expect(askBlocks.every(block => block.type === 'tool'
+        && block.userInput?.status === 'submitted'
+        && block.userInput.can_respond === false)).toBe(true)
       expect(assistantTurns[0]?.messages.some(block => block.type === 'error')).toBe(false)
     }
     expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('closes passive ask-user UI and reuses the parent turn for a resolved-decision continuation run', async () => {
+    const handlers: UIStreamEventHandler[] = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      handlers.push(onStreamEvent)
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn(),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+
+    const first = useChatStore(createTestPinia())
+    const second = useChatStore(createTestPinia())
+    await first.selectBot('bot-1')
+    await second.selectBot('bot-1')
+    await flushPromises()
+
+    const userInput = singleSelectUserInput()
+    const pendingTurn = askUserTurn(structuredClone(userInput), 'call-continuation-ask')
+    for (const store of [first, second]) {
+      store.messages.push(structuredClone(pendingTurn))
+    }
+
+    const continuationStreamId = 'stream-ask-continuation'
+    const continuation = runtimeStateSnapshot(
+      continuationStreamId,
+      [{ id: 0, type: 'text', content: 'continuing after answer' }],
+      'running',
+      20,
+    )
+    if (continuation.type === 'runtime_snapshot' && continuation.snapshot.current_run_view) {
+      continuation.snapshot.current_run_view.resolved_decision = {
+        kind: 'user_input',
+        id: userInput.user_input_id!,
+        status: 'submitted',
+      }
+    }
+    for (const handler of handlers) handler(structuredClone(continuation))
+    await flushPromises()
+
+    for (const store of [second, first]) {
+      const assistantTurns = store.messages.filter(turn => turn.role === 'assistant')
+      expect(assistantTurns).toHaveLength(1)
+      expect(assistantTurns[0]).toMatchObject({
+        streaming: true,
+        messages: [
+          { type: 'tool', userInput: { user_input_id: 'input-1', status: 'submitted', can_respond: false } },
+          { type: 'text', content: 'continuing after answer' },
+        ],
+      })
+    }
+  })
+
+  it('projects silent tool-approval continuation messages onto the parent approval turn', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const approval: UIToolApproval = {
+      approval_id: 'approval-silent-stream',
+      short_id: 21,
+      status: 'pending',
+      can_approve: true,
+    }
+    store.messages.push(approvalTurn(structuredClone(approval)))
+    expect(await store.respondToolApproval(approval, 'approve')).toBe(true)
+    const responseStreamId = String(sentWSMessages.find(message => message.type === 'tool_approval_response')?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    streamHandler?.({
+      type: 'start',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'message',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      data: { id: 0, type: 'text', content: 'approved continuation' },
+    } as UIStreamEvent)
+    await flushPromises()
+
+    const assistantTurns = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistantTurns).toHaveLength(1)
+    expect(assistantTurns[0]).toMatchObject({
+      id: 'assistant-approval',
+      streaming: true,
+      messages: [
+        { type: 'tool', approval: { approval_id: 'approval-silent-stream', status: 'approved' } },
+        { type: 'text', content: 'approved continuation' },
+      ],
+    })
+    expect(store.messages.some(turn => turn.id === `runtime-${responseStreamId}`)).toBe(false)
+
+    streamHandler?.({
+      type: 'end',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+    } as UIStreamEvent)
+    await flushPromises()
+    expect(assistantTurns[0]?.streaming).toBe(false)
+  })
+
+  it('keeps runtime continuation appends after the approval block on the initiating client', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const approval: UIToolApproval = {
+      approval_id: 'approval-runtime-order',
+      short_id: 22,
+      status: 'pending',
+      can_approve: true,
+    }
+    const turn: ChatAssistantTurn = approvalTurn(structuredClone(approval))
+    turn.messages.unshift({ id: 0, type: 'text', content: 'before approval' })
+    store.messages.push(turn)
+
+    expect(await store.respondToolApproval(approval, 'approve')).toBe(true)
+    const responseStreamId = String(sentWSMessages.find(message => message.type === 'tool_approval_response')?.stream_id ?? '')
+    expect(responseStreamId).not.toBe('')
+
+    const checkpoint = runtimeSnapshotFromScript([], 'session-1', responseStreamId, 'running', 1)
+    if (!checkpoint.current_run_view) throw new Error('missing continuation run')
+    checkpoint.current_run_view.resolved_decision = {
+      kind: 'tool_approval',
+      id: approval.approval_id,
+      status: 'approved',
+    }
+    streamHandler?.({
+      type: 'runtime_snapshot',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: checkpoint.epoch,
+      stream_id: responseStreamId,
+      seq: 1,
+      snapshot: checkpoint,
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: checkpoint.epoch,
+      stream_id: responseStreamId,
+      seq: 2,
+      delta: {
+        message_appends: [{ id: 0, type: 'text', content: 'after approval' }],
+      },
+    } as UIStreamEvent)
+    await flushPromises()
+
+    expect(store.messages.filter(message => message.role === 'assistant')).toHaveLength(1)
+    expect(turn.messages).toMatchObject([
+      { type: 'text', content: 'before approval' },
+      { type: 'tool', approval: { approval_id: 'approval-runtime-order', status: 'approved' } },
+      { type: 'text', content: 'after approval' },
+    ])
+  })
+
+  it('optimistically closes approvals in the active store and immediately projects authoritative runtime state in passive stores', async () => {
+    const handlers: UIStreamEventHandler[] = []
+    const outbound: Array<Array<Record<string, unknown>>> = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      const messages: Array<Record<string, unknown>> = []
+      handlers.push(onStreamEvent)
+      outbound.push(messages)
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn((message: Record<string, unknown>) => messages.push(message)),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+
+    const first = useChatStore(createTestPinia())
+    const second = useChatStore(createTestPinia())
+    await first.selectBot('bot-1')
+    await second.selectBot('bot-1')
+    await flushPromises()
+
+    const approval: UIToolApproval = {
+      approval_id: 'approval-shared', short_id: 12, status: 'pending', can_approve: true,
+    }
+    const pendingMessage: ConversationUiMessage = {
+      id: 1,
+      type: 'tool',
+      name: 'exec',
+      input: { command: 'pwd' },
+      tool_call_id: 'call-shared-approval',
+      running: false,
+      approval,
+    }
+    const initial = runtimeStateSnapshot('stream-shared-approval', [pendingMessage], 'running', 10)
+    for (const handler of handlers) handler(structuredClone(initial))
+    for (const store of [first, second]) {
+      store.messages.push(approvalTurn(structuredClone(approval)))
+    }
+
+    const activeBlock = first.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.approval?.approval_id === approval.approval_id)
+    if (activeBlock?.type !== 'tool' || !activeBlock.approval) {
+      throw new Error('active approval block was not projected')
+    }
+    expect(await first.respondToolApproval(activeBlock.approval, 'approve')).toBe(true)
+    const invocationId = String(outbound[0]?.find(message => message.type === 'tool_approval_response')?.stream_id ?? '')
+    expect(invocationId).not.toBe('')
+    expect(outbound[1]?.some(message => message.type === 'tool_approval_response')).toBe(false)
+    for (const [store, expectedStatus] of [[first, 'approved'], [second, 'pending']] as const) {
+      const approvals = store.messages
+        .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+        .filter(block => block.type === 'tool' && block.approval?.approval_id === approval.approval_id)
+      expect(approvals).toHaveLength(2)
+      expect(approvals.every(block => block.type === 'tool'
+        && block.approval?.status === expectedStatus
+        && block.approval.can_approve === (expectedStatus === 'pending'))).toBe(true)
+    }
+
+    const committedMessage: ConversationUiMessage = {
+      ...pendingMessage,
+      approval: { ...approval, status: 'approved', can_approve: false },
+    }
+    const projection = {
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      stream_id: 'stream-shared-approval',
+      seq: 11,
+      delta: { message_upserts: [committedMessage] },
+    } as UIStreamEvent
+    for (const handler of handlers) handler(structuredClone(projection))
+    handlers[0]?.({
+      type: 'command_error',
+      invocation_id: invocationId,
+      session_id: 'session-1',
+      action_id: 'tool_approval_response',
+      terminal: true,
+      error: { code: 'runtime_response_failed', message: 'late approval failure' },
+    } as UIStreamEvent)
+
+    for (const store of [first, second]) {
+      const approvals = store.messages
+        .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+        .filter(block => block.type === 'tool' && block.approval?.approval_id === approval.approval_id)
+      expect(approvals.every(block => block.type === 'tool'
+        && block.approval?.status === 'approved'
+        && block.approval.can_approve === false)).toBe(true)
+    }
+    expect(toast.error).not.toHaveBeenCalled()
+
+    const continuation = {
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      stream_id: 'stream-shared-approval',
+      seq: 12,
+      delta: {
+        message_upserts: [{ id: 2, type: 'text', content: 'continued' }],
+      },
+    } as UIStreamEvent
+    for (const handler of handlers) handler(structuredClone(continuation))
+
+    for (const store of [first, second]) {
+      expect(store.messages.some(turn => turn.role === 'assistant'
+        && turn.messages.some(block => block.type === 'text' && block.content === 'continued'))).toBe(true)
+    }
+  })
+
+  it('idempotently applies an already-approved tool upsert', async () => {
+    const handlers: UIStreamEventHandler[] = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      handlers.push(onStreamEvent)
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn(),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    api.fetchSessions.mockResolvedValue({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValue([])
+
+    const store = useChatStore(createTestPinia())
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const approval: UIToolApproval = {
+      approval_id: 'approval-barrier', short_id: 8, status: 'pending', can_approve: true,
+    }
+    const pendingMessage: ConversationUiMessage = {
+      id: 1,
+      type: 'tool',
+      name: 'exec',
+      input: { command: 'pwd' },
+      tool_call_id: 'call-barrier-approval',
+      running: false,
+      approval,
+    }
+    handlers[0]?.(structuredClone(runtimeStateSnapshot('stream-barrier-approval', [pendingMessage], 'running', 10)))
+    await flushPromises()
+
+    const activeBlock = store.messages
+      .flatMap(turn => turn.role === 'assistant' ? turn.messages : [])
+      .find(block => block.type === 'tool' && block.approval?.approval_id === approval.approval_id)
+    if (activeBlock?.type !== 'tool' || !activeBlock.approval) {
+      throw new Error('active approval block was not projected')
+    }
+    expect(await store.respondToolApproval(activeBlock.approval, 'approve')).toBe(true)
+
+    const approvedMessage: ConversationUiMessage = {
+      ...pendingMessage,
+      running: true,
+      approval: { ...approval, status: 'approved', can_approve: false },
+    }
+    handlers[0]?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      stream_id: 'stream-barrier-approval',
+      seq: 11,
+      delta: { message_upserts: [approvedMessage] },
+    } as UIStreamEvent)
+    handlers[0]?.({
+      type: 'runtime_delta',
+      bot_id: 'bot-1',
+      session_id: 'session-1',
+      epoch: 'epoch-session-1',
+      stream_id: 'stream-barrier-approval',
+      seq: 12,
+      delta: {
+        message_upserts: [{ id: 2, type: 'text', content: 'after approve' }],
+      },
+    } as UIStreamEvent)
+    await flushPromises()
+
+    expect(store.messages.some(turn => turn.role === 'assistant'
+      && turn.messages.some(block => block.type === 'text' && block.content === 'after approve'))).toBe(true)
   })
 
   it('projects send admission immediately and idempotently in two passive stores', async () => {
@@ -10254,6 +10777,64 @@ describe('chat-list store', () => {
       role: 'assistant',
       streaming: true,
       messages: [{ type: 'text', content: 'early partial' }],
+    })
+  })
+
+  it('does not duplicate the persisted retry request after active history hydration', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockImplementation((_botId: string, targetSessionId: string) => Promise.resolve(
+      targetSessionId === 'session-a'
+        ? [
+            { id: 'user-old', role: 'user', text: 'old prompt', attachments: [], timestamp: '2026-07-14T00:00:00Z' },
+            { id: 'assistant-old', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'old answer' }], timestamp: '2026-07-14T00:00:01Z' },
+          ]
+        : [],
+    ))
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    const streamId = 'stream-active-retry-hydration'
+    const snapshot = runtimeReplacementSnapshot(
+      streamId,
+      { kind: 'retry', replace_from_message_id: 'assistant-old' },
+      [{ id: 0, type: 'text', content: 'replacement partial' }],
+      'running',
+      10,
+      'session-a',
+      false,
+      false,
+    )
+    if (snapshot.type !== 'runtime_snapshot' || !snapshot.snapshot.current_run_view) {
+      throw new Error('expected retry runtime snapshot')
+    }
+    snapshot.snapshot.current_run_view.request_user_turn = {
+      role: 'user',
+      text: 'old prompt',
+      attachments: [],
+      timestamp: '2026-07-14T00:00:02Z',
+      platform: 'local',
+      external_message_id: streamId,
+    }
+    streamHandler?.(snapshot)
+    expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+
+    await store.selectSession('session-b')
+    await store.selectSession('session-a')
+    await flushPromises()
+
+    expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+    expect(store.messages[0]).toMatchObject({ id: 'user-old', role: 'user', text: 'old prompt' })
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+      messages: [{ type: 'text', content: 'replacement partial' }],
     })
   })
 

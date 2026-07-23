@@ -194,6 +194,24 @@ export function cloneUserInputState(userInput: UIUserInput): UIUserInput {
   }
 }
 
+export function isPendingUserInput(userInput?: UIUserInput) {
+  return userInput?.status?.trim().toLowerCase() === 'pending'
+}
+
+export function isSameUserInput(left?: UIUserInput, right?: UIUserInput) {
+  const leftId = left?.user_input_id?.trim()
+  const rightId = right?.user_input_id?.trim()
+  return Boolean(leftId && rightId && leftId === rightId)
+}
+
+export function mergeUserInputState(existing?: UIUserInput, incoming?: UIUserInput) {
+  if (!incoming) return existing
+  if (isSameUserInput(existing, incoming) && !isPendingUserInput(existing) && isPendingUserInput(incoming)) {
+    return existing
+  }
+  return incoming
+}
+
 export function normalizeRequestedSkills(items?: RequestedSkillSelection[]): RequestedSkillSelection[] {
   if (!items?.length) return []
   const out: RequestedSkillSelection[] = []

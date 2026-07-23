@@ -469,7 +469,6 @@ export const useChatStore = defineStore('chat', () => {
   const finalizeStreamFailure = (...args: Parameters<ReturnType<typeof createTranscriptController>['finalizeStreamFailure']>) => transcriptForTurn(args[0])?.finalizeStreamFailure(...args)
   const assistantTurnForRuntimeError = (targetSessionId: string, identity: Parameters<ReturnType<typeof createTranscriptController>['assistantTurnForRuntimeError']>[1]) => sessionTranscript(currentBotId.value ?? '', targetSessionId).assistantTurnForRuntimeError(targetSessionId, identity)
   const hasTurn = (turn: ChatMessage) => chatViews.entries().some(view => view.transcript.hasTurn(turn))
-  const markToolApprovalDecision = (approvalId: string, status: 'approved' | 'rejected' | 'pending') => activeTranscript().markToolApprovalDecision(approvalId, status)
   const resetTranscriptUserScope = () => chatViews.resetAll()
   const runtimeAdmissionTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const runtimeAbortWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -503,6 +502,7 @@ export const useChatStore = defineStore('chat', () => {
     trackAssistantStream,
     getAssistantStream,
     mapAssistantStreamMessage,
+    mappedAssistantStreamMessageId,
     resolveAssistantStream,
     rejectAssistantStream,
     discardAssistantStream,
@@ -530,7 +530,7 @@ export const useChatStore = defineStore('chat', () => {
   const runtimeUserGenerations = new WeakMap<ChatUserTurn, string>()
   const runtimeOperationAdmissions = new Map<string, boolean>()
   const approvalResponses = createApprovalResponseTracker({
-    rollbackApproval: approvalId => markToolApprovalDecision(approvalId, 'pending'),
+    rollbackApproval: () => {},
     onExpired: handleExpiredApprovalResponse,
   })
   const {
@@ -1030,6 +1030,7 @@ export const useChatStore = defineStore('chat', () => {
     const pending = visibleSessionSummaryRequests.get(key)
     if (pending) return pending
     const generation = userScopeGeneration
+    const requestRef: { current?: Promise<SessionSummary | null> } = {}
     const request = (async () => {
       try {
         const fetched = await fetchSession(bid, sid)
@@ -1039,11 +1040,12 @@ export const useChatStore = defineStore('chat', () => {
       } catch {
         return null
       } finally {
-        if (visibleSessionSummaryRequests.get(key) === request) {
+        if (visibleSessionSummaryRequests.get(key) === requestRef.current) {
           visibleSessionSummaryRequests.delete(key)
         }
       }
     })()
+    requestRef.current = request
     visibleSessionSummaryRequests.set(key, request)
     return request
   }
@@ -1660,6 +1662,7 @@ export const useChatStore = defineStore('chat', () => {
     append = true,
     runtimeGeneration = '',
     requestUserTurn?: ConversationUiTurn,
+    decisionAnchor?: { userInputId?: string, approvalId?: string },
   ): PendingAssistantStream | null {
     const id = streamId.trim()
     const bid = botId.trim()
@@ -1669,8 +1672,12 @@ export const useChatStore = defineStore('chat', () => {
     if (existing) return existing
 
     const reusedGeneration = isReusedRuntimeGeneration(id, runtimeGeneration, bid, sid)
-    const approvalId = getApprovalResponse(id, bid, sid)?.approvalId ?? ''
-    const userInputId = userInputResponseStreams.get(sidebandResponseKey(bid, sid, id))?.[0]?.userInput.user_input_id ?? ''
+    const approvalId = (decisionAnchor?.approvalId ?? '').trim()
+      || getApprovalResponse(id, bid, sid)?.approvalId
+      || ''
+    const userInputId = (decisionAnchor?.userInputId ?? '').trim()
+      || userInputResponseStreams.get(sidebandResponseKey(bid, sid, id))?.[0]?.userInput.user_input_id
+      || ''
     const transcript = sessionTranscript(bid, sid)
     const reusableTurn = reusedGeneration
       ? null
@@ -1690,6 +1697,38 @@ export const useChatStore = defineStore('chat', () => {
       finalizeStreamFailure(assistantTurn, bid, sid, error, runtimeAssistantErrorIdentityFor(id, runtimeGeneration, bid, sid))
     })
     return getAssistantStream(id, bid, sid) ?? null
+  }
+
+  function runtimeDecisionAnchor(run: NonNullable<SessionruntimeSnapshot['current_run_view']>) {
+    const decision = run.resolved_decision
+    const kind = (decision?.kind ?? '').trim()
+    const id = (decision?.id ?? '').trim()
+    if (!kind || !id) return {}
+    if (kind === 'user_input') return { userInputId: id }
+    if (kind === 'tool_approval') return { approvalId: id }
+    return {}
+  }
+
+  function projectRuntimeResolvedDecision(
+    run: NonNullable<SessionruntimeSnapshot['current_run_view']>,
+    botId: string,
+    targetSessionId: string,
+  ) {
+    const decision = run.resolved_decision
+    const kind = (decision?.kind ?? '').trim()
+    const id = (decision?.id ?? '').trim()
+    const status = (decision?.status ?? '').trim().toLowerCase()
+    if (!kind || !id || !status) return false
+    const transcript = sessionTranscript(botId, targetSessionId)
+    let changed = false
+    if (kind === 'user_input' && (status === 'submitted' || status === 'canceled')) {
+      changed = transcript.markUserInputDecision(id, status) || changed
+    } else if (kind === 'tool_approval' && (status === 'approved' || status === 'rejected')) {
+      changed = transcript.markToolApprovalDecision(id, status) || changed
+    } else {
+      return false
+    }
+    return changed
   }
 
   function clearUserInputResponseStream(streamId: string, botId: string, targetSessionId: string) {
@@ -2133,6 +2172,11 @@ export const useChatStore = defineStore('chat', () => {
     const runtimeMessages = (run.messages ?? [])
       .map((message, index) => runtimeMessageToUIMessage(message, index))
       .filter((message): message is UIMessage => message !== null)
+    projectRuntimeResolvedDecision(run, bid, sid)
+    for (const message of runtimeMessages) {
+      projectRuntimeDecisionMessage(message, bid, sid)
+    }
+    const decisionAnchor = runtimeDecisionAnchor(run)
     const terminalFailure = isRuntimeTerminalStatus(status) && status !== 'completed'
     const terminalErrorMessage = terminalFailure
       ? runtimeStatusError(status, runtimeRunErrorMessage(run, status)).message
@@ -2187,7 +2231,7 @@ export const useChatStore = defineStore('chat', () => {
       preparedReplacement = prepareRuntimeReplacement(bid, sid, operation, streamId, runGeneration)
       if (!preparedReplacement && !canProjectCommittedReplacementWithoutTarget) {
         if (!stream && isRuntimeActiveStatus(status) && !isTerminalStream(streamId, runGeneration, bid, sid)) {
-          stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn)
+          stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn, decisionAnchor)
         }
         const key = acpRuntimeKey(bid, sid)
         if (allowHistoryReplay) {
@@ -2226,11 +2270,11 @@ export const useChatStore = defineStore('chat', () => {
           loading.value = isSessionStreaming(bid, sid)
           return
         }
-        stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn)
+        stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn, decisionAnchor)
       }
     }
     if (!stream && !isTerminalStream(streamId, runGeneration, bid, sid) && (isRuntimeActiveStatus(status) || runtimeMessages.length > 0 || terminalFailure || preparedReplacement)) {
-      stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn)
+      stream = ensureRuntimeStream(streamId, bid, sid, false, runGeneration, run.request_user_turn, decisionAnchor)
       if (stream) {
         markRuntimeStreamObserved(stream, run.generation ?? '')
         if (stream.runtimeGeneration) runtimeAssistantGenerations.set(stream.assistantTurn, stream.runtimeGeneration)
@@ -2259,14 +2303,15 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
       reattachRuntimeAssistantTurn(stream)
+      const projectedMessages = runtimeMessages.map(message => mapAssistantStreamMessage(streamId, message, bid, sid))
       if (authoritativeSnapshot) {
         stream.runtimeMessageIds = replaceAssistantUIMessageSnapshot(
           stream.assistantTurn,
-          runtimeMessages,
+          projectedMessages,
           stream.runtimeMessageIds,
         ) ?? new Set<number>()
       } else {
-        for (const message of runtimeMessages) {
+        for (const message of projectedMessages) {
           const messageId = upsertAssistantUIMessage(stream.assistantTurn, message)
           if (messageId !== undefined) stream.runtimeMessageIds.add(messageId)
         }
@@ -2492,7 +2537,10 @@ export const useChatStore = defineStore('chat', () => {
     if (!runtimeMessage) return
     if (!stream) return
 
-    const block = stream.assistantTurn.messages.find(message => message.id === append.id && message.type === append.type)
+    const mappedId = mappedAssistantStreamMessageId(stream.streamId, append.id, stream.botId, stream.sessionId)
+    const block = mappedId === undefined
+      ? undefined
+      : stream.assistantTurn.messages.find(message => message.id === mappedId && message.type === append.type)
     if (block && (block.type === 'text' || block.type === 'reasoning')) {
       stream.runtimeMessageIds.add(block.id)
       block.content += append.content
@@ -2503,7 +2551,8 @@ export const useChatStore = defineStore('chat', () => {
       ? { ...normalized, content: append.content }
       : normalized
     if (incremental) {
-      const messageId = upsertAssistantUIMessage(stream.assistantTurn, incremental)
+      const mapped = mapAssistantStreamMessage(stream.streamId, incremental, stream.botId, stream.sessionId)
+      const messageId = upsertAssistantUIMessage(stream.assistantTurn, mapped)
       if (messageId !== undefined) stream.runtimeMessageIds.add(messageId)
     }
   }
@@ -2520,7 +2569,10 @@ export const useChatStore = defineStore('chat', () => {
     if (!runtimeMessage) return
     if (!stream) return
 
-    const block = stream.assistantTurn.messages.find((message): message is ToolCallBlock => message.id === append.id && message.type === 'tool')
+    const mappedId = mappedAssistantStreamMessageId(stream.streamId, append.id, stream.botId, stream.sessionId)
+    const block = mappedId === undefined
+      ? undefined
+      : stream.assistantTurn.messages.find((message): message is ToolCallBlock => message.id === mappedId && message.type === 'tool')
     if (!block) {
       const incrementalMessage = {
         ...runtimeMessage,
@@ -2529,7 +2581,8 @@ export const useChatStore = defineStore('chat', () => {
       }
       const normalized = runtimeMessageToUIMessage(incrementalMessage, runtimeMessages.indexOf(runtimeMessage))
       if (normalized) {
-        const messageId = upsertAssistantUIMessage(stream.assistantTurn, normalized)
+        const mapped = mapAssistantStreamMessage(stream.streamId, normalized, stream.botId, stream.sessionId)
+        const messageId = upsertAssistantUIMessage(stream.assistantTurn, mapped)
         if (messageId !== undefined) stream.runtimeMessageIds.add(messageId)
       }
       return
@@ -2549,12 +2602,43 @@ export const useChatStore = defineStore('chat', () => {
     const runtimeMessages = run.messages ?? []
     const index = runtimeMessages.findIndex(message => message.id === incoming.id)
     const runtimeMessage = index >= 0 ? runtimeMessages[index]! : incoming
-    if (!stream) return
     const normalized = runtimeMessageToUIMessage(runtimeMessage, index >= 0 ? index : runtimeMessages.length - 1)
+    if (normalized) projectRuntimeDecisionMessage(normalized, snapshot.bot_id ?? '', snapshot.session_id ?? '')
+    if (!stream) return
     if (normalized) {
-      const messageId = upsertAssistantUIMessage(stream.assistantTurn, normalized)
+      const mapped = mapAssistantStreamMessage(stream.streamId, normalized, stream.botId, stream.sessionId)
+      const messageId = upsertAssistantUIMessage(stream.assistantTurn, mapped)
       if (messageId !== undefined) stream.runtimeMessageIds.add(messageId)
     }
+  }
+
+  function projectRuntimeDecisionMessage(message: UIMessage, botId: string, targetSessionId: string) {
+    if (message.type !== 'tool') return false
+    const transcript = sessionTranscript(botId, targetSessionId)
+    let changed = false
+    const approval = message.approval
+    const approvalStatus = approval?.status?.trim().toLowerCase()
+    if (approval?.approval_id && (approvalStatus === 'approved' || approvalStatus === 'rejected')) {
+      changed = transcript.markToolApprovalDecision(approval.approval_id, approvalStatus) || changed
+      const committedResponses = pendingApprovalResponsesForSession(botId, targetSessionId)
+        .filter(pending => pending.approvalId === approval.approval_id)
+      for (const pending of committedResponses) {
+        settleApprovalResponse(pending.streamId, 'succeeded', pending.botId, pending.sessionId)
+      }
+    }
+    const userInput = message.user_input
+    const userInputStatus = userInput?.status?.trim().toLowerCase()
+    if (userInput?.user_input_id && (userInputStatus === 'submitted' || userInputStatus === 'canceled')) {
+      changed = transcript.markUserInputDecision(userInput.user_input_id, userInputStatus) || changed
+      const committedResponses = [...pendingUserInputResponses.values()]
+        .filter(pending => pending.botId === botId
+          && pending.sessionId === targetSessionId
+          && pending.userInputId === userInput.user_input_id)
+      for (const pending of committedResponses) {
+        clearUserInputResponseStream(pending.streamId, pending.botId, pending.sessionId)
+      }
+    }
+    return changed
   }
 
   function applyRuntimeDelta(event: UIRuntimeDeltaEvent, botId: string, targetSessionId: string) {
@@ -2774,7 +2858,7 @@ export const useChatStore = defineStore('chat', () => {
           settleApprovalResponse(invocationId, 'failed', commandBotId, commandSessionId)
           const userInputState = userInputResponseStreams.get(sidebandResponseKey(commandBotId, commandSessionId, invocationId))
           if (userInputState) restoreUserInputStates(userInputState)
-          toast.error(event.error?.message || 'runtime response failed')
+          toast.error(resolveApiErrorMessage(event.error ?? event, event.error?.message || 'runtime response failed'))
         } else {
           settleApprovalResponse(invocationId, 'succeeded', commandBotId, commandSessionId)
         }
@@ -2833,13 +2917,78 @@ export const useChatStore = defineStore('chat', () => {
     const approvalResponse = getApprovalResponse(streamId, bid, sid)
     const userInputResponse = userInputResponseStreams.get(sidebandResponseKey(bid, sid, streamId))
     if (approvalResponse?.silent || userInputResponse) {
+      // Sideband responses reuse the parent decision turn. Do not open a fresh
+      // discuss bubble for bare start frames; only project continuation content
+      // once a reusable decision turn is available.
+      if (event.type === 'start') {
+        const pending = getAssistantStream(streamId, bid, sid)
+        if (pending) clearRuntimeAdmissionTimeout(streamId, pending.botId, pending.sessionId)
+        return
+      }
+      if (event.type === 'message') {
+        if (!event.data) return
+        const approvalId = (approvalResponse?.approvalId ?? '').trim()
+        const userInputId = (userInputResponse?.[0]?.userInput.user_input_id ?? '').trim()
+        const transcript = sessionTranscript(bid, sid)
+        const reusable = (approvalId ? transcript.assistantTurnForApproval(approvalId) : null)
+          ?? (userInputId ? transcript.assistantTurnForUserInput(userInputId) : null)
+        if (!reusable && !getAssistantStream(streamId, bid, sid)) return
+        const decisionStream = ensureRuntimeStream(
+          streamId,
+          bid,
+          sid,
+          true,
+          '',
+          undefined,
+          { approvalId, userInputId },
+        )
+        if (!decisionStream) return
+        if (event.data.type === 'tool' && event.data.running && isGuiToolName(event.data.name)) {
+          const toolCallId = event.data.tool_call_id?.trim() ?? ''
+          const dedupeKey = `${bid}:${sid}:${toolCallId || `${streamId}:${event.data.id}:${event.data.name}`}`
+          if (!seenGuiToolCalls.has(dedupeKey)) {
+            seenGuiToolCalls.add(dedupeKey)
+            guiToolUseRequested.value = {
+              botId: bid,
+              sessionId: sid,
+              toolCallId,
+              toolName: event.data.name,
+              seq: ++guiToolUseRequestSeq,
+            }
+          }
+        }
+        const messageId = upsertAssistantUIMessage(
+          decisionStream.assistantTurn,
+          mapAssistantStreamMessage(streamId, event.data, bid, sid),
+        )
+        if (messageId !== undefined) decisionStream.runtimeMessageIds.add(messageId)
+        decisionStream.assistantTurn.streaming = true
+        loading.value = isActiveSessionStreaming() || isSessionStreaming(bid, sid)
+        return
+      }
       if (event.type === 'end' || event.type === 'error') {
+        const pending = getAssistantStream(streamId, bid, sid)
         if (event.type === 'error') {
           settleApprovalResponse(streamId, 'failed', bid, sid)
           if (userInputResponse) restoreUserInputStates(userInputResponse)
           toast.error(resolveApiErrorMessage(event, event.message || 'runtime response failed'))
+          if (pending) {
+            // Silent sidebands may share the parent turn with an active run.
+            // Discard the response stream without marking that parent as failed.
+            pruneEmptyAssistantTurnIfPending(streamId, bid, sid)
+            discardAssistantStream(streamId, bid, sid)
+          }
         } else {
           settleApprovalResponse(streamId, 'succeeded', bid, sid)
+          if (pending) {
+            pruneEmptyAssistantTurnIfPending(streamId, bid, sid)
+            resolveAssistantStream(streamId, bid, sid)
+          }
+          if (sid && !isSessionStreaming(bid, sid)) {
+            void refreshCurrentSession(bid, sid, { afterCurrent: true }).catch(error =>
+              console.error('Failed to reconcile silent decision continuation:', error),
+            )
+          }
         }
         clearUserInputResponseStream(streamId, bid, sid)
         loading.value = isActiveSessionStreaming()
@@ -3407,23 +3556,42 @@ export const useChatStore = defineStore('chat', () => {
     // `loadingChats` (sessions-list boot) makes the sidebar spin.
     subscribeRuntime(bid, sid)
     reconcileRuntimeSubscriptions(bid)
+    let historyLoaded = false
     try {
       await loadInitialMessages(bid, sid)
+      historyLoaded = true
     } finally {
       const runtimeState = runtimeStateBySession.get(acpRuntimeKey(bid, sid))
       const runtimeRun = runtimeState?.snapshot?.current_run_view
+      const runtimeStatus = (runtimeRun?.status ?? '').trim().toLowerCase()
+      const replacementProjected = Boolean(historyLoaded && runtimeState?.snapshot && runtimeRun?.operation)
+      if (historyLoaded && runtimeState?.snapshot && runtimeRun?.operation) {
+        // History hydration replaces the transcript objects. Re-run the whole
+        // replacement projection so retry can rebind its persisted request
+        // before request_user_turn is applied; projecting only that user turn
+        // would insert a duplicate because its external id is the new stream.
+        projectRuntimeSnapshot(
+          runtimeState.snapshot,
+          bid,
+          sid,
+          runtimeState.seq,
+          true,
+          false,
+          isRuntimeTerminalStatus(runtimeStatus) && runtimeStatus !== 'completed',
+        )
+      }
       for (const stream of assistantStreamsForSession(bid, sid)) {
         const runtimeGeneration = (runtimeRun?.generation ?? '').trim()
         if (
           runtimeRun?.stream_id?.trim() === stream.streamId
           && (!stream.runtimeGeneration || !runtimeGeneration || stream.runtimeGeneration === runtimeGeneration)
         ) {
+          if (replacementProjected) continue
           applyRuntimeRequestUserTurn(stream, runtimeRun.request_user_turn)
         }
         reattachTurnToSession(bid, sid, stream.assistantTurn)
       }
-      const runtimeStatus = (runtimeRun?.status ?? '').trim().toLowerCase()
-      if (runtimeState?.snapshot && isRuntimeTerminalStatus(runtimeStatus) && runtimeStatus !== 'completed') {
+      if (!replacementProjected && runtimeState?.snapshot && isRuntimeTerminalStatus(runtimeStatus) && runtimeStatus !== 'completed') {
         projectRuntimeSnapshot(runtimeState.snapshot, bid, sid, runtimeState.seq, true, false, true)
       }
     }
@@ -3465,6 +3633,8 @@ export const useChatStore = defineStore('chat', () => {
     for (const response of responses) {
       streamIds.add(sidebandResponseKey(response.botId, response.sessionId, response.streamId))
       settleApprovalResponse(response.streamId, outcome, response.botId, response.sessionId)
+      pruneEmptyAssistantTurnIfPending(response.streamId, response.botId, response.sessionId)
+      discardAssistantStream(response.streamId, response.botId, response.sessionId)
     }
     return streamIds
   }
@@ -4789,8 +4959,6 @@ export const useChatStore = defineStore('chat', () => {
       shortId: approval.short_id,
       rollback: () => transcript.restoreToolApprovalStates(previousApprovalStates),
     })) return false
-    // Optimistically update the approved/rejected tool block before the
-    // server snapshot arrives so the buttons disappear immediately.
     transcript.markToolApprovalDecision(approvalId, decision === 'approve' ? 'approved' : 'rejected')
     try {
       if (!sendWebSocketMessage(bid, {
@@ -4845,8 +5013,7 @@ export const useChatStore = defineStore('chat', () => {
       replaySent: false,
       replayFailed: false,
     })
-    const status = payload.canceled ? 'canceled' : 'submitted'
-    transcript.markUserInputDecision(userInputId, status)
+    transcript.markUserInputDecision(userInputId, payload.canceled ? 'canceled' : 'submitted')
 
     try {
       if (!sendWebSocketMessage(bid, {
@@ -4860,7 +5027,7 @@ export const useChatStore = defineStore('chat', () => {
         reason: payload.reason,
       })) throw new Error('WebSocket is not connected')
     } catch (error) {
-      transcript.restoreUserInputStates(previousUserInputStates)
+      restoreUserInputStates(previousUserInputStates)
       clearUserInputResponseStream(streamId, bid, sid)
       refreshLoadingForSession(bid, sid)
       toast.error(resolveApiErrorMessage(error, 'Failed to send user input response.'))

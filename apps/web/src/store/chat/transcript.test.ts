@@ -66,6 +66,23 @@ function approvalMessage(status = 'pending'): UIMessage {
   }
 }
 
+function userInputMessage(status = 'pending'): UIMessage {
+  return {
+    id: 1,
+    type: 'tool',
+    name: 'ask_user',
+    input: {},
+    tool_call_id: 'call-input',
+    running: false,
+    user_input: {
+      user_input_id: 'input-1',
+      status,
+      can_respond: status === 'pending',
+      questions: [{ id: 'q1', text: 'Pick', kind: 'text' }],
+    },
+  }
+}
+
 describe('chat transcript controller', () => {
   it('is the single context gate for appending active-session turns', () => {
     const { transcript } = makeTranscript()
@@ -162,6 +179,19 @@ describe('chat transcript controller', () => {
 
     transcript.restoreToolApprovalStates(snapshots)
     expect(block.approval?.status).toBe('pending')
+  })
+
+  it('keeps a local user-input decision when a stale pending tool snapshot arrives', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([rawAssistant('assistant-1', [userInputMessage()])], 'session-1')
+    const turn = transcript.messages[0] as ChatAssistantTurn
+
+    transcript.markUserInputDecision('input-1', 'submitted')
+    transcript.upsertAssistantUIMessage(turn, userInputMessage('pending'))
+
+    const block = turn.messages[0] as ToolCallBlock
+    expect(block.userInput).toMatchObject({ status: 'submitted', can_respond: false })
+    expect(block.user_input).toMatchObject({ status: 'submitted', can_respond: false })
   })
 
   it('replaces an authoritative assistant snapshot without losing matching local tool state', () => {

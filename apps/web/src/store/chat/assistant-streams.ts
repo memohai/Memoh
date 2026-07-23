@@ -258,6 +258,15 @@ export function createAssistantStreamRegistry({
     return targetId === message.id ? message : { ...message, id: targetId }
   }
 
+  function mappedAssistantStreamMessageId(
+    streamId: string,
+    messageId: number,
+    botId?: string,
+    targetSessionId?: string,
+  ): number | undefined {
+    return findAssistantStream(streamId, botId, targetSessionId)?.messageIds.get(messageId)
+  }
+
   function finishAssistantStream(streamId: string, botId?: string, targetSessionId?: string): PendingAssistantStream | undefined {
     const stream = findAssistantStream(streamId, botId, targetSessionId)
     if (!stream) return undefined
@@ -397,6 +406,7 @@ export function createAssistantStreamRegistry({
     trackAssistantStream,
     getAssistantStream,
     mapAssistantStreamMessage,
+    mappedAssistantStreamMessageId,
     resolveAssistantStream,
     rejectAssistantStream,
     discardAssistantStream,

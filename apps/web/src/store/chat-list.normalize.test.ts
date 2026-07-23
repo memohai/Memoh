@@ -8,6 +8,7 @@ import {
   isOptimisticTurn,
   isSameLogicalTurn,
   mergeApprovalState,
+  mergeUserInputState,
   normalizeForwardRef,
   normalizeReplyRef,
   normalizeRequestedSkills,
@@ -163,6 +164,22 @@ describe('cloneUserInputState', () => {
     expect(clone).toEqual(input)
     expect(clone.questions?.[0]).not.toBe(input.questions[0])
     expect(clone.questions?.[0]?.options?.[0]).not.toBe(input.questions[0]!.options[0])
+  })
+})
+
+describe('mergeUserInputState', () => {
+  it('keeps a terminal state when the same request regresses to pending', () => {
+    const submitted = { user_input_id: 'input-1', status: 'submitted', can_respond: false }
+    const stale = { user_input_id: 'input-1', status: 'pending', can_respond: true }
+    expect(mergeUserInputState(submitted, stale)).toBe(submitted)
+  })
+
+  it('accepts a terminal update and does not merge different requests', () => {
+    const pending = { user_input_id: 'input-1', status: 'pending', can_respond: true }
+    const submitted = { user_input_id: 'input-1', status: 'submitted', can_respond: false }
+    const other = { user_input_id: 'input-2', status: 'pending', can_respond: true }
+    expect(mergeUserInputState(pending, submitted)).toBe(submitted)
+    expect(mergeUserInputState(submitted, other)).toBe(other)
   })
 })
 
