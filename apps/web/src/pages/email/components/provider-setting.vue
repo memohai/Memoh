@@ -365,6 +365,19 @@ const { mutateAsync: doDelete, isLoading: deleteLoading } = useMutation({
 })
 
 const handleSave = form.handleSubmit(async (values) => {
+  try {
+    const providerId = await persistProvider(values)
+    if (!providerId) return
+    toast.success(t('provider.saveChanges'))
+    if (isOAuthProvider.value) {
+      await fetchOAuthStatus(providerId)
+    }
+  } catch (e: unknown) {
+    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
+  }
+})
+
+async function persistProvider(values: { name: string }): Promise<string | null> {
   const missing = orderedFields.value.find((field) => {
     if (!field.required || !field.key) return false
     const value = configData[field.key]
@@ -373,18 +386,16 @@ const handleSave = form.handleSubmit(async (values) => {
   })
   if (missing) {
     toast.error(t('provider.requiredField', { field: fieldLabel(missing) }))
-    return
+    return null
   }
-  try {
-    await submitUpdate({ name: values.name, config: { ...configData } })
-    toast.success(t('provider.saveChanges'))
-    if (isOAuthProvider.value) {
-      await fetchOAuthStatus()
-    }
-  } catch (e: unknown) {
-    toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
-  }
-})
+
+  const provider = await submitUpdate({ name: values.name, config: { ...configData } })
+  const providerId = provider?.id ?? curProviderId.value
+  if (!providerId) throw new Error(t('common.saveFailed'))
+  return providerId
+}
+
+const persistProviderForOAuth = form.handleSubmit(values => persistProvider(values))
 
 async function handleDelete() {
   if (!curProviderId.value) return
@@ -400,27 +411,36 @@ const authorizeLoading = ref(false)
 const hasOAuthToken = computed(() => Boolean(oauthStatus.value?.has_token))
 const oauthTokenExpired = computed(() => Boolean(oauthStatus.value?.has_token && oauthStatus.value?.expired))
 const canAuthorize = computed(() => {
-  if (!isOAuthProvider.value || !curProviderId.value) return false
+  if (!isOAuthProvider.value) return false
   if (oauthStatusLoading.value) return false
   if (oauthStatus.value && !oauthStatus.value.configured) return false
   return true
 })
 
 async function handleAuthorize() {
-  if (!curProviderId.value) return
+  const popup = window.open('', 'email-oauth', 'width=600,height=720')
+  if (!popup) {
+    toast.error(t('email.oauth.authorizeFailed'))
+    return
+  }
+
   authorizeLoading.value = true
   try {
+    const providerId = await persistProviderForOAuth()
+    if (!providerId) {
+      popup.close()
+      return
+    }
+
     const { data, error } = await getEmailProvidersByIdOauthAuthorize({
-      path: { id: curProviderId.value },
+      path: { id: providerId },
     })
     if (error || !data?.auth_url) {
       throw new Error(t('email.oauth.authorizeFailed'))
     }
 
-    const popup = window.open(data.auth_url, 'email-oauth', 'width=600,height=720')
-    if (!popup) {
-      throw new Error(t('email.oauth.authorizeFailed'))
-    }
+    popup.location.href = data.auth_url
+    popup.focus()
 
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => {
@@ -429,12 +449,12 @@ async function handleAuthorize() {
 
       const onMessage = async (event: MessageEvent) => {
         if (event.data?.type !== 'memoh-email-oauth-callback') return
-        if (event.data?.providerId && event.data.providerId !== curProviderId.value) return
+        if (event.data?.providerId && event.data.providerId !== providerId) return
 
         cleanup()
 
         if (event.data?.status === 'success') {
-          await fetchOAuthStatus()
+          await fetchOAuthStatus(providerId)
           toast.success(t('email.oauth.authorizeOpened'))
           resolve()
           return
@@ -446,21 +466,22 @@ async function handleAuthorize() {
       window.addEventListener('message', onMessage)
     })
   } catch (e: unknown) {
+    popup.close()
     toast.error(e instanceof Error ? e.message : t('email.oauth.authorizeFailed'))
   } finally {
     authorizeLoading.value = false
   }
 }
 
-async function fetchOAuthStatus() {
-  if (!isOAuthProvider.value || !curProviderId.value) {
+async function fetchOAuthStatus(providerId = curProviderId.value) {
+  if (!isOAuthProvider.value || !providerId) {
     oauthStatus.value = null
     return
   }
   oauthStatusLoading.value = true
   try {
     const { data, error } = await getEmailProvidersByIdOauthStatus({
-      path: { id: curProviderId.value },
+      path: { id: providerId },
     })
     if (error) {
       throw error

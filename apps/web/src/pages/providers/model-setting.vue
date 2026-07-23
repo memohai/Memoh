@@ -51,6 +51,7 @@
       <ProviderForm
         :provider="curProvider"
         :edit-loading="editLoading"
+        :ensure-provider="ensureOAuthProvider"
         @submit="changeProvider"
       />
 
@@ -167,7 +168,11 @@ const { mutate: changeProvider, isLoading: editLoading } = useMutation({
   },
 })
 
-async function materializeProvider(data: Record<string, unknown>, enable: boolean) {
+async function materializeProvider(
+  data: Record<string, unknown>,
+  enable: boolean,
+  importModels = true,
+) {
   if (curProvider.value?.id) return curProvider.value
   if (materializePromise) return materializePromise
 
@@ -200,13 +205,15 @@ async function materializeProvider(data: Record<string, unknown>, enable: boolea
     curProvider.value = result
     emit('materialized', result)
 
-    try {
-      await postProvidersByIdImportModels({
-        path: { id: created.id },
-        throwOnError: true,
-      })
-    } catch {
-      toast.error(t('models.importFailed'))
+    if (importModels) {
+      try {
+        await postProvidersByIdImportModels({
+          path: { id: created.id },
+          throwOnError: true,
+        })
+      } catch {
+        toast.error(t('models.importFailed'))
+      }
     }
 
     invalidateProviderQueries()
@@ -219,6 +226,18 @@ async function materializeProvider(data: Record<string, unknown>, enable: boolea
   } finally {
     materializePromise = null
   }
+}
+
+async function ensureOAuthProvider(): Promise<ProvidersGetResponse> {
+  const provider = curProvider.value
+  if (!provider) throw new Error('provider is missing')
+  if (provider.id) return provider
+
+  return materializeProvider({
+    name: provider.name,
+    config: provider.config ?? {},
+    metadata: provider.metadata ?? {},
+  }, provider.enable !== false, false)
 }
 
 async function handleToggleEnable(value: boolean) {
