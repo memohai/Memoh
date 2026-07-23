@@ -11,7 +11,7 @@ import (
 
 func TestBuiltinProviderNilService(t *testing.T) {
 	t.Parallel()
-	p := NewBuiltinProvider(slog.Default(), nil, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), nil)
 	if p.Type() != BuiltinType {
 		t.Fatalf("expected type %q, got %q", BuiltinType, p.Type())
 	}
@@ -32,7 +32,7 @@ func TestBuiltinProviderFileRuntimeDoesNotAdvertiseSemanticCompact(t *testing.T)
 	t.Parallel()
 	store := newFakeStore()
 	runtime := newFileRuntime(store)
-	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), runtime)
 
 	withoutLLM := p.SemanticCompactCapability()
 	if withoutLLM.Semantic {
@@ -54,7 +54,7 @@ func TestBuiltinProviderFileRuntimeDoesNotAdvertiseSemanticCompact(t *testing.T)
 
 func TestBuiltinProviderSemanticCompactCapabilityWithGraphRuntime(t *testing.T) {
 	t.Parallel()
-	provider := NewBuiltinProvider(slog.Default(), NewGraphRuntime(nil, newFakeWikiStore(), newFakeStore()), nil, nil)
+	provider := NewBuiltinProvider(slog.Default(), NewGraphRuntime(nil, newFakeWikiStore(), newFakeStore()))
 	provider.SetLLM(&fakeLLM{})
 
 	capability := provider.SemanticCompactCapability()
@@ -73,7 +73,7 @@ func TestBuiltinProviderOnBeforeChatEmptyQuery(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
 	runtime := newFileRuntime(store)
-	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), runtime)
 
 	result, err := p.OnBeforeChat(context.Background(), adapters.BeforeChatRequest{
 		BotID: "bot-1",
@@ -91,7 +91,7 @@ func TestBuiltinProviderContextPackingProducesMemoryContextTags(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
 	runtime := newFileRuntime(store)
-	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), runtime)
 
 	_ = p.OnAfterChat(context.Background(), adapters.AfterChatRequest{
 		BotID:    "bot-1",
@@ -123,7 +123,7 @@ func TestBuiltinProviderContextPackingProducesMemoryContextTags(t *testing.T) {
 
 func TestBuiltinProviderApplyProviderConfig(t *testing.T) {
 	t.Parallel()
-	p := NewBuiltinProvider(slog.Default(), nil, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), nil)
 
 	p.ApplyProviderConfig(map[string]any{
 		"context_target_items":    float64(10),
@@ -143,7 +143,7 @@ func TestBuiltinProviderApplyProviderConfig(t *testing.T) {
 
 func TestBuiltinProviderApplyProviderConfigNil(t *testing.T) {
 	t.Parallel()
-	p := NewBuiltinProvider(slog.Default(), nil, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), nil)
 	p.ApplyProviderConfig(nil)
 	if p.packer.TargetItems != defaultPackerConfig.TargetItems {
 		t.Fatalf("expected default TargetItems, got %d", p.packer.TargetItems)
@@ -157,7 +157,7 @@ func TestBuiltinProviderCompactUsesLLMResults(t *testing.T) {
 	llm := &fakeLLM{
 		compactFacts: []string{"Ran likes tea, especially black tea and oolong."},
 	}
-	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	provider := NewBuiltinProvider(slog.Default(), runtime)
 	provider.SetLLM(llm)
 	ctx := context.Background()
 	for _, memory := range []string{"Ran likes black tea", "Ran likes oolong tea"} {
@@ -205,7 +205,7 @@ func TestBuiltinProviderCompactUsesLLMResults(t *testing.T) {
 func TestBuiltinProviderCompactRequiresSemanticCompactCapability(t *testing.T) {
 	t.Parallel()
 	runtime := newFileRuntime(newFakeStore())
-	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	provider := NewBuiltinProvider(slog.Default(), runtime)
 
 	if _, err := provider.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 0); err == nil {
 		t.Fatal("expected file runtime compact to fail instead of truncating memories")
@@ -239,7 +239,7 @@ func TestIntFromConfig(t *testing.T) {
 
 func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 	t.Parallel()
-	p := NewBuiltinProvider(slog.Default(), nil, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), nil)
 	if _, err := p.Add(context.Background(), adapters.AddRequest{}); err == nil {
 		t.Fatal("expected Add error")
 	}

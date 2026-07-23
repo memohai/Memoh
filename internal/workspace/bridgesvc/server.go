@@ -585,7 +585,7 @@ func filterUnsetEnv(env []string, unset []string) []string {
 	if len(env) == 0 || len(unset) == 0 {
 		return env
 	}
-	// Keep wildcard semantics aligned with acpclient.envNameBlocked. This side
+	// Keep wildcard semantics aligned with agent/runtime/acp/client.envNameBlocked. This side
 	// filters inherited bridge process env before launching the workspace command.
 	blocked := make(map[string]struct{}, len(unset))
 	prefixes := make([]string, 0)

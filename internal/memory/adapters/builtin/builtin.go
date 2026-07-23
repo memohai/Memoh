@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/mcp"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 )
@@ -23,12 +22,10 @@ const (
 
 // BuiltinProvider wraps the existing Service as a Provider.
 type BuiltinProvider struct {
-	service      Runtime
-	llm          adapters.LLM
-	chatAccessor conversation.Accessor
-	adminChecker AdminChecker
-	logger       *slog.Logger
-	packer       contextPackerConfig
+	service Runtime
+	llm     adapters.LLM
+	logger  *slog.Logger
+	packer  contextPackerConfig
 }
 
 // Runtime is the runtime memory backend required by the builtin provider.
@@ -53,22 +50,15 @@ type llmCompactRuntime interface {
 	CompactWithLLM(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm adapters.LLM) (adapters.CompactResult, error)
 }
 
-// AdminChecker checks whether a channel identity has admin privileges.
-type AdminChecker interface {
-	IsAdmin(ctx context.Context, channelIdentityID string) (bool, error)
-}
-
-func NewBuiltinProvider(log *slog.Logger, service Runtime, chatAccessor conversation.Accessor, adminChecker AdminChecker) *BuiltinProvider {
+func NewBuiltinProvider(log *slog.Logger, service Runtime) *BuiltinProvider {
 	if log == nil {
 		log = slog.Default()
 	}
 	logger := log.With(slog.String("provider", BuiltinType))
 	return &BuiltinProvider{
-		service:      service,
-		chatAccessor: chatAccessor,
-		adminChecker: adminChecker,
-		logger:       logger,
-		packer:       defaultPackerConfig,
+		service: service,
+		logger:  logger,
+		packer:  defaultPackerConfig,
 	}
 }
 
@@ -344,11 +334,6 @@ func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionC
 	if botID == "" {
 		return mcp.BuildToolErrorResult("bot_id is required"), nil
 	}
-	chatID := strings.TrimSpace(session.ChatID)
-	if chatID == "" {
-		chatID = botID
-	}
-
 	limit := defaultMemoryToolLimit
 	if value, ok, err := mcp.IntArg(arguments, "limit"); err != nil {
 		return mcp.BuildToolErrorResult(err.Error()), nil
@@ -360,29 +345,6 @@ func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionC
 	}
 	if limit > maxMemoryToolLimit {
 		limit = maxMemoryToolLimit
-	}
-
-	if chatID != botID {
-		if p.chatAccessor == nil {
-			return mcp.BuildToolErrorResult("chat service not available"), nil
-		}
-		chatObj, err := p.chatAccessor.Get(ctx, chatID)
-		if err != nil {
-			return mcp.BuildToolErrorResult("chat not found"), nil
-		}
-		if strings.TrimSpace(chatObj.BotID) != botID {
-			return mcp.BuildToolErrorResult("bot mismatch"), nil
-		}
-		channelIdentityID := strings.TrimSpace(session.ChannelIdentityID)
-		if channelIdentityID != "" {
-			allowed, err := p.canAccessChat(ctx, chatID, channelIdentityID)
-			if err != nil {
-				return mcp.BuildToolErrorResult(err.Error()), nil
-			}
-			if !allowed {
-				return mcp.BuildToolErrorResult("not a chat participant"), nil
-			}
-		}
 	}
 
 	resp, err := p.service.Search(ctx, adapters.SearchRequest{
@@ -422,22 +384,6 @@ func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionC
 		"total":   len(results),
 		"results": results,
 	}), nil
-}
-
-func (p *BuiltinProvider) canAccessChat(ctx context.Context, chatID, channelIdentityID string) (bool, error) {
-	if p.adminChecker != nil {
-		isAdmin, err := p.adminChecker.IsAdmin(ctx, channelIdentityID)
-		if err != nil {
-			return false, err
-		}
-		if isAdmin {
-			return true, nil
-		}
-	}
-	if p.chatAccessor == nil {
-		return false, errors.New("chat service not available")
-	}
-	return p.chatAccessor.IsParticipant(ctx, chatID, channelIdentityID)
 }
 
 // --- CRUD ---

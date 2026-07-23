@@ -3,18 +3,16 @@ package turn
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/memohai/memoh/internal/conversation"
 )
 
 func TestExtractAssistantOutputsSkipsAssistantToolCallMessages(t *testing.T) {
-	outputs := ExtractAssistantOutputs([]conversation.ModelMessage{
+	outputs := ExtractAssistantOutputs([]ModelMessage{
 		{
 			Role:    "assistant",
-			Content: conversation.NewTextContent("I will inspect the file first."),
-			ToolCalls: []conversation.ToolCall{{
+			Content: NewTextContent("I will inspect the file first."),
+			ToolCalls: []ToolCall{{
 				Type: "function",
-				Function: conversation.ToolCallFunction{
+				Function: ToolCallFunction{
 					Name:      "read_file",
 					Arguments: `{"path":"/tmp/a.txt"}`,
 				},
@@ -22,7 +20,7 @@ func TestExtractAssistantOutputsSkipsAssistantToolCallMessages(t *testing.T) {
 		},
 		{
 			Role:    "assistant",
-			Content: conversation.NewTextContent("Done. Here is the final answer."),
+			Content: NewTextContent("Done. Here is the final answer."),
 		},
 	})
 
@@ -35,7 +33,7 @@ func TestExtractAssistantOutputsSkipsAssistantToolCallMessages(t *testing.T) {
 }
 
 func TestExtractAssistantOutputsExcludesReasoningParts(t *testing.T) {
-	content, err := json.Marshal([]conversation.ContentPart{
+	content, err := json.Marshal([]ContentPart{
 		{Type: "reasoning", Text: "I should inspect the file first."},
 		{Type: "text", Text: "Here is the file summary."},
 	})
@@ -43,7 +41,7 @@ func TestExtractAssistantOutputsExcludesReasoningParts(t *testing.T) {
 		t.Fatalf("marshal content: %v", err)
 	}
 
-	outputs := ExtractAssistantOutputs([]conversation.ModelMessage{{
+	outputs := ExtractAssistantOutputs([]ModelMessage{{
 		Role:    "assistant",
 		Content: content,
 	}})
@@ -68,7 +66,7 @@ func TestExtractAssistantOutputsSkipsReasoningOnlyStructuredMessage(t *testing.T
 		t.Fatalf("marshal content: %v", err)
 	}
 
-	outputs := ExtractAssistantOutputs([]conversation.ModelMessage{{
+	outputs := ExtractAssistantOutputs([]ModelMessage{{
 		Role:    "assistant",
 		Content: content,
 	}})
@@ -87,7 +85,7 @@ func TestExtractAssistantOutputsSkipsStructuredToolCallMessageWithVisibleText(t 
 		t.Fatalf("marshal content: %v", err)
 	}
 
-	outputs := ExtractAssistantOutputs([]conversation.ModelMessage{{
+	outputs := ExtractAssistantOutputs([]ModelMessage{{
 		Role:    "assistant",
 		Content: content,
 	}})

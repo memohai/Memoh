@@ -336,7 +336,7 @@ func TestOnAfterChatWithLLM(t *testing.T) {
 		},
 	}
 
-	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), runtime)
 	p.SetLLM(llm)
 
 	err := p.OnAfterChat(context.Background(), adapters.AfterChatRequest{
@@ -364,7 +364,7 @@ func TestOnAfterChatFallbackWithoutLLM(t *testing.T) {
 	store := newFakeStore()
 	runtime := newFileRuntime(store)
 
-	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), runtime)
 
 	err := p.OnAfterChat(context.Background(), adapters.AfterChatRequest{
 		BotID: "bot-1",
@@ -391,7 +391,7 @@ func TestOnBeforeChatRecallsFactMemory(t *testing.T) {
 		},
 	}
 
-	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p := NewBuiltinProvider(slog.Default(), runtime)
 	p.SetLLM(llm)
 
 	_ = p.OnAfterChat(context.Background(), adapters.AfterChatRequest{

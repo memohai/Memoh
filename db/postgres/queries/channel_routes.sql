@@ -14,7 +14,6 @@ VALUES (
 )
 RETURNING
   id,
-  sqlc.arg(chat_id)::uuid AS chat_id,
   bot_id,
   channel_type AS platform,
   channel_config_id,
@@ -30,7 +29,6 @@ RETURNING
 -- name: FindChatRoute :one
 SELECT
   id,
-  bot_id AS chat_id,
   bot_id,
   channel_type AS platform,
   channel_config_id,
@@ -53,7 +51,6 @@ LIMIT 1;
 -- name: GetChatRouteByID :one
 SELECT
   id,
-  bot_id AS chat_id,
   bot_id,
   channel_type AS platform,
   channel_config_id,
@@ -71,7 +68,6 @@ WHERE team_id = public.memoh_current_team_id() AND id = $1;
 -- name: ListChatRoutes :many
 SELECT
   id,
-  bot_id AS chat_id,
   bot_id,
   channel_type AS platform,
   channel_config_id,
@@ -84,7 +80,7 @@ SELECT
   created_at,
   updated_at
 FROM bot_channel_routes
-WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(chat_id)
+WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id)
 ORDER BY created_at ASC;
 
 -- name: UpdateChatRouteReplyTarget :exec

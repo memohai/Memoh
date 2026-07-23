@@ -8,8 +8,8 @@ import (
 	"unicode"
 
 	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/agent/context/compaction"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/compaction"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/heartbeat"

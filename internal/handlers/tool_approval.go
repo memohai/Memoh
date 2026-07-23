@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,33 +11,33 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
+	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/conversation/flow"
-	"github.com/memohai/memoh/internal/toolapproval"
 )
 
 type ToolApprovalHandler struct {
 	logger         *slog.Logger
 	botService     *bots.Service
 	accountService *accounts.Service
-	resolver       toolApprovalResponder
+	turnService    toolApprovalResponder
 }
 
 type toolApprovalResponder interface {
-	RespondToolApproval(ctx context.Context, input flow.ToolApprovalResponseInput, eventCh chan<- flow.WSStreamEvent) error
+	RespondToolApproval(ctx context.Context, input turn.ToolApprovalResponse, eventCh chan<- json.RawMessage) error
 }
 
 type ToolApprovalDecisionRequest struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-func NewToolApprovalHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *ToolApprovalHandler {
+func NewToolApprovalHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, turnService turn.Service) *ToolApprovalHandler {
 	return &ToolApprovalHandler{
 		logger:         log.With(slog.String("handler", "tool_approval")),
 		botService:     botService,
 		accountService: accountService,
-		resolver:       resolver,
+		turnService:    turnService,
 	}
 }
 
@@ -88,7 +89,7 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 	}
 	var req ToolApprovalDecisionRequest
 	_ = c.Bind(&req)
-	if err := h.resolver.RespondToolApproval(context.WithoutCancel(c.Request().Context()), flow.ToolApprovalResponseInput{
+	if err := h.turnService.RespondToolApproval(context.WithoutCancel(c.Request().Context()), turn.ToolApprovalResponse{
 		BotID:                  botID,
 		ActorChannelIdentityID: actorUserID,
 		ActorUserID:            actorUserID,

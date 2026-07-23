@@ -6,15 +6,15 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/agent/turn"
 )
 
 func TestModelMessageToSDKMessageText(t *testing.T) {
 	t.Parallel()
 
-	got := ModelMessageToSDKMessage(conversation.ModelMessage{
+	got := ModelMessageToSDKMessage(turn.ModelMessage{
 		Role:    "user",
-		Content: conversation.NewTextContent("hello"),
+		Content: turn.NewTextContent("hello"),
 	})
 
 	assertSameJSON(t, got, sdk.UserMessage("hello"))
@@ -23,7 +23,7 @@ func TestModelMessageToSDKMessageText(t *testing.T) {
 func TestModelMessageToSDKMessageStructuredParts(t *testing.T) {
 	t.Parallel()
 
-	got := ModelMessageToSDKMessage(conversation.ModelMessage{
+	got := ModelMessageToSDKMessage(turn.ModelMessage{
 		Role: "assistant",
 		Content: mustJSON(t, []map[string]any{
 			{"type": "text", "text": "checking"},
@@ -68,7 +68,7 @@ func TestSDKMessagesToModelMessagesPreservesUsage(t *testing.T) {
 func TestModelMessageToSDKMessageInvalidLegacyContentKeepsRole(t *testing.T) {
 	t.Parallel()
 
-	got := ModelMessageToSDKMessage(conversation.ModelMessage{
+	got := ModelMessageToSDKMessage(turn.ModelMessage{
 		Role:    "tool",
 		Content: json.RawMessage(`{"not":"a valid sdk content shape"}`),
 	})

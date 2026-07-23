@@ -21,26 +21,31 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/acpagent"
-	"github.com/memohai/memoh/internal/acpclient"
-	agentpkg "github.com/memohai/memoh/internal/agent"
+	acpprofileadapter "github.com/memohai/memoh/internal/agent/adapter/acpprofile"
+	"github.com/memohai/memoh/internal/agent/application"
 	"github.com/memohai/memoh/internal/agent/background"
-	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/agent/context/compaction"
+	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	agentpayload "github.com/memohai/memoh/internal/agent/event/payload"
+	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
+	"github.com/memohai/memoh/internal/agent/runtime/native"
+	agenttools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/agent/turn"
-	turninprocess "github.com/memohai/memoh/internal/agent/turn/inprocess"
-	"github.com/memohai/memoh/internal/agentpayload"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/botbackup"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/route"
-	"github.com/memohai/memoh/internal/compaction"
+	"github.com/memohai/memoh/internal/chat/event"
+	"github.com/memohai/memoh/internal/chat/message"
+	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/memohai/memoh/internal/chat/timeline"
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/container"
 	containerprovider "github.com/memohai/memoh/internal/container/provider"
-	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
 	pgvectordb "github.com/memohai/memoh/internal/db/pgvector"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
@@ -61,13 +66,10 @@ import (
 	"github.com/memohai/memoh/internal/memory/memllm"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/memory/wikistore"
-	"github.com/memohai/memoh/internal/message"
-	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/messaging"
 	"github.com/memohai/memoh/internal/models"
 	netctl "github.com/memohai/memoh/internal/network"
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
-	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
@@ -75,14 +77,11 @@ import (
 	"github.com/memohai/memoh/internal/registry"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
-	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/storage/providers/fallback"
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	"github.com/memohai/memoh/internal/team"
-	"github.com/memohai/memoh/internal/toolapproval"
-	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/userruntime"
 	videopkg "github.com/memohai/memoh/internal/video"
 	"github.com/memohai/memoh/internal/workspace"
@@ -238,6 +237,22 @@ type workspaceTargetPolicyResolver struct {
 	manager *workspace.Manager
 }
 
+type toolApprovalPolicyProvider struct {
+	settings *settings.Service
+}
+
+func (p toolApprovalPolicyProvider) ToolApprovalPolicy(ctx context.Context, botID string) (toolapproval.PolicyConfig, error) {
+	botSettings, err := p.settings.GetBot(ctx, botID)
+	if err != nil {
+		return toolapproval.PolicyConfig{}, err
+	}
+	return toolApprovalPolicyConfig(botSettings.ToolApprovalConfig), nil
+}
+
+func provideToolApprovalService(log *slog.Logger, queries dbstore.Queries, settingsService *settings.Service) *toolapproval.Service {
+	return toolapproval.NewService(log, queries, toolApprovalPolicyProvider{settings: settingsService})
+}
+
 func (r workspaceTargetPolicyResolver) ResolveWorkspaceTargetPolicy(ctx context.Context, botID, targetID string) (toolapproval.WorkspaceTargetPolicy, error) {
 	resolved, err := r.manager.ResolveWorkspaceTarget(ctx, botID, targetID)
 	if err != nil {
@@ -247,8 +262,39 @@ func (r workspaceTargetPolicyResolver) ResolveWorkspaceTargetPolicy(ctx context.
 		TargetID: resolved.TargetID,
 		Kind:     resolved.Kind,
 		Name:     resolved.Name,
-		Config:   resolved.Approval,
+		Config:   toolApprovalPolicyConfig(resolved.Approval),
 	}, nil
+}
+
+func toolApprovalPolicyConfig(config settings.ToolApprovalConfig) toolapproval.PolicyConfig {
+	return toolapproval.PolicyConfig{
+		Enabled: config.Enabled,
+		Read: toolapproval.FilePolicy{
+			Mode:             toolapproval.PolicyMode(config.Read.Mode),
+			RequireApproval:  config.Read.RequireApproval,
+			BypassGlobs:      cloneOptionalStrings(config.Read.BypassGlobs),
+			ForceReviewGlobs: cloneOptionalStrings(config.Read.ForceReviewGlobs),
+		},
+		Write: toolapproval.FilePolicy{
+			Mode:             toolapproval.PolicyMode(config.Write.Mode),
+			RequireApproval:  config.Write.RequireApproval,
+			BypassGlobs:      cloneOptionalStrings(config.Write.BypassGlobs),
+			ForceReviewGlobs: cloneOptionalStrings(config.Write.ForceReviewGlobs),
+		},
+		Exec: toolapproval.ExecPolicy{
+			Mode:                toolapproval.PolicyMode(config.Exec.Mode),
+			RequireApproval:     config.Exec.RequireApproval,
+			BypassCommands:      cloneOptionalStrings(config.Exec.BypassCommands),
+			ForceReviewCommands: cloneOptionalStrings(config.Exec.ForceReviewCommands),
+		},
+	}
+}
+
+func cloneOptionalStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return append([]string{}, values...)
 }
 
 func (p nativeWorkspaceBridgeProvider) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
@@ -288,7 +334,7 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 	}
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, vectorStore *pgvectordb.Store, wikiStore *wikistore.Store) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, provider bridge.Provider, queries dbstore.Queries, vectorStore *pgvectordb.Store, wikiStore *wikistore.Store) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileStore := storefs.New(log, provider)
 	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(ctx context.Context, teamID, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
@@ -300,7 +346,7 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 		if err != nil {
 			return nil, err
 		}
-		p := membuiltin.NewBuiltinProvider(log, runtime, chatService, accountService)
+		p := membuiltin.NewBuiltinProvider(log, runtime)
 		p.SetLLM(llm)
 		p.ApplyProviderConfig(providerConfig)
 		return p, nil
@@ -321,26 +367,28 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 	} else {
 		defaultRuntime = membuiltin.NewFileRuntime(fileStore)
 	}
-	defaultProvider := membuiltin.NewBuiltinProvider(log, defaultRuntime, chatService, accountService)
+	defaultProvider := membuiltin.NewBuiltinProvider(log, defaultRuntime)
 	defaultProvider.SetLLM(llm)
 	registry.Register("__builtin_default__", defaultProvider)
 	return registry
 }
 
 func provideSessionService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *sessionpkg.Service {
-	return sessionpkg.NewService(log, queries, hub)
+	service := sessionpkg.NewService(log, queries, hub)
+	service.SetACPSetupValidator(acpprofileadapter.NewCatalog())
+	return service
 }
 
 func provideMessageService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *message.DBService {
 	return message.NewService(log, queries, hub)
 }
 
-func provideScheduleTriggerer(resolver *flow.Resolver) schedule.Triggerer {
-	return flow.NewScheduleGateway(resolver)
+func provideScheduleTriggerer(service *application.Service) schedule.Triggerer {
+	return application.NewScheduleGateway(service)
 }
 
-func provideHeartbeatTriggerer(resolver *flow.Resolver) heartbeat.Triggerer {
-	return flow.NewHeartbeatGateway(resolver)
+func provideHeartbeatTriggerer(service *application.Service) heartbeat.Triggerer {
+	return application.NewHeartbeatGateway(service)
 }
 
 type sessionCreatorAdapter struct {
@@ -366,8 +414,8 @@ func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.
 	return &sessionCreatorAdapter{svc: sessionService}
 }
 
-func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *agentpkg.Agent {
-	return agentpkg.New(agentpkg.Deps{
+func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *native.Agent {
+	return native.New(native.Deps{
 		BridgeProvider: provider,
 		HookService:    hookService,
 		Logger:         log,
@@ -375,24 +423,24 @@ func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hooks
 	})
 }
 
-func agentLimitsFromConfig(cfg config.AgentConfig) agentpkg.Limits {
-	return agentpkg.LimitsFromValues(
+func agentLimitsFromConfig(cfg config.AgentConfig) native.Limits {
+	return native.LimitsFromValues(
 		cfg.ToolOutputMaxBytes,
 		cfg.ToolOutputMaxLines,
 		cfg.SystemFilesMaxBytes,
 	)
 }
 
-func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, hookService *hookspkg.Service, providers []agenttools.ToolProvider) {
+func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, providers []agenttools.ToolProvider) {
 	a.SetToolProviders(providers)
 	for _, p := range providers {
 		if cp, ok := p.(*agenttools.ContainerProvider); ok {
 			cp.SetHookService(hookService)
 		}
 		if sp, ok := p.(*agenttools.SpawnProvider); ok {
-			sp.SetAgent(agentpkg.NewSpawnAdapter(a))
+			sp.SetAgent(native.NewSpawnAdapter(a))
 			sp.SetMessageService(msgService)
-			sp.SetSystemPromptFunc(agentpkg.SpawnSystemPrompt)
+			sp.SetSystemPromptFunc(native.SpawnSystemPrompt)
 			sp.SetHookService(hookService)
 		}
 	}
@@ -422,11 +470,11 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service) *flow.Resolver {
-	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
-	resolver.SetBotPermissionChecker(&resolverBotPermissionChecker{bots: botService, accounts: accountService})
-	resolver.SetWorkspaceTargetResolver(workspaceManager)
-	resolver.SetHookService(hookService)
+func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service) *application.Service {
+	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
+	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
+	service.SetWorkspaceTargetResolver(workspaceManager)
+	service.SetHookService(hookService)
 	if sessionService != nil {
 		sessionService.SetHookService(hookService)
 	}
@@ -436,28 +484,28 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 	if workspaceManager != nil {
 		workspaceManager.SetHookService(hookService)
 	}
-	resolver.SetMemoryRegistry(memoryRegistry)
-	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
-	resolver.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
-	resolver.SetChannelStore(channelStore)
-	resolver.SetSessionService(sessionService)
-	resolver.SetEventPublisher(eventHub)
-	resolver.SetCompactionService(compactionService)
-	resolver.SetPipeline(pipeline)
-	resolver.SetBackgroundManager(bgManager)
+	service.SetMemoryRegistry(memoryRegistry)
+	service.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
+	service.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
+	service.SetChannelStore(channelStore)
+	service.SetSessionService(sessionService)
+	service.SetEventPublisher(eventHub)
+	service.SetCompactionService(compactionService)
+	service.SetPipeline(pipeline)
+	service.SetBackgroundManager(bgManager)
 	if toolApproval != nil {
 		toolApproval.SetHookService(hookService)
 		toolApproval.SetWorkspaceTargetPolicyResolver(workspaceTargetPolicyResolver{manager: workspaceManager})
 	}
-	resolver.SetToolApprovalService(toolApproval)
-	resolver.SetUserInputService(userInput)
-	resolver.SetACPSessionPool(acpPool)
+	service.SetToolApprovalService(toolApproval)
+	service.SetUserInputService(userInput)
+	service.SetACPSessionPool(acpPool)
 	if bgManager != nil {
 		bgManager.SetEventFunc(func(evt background.TaskEvent) {
 			if eventHub == nil {
 				return
 			}
-			// The wire shape lives in internal/agentpayload — see its
+			// The wire shape lives in internal/agent/event/payload — see its
 			// BackgroundTask helper and the tests there that pin the
 			// top-level `session_id` placement the per-session SSE handler
 			// routes on.
@@ -472,7 +520,7 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 			})
 		})
 	}
-	return resolver
+	return service
 }
 
 func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
@@ -844,18 +892,18 @@ type skillLoaderAdapter struct {
 	handler *handlers.ContainerdHandler
 }
 
-func (a *skillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]flow.SkillEntry, error) {
+func (a *skillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]application.SkillEntry, error) {
 	items, err := a.handler.LoadSkills(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]flow.SkillEntry, len(items))
+	entries := make([]application.SkillEntry, len(items))
 	for i, item := range items {
 		skillPath := ""
 		if item.SourcePath != "" {
 			skillPath = stdpath.Dir(item.SourcePath)
 		}
-		entries[i] = flow.SkillEntry{
+		entries[i] = application.SkillEntry{
 			Name:        item.Name,
 			Description: item.Description,
 			Content:     item.Content,
@@ -942,27 +990,24 @@ func (a *gatewayAssetLoaderAdapter) AccessPathForGateway(ctx context.Context, bo
 	return strings.TrimSpace(accessPath), nil
 }
 
-// provideTurnService binds the in-process turn adapter over the resolver
-// and native agent. Both chat and discuss turns flow through it; Channel
-// consumes it as the only agent surface.
-func provideTurnService(resolver *flow.Resolver, agent *agentpkg.Agent) turn.Service {
+// provideTurnService exposes the application service as Channel's only Agent
+// surface. Both chat and discuss turns run directly on the same service.
+func provideTurnService(service *application.Service) turn.Service {
 	// The self-hosted runtime binds its DB pool to the singleton team, so
-	// the adapter fails closed on any other TeamID (turn.ErrTeamNotServed).
-	return turninprocess.New(resolver,
-		turninprocess.WithDiscuss(agent, resolver),
-		turninprocess.WithAllowedTeam(team.DefaultTeamID),
-	)
+	// the service fails closed on any other TeamID (turn.ErrTeamNotServed).
+	service.SetAllowedTeam(team.DefaultTeamID)
+	return service
 }
 
-// resolverBotPermissionChecker duplicates the Channel module's inbound permission
-// glue for the resolver side; both adapt bots/accounts onto the same
+// applicationBotPermissionChecker duplicates the Channel module's inbound
+// permission glue; both adapt bots/accounts onto the same
 // HasBotPermission shape.
-type resolverBotPermissionChecker struct {
+type applicationBotPermissionChecker struct {
 	bots     *bots.Service
 	accounts *accounts.Service
 }
 
-func (a *resolverBotPermissionChecker) HasBotPermission(ctx context.Context, botID, accountID, permission string) (bool, error) {
+func (a *applicationBotPermissionChecker) HasBotPermission(ctx context.Context, botID, accountID, permission string) (bool, error) {
 	if a == nil || a.bots == nil || a.accounts == nil {
 		return false, errors.New("bot permission services not configured")
 	}

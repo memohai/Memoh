@@ -14,11 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/acpprofile"
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/bots"
+	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/session"
 )
 
 type sessionUpdateQueries struct {
@@ -98,7 +98,7 @@ func TestUpdateSessionSwitchesEmptyChatToACPAgent(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -156,7 +156,7 @@ func TestUpdateSessionRejectsConflictingTypeAndRuntime(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -196,7 +196,7 @@ func TestUpdateSessionRejectsSystemACPRuntimeAsBadRequest(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -235,7 +235,7 @@ func TestUpdateSessionAllowsConcordantACPTypeAndRuntime(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -283,7 +283,7 @@ func TestUpdateSessionSwitchToACPDoesNotInheritOwnerFromNonACPMetadata(t *testin
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -336,7 +336,7 @@ func TestUpdateSessionSwitchToACPRequiresWorkspaceExec(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
@@ -373,7 +373,7 @@ func TestUpdateSessionDefaultsACPProjectPath(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -422,7 +422,7 @@ func TestUpdateSessionDefaultsACPProjectPathBeforeAgentChangeCheck(t *testing.T)
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -466,7 +466,7 @@ func TestUpdateSessionRejectsAgentChangeAfterFirstMessage(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -499,7 +499,7 @@ func TestUpdateSessionRejectsRetagToSubagentForChatUser(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
@@ -532,7 +532,7 @@ func TestGetSessionAllowsChatUserToReadOwnSubagent(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
@@ -564,7 +564,7 @@ func TestUpdateSessionRejectsSubagentTitleUpdateForChatUser(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
@@ -607,7 +607,7 @@ func TestUpdateSessionAllowsEmptyACPAgentChangeAndClosesRuntime(t *testing.T) {
 	closer := &recordingACPSessionCloser{active: map[string]bool{sessionID: true}}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		closer,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -669,7 +669,7 @@ func TestUpdateSessionMetadataPatchPreservesDiscussACPRuntime(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -729,7 +729,7 @@ func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *te
 	closer := &recordingACPSessionCloser{}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		closer,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),

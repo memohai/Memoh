@@ -72,33 +72,20 @@ Memoh/
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
-│   ├── acpagent/               #   ACP (Agent Control Protocol) runtime session pool
-│   ├── acpclient/              #   ACP client process management
-│   ├── acpfeedback/            #   User-facing ACP error codes and messages
-│   ├── acpprofile/             #   ACP profile definitions
 │   ├── arch/                   #   Architecture guard tests (channel-boundary import rules, spec §8)
-│   ├── agent/                  #   In-process AI agent (Twilight AI SDK integration)
-│   │   ├── agent.go            #     Core agent: Stream() / Generate() via Twilight SDK
-│   │   ├── stream.go           #     Streaming event assembly
-│   │   ├── sential.go          #     Sential (sentinel) loop detection logic
-│   │   ├── prompt.go           #     Prompt assembly (system, heartbeat, schedule, subagent, discuss)
-│   │   ├── config.go           #     Agent service dependencies
-│   │   ├── context_frag.go     #     Context fragment compilation (see internal/contextfrag)
-│   │   ├── hooks.go            #     Agent lifecycle hook dispatch (see internal/hooks)
-│   │   ├── attachment_bundle.go #    Attachment bundle assembly
-│   │   ├── fs.go               #     Filesystem utilities
-│   │   ├── guard_state.go      #     Guard state management
-│   │   ├── retry.go            #     Retry logic
-│   │   ├── read_media.go       #     Media reading utilities
-│   │   ├── spawn_adapter.go    #     Spawn adapter for sub-processes
+│   ├── agent/                  #   Agent bounded package; root is a namespace, not a Go package
+│   │   ├── adapter/            #     Adapters from lower-level domain ports to runtime implementations
+│   │   ├── application/        #     Turn orchestration: context, persistence, memory, approvals, runtime dispatch
 │   │   ├── background/         #     Background task manager (spawned subagents, video tasks)
-│   │   ├── event/              #     Agent event types
+│   │   ├── context/            #     Context fragments, history projection, compaction, and output limits
+│   │   ├── decision/           #     User input, tool approval, and stable user-facing feedback
+│   │   ├── event/              #     Agent events and transport payload vocabulary
+│   │   ├── runtime/            #     Runtime implementations
+│   │   │   ├── acp/            #       ACP pool, client process manager, and profiles
+│   │   │   ├── native/         #       Twilight AI native runtime, prompts, streaming, hooks, and guards
+│   │   │   └── session/        #       Per-thread runtime state and control
 │   │   ├── sessionmode/        #     Session mode resolution
-│   │   ├── prompts/            #     Prompt templates (Markdown, with partials prefixed by _)
-│   │   │   ├── system_common.md, mode_chat.md, mode_discuss.md, mode_heartbeat.md, mode_schedule.md, mode_subagent.md
-│   │   │   ├── _memory.md, _identities.md
-│   │   │   └── heartbeat.md, schedule.md
-│   │   └── tools/              #     Tool providers (ToolProvider interface)
+│   │   ├── tool/               #     Native tool providers (package name remains tools)
 │   │       ├── message.go      #       Send message tool
 │   │       ├── contacts.go     #       Contact list tool
 │   │       ├── schedule.go     #       Schedule management tool
@@ -123,8 +110,7 @@ Memoh/
 │   │       ├── prune.go        #       Pruning tool
 │   │       ├── history.go      #       History access tool
 │   │       └── read_media.go   #       Media reading tool
-│   │   └── turn/               #     Turn contract (StartTurnCommand/Event/RunHandle) + inprocess & gRPC transports
-│   ├── agentpayload/           #   On-wire shapes for agent events forwarded to SSE subscribers
+│   │   └── turn/               #     Pure Turn port plus authenticated gRPC transport
 │   ├── attachment/             #   Attachment normalization (MIME types, base64)
 │   ├── audio/                  #   Audio/TTS processing utilities
 │   ├── auth/                   #   JWT authentication middleware and utilities
@@ -134,23 +120,25 @@ Memoh/
 │   ├── capabilities/           #   Model reasoning capability derivation (LiteLLM registry)
 │   ├── channel/                #   Channel adapter system
 │   │   ├── adapters/           #     Platform adapters: telegram, discord, feishu, qq, dingtalk, weixin, wecom, wechatoa, matrix, misskey, line, slack, local
-│   │   └── identities/        #     Channel identity service
+│   │   ├── discuss/            #     Discuss-mode driver
+│   │   ├── inbound/            #     Inbound adaptation and Turn dispatch
+│   │   ├── route/              #     External conversation/thread to internal Thread routing
+│   │   └── identities/         #     Channel identity service
 │   ├── channelaccess/          #   Effective per-bot Manage capability (channel binding + override)
+│   ├── chat/                   #   Chat bounded package
+│   │   ├── event/              #     Persisted chat event hub
+│   │   ├── message/            #     Message persistence
+│   │   ├── thread/             #     Internal Thread lifecycle and forks
+│   │   ├── timeline/           #     Canonical events, projection, rendering, and persistence
+│   │   └── view/               #     API/UI history projection
 │   ├── command/                #   Slash command system (extensible command handlers)
-│   ├── compaction/             #   Message history compaction service (LLM summarization)
 │   ├── config/                 #   Configuration loading and parsing (TOML + YAML providers)
 │   ├── container/              #   Container runtime abstraction + adapters (containerd, Apple, Docker)
-│   ├── contextfrag/            #   Typed context-fragment IR (compile, render, hash)
-│   ├── contextlimit/           #   Tool output size limits (head/tail truncation)
-│   ├── conversation/           #   Conversation management and flow resolver
-│   │   ├── service.go          #     Conversation CRUD and routing
-│   │   └── flow/               #     Chat orchestration (resolver, streaming, memory, triggers)
 │   ├── copilot/                #   GitHub Copilot client integration
 │   ├── db/                     #   Database connection and migration utilities
 │   │   ├── postgres/           #     PostgreSQL store adapters
 │   │   │   └── sqlc/           #     ⚠️ Auto-generated by sqlc — DO NOT modify manually
 │   │   └── store/              #     Transitional Queries interface shared by domain services
-│   ├── decision/               #   Decision DTOs and waiter registry (ask_user, tool approval)
 │   ├── email/                  #   Email provider and outbox management (Mailgun, generic SMTP, OAuth)
 │   ├── embedded/               #   Embedded filesystem assets (web only)
 │   ├── display/                #   Workspace display service (Xvnc/RFB/WebRTC sessions and input forwarding)
@@ -165,13 +153,11 @@ Memoh/
 │   ├── mcp/                    #   MCP protocol manager (connections, OAuth, tool gateway)
 │   ├── media/                  #   Content-addressed media asset service
 │   ├── memory/                 #   Long-term memory system (multi-provider: Qdrant, BM25, LLM extraction)
-│   ├── message/                #   Message persistence and event publishing
 │   ├── messaging/              #   Outbound message executor
 │   ├── models/                 #   LLM model management (CRUD, variants, client types, probe)
 │   ├── network/                #   Workspace container network configuration
 │   ├── oauthclients/           #   Built-in OAuth client registry (TOML)
 │   ├── oauthctx/               #   OAuth context helpers
-│   ├── pipeline/               #   Discuss/chat pipeline (adapt, projection, rendering, driver)
 │   ├── plugins/                #   Plugin system (manifests, installations, lifecycle)
 │   ├── policy/                 #   Access policy resolution (guest access)
 │   ├── providers/              #   LLM provider management (OpenAI, Anthropic, etc.)
@@ -181,7 +167,6 @@ Memoh/
 │   ├── schedule/               #   Scheduled task service (cron)
 │   ├── searchproviders/        #   Search engine provider management (Brave, etc.)
 │   ├── server/                 #   HTTP server wrapper (Echo setup, middleware, shutdown)
-│   ├── session/                #   Bot session management service
 │   ├── settings/               #   Bot settings management
 │   ├── skills/                 #   Skill registry and activation
 │   ├── slash/                  #   Slash-command classification and metadata (channel + web surfaces)
@@ -344,18 +329,20 @@ PostgreSQL migrations live in `db/postgres/migrations/`:
 ### Agent Development
 
 - The AI agent runs **in-process** within the Go server — there is no separate agent gateway service.
-- Core agent logic lives in `internal/agent/`, powered by the [Twilight AI](https://github.com/memohai/twilight-ai) Go SDK.
-- `internal/agent/agent.go` provides `Stream()` (SSE streaming) and `Generate()` (non-streaming) methods.
+- `internal/agent/` is a bounded-package namespace. It intentionally contains no root Go package.
+- `internal/agent/application/` owns turn orchestration: message assembly, history, memory, compaction, decisions, persistence, and runtime dispatch.
+- The Twilight AI native runtime lives in `internal/agent/runtime/native/`; `agent.go` there provides `Stream()` (SSE streaming) and `Generate()` (non-streaming) methods.
+- `internal/agent/turn/` is the pure port used by Channel and by the authenticated in-process/gRPC transports. Internal code says Thread; compatibility adapters keep external `session_id` and existing gRPC fields stable.
 - Model/client types are defined in `internal/models/types.go`: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`, `openai-codex`, `github-copilot`, `edge-speech`.
 - Model types: `chat`, `embedding`, `speech`.
-- Tools are implemented as `ToolProvider` instances in `internal/agent/tools/`, loaded via setter injection to avoid FX dependency cycles.
-- **Tool usage lives with the tool, never in the static prompt.** Per-tool usage goes in `sdk.Tool.Description`; cross-tool workflow guidance goes in an optional `tools.ToolUsage` `Usage()` method that `assembleTools` injects only when that provider registers tools for the session. Because both are gated with the tool itself, the prompt template never names conditionally-registered tools (guarded by a test in `internal/agent/prompt_test.go`) and can't drift — the cause of the original `speak` / `search_memory` / `schedule` bugs.
-- Prompt templates are embedded Go Markdown files in `internal/agent/prompts/`. Partials (reusable fragments) are prefixed with `_` (e.g., `_memory.md`, `_identities.md`). System prompting combines `system_common.md` with mode-specific prompts such as `mode_chat.md` and `mode_discuss.md`.
-- The conversation flow resolver (`internal/conversation/flow/`) orchestrates message assembly, memory injection, history trimming, and agent invocation.
-- The discuss/chat pipeline (`internal/pipeline/`) provides an alternative orchestration path with adaptation, projection, rendering, and driver layers.
-- Browser Use and Computer Use capabilities live in `internal/agent/tools/browser.go` (plus `internal/agent/tools/computer_a11y.go`) and are exposed only when the bot's workspace display is enabled. `browser_action` / `browser_observe` operate the headed workspace Chrome/Chromium instance over CDP, `browser_remote_session` exposes the same CDP endpoint for code-driven Playwright/CDP sessions, and the Computer Use pair (`computer_observe` / `computer_action`) drives the broader GUI desktop: snapshots come from the AT-SPI accessibility tree via the bundled `a11y-cli` Rust helper at `/opt/memoh/toolkit/display/bin/a11y-cli`, and raw RFB pointer/keyboard input remains as a fallback when accessibility cannot reach the target. Both browser and computer screenshots are saved to a workspace path and never auto-attached to the conversation, so the model must explicitly read the path when it wants the image. Prefer Browser Use for web pages; use Computer Use for native dialogs, non-browser apps, or GUI states that CDP cannot reach.
+- Tools are implemented as `ToolProvider` instances in `internal/agent/tool/`, loaded via setter injection to avoid FX dependency cycles.
+- **Tool usage lives with the tool, never in the static prompt.** Per-tool usage goes in `sdk.Tool.Description`; cross-tool workflow guidance goes in an optional `tools.ToolUsage` `Usage()` method that `assembleTools` injects only when that provider registers tools for the session. Because both are gated with the tool itself, the prompt template never names conditionally-registered tools (guarded by `internal/agent/runtime/native/prompt_test.go`) and can't drift — the cause of the original `speak` / `search_memory` / `schedule` bugs.
+- Prompt templates are embedded from `internal/agent/runtime/native/prompts/`. Partials (reusable fragments) are prefixed with `_` (e.g., `_memory.md`, `_identities.md`). System prompting combines `system_common.md` with mode-specific prompts such as `mode_chat.md` and `mode_discuss.md`.
+- Internal chat state lives under `internal/chat/`: `thread` owns Thread lifecycle/forks, `message` owns persistence, `timeline` owns canonical event projection, and `view` owns API/UI history projection. These packages do not orchestrate Agent execution.
+- The chat timeline (`internal/chat/timeline/`) owns canonical events, projection, rendering, persistence, and context composition. Inbound adaptation lives in `internal/channel/inbound/`, while discuss-mode driving lives in `internal/channel/discuss/`.
+- Browser Use and Computer Use capabilities live in `internal/agent/tool/browser.go` (plus `internal/agent/tool/computer_a11y.go`) and are exposed only when the bot's workspace display is enabled. `browser_action` / `browser_observe` operate the headed workspace Chrome/Chromium instance over CDP, `browser_remote_session` exposes the same CDP endpoint for code-driven Playwright/CDP sessions, and the Computer Use pair (`computer_observe` / `computer_action`) drives the broader GUI desktop: snapshots come from the AT-SPI accessibility tree via the bundled `a11y-cli` Rust helper at `/opt/memoh/toolkit/display/bin/a11y-cli`, and raw RFB pointer/keyboard input remains as a fallback when accessibility cannot reach the target. Both browser and computer screenshots are saved to a workspace path and never auto-attached to the conversation, so the model must explicitly read the path when it wants the image. Prefer Browser Use for web pages; use Computer Use for native dialogs, non-browser apps, or GUI states that CDP cannot reach.
 - Headless Playwright scripts are still ordinary workspace commands, but they are not the same path as the headed workspace browser/display stack. Use the headed Browser Use tools when the user needs to inspect or operate the visible workspace browser.
-- The compaction service (`internal/compaction/`) handles LLM-based conversation summarization.
+- The compaction service (`internal/agent/context/compaction/`) handles LLM-based conversation summarization.
 - Loop detection (text and tool loops) is built into the agent with configurable thresholds.
 - Tag extraction system processes inline tags in streaming output (attachments, reactions, speech/TTS).
 
@@ -390,9 +377,9 @@ PostgreSQL migrations live in `db/postgres/migrations/`:
 
 The codebase has grown beyond the original agent/channel/container core. When working near these areas, read the local `AGENTS.md` and treat the corresponding `internal/` package as the source of truth; do not guess tool or schema details.
 
-- **ACP (`internal/acpagent/`, `internal/acpclient/`, `internal/acpprofile/`)** — runtime pool and OAuth integration for external ACP agents such as Claude Code and Codex.
+- **ACP (`internal/agent/runtime/acp/`)** — runtime pool, client process manager, profiles, and OAuth integration for external ACP agents such as Claude Code and Codex. Stable user-facing ACP errors live in `internal/agent/decision/feedback/`.
 - **Plugin system (`internal/plugins/`)** — plugin manifests, installations, enable/disable lifecycle, and OAuth client bindings. The web Supermarket pages (`apps/web/src/pages/supermarket/`) consume this API to discover and install plugins/skills.
-- **User input / `ask_user` (`internal/userinput/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.
+- **User input / `ask_user` (`internal/agent/decision/input/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.
 - **Bot backup / import / export (`internal/botbackup/`)** — archive-based bot portability with preview and merge/replace/skip strategies.
 - **Workspace resource limits (`internal/workspace/resource_limits.go`)** — per-bot CPU/memory/storage quotas and runtime metrics.
 

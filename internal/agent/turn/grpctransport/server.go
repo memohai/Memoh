@@ -10,9 +10,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/agent/turn/turnpb"
-	"github.com/memohai/memoh/internal/userinput"
 )
 
 type Server struct {
@@ -46,7 +46,7 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 		return status.Error(codes.InvalidArgument, "first frame must start a turn")
 	}
 	var cmd turn.StartTurnCommand
-	if err := json.Unmarshal(startJSON, &cmd); err != nil {
+	if err := unmarshalStartTurnCommand(startJSON, &cmd); err != nil {
 		return status.Error(codes.InvalidArgument, "invalid start turn payload")
 	}
 	handle, err := s.service.StartTurn(stream.Context(), cmd)
@@ -150,7 +150,7 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 
 func (s *Server) RespondToolApproval(req *turnpb.JsonRequest, stream turnpb.TurnService_RespondToolApprovalServer) error {
 	var input turn.ToolApprovalResponse
-	if err := json.Unmarshal(req.GetJson(), &input); err != nil {
+	if err := unmarshalToolApprovalResponse(req.GetJson(), &input); err != nil {
 		return status.Error(codes.InvalidArgument, "invalid tool approval payload")
 	}
 	return s.streamContinuation(stream.Context(), stream.Send, func(ch chan<- json.RawMessage) error {
@@ -160,7 +160,7 @@ func (s *Server) RespondToolApproval(req *turnpb.JsonRequest, stream turnpb.Turn
 
 func (s *Server) RespondUserInput(req *turnpb.JsonRequest, stream turnpb.TurnService_RespondUserInputServer) error {
 	var input turn.UserInputResponse
-	if err := json.Unmarshal(req.GetJson(), &input); err != nil {
+	if err := unmarshalUserInputResponse(req.GetJson(), &input); err != nil {
 		return status.Error(codes.InvalidArgument, "invalid user input payload")
 	}
 	return s.streamContinuation(stream.Context(), stream.Send, func(ch chan<- json.RawMessage) error {
@@ -256,7 +256,7 @@ func (s *Server) mapError(operation string, err error) error {
 
 func eventToProto(event turn.Event) *turnpb.EventResponse {
 	return &turnpb.EventResponse{
-		RunId: event.RunID, TeamId: event.TeamID, SessionId: event.SessionID,
+		RunId: event.RunID, TeamId: event.TeamID, SessionId: event.ThreadID,
 		Seq: event.Seq, Kind: event.Kind, Payload: event.Payload,
 	}
 }

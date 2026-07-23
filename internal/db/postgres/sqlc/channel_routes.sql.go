@@ -27,7 +27,6 @@ VALUES (
 )
 RETURNING
   id,
-  $9::uuid AS chat_id,
   bot_id,
   channel_type AS platform,
   channel_config_id,
@@ -50,12 +49,10 @@ type CreateChatRouteParams struct {
 	ConversationType pgtype.Text `json:"conversation_type"`
 	ReplyTarget      pgtype.Text `json:"reply_target"`
 	Metadata         []byte      `json:"metadata"`
-	ChatID           pgtype.UUID `json:"chat_id"`
 }
 
 type CreateChatRouteRow struct {
 	ID               pgtype.UUID        `json:"id"`
-	ChatID           pgtype.UUID        `json:"chat_id"`
 	BotID            pgtype.UUID        `json:"bot_id"`
 	Platform         string             `json:"platform"`
 	ChannelConfigID  pgtype.UUID        `json:"channel_config_id"`
@@ -79,12 +76,10 @@ func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams
 		arg.ConversationType,
 		arg.ReplyTarget,
 		arg.Metadata,
-		arg.ChatID,
 	)
 	var i CreateChatRouteRow
 	err := row.Scan(
 		&i.ID,
-		&i.ChatID,
 		&i.BotID,
 		&i.Platform,
 		&i.ChannelConfigID,
@@ -123,7 +118,6 @@ func (q *Queries) DeleteChatRoute(ctx context.Context, id pgtype.UUID) error {
 const findChatRoute = `-- name: FindChatRoute :one
 SELECT
   id,
-  bot_id AS chat_id,
   bot_id,
   channel_type AS platform,
   channel_config_id,
@@ -153,7 +147,6 @@ type FindChatRouteParams struct {
 
 type FindChatRouteRow struct {
 	ID               pgtype.UUID        `json:"id"`
-	ChatID           pgtype.UUID        `json:"chat_id"`
 	BotID            pgtype.UUID        `json:"bot_id"`
 	Platform         string             `json:"platform"`
 	ChannelConfigID  pgtype.UUID        `json:"channel_config_id"`
@@ -177,7 +170,6 @@ func (q *Queries) FindChatRoute(ctx context.Context, arg FindChatRouteParams) (F
 	var i FindChatRouteRow
 	err := row.Scan(
 		&i.ID,
-		&i.ChatID,
 		&i.BotID,
 		&i.Platform,
 		&i.ChannelConfigID,
@@ -196,7 +188,6 @@ func (q *Queries) FindChatRoute(ctx context.Context, arg FindChatRouteParams) (F
 const getChatRouteByID = `-- name: GetChatRouteByID :one
 SELECT
   id,
-  bot_id AS chat_id,
   bot_id,
   channel_type AS platform,
   channel_config_id,
@@ -214,7 +205,6 @@ WHERE team_id = public.memoh_current_team_id() AND id = $1
 
 type GetChatRouteByIDRow struct {
 	ID               pgtype.UUID        `json:"id"`
-	ChatID           pgtype.UUID        `json:"chat_id"`
 	BotID            pgtype.UUID        `json:"bot_id"`
 	Platform         string             `json:"platform"`
 	ChannelConfigID  pgtype.UUID        `json:"channel_config_id"`
@@ -233,7 +223,6 @@ func (q *Queries) GetChatRouteByID(ctx context.Context, id pgtype.UUID) (GetChat
 	var i GetChatRouteByIDRow
 	err := row.Scan(
 		&i.ID,
-		&i.ChatID,
 		&i.BotID,
 		&i.Platform,
 		&i.ChannelConfigID,
@@ -252,7 +241,6 @@ func (q *Queries) GetChatRouteByID(ctx context.Context, id pgtype.UUID) (GetChat
 const listChatRoutes = `-- name: ListChatRoutes :many
 SELECT
   id,
-  bot_id AS chat_id,
   bot_id,
   channel_type AS platform,
   channel_config_id,
@@ -271,7 +259,6 @@ ORDER BY created_at ASC
 
 type ListChatRoutesRow struct {
 	ID               pgtype.UUID        `json:"id"`
-	ChatID           pgtype.UUID        `json:"chat_id"`
 	BotID            pgtype.UUID        `json:"bot_id"`
 	Platform         string             `json:"platform"`
 	ChannelConfigID  pgtype.UUID        `json:"channel_config_id"`
@@ -285,8 +272,8 @@ type ListChatRoutesRow struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]ListChatRoutesRow, error) {
-	rows, err := q.db.Query(ctx, listChatRoutes, chatID)
+func (q *Queries) ListChatRoutes(ctx context.Context, botID pgtype.UUID) ([]ListChatRoutesRow, error) {
+	rows, err := q.db.Query(ctx, listChatRoutes, botID)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +283,6 @@ func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]Lis
 		var i ListChatRoutesRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.ChatID,
 			&i.BotID,
 			&i.Platform,
 			&i.ChannelConfigID,

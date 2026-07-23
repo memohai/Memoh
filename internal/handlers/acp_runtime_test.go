@@ -14,15 +14,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/acpagent"
-	"github.com/memohai/memoh/internal/acpclient"
-	"github.com/memohai/memoh/internal/acpfeedback"
-	"github.com/memohai/memoh/internal/acpprofile"
+	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
+	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
+	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/session"
 )
 
 type acpRuntimeQueries struct {

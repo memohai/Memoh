@@ -14,12 +14,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/memohai/memoh/internal/acpfeedback"
+	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/agent/turn/turnpb"
+	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	intrpc "github.com/memohai/memoh/internal/rpc"
-	sessionpkg "github.com/memohai/memoh/internal/session"
-	"github.com/memohai/memoh/internal/userinput"
 )
 
 func TestStartTurnRoundTrip(t *testing.T) {
@@ -31,7 +31,7 @@ func TestStartTurnRoundTrip(t *testing.T) {
 		SchemaVersion: 1,
 		TeamID:        "team-1",
 		BotID:         "bot-1",
-		SessionID:     "session-1",
+		ThreadID:      "session-1",
 		Query:         "hello",
 		Attachments:   []turn.Attachment{{Name: "a.txt", ContentHash: "hash-1"}},
 	})
@@ -39,11 +39,114 @@ func TestStartTurnRoundTrip(t *testing.T) {
 		t.Fatalf("start turn: %v", err)
 	}
 	event := <-handle.Events()
-	if event.RunID != "run-1" || event.Seq != 1 || string(event.Payload) != `{"type":"text_delta","text":"hi"}` {
+	if event.RunID != "run-1" || event.ThreadID != "session-1" || event.Seq != 1 || string(event.Payload) != `{"type":"text_delta","text":"hi"}` {
 		t.Fatalf("event = %#v", event)
 	}
-	if fake.started.Query != "hello" || fake.started.Attachments[0].ContentHash != "hash-1" {
+	if fake.started.ThreadID != "session-1" || fake.started.Query != "hello" || fake.started.Attachments[0].ContentHash != "hash-1" {
 		t.Fatalf("command = %#v", fake.started)
+	}
+}
+
+func TestLegacySessionIDJSONWireCompatibility(t *testing.T) {
+	tests := []struct {
+		name      string
+		marshal   func() ([]byte, error)
+		unmarshal func([]byte) (string, error)
+	}{
+		{
+			name: "start",
+			marshal: func() ([]byte, error) {
+				return marshalStartTurnCommand(turn.StartTurnCommand{
+					TeamID: "team-1", ThreadID: "thread-1", Query: "hello",
+				})
+			},
+			unmarshal: func(data []byte) (string, error) {
+				var value turn.StartTurnCommand
+				err := unmarshalStartTurnCommand(data, &value)
+				return value.ThreadID, err
+			},
+		},
+		{
+			name: "tool approval",
+			marshal: func() ([]byte, error) {
+				return marshalToolApprovalResponse(turn.ToolApprovalResponse{
+					BotID: "bot-1", ThreadID: "thread-1", ApprovalID: "approval-1",
+				})
+			},
+			unmarshal: func(data []byte) (string, error) {
+				var value turn.ToolApprovalResponse
+				err := unmarshalToolApprovalResponse(data, &value)
+				return value.ThreadID, err
+			},
+		},
+		{
+			name: "user input",
+			marshal: func() ([]byte, error) {
+				return marshalUserInputResponse(turn.UserInputResponse{
+					BotID: "bot-1", ThreadID: "thread-1", UserInputID: "input-1",
+				})
+			},
+			unmarshal: func(data []byte) (string, error) {
+				var value turn.UserInputResponse
+				err := unmarshalUserInputResponse(data, &value)
+				return value.ThreadID, err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := tt.marshal()
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(data, &fields); err != nil {
+				t.Fatalf("decode literal payload: %v", err)
+			}
+			if _, exists := fields[internalThreadIDKey]; exists {
+				t.Fatalf("payload leaked internal %q key: %s", internalThreadIDKey, data)
+			}
+			rawSessionID, exists := fields[legacySessionIDKey]
+			if !exists {
+				t.Fatalf("payload missing legacy %q key: %s", legacySessionIDKey, data)
+			}
+			var sessionID string
+			if err := json.Unmarshal(rawSessionID, &sessionID); err != nil {
+				t.Fatalf("decode legacy SessionID: %v", err)
+			}
+			if sessionID != "thread-1" {
+				t.Fatalf("legacy SessionID = %q, want thread-1", sessionID)
+			}
+			threadID, err := tt.unmarshal(data)
+			if err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if threadID != "thread-1" {
+				t.Fatalf("roundtrip ThreadID = %q, want thread-1", threadID)
+			}
+		})
+	}
+}
+
+func TestEventProtoSessionIDCompatibility(t *testing.T) {
+	original := turn.Event{
+		RunID:    "run-1",
+		TeamID:   "team-1",
+		ThreadID: "thread-1",
+		Seq:      7,
+		Kind:     "text_delta",
+		Payload:  json.RawMessage(`{"type":"text_delta","text":"hello"}`),
+	}
+	wire := eventToProto(original)
+	if wire.GetSessionId() != "thread-1" {
+		t.Fatalf("proto session_id = %q, want thread-1", wire.GetSessionId())
+	}
+	roundTrip := eventFromProto(wire)
+	if roundTrip.ThreadID != original.ThreadID || roundTrip.RunID != original.RunID ||
+		roundTrip.TeamID != original.TeamID || roundTrip.Seq != original.Seq ||
+		roundTrip.Kind != original.Kind || string(roundTrip.Payload) != string(original.Payload) {
+		t.Fatalf("event roundtrip = %#v, want %#v", roundTrip, original)
 	}
 }
 
@@ -121,7 +224,7 @@ func (f *fakeService) StartTurn(_ context.Context, cmd turn.StartTurnCommand) (t
 	eventCount := max(f.eventCount, 1)
 	events := make(chan turn.Event, eventCount)
 	for i := range eventCount {
-		events <- turn.Event{RunID: "run-1", TeamID: cmd.TeamID, SessionID: cmd.SessionID, Seq: int64(i + 1), Kind: "text_delta", Payload: json.RawMessage(`{"type":"text_delta","text":"hi"}`)}
+		events <- turn.Event{RunID: "run-1", TeamID: cmd.TeamID, ThreadID: cmd.ThreadID, Seq: int64(i + 1), Kind: "text_delta", Payload: json.RawMessage(`{"type":"text_delta","text":"hi"}`)}
 	}
 	close(events)
 	errs := make(chan error)

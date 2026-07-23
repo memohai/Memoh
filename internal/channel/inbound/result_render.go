@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/internal/acpfeedback"
+	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"

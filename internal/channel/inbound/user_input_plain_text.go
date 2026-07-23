@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/userinput"
 )
 
 // handlePlainTextUserInput is the universal fallback for channels that do not
@@ -64,11 +64,11 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	}
 	return true, p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, responseRunner, turn.UserInputResponse{
 		BotID:                  strings.TrimSpace(identity.BotID),
-		SessionID:              strings.TrimSpace(sessionID),
+		ThreadID:               strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
 		ActorUserID:            strings.TrimSpace(identity.UserID),
 		ExplicitID:             result.Request.ID,
-		Answers:                result.Request.Interaction.Answers,
+		Answers:                turnQuestionAnswers(result.Request.Interaction.Answers),
 		ChatToken:              p.issueChatToken(identity, routeID, msg),
 	})
 }

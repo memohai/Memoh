@@ -146,6 +146,7 @@ type BotStore interface {
 	UpdateProfile(ctx context.Context, botID ID, input Patch) (Record, error)
 	UpdateOwner(ctx context.Context, botID ID, ownerUserID ID) (Record, error)
 	UpdateStatus(ctx context.Context, botID ID, status string) (Record, error)
+	TouchActivity(ctx context.Context, botID ID) error
 	Delete(ctx context.Context, botID ID) error
 }
 
@@ -244,17 +245,6 @@ type SessionRepository interface {
 	SoftDelete(ctx context.Context, sessionID ID) error
 }
 
-type ChatRepository interface {
-	Create(ctx context.Context, input Input) (Record, error)
-	GetByID(ctx context.Context, chatID ID) (Record, error)
-	GetReadAccess(ctx context.Context, chatID ID, userID ID) (Record, error)
-	ListVisibleByBotAndUser(ctx context.Context, botID ID, userID ID) ([]Record, error)
-	ListThreadsByParent(ctx context.Context, parentID ID) ([]Record, error)
-	Delete(ctx context.Context, chatID ID) error
-	GetSettings(ctx context.Context, chatID ID) (Record, error)
-	UpsertSettings(ctx context.Context, chatID ID, input Input) (Record, error)
-}
-
 type PipelineSessionEventRepository interface {
 	InsertIdempotent(ctx context.Context, input Input) (ID, error)
 	ListBySession(ctx context.Context, sessionID ID, filter Filter) ([]Record, error)
@@ -300,7 +290,6 @@ type ChannelRouteRepository interface {
 	Delete(ctx context.Context, routeID ID) error
 	UpdateReplyTarget(ctx context.Context, routeID ID, target string) (Record, error)
 	UpdateMetadata(ctx context.Context, routeID ID, metadata JSON) (Record, error)
-	TouchChat(ctx context.Context, routeID ID) error
 }
 
 type BotACLStore interface {

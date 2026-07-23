@@ -10,8 +10,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	messagepkg "github.com/memohai/memoh/internal/message"
-	messageevent "github.com/memohai/memoh/internal/message/event"
+	messageevent "github.com/memohai/memoh/internal/chat/event"
+	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
 
 // TestMessagesEventsRouteIsRemoved guards the route contract: the bot-wide

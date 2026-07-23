@@ -18,45 +18,43 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/agent/background"
+	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/conversation"
+	messageevent "github.com/memohai/memoh/internal/chat/event"
+	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	session "github.com/memohai/memoh/internal/chat/thread"
+	chatview "github.com/memohai/memoh/internal/chat/view"
 	"github.com/memohai/memoh/internal/media"
-	messagepkg "github.com/memohai/memoh/internal/message"
-	messageevent "github.com/memohai/memoh/internal/message/event"
-	"github.com/memohai/memoh/internal/session"
-	"github.com/memohai/memoh/internal/toolapproval"
-	"github.com/memohai/memoh/internal/userinput"
 )
 
 // MessageHandler handles bot-scoped messaging endpoints.
 type MessageHandler struct {
-	conversationService conversation.Accessor
-	messageService      messagepkg.Service
-	sessionService      *session.Service
-	messageEvents       messageevent.Subscriber
-	mediaService        *media.Service
-	botService          *bots.Service
-	accountService      *accounts.Service
-	toolApproval        *toolapproval.Service
-	userInput           *userinput.Service
-	bgManager           *background.Manager
-	logger              *slog.Logger
+	messageService messagepkg.Service
+	sessionService *session.Service
+	messageEvents  messageevent.Subscriber
+	mediaService   *media.Service
+	botService     *bots.Service
+	accountService *accounts.Service
+	toolApproval   *toolapproval.Service
+	userInput      *userinput.Service
+	bgManager      *background.Manager
+	logger         *slog.Logger
 }
 
 // NewMessageHandler creates a MessageHandler.
-func NewMessageHandler(log *slog.Logger, conversationService conversation.Accessor, messageService messagepkg.Service, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service, eventSubscribers ...messageevent.Subscriber) *MessageHandler {
+func NewMessageHandler(log *slog.Logger, messageService messagepkg.Service, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service, eventSubscribers ...messageevent.Subscriber) *MessageHandler {
 	var messageEvents messageevent.Subscriber
 	if len(eventSubscribers) > 0 {
 		messageEvents = eventSubscribers[0]
 	}
 	return &MessageHandler{
-		conversationService: conversationService,
-		messageService:      messageService,
-		sessionService:      sessionService,
-		messageEvents:       messageEvents,
-		botService:          botService,
-		accountService:      accountService,
-		logger:              log.With(slog.String("handler", "conversation")),
+		messageService: messageService,
+		sessionService: sessionService,
+		messageEvents:  messageEvents,
+		botService:     botService,
+		accountService: accountService,
+		logger:         log.With(slog.String("handler", "conversation")),
 	}
 }
 
@@ -130,7 +128,7 @@ func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 // @Param before_message_id query string false "Message ID cursor before which to page"
 // @Param format query string false "Response format: ui returns normalized chat UI turns"
 // @Success 200 {object} map[string][]messagepkg.Message
-// @Success 200 {object} map[string][]conversation.UITurn "when format=ui"
+// @Success 200 {object} map[string][]chatview.UITurn "when format=ui"
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -204,7 +202,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
-		items := conversation.ConvertMessagesToUITurns(messages)
+		items := chatview.ConvertMessagesToUITurns(messages)
 		h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 		return c.JSON(http.StatusOK, map[string]any{
 			"items": items,
@@ -240,7 +238,7 @@ func (h *MessageHandler) listLatestUIPageBySession(ctx context.Context, sessionI
 	}
 
 	start := len(messages) - int(limit)
-	for start > 0 && !conversation.IsUITurnBoundary(messages[start]) {
+	for start > 0 && !chatview.IsUITurnBoundary(messages[start]) {
 		start--
 	}
 	return messages[start:], nil
@@ -303,7 +301,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	}
 
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, located.Messages)
-	items := conversation.ConvertMessagesToUITurns(located.Messages)
+	items := chatview.ConvertMessagesToUITurns(located.Messages)
 	h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 	return c.JSON(http.StatusOK, map[string]any{
 		"items":                      items,
@@ -328,12 +326,12 @@ func parseBoundedInt32(raw string, fallback int32, minValue int32, maxValue int3
 	return value
 }
 
-func (h *MessageHandler) backgroundTaskSnapshots(botID, sessionID string) []conversation.UIBackgroundTask {
+func (h *MessageHandler) backgroundTaskSnapshots(botID, sessionID string) []chatview.UIBackgroundTask {
 	if h.bgManager == nil {
 		return nil
 	}
 	snapshots := h.bgManager.ListSnapshotsForSession(botID, sessionID)
-	tasks := make([]conversation.UIBackgroundTask, 0, len(snapshots))
+	tasks := make([]chatview.UIBackgroundTask, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		status := string(snapshot.Status)
 		stalled := snapshot.Stalled
@@ -344,7 +342,7 @@ func (h *MessageHandler) backgroundTaskSnapshots(botID, sessionID string) []conv
 		if label == "" {
 			label = snapshot.Description
 		}
-		tasks = append(tasks, conversation.UIBackgroundTask{
+		tasks = append(tasks, chatview.UIBackgroundTask{
 			TaskID:         snapshot.TaskID,
 			Status:         status,
 			Command:        label,
@@ -369,7 +367,7 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func (h *MessageHandler) toolApprovalCanApproveFn(sess session.Session) func(toolapproval.Request) bool {
+func (h *MessageHandler) toolApprovalCanApproveFn(sess session.Thread) func(toolapproval.Request) bool {
 	defaultFn := func(req toolapproval.Request) bool {
 		return toolapproval.CanApprove(req.Status)
 	}
@@ -379,12 +377,12 @@ func (h *MessageHandler) toolApprovalCanApproveFn(sess session.Session) func(too
 	return h.toolApproval.CanRespond
 }
 
-func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID string, sess session.Session, items []conversation.UITurn) {
+func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID string, sess session.Thread, items []chatview.UITurn) {
 	if len(items) == 0 {
 		return
 	}
 	if h.bgManager != nil {
-		conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
+		chatview.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
 	}
 	toolCallIDs := toolCallIDsFromUITurns(items)
 	if len(toolCallIDs) == 0 {
@@ -420,12 +418,12 @@ func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID s
 	}
 }
 
-func toolCallIDsFromUITurns(turns []conversation.UITurn) []string {
+func toolCallIDsFromUITurns(turns []chatview.UITurn) []string {
 	var seen map[string]struct{}
 	var ids []string
 	for _, turn := range turns {
 		for _, msg := range turn.Messages {
-			if msg.Type != conversation.UIMessageTool {
+			if msg.Type != chatview.UIMessageTool {
 				continue
 			}
 			id := strings.TrimSpace(msg.ToolCallID)
@@ -445,7 +443,7 @@ func toolCallIDsFromUITurns(turns []conversation.UITurn) []string {
 	return ids
 }
 
-func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Request, canApproveFn func(toolapproval.Request) bool) {
+func mergeToolApprovals(turns []chatview.UITurn, approvals []toolapproval.Request, canApproveFn func(toolapproval.Request) bool) {
 	if len(turns) == 0 || len(approvals) == 0 {
 		return
 	}
@@ -466,7 +464,7 @@ func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Re
 		}
 		for msgIdx := range turns[turnIdx].Messages {
 			msg := &turns[turnIdx].Messages[msgIdx]
-			if msg.Type != conversation.UIMessageTool {
+			if msg.Type != chatview.UIMessageTool {
 				continue
 			}
 			approval, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
@@ -475,7 +473,7 @@ func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Re
 			}
 			running := false
 			msg.Running = &running
-			msg.Approval = &conversation.UIToolApproval{
+			msg.Approval = &chatview.UIToolApproval{
 				ApprovalID:     approval.ID,
 				ShortID:        approval.ShortID,
 				Status:         approval.Status,
@@ -486,7 +484,7 @@ func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Re
 	}
 }
 
-func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, canRespondFn func(userinput.Request) bool) {
+func mergeUserInputs(turns []chatview.UITurn, requests []userinput.Request, canRespondFn func(userinput.Request) bool) {
 	if len(turns) == 0 || len(requests) == 0 {
 		return
 	}
@@ -502,7 +500,7 @@ func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, 
 		}
 		for msgIdx := range turns[turnIdx].Messages {
 			msg := &turns[turnIdx].Messages[msgIdx]
-			if msg.Type != conversation.UIMessageTool {
+			if msg.Type != chatview.UIMessageTool {
 				continue
 			}
 			req, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
@@ -515,7 +513,7 @@ func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, 
 			if canRespondFn != nil {
 				canRespond = canRespondFn(req)
 			}
-			msg.UserInput = &conversation.UIUserInput{
+			msg.UserInput = &chatview.UIUserInput{
 				UserInputID: req.ID,
 				ShortID:     req.ShortID,
 				Status:      req.Status,
@@ -589,7 +587,7 @@ func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID strin
 	// ListBeforeMessageBySession already returns oldest-first, so prepend each
 	// batch directly; the combined slice stays monotonic and the turn converter
 	// (which scans in order) keeps one reply in a single turn.
-	for len(messages) > 0 && len(messages) < maxRows && !conversation.IsUITurnBoundary(messages[0]) {
+	for len(messages) > 0 && len(messages) < maxRows && !chatview.IsUITurnBoundary(messages[0]) {
 		older, err := h.messageService.ListBeforeMessageBySession(ctx, sessionID, messages[0].ID, batch)
 		if err != nil || len(older) == 0 {
 			break
@@ -715,20 +713,20 @@ func (h *MessageHandler) authorizeBotMessageAccess(c echo.Context, channelIdenti
 	return bot, perms, nil
 }
 
-func (h *MessageHandler) authorizeMessageSession(c echo.Context, channelIdentityID, botID, sessionID string) (bots.Bot, []string, session.Session, error) {
+func (h *MessageHandler) authorizeMessageSession(c echo.Context, channelIdentityID, botID, sessionID string) (bots.Bot, []string, session.Thread, error) {
 	if h.sessionService == nil {
-		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
+		return bots.Bot{}, nil, session.Thread{}, echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
 	}
 	bot, perms, err := h.authorizeBotMessageAccess(c, channelIdentityID, botID)
 	if err != nil {
-		return bots.Bot{}, nil, session.Session{}, err
+		return bots.Bot{}, nil, session.Thread{}, err
 	}
 	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
 	if err != nil || sess.BotID != bot.ID {
-		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return bots.Bot{}, nil, session.Thread{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
 	if !canAccessSession(sess, channelIdentityID, perms) {
-		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return bots.Bot{}, nil, session.Thread{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
 	return bot, perms, sess, nil
 }

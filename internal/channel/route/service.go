@@ -8,45 +8,33 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/conversation"
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-// ConversationService contains the minimal conversation behavior required by route resolution.
-type ConversationService interface {
-	Create(ctx context.Context, botID, channelIdentityID string, req conversation.CreateRequest) (conversation.Conversation, error)
-}
-
-// DBService manages channel routes and route-to-conversation resolution.
+// DBService manages channel routes and route-to-bot/thread resolution.
 type DBService struct {
-	queries      dbstore.Queries
-	conversation ConversationService
-	logger       *slog.Logger
+	queries dbstore.Queries
+	logger  *slog.Logger
 }
 
 // NewService creates a channel route service.
-func NewService(log *slog.Logger, queries dbstore.Queries, conversationService ConversationService) *DBService {
+func NewService(log *slog.Logger, queries dbstore.Queries) *DBService {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &DBService{
-		queries:      queries,
-		conversation: conversationService,
-		logger:       log.With(slog.String("service", "channel/route")),
+		queries: queries,
+		logger:  log.With(slog.String("service", "channel/route")),
 	}
 }
 
 // Create creates a route.
 func (s *DBService) Create(ctx context.Context, input CreateInput) (Route, error) {
-	pgConversationID, err := dbpkg.ParseUUID(input.ChatID)
-	if err != nil {
-		return Route{}, err
-	}
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
 	if err != nil {
 		return Route{}, err
@@ -64,12 +52,11 @@ func (s *DBService) Create(ctx context.Context, input CreateInput) (Route, error
 	}
 
 	row, err := s.queries.CreateChatRoute(ctx, sqlc.CreateChatRouteParams{
-		ChatID:           pgConversationID,
 		BotID:            pgBotID,
 		Platform:         input.Platform,
 		ChannelConfigID:  pgConfigID,
-		ConversationID:   input.ConversationID,
-		ThreadID:         toPgText(input.ThreadID),
+		ConversationID:   input.ExternalConversationID,
+		ThreadID:         toPgText(input.ExternalThreadID),
 		ConversationType: toPgText(input.ConversationType),
 		ReplyTarget:      toPgText(input.ReplyTarget),
 		Metadata:         metadata,
@@ -82,7 +69,7 @@ func (s *DBService) Create(ctx context.Context, input CreateInput) (Route, error
 }
 
 // Find finds a route by bot/platform/external-conversation/thread.
-func (s *DBService) Find(ctx context.Context, botID, platform, conversationID, threadID string) (Route, error) {
+func (s *DBService) Find(ctx context.Context, botID, platform, externalConversationID, externalThreadID string) (Route, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
 	if err != nil {
 		return Route{}, err
@@ -90,8 +77,8 @@ func (s *DBService) Find(ctx context.Context, botID, platform, conversationID, t
 	row, err := s.queries.FindChatRoute(ctx, sqlc.FindChatRouteParams{
 		BotID:          pgBotID,
 		Platform:       platform,
-		ConversationID: conversationID,
-		ThreadID:       toPgText(threadID),
+		ConversationID: externalConversationID,
+		ThreadID:       toPgText(externalThreadID),
 	})
 	if err != nil {
 		return Route{}, err
@@ -112,9 +99,9 @@ func (s *DBService) GetByID(ctx context.Context, routeID string) (Route, error) 
 	return toRouteFromGet(row), nil
 }
 
-// List lists all routes for a conversation.
-func (s *DBService) List(ctx context.Context, conversationID string) ([]Route, error) {
-	pgID, err := dbpkg.ParseUUID(conversationID)
+// List lists all routes for a bot.
+func (s *DBService) List(ctx context.Context, botID string) ([]Route, error) {
+	pgID, err := dbpkg.ParseUUID(botID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,9 +153,9 @@ func (s *DBService) UpdateMetadata(ctx context.Context, routeID string, metadata
 	})
 }
 
-// ResolveConversation finds or creates a conversation route for an inbound message.
+// ResolveConversation finds or creates a bot route for an inbound message.
 func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput) (ResolveConversationResult, error) {
-	route, err := s.Find(ctx, input.BotID, input.Platform, input.ConversationID, input.ThreadID)
+	route, err := s.Find(ctx, input.BotID, input.Platform, input.ExternalConversationID, input.ExternalThreadID)
 	if err == nil {
 		if strings.TrimSpace(input.ReplyTarget) != "" && input.ReplyTarget != route.ReplyTarget {
 			if updateErr := s.UpdateReplyTarget(ctx, route.ID, input.ReplyTarget); updateErr != nil && s.logger != nil {
@@ -181,149 +168,98 @@ func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput)
 				s.logger.Warn("update route metadata failed", slog.Any("error", updateErr))
 			}
 		}
-		pgConversationID, parseErr := dbpkg.ParseUUID(route.ChatID)
+		pgBotID, parseErr := dbpkg.ParseUUID(route.BotID)
 		if parseErr != nil {
-			return ResolveConversationResult{}, fmt.Errorf("parse route conversation id: %w", parseErr)
+			return ResolveConversationResult{}, fmt.Errorf("parse route bot id: %w", parseErr)
 		}
-		if touchErr := s.queries.TouchChat(ctx, pgConversationID); touchErr != nil && s.logger != nil {
-			s.logger.Warn("touch conversation failed", slog.Any("error", touchErr))
+		if touchErr := s.queries.TouchBotActivity(ctx, pgBotID); touchErr != nil && s.logger != nil {
+			s.logger.Warn("touch bot activity failed", slog.Any("error", touchErr))
 		}
-		return ResolveConversationResult{ChatID: route.ChatID, RouteID: route.ID, Created: false}, nil
+		return ResolveConversationResult{BotID: route.BotID, RouteID: route.ID, Created: false}, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return ResolveConversationResult{}, fmt.Errorf("find route: %w", err)
 	}
 
-	if s.conversation == nil {
-		return ResolveConversationResult{}, errors.New("conversation service not configured")
-	}
-
-	kind := determineConversationKind(input.ThreadID, input.ConversationType)
-	creatorChannelIdentityID := s.resolveConversationCreatorChannelIdentityID(ctx, input.BotID, input.ChannelIdentityID, kind)
-
-	var parentConversationID string
-	if kind == conversation.KindThread {
-		parentRoute, parentErr := s.Find(ctx, input.BotID, input.Platform, input.ConversationID, "")
-		if parentErr == nil {
-			parentConversationID = parentRoute.ChatID
-		}
-	}
-
-	createdConversation, err := s.conversation.Create(ctx, input.BotID, creatorChannelIdentityID, conversation.CreateRequest{
-		Kind:         kind,
-		ParentChatID: parentConversationID,
-	})
+	pgBotID, err := dbpkg.ParseUUID(input.BotID)
 	if err != nil {
-		return ResolveConversationResult{}, fmt.Errorf("create conversation: %w", err)
+		return ResolveConversationResult{}, fmt.Errorf("parse route bot id: %w", err)
+	}
+	if _, err := s.queries.GetBotByID(ctx, pgBotID); err != nil {
+		return ResolveConversationResult{}, fmt.Errorf("get route bot: %w", err)
 	}
 
 	newRoute, err := s.Create(ctx, CreateInput{
-		ChatID:           createdConversation.ID,
-		BotID:            input.BotID,
-		Platform:         input.Platform,
-		ChannelConfigID:  input.ChannelConfigID,
-		ConversationID:   input.ConversationID,
-		ThreadID:         input.ThreadID,
-		ConversationType: input.ConversationType,
-		ReplyTarget:      input.ReplyTarget,
-		Metadata:         input.Metadata,
+		BotID:                  input.BotID,
+		Platform:               input.Platform,
+		ChannelConfigID:        input.ChannelConfigID,
+		ExternalConversationID: input.ExternalConversationID,
+		ExternalThreadID:       input.ExternalThreadID,
+		ConversationType:       input.ConversationType,
+		ReplyTarget:            input.ReplyTarget,
+		Metadata:               input.Metadata,
 	})
 	if err != nil {
 		// Concurrent insert race: another goroutine created the same route between
 		// our Find and Create calls. Fall back to Find the winning row.
 		if dbpkg.IsUniqueViolation(err) {
-			existing, findErr := s.Find(ctx, input.BotID, input.Platform, input.ConversationID, input.ThreadID)
+			existing, findErr := s.Find(ctx, input.BotID, input.Platform, input.ExternalConversationID, input.ExternalThreadID)
 			if findErr == nil {
-				return ResolveConversationResult{ChatID: existing.ChatID, RouteID: existing.ID, Created: false}, nil
+				return ResolveConversationResult{BotID: existing.BotID, RouteID: existing.ID, Created: false}, nil
 			}
 		}
 		return ResolveConversationResult{}, fmt.Errorf("create route: %w", err)
 	}
 
-	return ResolveConversationResult{ChatID: createdConversation.ID, RouteID: newRoute.ID, Created: true}, nil
-}
-
-func determineConversationKind(threadID, conversationType string) string {
-	if strings.TrimSpace(threadID) != "" {
-		return conversation.KindThread
-	}
-	switch channel.NormalizeConversationType(conversationType) {
-	case channel.ConversationTypeThread:
-		return conversation.KindThread
-	case channel.ConversationTypePrivate:
-		return conversation.KindDirect
-	default:
-		return conversation.KindGroup
-	}
-}
-
-func (s *DBService) resolveConversationCreatorChannelIdentityID(ctx context.Context, botID, fallbackChannelIdentityID, kind string) string {
-	fallback := strings.TrimSpace(fallbackChannelIdentityID)
-	if kind != conversation.KindGroup || s.queries == nil {
-		return fallback
-	}
-	pgBotID, err := dbpkg.ParseUUID(botID)
-	if err != nil {
-		return fallback
-	}
-	row, err := s.queries.GetBotByID(ctx, pgBotID)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("resolve bot owner for group conversation failed", slog.Any("error", err))
-		}
-		return fallback
-	}
-	// NOTE: OwnerUserID is the bot owner's user ID. Used as fallback creator for group conversations.
-	ownerUserID := row.OwnerUserID.String()
-	if strings.TrimSpace(ownerUserID) == "" {
-		return fallback
-	}
-	return ownerUserID
+	return ResolveConversationResult{BotID: newRoute.BotID, RouteID: newRoute.ID, Created: true}, nil
 }
 
 func toRouteFromCreate(row sqlc.CreateChatRouteRow) Route {
 	return toRouteFields(
-		row.ID, row.ChatID, row.BotID, row.Platform, row.ChannelConfigID,
+		row.ID, row.BotID, row.Platform, row.ChannelConfigID,
 		row.ConversationID, row.ThreadID, row.ConversationType, row.ReplyTarget,
-		row.Metadata, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSessionID, row.Metadata, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
 func toRouteFromFind(row sqlc.FindChatRouteRow) Route {
 	return toRouteFields(
-		row.ID, row.ChatID, row.BotID, row.Platform, row.ChannelConfigID,
+		row.ID, row.BotID, row.Platform, row.ChannelConfigID,
 		row.ConversationID, row.ThreadID, row.ConversationType, row.ReplyTarget,
-		row.Metadata, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSessionID, row.Metadata, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
 func toRouteFromGet(row sqlc.GetChatRouteByIDRow) Route {
 	return toRouteFields(
-		row.ID, row.ChatID, row.BotID, row.Platform, row.ChannelConfigID,
+		row.ID, row.BotID, row.Platform, row.ChannelConfigID,
 		row.ConversationID, row.ThreadID, row.ConversationType, row.ReplyTarget,
-		row.Metadata, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSessionID, row.Metadata, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
 func toRouteFromList(row sqlc.ListChatRoutesRow) Route {
 	return toRouteFields(
-		row.ID, row.ChatID, row.BotID, row.Platform, row.ChannelConfigID,
+		row.ID, row.BotID, row.Platform, row.ChannelConfigID,
 		row.ConversationID, row.ThreadID, row.ConversationType, row.ReplyTarget,
-		row.Metadata, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSessionID, row.Metadata, row.CreatedAt, row.UpdatedAt,
 	)
 }
 
-func toRouteFields(id, conversationID, botID pgtype.UUID, platform string, channelConfigID pgtype.UUID, externalConversationID string, threadID, conversationType, replyTarget pgtype.Text, metadata []byte, createdAt, updatedAt pgtype.Timestamptz) Route {
+func toRouteFields(id, botID pgtype.UUID, platform string, channelConfigID pgtype.UUID, externalConversationID string, externalThreadID, conversationType, replyTarget pgtype.Text, activeThreadID pgtype.UUID, metadata []byte, createdAt, updatedAt pgtype.Timestamptz) Route {
 	return Route{
-		ID:               id.String(),
-		ChatID:           conversationID.String(),
-		BotID:            botID.String(),
-		Platform:         platform,
-		ChannelConfigID:  channelConfigID.String(),
-		ConversationID:   externalConversationID,
-		ThreadID:         dbpkg.TextToString(threadID),
-		ConversationType: dbpkg.TextToString(conversationType),
-		ReplyTarget:      dbpkg.TextToString(replyTarget),
-		Metadata:         parseJSONMap(metadata),
-		CreatedAt:        createdAt.Time,
-		UpdatedAt:        updatedAt.Time,
+		ID:                     id.String(),
+		BotID:                  botID.String(),
+		Platform:               platform,
+		ChannelConfigID:        channelConfigID.String(),
+		ExternalConversationID: externalConversationID,
+		ExternalThreadID:       dbpkg.TextToString(externalThreadID),
+		ConversationType:       dbpkg.TextToString(conversationType),
+		ReplyTarget:            dbpkg.TextToString(replyTarget),
+		ActiveThreadID:         activeThreadID.String(),
+		Metadata:               parseJSONMap(metadata),
+		CreatedAt:              createdAt.Time,
+		UpdatedAt:              updatedAt.Time,
 	}
 }
 

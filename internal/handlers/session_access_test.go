@@ -4,20 +4,20 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/session"
+	session "github.com/memohai/memoh/internal/chat/thread"
 )
 
 func TestCanAccessSessionScopesChatToCreator(t *testing.T) {
 	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	otherUserID := "cccccccc-cccc-cccc-cccc-cccccccccccc"
 
-	if !canAccessSession(session.Session{Type: session.TypeChat, CreatedByUserID: userID}, userID, []string{bots.PermissionChat}) {
+	if !canAccessSession(session.Thread{Type: session.TypeChat, CreatedByUserID: userID}, userID, []string{bots.PermissionChat}) {
 		t.Fatal("chat permission should access own chat session")
 	}
-	if canAccessSession(session.Session{Type: session.TypeChat, CreatedByUserID: otherUserID}, userID, []string{bots.PermissionChat}) {
+	if canAccessSession(session.Thread{Type: session.TypeChat, CreatedByUserID: otherUserID}, userID, []string{bots.PermissionChat}) {
 		t.Fatal("chat permission should not access another user's chat session")
 	}
-	if canAccessSession(session.Session{Type: session.TypeChat}, userID, []string{bots.PermissionChat}) {
+	if canAccessSession(session.Thread{Type: session.TypeChat}, userID, []string{bots.PermissionChat}) {
 		t.Fatal("chat permission should not access legacy sessions without a creator")
 	}
 }
@@ -25,7 +25,7 @@ func TestCanAccessSessionScopesChatToCreator(t *testing.T) {
 func TestCanAccessSessionAllowsChatOwnerToReadOwnSubagent(t *testing.T) {
 	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	otherUserID := "cccccccc-cccc-cccc-cccc-cccccccccccc"
-	sess := session.Session{Type: session.TypeSubagent, CreatedByUserID: userID}
+	sess := session.Thread{Type: session.TypeSubagent, CreatedByUserID: userID}
 
 	if !canAccessSession(sess, userID, []string{bots.PermissionChat}) {
 		t.Fatal("chat permission should access own subagent session")
@@ -40,7 +40,7 @@ func TestCanAccessSessionAllowsChatOwnerToReadOwnSubagent(t *testing.T) {
 
 func TestCanAccessSessionAllowsWorkspaceExecForOwnACP(t *testing.T) {
 	userID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-	sess := session.Session{Type: session.TypeACPAgent, CreatedByUserID: userID}
+	sess := session.Thread{Type: session.TypeACPAgent, CreatedByUserID: userID}
 
 	if canAccessSession(sess, userID, []string{bots.PermissionChat}) {
 		t.Fatal("chat permission should not access ACP sessions")

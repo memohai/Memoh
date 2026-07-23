@@ -12,9 +12,9 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/bots"
-	messagepkg "github.com/memohai/memoh/internal/message"
-	messageevent "github.com/memohai/memoh/internal/message/event"
-	"github.com/memohai/memoh/internal/session"
+	messageevent "github.com/memohai/memoh/internal/chat/event"
+	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	session "github.com/memohai/memoh/internal/chat/thread"
 )
 
 // sessionMessageBacklogSize is the server-fixed number of backlog messages
@@ -388,7 +388,7 @@ func canDeliverSessionActivity(ctx context.Context, channelIdentityID, botID str
 // canReadMessageSessionFromCache mirrors canReadMessageSession but skips the
 // session.Get call by accepting an already-loaded session. The authorization
 // policy lives in canAccessSession; this is the cached-path entry point.
-func canReadMessageSessionFromCache(sess session.Session, channelIdentityID, botID string, perms []string) bool {
+func canReadMessageSessionFromCache(sess session.Thread, channelIdentityID, botID string, perms []string) bool {
 	if bots.HasPermission(perms, bots.PermissionManage) {
 		return true
 	}
@@ -442,7 +442,7 @@ func beginSSEResponse(c echo.Context) (io.Writer, http.Flusher, error) {
 type sessionCache struct {
 	logger *slog.Logger
 	svc    *session.Service
-	rows   map[string]session.Session
+	rows   map[string]session.Thread
 	misses map[string]struct{}
 }
 
@@ -453,7 +453,7 @@ func newSessionCache(logger *slog.Logger, svc *session.Service) *sessionCache {
 	return &sessionCache{
 		logger: logger,
 		svc:    svc,
-		rows:   map[string]session.Session{},
+		rows:   map[string]session.Thread{},
 		misses: map[string]struct{}{},
 	}
 }
@@ -462,15 +462,15 @@ func newSessionCache(logger *slog.Logger, svc *session.Service) *sessionCache {
 // return value is false when the session cannot be loaded — either because
 // the service is not configured or because the DB lookup failed (which is
 // logged so an outage doesn't masquerade as normal filtering).
-func (c *sessionCache) get(ctx context.Context, sessionID string) (session.Session, bool) {
+func (c *sessionCache) get(ctx context.Context, sessionID string) (session.Thread, bool) {
 	if cached, ok := c.rows[sessionID]; ok {
 		return cached, true
 	}
 	if _, missed := c.misses[sessionID]; missed {
-		return session.Session{}, false
+		return session.Thread{}, false
 	}
 	if c.svc == nil {
-		return session.Session{}, false
+		return session.Thread{}, false
 	}
 	sess, err := c.svc.Get(ctx, sessionID)
 	if err != nil {
@@ -479,7 +479,7 @@ func (c *sessionCache) get(ctx context.Context, sessionID string) (session.Sessi
 			slog.Any("error", err),
 		)
 		c.misses[sessionID] = struct{}{}
-		return session.Session{}, false
+		return session.Thread{}, false
 	}
 	c.rows[sessionID] = sess
 	return sess, true
@@ -488,7 +488,7 @@ func (c *sessionCache) get(ctx context.Context, sessionID string) (session.Sessi
 // payloadSessionID extracts the session id from an event payload. All in-tree
 // publishers (BackgroundTask, MessageCreated, …) lift `session_id`
 // to the top level of the payload; the producer-side contract is pinned by
-// the helper tests in internal/agentpayload, so this is a single lookup.
+// the helper tests in internal/agent/event/payload, so this is a single lookup.
 func payloadSessionID(payload map[string]any) string {
 	v, _ := payload["session_id"].(string)
 	return v

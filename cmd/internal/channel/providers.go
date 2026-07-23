@@ -20,6 +20,9 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
+	acpprofileadapter "github.com/memohai/memoh/internal/agent/adapter/acpprofile"
+	"github.com/memohai/memoh/internal/agent/context/compaction"
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/turn"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/auth"
@@ -38,15 +41,17 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/wechatoa"
 	"github.com/memohai/memoh/internal/channel/adapters/wecom"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
+	"github.com/memohai/memoh/internal/channel/discuss"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/inbound"
 	"github.com/memohai/memoh/internal/channel/publicmedia"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/channelaccess"
+	"github.com/memohai/memoh/internal/chat/message"
+	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/memohai/memoh/internal/chat/timeline"
 	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
@@ -58,25 +63,21 @@ import (
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/media"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthclients"
-	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
-	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	"github.com/memohai/memoh/internal/team"
-	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/webhooktunnel"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
-func providePipeline() *pipelinepkg.Pipeline {
-	return pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+func providePipeline() *timeline.Pipeline {
+	return timeline.NewPipeline(timeline.RenderParams{})
 }
 
 func provideLocalMediaService(log *slog.Logger, cfg config.Config) *media.Service {
@@ -87,22 +88,21 @@ func provideLocalMediaService(log *slog.Logger, cfg config.Config) *media.Servic
 	return media.NewService(log, localfs.New(filepath.Join(dataRoot, "media")))
 }
 
-func provideEventStore(log *slog.Logger, queries dbstore.Queries) *pipelinepkg.EventStore {
-	return pipelinepkg.NewEventStore(log, queries)
+func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.EventStore {
+	return timeline.NewEventStore(log, queries)
 }
 
-func provideDiscussDriver(log *slog.Logger, pipeline *pipelinepkg.Pipeline, eventStore *pipelinepkg.EventStore, msgService *message.DBService) *pipelinepkg.DiscussDriver {
-	return pipelinepkg.NewDiscussDriver(pipelinepkg.DiscussDriverDeps{
+func provideDiscussDriver(log *slog.Logger, pipeline *timeline.Pipeline, eventStore *timeline.EventStore, msgService *message.DBService) *discuss.DiscussDriver {
+	return discuss.NewDiscussDriver(discuss.DiscussDriverDeps{
 		Pipeline:       pipeline,
-		EventStore:     eventStore,
 		MessageService: msgService,
 		CursorStore:    eventStore,
 		Logger:         log,
 	})
 }
 
-func provideRouteService(log *slog.Logger, queries dbstore.Queries, chatService *conversation.Service) *route.DBService {
-	return route.NewService(log, queries, chatService)
+func provideRouteService(log *slog.Logger, queries dbstore.Queries) *route.DBService {
+	return route.NewService(log, queries)
 }
 
 type channelRegistryParams struct {
@@ -214,9 +214,9 @@ func provideChannelRouter(
 	mediaService *media.Service,
 	audioService channelAudio,
 	settingsService channelSettings,
-	pipeline *pipelinepkg.Pipeline,
-	eventStore *pipelinepkg.EventStore,
-	discussDriver *pipelinepkg.DiscussDriver,
+	pipeline *timeline.Pipeline,
+	eventStore *timeline.EventStore,
+	discussDriver *discuss.DiscussDriver,
 	cfg config.Config,
 	cmdHandler inbound.CommandHandler,
 	skillResolver inbound.RequestedSkillResolver,
@@ -246,6 +246,7 @@ func provideChannelRouter(
 	processor.SetIMDisplayOptions(&settingsIMDisplayOptions{settings: settingsService})
 	processor.SetDefaultChatRuntime(&settingsDefaultChatRuntime{settings: settingsService})
 	processor.SetACPAgentSetupReader(&botACPAgentSetupReader{bots: botService})
+	processor.SetACPProfileResolver(acpprofileadapter.NewCatalog())
 	processor.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
 	processor.SetCommandHandler(cmdHandler)
 	processor.SetRequestedSkillResolver(skillResolver)
@@ -377,7 +378,7 @@ type sessionEnsurerAdapter struct {
 }
 
 func (a *sessionEnsurerAdapter) EnsureActiveSession(ctx context.Context, botID, routeID, channelType string) (inbound.SessionResult, error) {
-	sess, err := a.svc.EnsureActiveSession(ctx, botID, routeID, channelType)
+	sess, err := a.svc.EnsureActiveThread(ctx, botID, routeID, channelType)
 	if err != nil {
 		return inbound.SessionResult{}, err
 	}
@@ -394,7 +395,7 @@ func (a *sessionEnsurerAdapter) GetActiveSession(ctx context.Context, routeID st
 
 func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, routeID, channelType string, spec inbound.NewSessionSpec) (inbound.SessionResult, error) {
 	createdByUserID := newSessionCreatedByUserID(spec)
-	sess, err := a.svc.CreateNewSessionWithInput(ctx, sessionpkg.CreateInput{
+	sess, err := a.svc.CreateNewThreadWithInput(ctx, sessionpkg.CreateInput{
 		BotID:           botID,
 		RouteID:         routeID,
 		ChannelType:     channelType,
@@ -419,7 +420,7 @@ func newSessionCreatedByUserID(spec inbound.NewSessionSpec) string {
 	return strings.TrimSpace(spec.RuntimeOwnerAccountID)
 }
 
-func inboundSessionResult(sess sessionpkg.Session) inbound.SessionResult {
+func inboundSessionResult(sess sessionpkg.Thread) inbound.SessionResult {
 	return inbound.SessionResult{
 		ID:                    sess.ID,
 		Type:                  sess.Type,
@@ -429,7 +430,7 @@ func inboundSessionResult(sess sessionpkg.Session) inbound.SessionResult {
 	}
 }
 
-func sessionRuntimeOwnerAccountID(sess sessionpkg.Session) string {
+func sessionRuntimeOwnerAccountID(sess sessionpkg.Thread) string {
 	if value := runtimeMetadataString(sess.RuntimeMetadata, "runtime_owner_account_id"); value != "" {
 		return value
 	}

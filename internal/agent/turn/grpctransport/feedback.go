@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/memohai/memoh/internal/acpfeedback"
-	sessionpkg "github.com/memohai/memoh/internal/session"
+	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
+	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 )
 
 // feedbackStatusPrefix marks a gRPC status message that carries a JSON

@@ -12,8 +12,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	agentpkg "github.com/memohai/memoh/internal/agent"
-	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/agent/application"
+	"github.com/memohai/memoh/internal/agent/runtime/native"
 )
 
 const (
@@ -22,7 +22,7 @@ const (
 	runtimeContractStreamID  = "stream-runtime-contract"
 )
 
-func rawRuntimeContractEvent(t *testing.T, ev agentpkg.StreamEvent) flow.WSStreamEvent {
+func rawRuntimeContractEvent(t *testing.T, ev native.StreamEvent) application.WSStreamEvent {
 	t.Helper()
 	data, err := json.Marshal(ev)
 	if err != nil {
@@ -31,38 +31,38 @@ func rawRuntimeContractEvent(t *testing.T, ev agentpkg.StreamEvent) flow.WSStrea
 	return data
 }
 
-func richActiveRunWSContractScript(t *testing.T) []flow.WSStreamEvent {
+func richActiveRunWSContractScript(t *testing.T) []application.WSStreamEvent {
 	t.Helper()
-	return []flow.WSStreamEvent{
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{Type: agentpkg.EventAgentStart}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{Type: agentpkg.EventReasoningDelta, Delta: "I need to inspect the workspace."}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "I will check the current state."}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{
-			Type:       agentpkg.EventToolCallStart,
+	return []application.WSStreamEvent{
+		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventAgentStart}),
+		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventReasoningDelta, Delta: "I need to inspect the workspace."}),
+		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventTextDelta, Delta: "I will check the current state."}),
+		rawRuntimeContractEvent(t, native.StreamEvent{
+			Type:       native.EventToolCallStart,
 			ToolName:   "exec",
 			ToolCallID: "call-exec",
 			Input:      map[string]any{"command": "pwd"},
 		}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{
-			Type:       agentpkg.EventToolCallProgress,
+		rawRuntimeContractEvent(t, native.StreamEvent{
+			Type:       native.EventToolCallProgress,
 			ToolName:   "exec",
 			ToolCallID: "call-exec",
 			Progress:   "queued",
 		}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{
-			Type:       agentpkg.EventToolCallProgress,
+		rawRuntimeContractEvent(t, native.StreamEvent{
+			Type:       native.EventToolCallProgress,
 			ToolName:   "exec",
 			ToolCallID: "call-exec",
 			Progress:   map[string]any{"stdout": "/workspace\n"},
 		}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{
-			Type:       agentpkg.EventToolCallEnd,
+		rawRuntimeContractEvent(t, native.StreamEvent{
+			Type:       native.EventToolCallEnd,
 			ToolName:   "exec",
 			ToolCallID: "call-exec",
 			Result:     map[string]any{"structuredContent": map[string]any{"stdout": "/workspace\n"}},
 		}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{
-			Type:       agentpkg.EventToolApprovalRequest,
+		rawRuntimeContractEvent(t, native.StreamEvent{
+			Type:       native.EventToolApprovalRequest,
 			ToolName:   "exec",
 			ToolCallID: "call-approval",
 			Input:      map[string]any{"command": "rm -rf build"},
@@ -70,8 +70,8 @@ func richActiveRunWSContractScript(t *testing.T) []flow.WSStreamEvent {
 			ShortID:    7,
 			Status:     "pending",
 		}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{
-			Type:        agentpkg.EventUserInputRequest,
+		rawRuntimeContractEvent(t, native.StreamEvent{
+			Type:        native.EventUserInputRequest,
 			ToolName:    "ask_user",
 			ToolCallID:  "call-ask",
 			Input:       map[string]any{"questions": []any{map[string]any{"text": "Continue?", "kind": "single_select"}}},
@@ -93,21 +93,21 @@ func richActiveRunWSContractScript(t *testing.T) []flow.WSStreamEvent {
 				},
 			},
 		}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{Type: agentpkg.EventAgentEnd}),
+		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventAgentEnd}),
 	}
 }
 
-func interruptedRunWSContractScript(t *testing.T) []flow.WSStreamEvent {
+func interruptedRunWSContractScript(t *testing.T) []application.WSStreamEvent {
 	t.Helper()
-	return []flow.WSStreamEvent{
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{Type: agentpkg.EventAgentStart}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "partial output"}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{Type: agentpkg.EventError, Error: "runtime interrupted"}),
-		rawRuntimeContractEvent(t, agentpkg.StreamEvent{Type: agentpkg.EventAgentAbort}),
+	return []application.WSStreamEvent{
+		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventAgentStart}),
+		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventTextDelta, Delta: "partial output"}),
+		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventError, Error: "runtime interrupted"}),
+		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventAgentAbort}),
 	}
 }
 
-func collectRuntimeContractWSEvents(t *testing.T, script []flow.WSStreamEvent, stopAt string) []map[string]any {
+func collectRuntimeContractWSEvents(t *testing.T, script []application.WSStreamEvent, stopAt string) []map[string]any {
 	t.Helper()
 
 	closeWriter := make(chan struct{})
@@ -122,7 +122,7 @@ func collectRuntimeContractWSEvents(t *testing.T, script []flow.WSStreamEvent, s
 		defer func() { _ = conn.Close() }()
 
 		writer := newWSWriter(conn)
-		eventCh := make(chan flow.WSStreamEvent, len(script))
+		eventCh := make(chan application.WSStreamEvent, len(script))
 		for _, event := range script {
 			eventCh <- event
 		}

@@ -11,6 +11,67 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearBotRuntimeData = `-- name: ClearBotRuntimeData :exec
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.bot_id = $1
+  ORDER BY session.id
+  FOR UPDATE
+),
+target_compaction_artifacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts compact
+  USING target_compaction_artifacts target
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = target.id
+  RETURNING compact.id
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+    AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+  ORDER BY message.id
+  FOR UPDATE
+),
+deleted_messages AS (
+  DELETE FROM bot_history_messages message
+  USING target_messages target
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.id = target.id
+  RETURNING message.id
+),
+deleted_sessions AS (
+  DELETE FROM bot_sessions session
+  USING target_sessions target
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
+    AND (SELECT count(*) FROM deleted_messages) >= 0
+  RETURNING session.id
+)
+DELETE FROM bot_channel_routes route
+WHERE route.team_id = public.memoh_current_team_id()
+  AND route.bot_id = $1
+  AND (SELECT count(*) FROM deleted_sessions) >= 0
+`
+
+func (q *Queries) ClearBotRuntimeData(ctx context.Context, botID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearBotRuntimeData, botID)
+	return err
+}
+
 const createBot = `-- name: CreateBot :one
 INSERT INTO bots (owner_user_id, name, display_name, avatar_url, timezone, is_active, metadata, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -487,6 +548,17 @@ func (q *Queries) LockBotForSessionWrite(ctx context.Context, id pgtype.UUID) (p
 	var id_2 pgtype.UUID
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const touchBotActivity = `-- name: TouchBotActivity :exec
+UPDATE bots
+SET updated_at = now()
+WHERE team_id = public.memoh_current_team_id() AND id = $1
+`
+
+func (q *Queries) TouchBotActivity(ctx context.Context, botID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, touchBotActivity, botID)
+	return err
 }
 
 const updateBotOwner = `-- name: UpdateBotOwner :one
