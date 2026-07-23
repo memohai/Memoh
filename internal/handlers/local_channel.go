@@ -95,7 +95,7 @@ type localChannelResolver interface {
 	PrepareEditLatestMessageWS(ctx context.Context, input flow.EditLatestMessageInput) (flow.PreparedReplacementWS, error)
 	PrepareRetryLatestMessageWS(ctx context.Context, input flow.RetryLatestMessageInput) (flow.PreparedReplacementWS, error)
 	PrepareToolApprovalResponse(ctx context.Context, input flow.ToolApprovalResponseInput) (runtimefence.PreservedDecision, error)
-	PrepareUserInputResponse(ctx context.Context, input flow.UserInputResponseInput) (runtimefence.PreservedDecision, error)
+	PrepareUserInputResponseTarget(ctx context.Context, input flow.UserInputResponseInput) (runtimefence.PreservedDecision, error)
 	RespondToolApproval(ctx context.Context, input flow.ToolApprovalResponseInput, eventCh chan<- flow.WSStreamEvent) error
 	RespondUserInput(ctx context.Context, input flow.UserInputResponseInput, eventCh chan<- flow.WSStreamEvent) error
 	DeferSessionCompaction(botID, sessionID, streamID string) func()
@@ -2413,7 +2413,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				ChatToken:              bearerToken,
 			}
 			deferred := func() {
-				preserved, err := h.resolver.PrepareUserInputResponse(streamBaseCtx, responseInput)
+				preserved, err := h.resolver.PrepareUserInputResponseTarget(streamBaseCtx, responseInput)
 				if err != nil {
 					h.sendWSSidebandResult(connCtx, writer, responseMsg, "user_input_response", err)
 					return

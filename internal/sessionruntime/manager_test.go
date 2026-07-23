@@ -1359,6 +1359,14 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 		t.Parallel()
 		runRuntimeManagerSharesRequestUserTurnContract(t, suite)
 	})
+	t.Run("publishes live admissions to remote observers", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerPublishesLiveAdmissionsContract(t, suite)
+	})
+	t.Run("projects committed user input decisions to observers", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerProjectsUserInputDecisionsContract(t, suite)
+	})
 	t.Run("keeps queued steer valid past command acknowledgement timeout", func(t *testing.T) {
 		t.Parallel()
 		runRuntimeManagerKeepsQueuedSteerPastAckTimeoutContract(t, suite)
@@ -1399,6 +1407,120 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 		t.Parallel()
 		runRuntimeManagerDetectsFirstDeltaGapContract(t, suite)
 	})
+}
+
+func runRuntimeManagerProjectsUserInputDecisionsContract(t *testing.T, suite runtimeBackendContractSuite) {
+	t.Helper()
+	backends := suite.newSharedBackends(t, 2)
+	owner := testRuntimeManager(t, backends[0], "owner-user-input-projection")
+	observer := testRuntimeManager(t, backends[1], "observer-user-input-projection")
+	sub, err := observer.Subscribe(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("subscribe observer: %v", err)
+	}
+	defer sub.Close()
+	_ = waitRuntimeEvent(t, sub.C, func(event Event) bool { return event.Type == EventRuntimeSnapshot })
+
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start user input run: %v", err)
+	}
+	handle := requireRunHandle(t, owner, testBotID, testSessionID, testStreamID)
+	for _, targetID := range []string{"input-submit", "input-cancel", "input-failed"} {
+		if _, err := owner.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{
+			Type: agentpkg.EventUserInputRequest, ToolName: "ask_user", ToolCallID: "call-" + targetID,
+			UserInputID: targetID, Status: "pending",
+		}); err != nil {
+			t.Fatalf("record %s: %v", targetID, err)
+		}
+	}
+
+	statusFor := func(snapshot Snapshot, targetID string) (string, bool) {
+		if snapshot.CurrentRunView == nil {
+			return "", false
+		}
+		for _, message := range snapshot.CurrentRunView.Messages {
+			if message.UserInput != nil && message.UserInput.UserInputID == targetID {
+				return message.UserInput.Status, message.UserInput.CanRespond
+			}
+		}
+		return "", false
+	}
+	var handlerCalls atomic.Int64
+	owner.SetCommandHandler(func(ctx context.Context, command Command) error {
+		handlerCalls.Add(1)
+		snapshot, err := owner.Snapshot(ctx, command.BotID, command.SessionID)
+		if err != nil {
+			return err
+		}
+		status, canRespond := statusFor(snapshot, command.TargetID)
+		if status != "pending" || !canRespond {
+			return fmt.Errorf("target was projected before durable execution: status=%q can_respond=%v", status, canRespond)
+		}
+		if command.TargetID == "input-failed" {
+			return errors.New("durable user input update failed")
+		}
+		return nil
+	})
+
+	for _, decision := range []struct {
+		targetID string
+		payload  string
+		status   string
+	}{
+		{targetID: "input-submit", payload: `{"Canceled":false}`, status: "submitted"},
+		{targetID: "input-cancel", payload: `{"canceled":true}`, status: "canceled"},
+	} {
+		handled, err := owner.DispatchActiveCommand(
+			context.Background(), testBotID, testSessionID,
+			CommandUserInputResponse, decision.targetID, []byte(decision.payload),
+		)
+		if err != nil || !handled {
+			t.Fatalf("dispatch %s = handled:%v err:%v", decision.targetID, handled, err)
+		}
+		event := waitRuntimeEvent(t, sub.C, func(event Event) bool {
+			if event.Delta == nil {
+				return false
+			}
+			for _, message := range event.Delta.MessageUpserts {
+				if message.UserInput != nil &&
+					message.UserInput.UserInputID == decision.targetID &&
+					message.UserInput.Status == decision.status &&
+					!message.UserInput.CanRespond {
+					return true
+				}
+			}
+			return false
+		})
+		if event.Type != EventRuntimeDelta {
+			t.Fatalf("decision projection event = %#v", event)
+		}
+		snapshot := waitRuntimeSnapshot(t, observer, testBotID, testSessionID, func(snapshot Snapshot) bool {
+			status, canRespond := statusFor(snapshot, decision.targetID)
+			return status == decision.status && !canRespond
+		})
+		status, canRespond := statusFor(snapshot, decision.targetID)
+		if status != decision.status || canRespond {
+			t.Fatalf("%s observer state = status:%q can_respond:%v", decision.targetID, status, canRespond)
+		}
+	}
+
+	handled, err := owner.DispatchActiveCommand(
+		context.Background(), testBotID, testSessionID,
+		CommandUserInputResponse, "input-failed", []byte(`{"canceled":true}`),
+	)
+	if !handled || err == nil {
+		t.Fatalf("failed decision dispatch = handled:%v err:%v", handled, err)
+	}
+	snapshot, snapshotErr := observer.Snapshot(context.Background(), testBotID, testSessionID)
+	if snapshotErr != nil {
+		t.Fatalf("load failed decision state: %v", snapshotErr)
+	}
+	if status, canRespond := statusFor(snapshot, "input-failed"); status != "pending" || !canRespond {
+		t.Fatalf("failed decision was projected: status=%q can_respond=%v", status, canRespond)
+	}
+	if calls := handlerCalls.Load(); calls != 3 {
+		t.Fatalf("command handler calls = %d, want 3", calls)
+	}
 }
 
 func runRuntimeManagerScopesIdenticalStreamIDsContract(t *testing.T, suite runtimeBackendContractSuite) {
@@ -2864,6 +2986,117 @@ func runRuntimeManagerSharesRequestUserTurnContract(t *testing.T, suite runtimeB
 	}
 }
 
+func runRuntimeManagerPublishesLiveAdmissionsContract(t *testing.T, suite runtimeBackendContractSuite) {
+	t.Helper()
+
+	backends := suite.newSharedBackends(t, 2)
+	owner := testRuntimeManager(t, backends[0], "owner-live-admission")
+	observer := testRuntimeManager(t, backends[1], "observer-live-admission")
+	tests := []struct {
+		name      string
+		admission RunAdmissionView
+		assertRun func(*testing.T, *CurrentRunView)
+	}{
+		{
+			name: "ordinary request",
+			admission: RunAdmissionView{RequestUserTurn: &conversation.UITurn{
+				Role: "user", Text: "new request",
+			}},
+			assertRun: func(t *testing.T, run *CurrentRunView) {
+				t.Helper()
+				if run.RequestUserTurn == nil || run.RequestUserTurn.Text != "new request" {
+					t.Fatalf("live ordinary request turn = %#v", run.RequestUserTurn)
+				}
+			},
+		},
+		{
+			name: "retry replacement",
+			admission: RunAdmissionView{
+				RequestUserTurn: &conversation.UITurn{Role: "user", Text: "retry request"},
+				Operation: &RunOperationView{
+					Kind:                 RunOperationRetry,
+					ReplaceFromMessageID: "assistant-old",
+				},
+			},
+			assertRun: func(t *testing.T, run *CurrentRunView) {
+				t.Helper()
+				if run.Operation == nil || run.Operation.Kind != RunOperationRetry || run.Operation.ReplaceFromMessageID != "assistant-old" {
+					t.Fatalf("live retry operation = %#v", run.Operation)
+				}
+			},
+		},
+	}
+	for index, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessionID := fmt.Sprintf("%s-live-admission-%d", testSessionID, index)
+			streamID := fmt.Sprintf("%s-live-admission-%d", testStreamID, index)
+			subscriptions := make([]Subscription, 0, 2)
+			for _, manager := range []*Manager{owner, observer} {
+				sub, err := manager.Subscribe(context.Background(), testBotID, sessionID)
+				if err != nil {
+					t.Fatalf("subscribe live admission observer: %v", err)
+				}
+				defer sub.Close()
+				_ = waitRuntimeEvent(t, sub.C, func(event Event) bool {
+					return event.Type == EventRuntimeSnapshot
+				})
+				subscriptions = append(subscriptions, sub)
+			}
+			if tt.admission.RequestUserTurn != nil {
+				tt.admission.RequestUserTurn.ExternalMessageID = streamID
+			}
+			handle, err := owner.StartRunWithOptions(context.Background(), RunStartOptions{
+				BotID: testBotID, SessionID: sessionID, StreamID: streamID,
+				Admission: tt.admission,
+				AbortCh:   make(chan struct{}, 1), Cancel: func() {}, InjectCh: make(chan conversation.InjectMessage, 1),
+			})
+			if err != nil {
+				t.Fatalf("start live admission: %v", err)
+			}
+			for observerIndex, sub := range subscriptions {
+				event := waitRuntimeEvent(t, sub.C, func(event Event) bool {
+					return event.Type == EventRuntimeDelta && event.Delta != nil &&
+						event.Delta.CurrentRunView != nil &&
+						event.Delta.CurrentRunView.Status == RunStatusRunning
+				})
+				run := event.Delta.CurrentRunView
+				if run.Messages == nil {
+					t.Fatalf("live admission observer %d messages = nil, want []", observerIndex)
+				}
+				tt.assertRun(t, run)
+			}
+
+			if _, err := owner.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{
+				Type: agentpkg.EventTextDelta, Delta: "shared output",
+			}); err != nil {
+				t.Fatalf("publish live admission output: %v", err)
+			}
+			for observerIndex, sub := range subscriptions {
+				event := waitRuntimeEvent(t, sub.C, func(event Event) bool {
+					return event.Delta != nil && len(event.Delta.MessageAppends) == 1
+				})
+				if event.Delta.MessageAppends[0].Content != "shared output" {
+					t.Fatalf("live admission observer %d append = %#v", observerIndex, event.Delta.MessageAppends)
+				}
+			}
+			if err := owner.FinishRun(context.Background(), handle, RunStatusCompleted, ""); err != nil {
+				t.Fatalf("finish live admission: %v", err)
+			}
+			for observerIndex, sub := range subscriptions {
+				_ = waitRuntimeEvent(t, sub.C, func(event Event) bool {
+					return event.Delta != nil && event.Delta.Run != nil &&
+						event.Delta.Run.Status != nil && *event.Delta.Run.Status == RunStatusCompleted
+				})
+				select {
+				case duplicate := <-sub.C:
+					t.Fatalf("live admission observer %d received duplicate terminal event: %#v", observerIndex, duplicate)
+				case <-time.After(100 * time.Millisecond):
+				}
+			}
+		})
+	}
+}
+
 func TestRuntimeManagerRejectsNonUserRequestTurn(t *testing.T) {
 	t.Parallel()
 
@@ -3165,7 +3398,7 @@ func runRuntimeManagerRoutesActiveResponsesAcrossManagersContract(t *testing.T, 
 	backends := suite.newSharedBackends(t, 2)
 	owner := testRuntimeManager(t, backends[0], "response-owner")
 	remote := testRuntimeManager(t, backends[1], "response-remote")
-	commands := make(chan Command, 2)
+	commands := make(chan Command, 3)
 	owner.SetCommandHandler(func(_ context.Context, command Command) error {
 		commands <- command
 		return nil
@@ -3175,7 +3408,8 @@ func runRuntimeManagerRoutesActiveResponsesAcrossManagersContract(t *testing.T, 
 	}
 	for _, event := range []agentpkg.StreamEvent{
 		{Type: agentpkg.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-approval", ApprovalID: "approval-1", Status: "pending"},
-		{Type: agentpkg.EventUserInputRequest, ToolName: "ask_user", ToolCallID: "call-input", UserInputID: "input-1", Status: "pending"},
+		{Type: agentpkg.EventUserInputRequest, ToolName: "ask_user", ToolCallID: "call-input-submit", UserInputID: "input-submit", Status: "pending"},
+		{Type: agentpkg.EventUserInputRequest, ToolName: "ask_user", ToolCallID: "call-input-cancel", UserInputID: "input-cancel", Status: "pending"},
 	} {
 		if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testStreamID), event); err != nil {
 			t.Fatalf("record response target: %v", err)
@@ -3185,11 +3419,14 @@ func runRuntimeManagerRoutesActiveResponsesAcrossManagersContract(t *testing.T, 
 	for _, request := range []struct {
 		commandType string
 		targetID    string
+		payload     string
+		status      string
 	}{
-		{commandType: CommandToolApprovalResponse, targetID: "approval-1"},
-		{commandType: CommandUserInputResponse, targetID: "input-1"},
+		{commandType: CommandToolApprovalResponse, targetID: "approval-1", payload: `{"decision":"approve"}`},
+		{commandType: CommandUserInputResponse, targetID: "input-submit", payload: `{"canceled":false}`, status: "submitted"},
+		{commandType: CommandUserInputResponse, targetID: "input-cancel", payload: `{"Canceled":true}`, status: "canceled"},
 	} {
-		handled, err := remote.DispatchActiveCommand(context.Background(), testBotID, testSessionID, request.commandType, request.targetID, []byte(`{"ok":true}`))
+		handled, err := remote.DispatchActiveCommand(context.Background(), testBotID, testSessionID, request.commandType, request.targetID, []byte(request.payload))
 		if err != nil || !handled {
 			t.Fatalf("dispatch %s = handled:%v err:%v", request.commandType, handled, err)
 		}
@@ -3200,6 +3437,22 @@ func runRuntimeManagerRoutesActiveResponsesAcrossManagersContract(t *testing.T, 
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatalf("timed out waiting for %s", request.commandType)
+		}
+		if request.status != "" {
+			waitRuntimeSnapshot(t, remote, testBotID, testSessionID, func(snapshot Snapshot) bool {
+				if snapshot.CurrentRunView == nil {
+					return false
+				}
+				for _, message := range snapshot.CurrentRunView.Messages {
+					if message.UserInput != nil &&
+						message.UserInput.UserInputID == request.targetID &&
+						message.UserInput.Status == request.status &&
+						!message.UserInput.CanRespond {
+						return true
+					}
+				}
+				return false
+			})
 		}
 	}
 	if handled, err := remote.DispatchActiveCommand(context.Background(), testBotID, testSessionID, CommandToolApprovalResponse, "approval-old", nil); err != nil || handled {

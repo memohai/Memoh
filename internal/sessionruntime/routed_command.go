@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/memohai/memoh/internal/conversation"
 )
 
 // DispatchActiveCommand routes a response for a UI request embedded in the
@@ -327,7 +329,79 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 		return ErrCommandBusy
 	}
 	defer m.endCommandTarget(cmd)
-	err = handler(commandCtx, cmd)
+	if err = handler(commandCtx, cmd); err != nil {
+		return err
+	}
+	projectionCtx, projectionCancel := context.WithTimeout(context.WithoutCancel(commandCtx), m.commandTimeout())
+	defer projectionCancel()
+	if err = m.projectUserInputCommandDecision(projectionCtx, handle, cmd); err != nil && !errors.Is(err, ErrRunOwnershipLost) {
+		m.logger.Warn("project routed user input decision failed; subscribers will reconcile from later runtime state",
+			slog.Any("error", err),
+			slog.String("stream_id", cmd.StreamID),
+			slog.String("target_id", cmd.TargetID),
+		)
+	}
+	return nil
+}
+
+// projectUserInputCommandDecision publishes the committed decision only after
+// the owner-local handler has successfully updated the durable request. It is
+// an observer projection, so a run that finishes concurrently is a safe no-op.
+func (m *Manager) projectUserInputCommandDecision(ctx context.Context, handle RunHandle, cmd Command) error {
+	if strings.TrimSpace(cmd.Type) != CommandUserInputResponse {
+		return nil
+	}
+	targetID := strings.TrimSpace(cmd.TargetID)
+	if targetID == "" {
+		return nil
+	}
+	status := "submitted"
+	var payload map[string]any
+	if err := unmarshalRuntimeJSON(cmd.Payload, &payload); err == nil {
+		if canceled, _ := runtimeCommandMapValue(payload, "canceled").(bool); canceled {
+			status = "canceled"
+		}
+	}
+	_, _, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
+		run := snapshot.CurrentRunView
+		if !runMatchesHandle(run, handle) || !m.runOwnerMatches(run) || !isActiveRunStatus(run.Status) {
+			return snapshot, false, nil
+		}
+		for i := range run.Messages {
+			userInput := run.Messages[i].UserInput
+			if userInput == nil || strings.TrimSpace(userInput.UserInputID) != targetID {
+				continue
+			}
+			currentStatus := strings.ToLower(strings.TrimSpace(userInput.Status))
+			if currentStatus != "" && currentStatus != "pending" && currentStatus != status {
+				return snapshot, false, nil
+			}
+			if currentStatus == status && !userInput.CanRespond {
+				return snapshot, false, nil
+			}
+			projected := *userInput
+			projected.Status = status
+			projected.CanRespond = false
+			run.Messages[i].UserInput = &projected
+			snapshot.Seq++
+			snapshot.Queue = nonNilQueue(snapshot.Queue)
+			snapshot.UpdatedAt = now
+			run.UpdatedAt = now
+			return snapshot, true, nil
+		}
+		return snapshot, false, nil
+	}, func(snapshot Snapshot) RuntimeDelta {
+		run := snapshot.CurrentRunView
+		if run == nil {
+			return RuntimeDelta{}
+		}
+		for _, message := range run.Messages {
+			if message.UserInput != nil && strings.TrimSpace(message.UserInput.UserInputID) == targetID {
+				return RuntimeDelta{MessageUpserts: []conversation.UIMessage{message}}
+			}
+		}
+		return RuntimeDelta{}
+	})
 	return err
 }
 
