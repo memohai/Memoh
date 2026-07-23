@@ -40,37 +40,28 @@
 
 # Agent loop, orchestration, context, and approval flow
 /internal/agent/                 @memohai/agent-loop
-/internal/agentpayload/          @memohai/agent-loop
-/internal/compaction/            @memohai/agent-loop
-/internal/contextfrag/           @memohai/agent-loop
-/internal/contextlimit/          @memohai/agent-loop
-/internal/conversation/          @memohai/agent-loop
-/internal/decision/              @memohai/agent-loop
+/internal/chat/                  @memohai/agent-loop
 /internal/healthcheck/checkers/mcp/ @memohai/agent-loop
 /internal/heartbeat/             @memohai/agent-loop
-/internal/historyfrag/           @memohai/agent-loop
 /internal/hooks/                 @memohai/agent-loop
 /internal/mcp/                   @memohai/agent-loop
 /internal/memory/                @memohai/agent-loop
-/internal/pipeline/              @memohai/agent-loop
 /internal/prune/                 @memohai/agent-loop
 /internal/schedule/              @memohai/agent-loop
-/internal/session/               @memohai/agent-loop
 /internal/skills/                @memohai/agent-loop
-/internal/toolapproval/          @memohai/agent-loop
-/internal/userinput/             @memohai/agent-loop
 
 # Channels, messaging, identities, and commands
 /internal/acl/                   @memohai/channel
 /internal/channel/               @memohai/channel
 /internal/channelaccess/         @memohai/channel
+/internal/chat/event/            @memohai/channel
+/internal/chat/message/          @memohai/channel
 /internal/command/               @memohai/channel
 /internal/commandsyntax/         @memohai/channel
 /internal/email/                 @memohai/channel
 /internal/healthcheck/checkers/channel/ @memohai/channel
 /internal/i18n/                  @memohai/channel
 /internal/identity/              @memohai/channel
-/internal/message/               @memohai/channel
 /internal/messageconv/           @memohai/channel
 /internal/messaging/             @memohai/channel
 /internal/slash/                 @memohai/channel
@@ -87,10 +78,10 @@
 /packages/runtime/               @memohai/runtime
 /cmd/bridge/                     @memohai/runtime
 /cmd/gen-bridge-mtls/            @memohai/runtime
-/internal/acpagent/              @memohai/runtime
-/internal/acpclient/             @memohai/runtime
-/internal/acpfeedback/           @memohai/runtime
-/internal/acpprofile/            @memohai/runtime
+/internal/agent/adapter/acpprofile/ @memohai/runtime
+/internal/agent/decision/feedback/ @memohai/runtime
+/internal/agent/runtime/acp/     @memohai/runtime
+/internal/agent/runtime/session/ @memohai/runtime
 /internal/boot/                  @memohai/runtime
 /internal/container/             @memohai/runtime
 /internal/display/               @memohai/runtime

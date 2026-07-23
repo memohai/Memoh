@@ -136,7 +136,7 @@ jobs:
           MEMOH_TEST_DISTRIBUTED_REQUIRED: "1"
           RUNTIME_URL: redis://127.0.0.1:${{ job.services.runtime.ports['6379'] }}/0
           RUNTIME_ENV_NAME: ${{ matrix.env_name }}
-        run: env "$RUNTIME_ENV_NAME=$RUNTIME_URL" go test -v -race -count=1 -timeout 90s ./internal/sessionruntime
+        run: env "$RUNTIME_ENV_NAME=$RUNTIME_URL" go test -v -race -count=1 -timeout 90s ./internal/agent/runtime/session
 
   session-runtime-postgres:
     name: Session Runtime (PostgreSQL fencing)
@@ -171,6 +171,6 @@ jobs:
           go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresRuntimeFence' ./internal/runtimefence
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgresRuntimeFence' ./internal/message
+            -run '^TestPostgresRuntimeFence' ./internal/chat/message
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgresRuntimeFence' ./internal/acpagent
+            -run '^TestPostgresRuntimeFence' ./internal/agent/runtime/acp

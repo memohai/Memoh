@@ -241,7 +241,7 @@ func TestPostgresRepairSupersededMessageVisibilityMigration(t *testing.T) {
 		t.Fatalf("insert repair fixtures: %v", err)
 	}
 
-	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	sql, err := os.ReadFile("../../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
 	if err != nil {
 		t.Fatalf("read repair migration: %v", err)
 	}

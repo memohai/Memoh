@@ -419,7 +419,7 @@ func TestPostgresRepairIncompleteForkSessionsMigration(t *testing.T) {
 		t.Fatalf("insert repair fork messages: %v", err)
 	}
 
-	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	sql, err := os.ReadFile("../../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
 	if err != nil {
 		t.Fatalf("read fork repair migration: %v", err)
 	}
@@ -500,7 +500,7 @@ func TestPostgresRepairIncompleteForkRetriedCopiedTurnMigration(t *testing.T) {
 		t.Fatalf("insert retried fork messages: %v", err)
 	}
 
-	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	sql, err := os.ReadFile("../../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
 	if err != nil {
 		t.Fatalf("read fork repair migration: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestPostgresRepairIncompleteForkTurnlessFollowUpMigration(t *testing.T) {
 		t.Fatalf("insert turnless fork messages: %v", err)
 	}
 
-	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	sql, err := os.ReadFile("../../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
 	if err != nil {
 		t.Fatalf("read fork repair migration: %v", err)
 	}
@@ -739,7 +739,7 @@ func TestPostgresRepairSkipsConsistentIncompleteForkMigration(t *testing.T) {
 		t.Fatalf("insert consistent fork messages: %v", err)
 	}
 
-	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	sql, err := os.ReadFile("../../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
 	if err != nil {
 		t.Fatalf("read fork repair migration: %v", err)
 	}
