@@ -630,6 +630,7 @@ func Load(path string) (Config, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			cfg.applyBridgeTLSEnvOverrides()
+			cfg.applySessionRuntimeEnvOverrides()
 			if err := cfg.validate(); err != nil {
 				return cfg, err
 			}
@@ -672,6 +673,7 @@ func Load(path string) (Config, error) {
 		cfg.Workspace = cfg.Container.WorkspaceConfig
 	}
 	cfg.applyBridgeTLSEnvOverrides()
+	cfg.applySessionRuntimeEnvOverrides()
 	if err := cfg.validate(); err != nil {
 		return cfg, err
 	}
@@ -771,6 +773,24 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_INTERNAL_RPC_CHANNEL_TARGET")); value != "" {
 		cfg.InternalRPC.ChannelTarget = value
+	}
+}
+
+func (cfg *Config) applySessionRuntimeEnvOverrides() {
+	if value := strings.TrimSpace(os.Getenv("MEMOH_SESSION_RUNTIME_BACKEND")); value != "" {
+		cfg.SessionRuntime.Backend = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_SESSION_RUNTIME_STATE_TTL")); value != "" {
+		cfg.SessionRuntime.StateTTL = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_SESSION_RUNTIME_OWNER_LEASE_TTL")); value != "" {
+		cfg.SessionRuntime.OwnerLeaseTTL = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_SESSION_RUNTIME_REDIS_URL")); value != "" {
+		cfg.SessionRuntime.Redis.URL = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_SESSION_RUNTIME_REDIS_KEY_PREFIX")); value != "" {
+		cfg.SessionRuntime.Redis.KeyPrefix = value
 	}
 }
 

@@ -85,6 +85,18 @@ set -e
 docker compose -f devenv/docker-compose.yml up --build
 """
 
+[tasks."dev:redis"]
+description = "Start development environment with Redis session runtime"
+depends = ["//:dev:workspace-image"]
+run = """
+#!/bin/bash
+set -e
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f devenv/docker-compose.runtime-redis.yml \
+  up --build
+"""
+
 [tasks."dev:webhook-tunnel"]
 description = "Start development environment with Cloudflare Quick Tunnel for webhooks"
 depends = ["//:dev:workspace-image"]
@@ -102,6 +114,22 @@ run = """
 set -e
 docker compose -f devenv/docker-compose.minify.yml up --build
 """
+
+[tasks."dev:minify:redis"]
+description = "Start minified development environment with Redis session runtime"
+depends = ["//:dev:workspace-image"]
+run = """
+#!/bin/bash
+set -e
+docker compose \
+  -f devenv/docker-compose.minify.yml \
+  -f devenv/docker-compose.runtime-redis.yml \
+  up --build
+"""
+
+[tasks."test:runtime:redis"]
+description = "Run distributed session runtime contracts against temporary Redis"
+run = "./scripts/test-session-runtime-redis.sh"
 
 [tasks."dev:minify:webhook-tunnel"]
 description = "Start minified development environment with Cloudflare Quick Tunnel for webhooks"

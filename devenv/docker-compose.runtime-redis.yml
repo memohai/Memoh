@@ -1,0 +1,24 @@
+services:
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - session_runtime_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  server:
+    environment:
+      MEMOH_SESSION_RUNTIME_BACKEND: redis
+      MEMOH_SESSION_RUNTIME_REDIS_URL: redis://redis:6379/0
+      MEMOH_SESSION_RUNTIME_REDIS_KEY_PREFIX: "memoh:dev:session_runtime:"
+    depends_on:
+      redis:
+        condition: service_healthy
+volumes:
+  session_runtime_redis_data:
+    driver: local

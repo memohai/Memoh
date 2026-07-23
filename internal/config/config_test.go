@@ -274,6 +274,77 @@ func TestLoadDefaultsSessionRuntimeToMemory(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesSessionRuntimeEnvOverrides(t *testing.T) {
+	t.Setenv("MEMOH_SESSION_RUNTIME_BACKEND", "redis")
+	t.Setenv("MEMOH_SESSION_RUNTIME_STATE_TTL", "8h")
+	t.Setenv("MEMOH_SESSION_RUNTIME_OWNER_LEASE_TTL", "45s")
+	t.Setenv("MEMOH_SESSION_RUNTIME_REDIS_URL", "redis://redis.example:6379/2")
+	t.Setenv("MEMOH_SESSION_RUNTIME_REDIS_KEY_PREFIX", "test:runtime:")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.SessionRuntime.BackendOrDefault() != SessionRuntimeBackendRedis {
+		t.Fatalf("session runtime backend = %q, want redis", cfg.SessionRuntime.BackendOrDefault())
+	}
+	if cfg.SessionRuntime.StateTTLOrDefault() != "8h" {
+		t.Fatalf("session runtime state ttl = %q, want 8h", cfg.SessionRuntime.StateTTLOrDefault())
+	}
+	if cfg.SessionRuntime.OwnerLeaseTTLOrDefault() != "45s" {
+		t.Fatalf("session runtime owner lease ttl = %q, want 45s", cfg.SessionRuntime.OwnerLeaseTTLOrDefault())
+	}
+	if cfg.SessionRuntime.Redis.URLOrDefault() != "redis://redis.example:6379/2" {
+		t.Fatalf("redis url = %q", cfg.SessionRuntime.Redis.URLOrDefault())
+	}
+	if cfg.SessionRuntime.Redis.KeyPrefixOrDefault() != "test:runtime:" {
+		t.Fatalf("redis key prefix = %q", cfg.SessionRuntime.Redis.KeyPrefixOrDefault())
+	}
+}
+
+func TestLoadSessionRuntimeEnvOverridesFileConfig(t *testing.T) {
+	t.Setenv("MEMOH_SESSION_RUNTIME_BACKEND", "redis")
+	t.Setenv("MEMOH_SESSION_RUNTIME_STATE_TTL", "8h")
+	t.Setenv("MEMOH_SESSION_RUNTIME_OWNER_LEASE_TTL", "45s")
+	t.Setenv("MEMOH_SESSION_RUNTIME_REDIS_URL", "redis://env.example:6379/2")
+	t.Setenv("MEMOH_SESSION_RUNTIME_REDIS_KEY_PREFIX", "env:runtime:")
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	data := []byte(`
+[session_runtime]
+backend = "memory"
+state_ttl = "2h"
+owner_lease_ttl = "30s"
+
+[session_runtime.redis]
+url = "redis://file.example:6379/1"
+key_prefix = "file:runtime:"
+`)
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.SessionRuntime.BackendOrDefault() != SessionRuntimeBackendRedis {
+		t.Fatalf("session runtime backend = %q, want redis", cfg.SessionRuntime.BackendOrDefault())
+	}
+	if cfg.SessionRuntime.StateTTLOrDefault() != "8h" {
+		t.Fatalf("session runtime state ttl = %q, want 8h", cfg.SessionRuntime.StateTTLOrDefault())
+	}
+	if cfg.SessionRuntime.OwnerLeaseTTLOrDefault() != "45s" {
+		t.Fatalf("session runtime owner lease ttl = %q, want 45s", cfg.SessionRuntime.OwnerLeaseTTLOrDefault())
+	}
+	if cfg.SessionRuntime.Redis.URLOrDefault() != "redis://env.example:6379/2" {
+		t.Fatalf("redis url = %q", cfg.SessionRuntime.Redis.URLOrDefault())
+	}
+	if cfg.SessionRuntime.Redis.KeyPrefixOrDefault() != "env:runtime:" {
+		t.Fatalf("redis key prefix = %q", cfg.SessionRuntime.Redis.KeyPrefixOrDefault())
+	}
+}
+
 func TestLoadReadsSessionRuntimeRedisConfig(t *testing.T) {
 	t.Parallel()
 
