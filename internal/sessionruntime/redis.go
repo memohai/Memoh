@@ -1013,7 +1013,11 @@ func prepareRedisSnapshot(snapshot Snapshot) (preparedRedisSnapshot, error) {
 	contents := make(map[string]string)
 	if snapshot.CurrentRunView != nil {
 		run := *snapshot.CurrentRunView
-		run.Messages = append([]conversation.UIMessage(nil), snapshot.CurrentRunView.Messages...)
+		// messages is a required wire collection. Copying an empty slice onto a
+		// nil destination turns [] into null after the Redis round trip, which
+		// makes the activation checkpoint invalid for strict runtime clients.
+		run.Messages = make([]conversation.UIMessage, len(snapshot.CurrentRunView.Messages))
+		copy(run.Messages, snapshot.CurrentRunView.Messages)
 		for index := range run.Messages {
 			message := &run.Messages[index]
 			if message.Type != conversation.UIMessageText && message.Type != conversation.UIMessageReasoning {
@@ -1060,6 +1064,11 @@ func decodeRedisSnapshot(data []byte) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	snapshot.Queue = nonNilQueue(snapshot.Queue)
+	if snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Messages == nil {
+		// Heal snapshots written by older Redis backends so reconnect
+		// checkpoints obey the same collection contract as memory mode.
+		snapshot.CurrentRunView.Messages = []conversation.UIMessage{}
+	}
 	return snapshot, nil
 }
 

@@ -280,6 +280,55 @@ func TestDecodeRedisSnapshotPreservesDynamicJSONShapes(t *testing.T) {
 	}
 }
 
+func TestRedisSnapshotKeepsEmptyRuntimeMessagesAsArray(t *testing.T) {
+	t.Parallel()
+
+	snapshot := Snapshot{
+		BotID: "bot-empty-messages", SessionID: "session-empty-messages",
+		Epoch: "epoch-empty-messages", Seq: 2, Queue: []QueuedRunView{},
+		CurrentRunView: &CurrentRunView{
+			StreamID: "stream-empty-messages", Generation: "generation-empty-messages",
+			Status: RunStatusRunning, Messages: []conversation.UIMessage{},
+		},
+	}
+	prepared, err := prepareRedisSnapshot(snapshot)
+	if err != nil {
+		t.Fatalf("prepare snapshot: %v", err)
+	}
+	var encoded map[string]any
+	if err := unmarshalRuntimeJSON(prepared.stateData, &encoded); err != nil {
+		t.Fatalf("decode prepared state: %v", err)
+	}
+	run, ok := encoded["current_run_view"].(map[string]any)
+	if !ok {
+		t.Fatalf("encoded current run = %#v", encoded["current_run_view"])
+	}
+	messages, ok := run["messages"].([]any)
+	if !ok || len(messages) != 0 {
+		t.Fatalf("encoded messages = %#v, want []", run["messages"])
+	}
+
+	decoded, err := decodeRedisSnapshot([]byte(`{
+		"bot_id":"bot-empty-messages",
+		"session_id":"session-empty-messages",
+		"epoch":"epoch-empty-messages",
+		"seq":2,
+		"queue":[],
+		"current_run_view":{
+			"stream_id":"stream-empty-messages",
+			"generation":"generation-empty-messages",
+			"status":"running",
+			"messages":null
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("decode legacy snapshot: %v", err)
+	}
+	if decoded.CurrentRunView == nil || decoded.CurrentRunView.Messages == nil || len(decoded.CurrentRunView.Messages) != 0 {
+		t.Fatalf("decoded legacy messages = %#v, want non-nil empty slice", decoded.CurrentRunView)
+	}
+}
+
 func runRedisSnapshotFidelityContract(t *testing.T, redisURL string) {
 	t.Helper()
 
