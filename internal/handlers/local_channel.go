@@ -95,6 +95,10 @@ type localChannelResolver interface {
 	PrepareRetryLatestMessageWS(ctx context.Context, input flow.RetryLatestMessageInput) (flow.PreparedReplacementWS, error)
 	PrepareToolApprovalResponse(ctx context.Context, input flow.ToolApprovalResponseInput) (runtimefence.PreservedDecision, error)
 	PrepareUserInputResponseTarget(ctx context.Context, input flow.UserInputResponseInput) (runtimefence.PreservedDecision, error)
+	CommitToolApprovalResponse(ctx context.Context, input flow.ToolApprovalResponseInput) (flow.CommittedToolApprovalResponse, error)
+	ContinueCommittedToolApprovalResponse(ctx context.Context, committed flow.CommittedToolApprovalResponse, eventCh chan<- flow.WSStreamEvent) error
+	CommitUserInputResponse(ctx context.Context, input flow.UserInputResponseInput) (flow.CommittedUserInputResponse, error)
+	ContinueCommittedUserInputResponse(ctx context.Context, committed flow.CommittedUserInputResponse, eventCh chan<- flow.WSStreamEvent) error
 	RespondToolApproval(ctx context.Context, input flow.ToolApprovalResponseInput, eventCh chan<- flow.WSStreamEvent) error
 	RespondUserInput(ctx context.Context, input flow.UserInputResponseInput, eventCh chan<- flow.WSStreamEvent) error
 	DeferSessionCompaction(botID, sessionID, streamID string) func()
@@ -1648,6 +1652,22 @@ func (h *LocalChannelHandler) routeWSRuntimeResponse(baseCtx, connCtx context.Co
 			dispatchErr = nil
 		}
 		if !handled {
+			// A deferred StartRun cannot replace an already-active parent run. Doing so
+			// surfaces as session_runtime.run_failed on the sideband stream_id and breaks
+			// approval / ask_user continuation rendering. Fail closed as a command error.
+			if snapshot, snapErr := h.sessionRuntime.Snapshot(baseCtx, botID, sessionID); snapErr == nil {
+				if run := snapshot.CurrentRunView; run != nil {
+					status := strings.ToLower(strings.TrimSpace(run.Status))
+					if status == sessionruntime.RunStatusAdmitting ||
+						status == sessionruntime.RunStatusRunning ||
+						status == sessionruntime.RunStatusAborting {
+						if connCtx.Err() == nil {
+							h.sendWSSidebandResult(connCtx, writer, msg, actionID, sessionruntime.ErrCommandTargetNotActive)
+						}
+						return
+					}
+				}
+			}
 			deferred()
 			return
 		}
@@ -2218,13 +2238,23 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				suppressActivePromptAttach := activeStreams.hasSession(sessionID)
 				releaseWSMessageTurn := h.enterWSMessageTurn(botID, sessionID, streamID)
-				h.startWSStreamWithAdmissionBuilder(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws approval stream error", releaseWSMessageTurn, runtimefence.ActivationOptions{PreserveDecision: &preserved}, func(context.Context) (sessionruntime.RunAdmissionView, error) {
-					return sessionruntime.RunAdmissionView{}, nil
+				approvalStatus := sessionruntime.ApprovalDecisionStatus(responseInput.Decision)
+				var committed flow.CommittedToolApprovalResponse
+				h.startWSStreamWithAdmissionBuilder(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws approval stream error", releaseWSMessageTurn, runtimefence.ActivationOptions{PreserveDecision: &preserved}, func(ctx context.Context) (sessionruntime.RunAdmissionView, error) {
+					if approvalStatus == "" {
+						return sessionruntime.RunAdmissionView{}, nil
+					}
+					input := responseInput
+					input.SuppressActivePromptAttach = suppressActivePromptAttach
+					var commitErr error
+					committed, commitErr = h.resolver.CommitToolApprovalResponse(ctx, input)
+					if commitErr != nil {
+						return sessionruntime.RunAdmissionView{}, commitErr
+					}
+					return sessionruntime.ResolvedDecisionAdmission(preserved.Kind, preserved.ID, approvalStatus), nil
 				},
 					func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, _ <-chan struct{}, _ <-chan conversation.InjectMessage) error {
-						input := responseInput
-						input.SuppressActivePromptAttach = suppressActivePromptAttach
-						return h.resolver.RespondToolApproval(ctx, input, eventCh)
+						return h.resolver.ContinueCommittedToolApprovalResponse(ctx, committed, eventCh)
 					},
 				)
 			}
@@ -2273,13 +2303,23 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				suppressActivePromptAttach := activeStreams.hasSession(sessionID)
 				releaseWSMessageTurn := h.enterWSMessageTurn(botID, sessionID, streamID)
-				h.startWSStreamWithAdmissionBuilder(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws user input stream error", releaseWSMessageTurn, runtimefence.ActivationOptions{PreserveDecision: &preserved}, func(context.Context) (sessionruntime.RunAdmissionView, error) {
-					return sessionruntime.RunAdmissionView{}, nil
+				userInputStatus := "submitted"
+				if responseInput.Canceled {
+					userInputStatus = "canceled"
+				}
+				var committed flow.CommittedUserInputResponse
+				h.startWSStreamWithAdmissionBuilder(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws user input stream error", releaseWSMessageTurn, runtimefence.ActivationOptions{PreserveDecision: &preserved}, func(ctx context.Context) (sessionruntime.RunAdmissionView, error) {
+					input := responseInput
+					input.SuppressActivePromptAttach = suppressActivePromptAttach
+					var commitErr error
+					committed, commitErr = h.resolver.CommitUserInputResponse(ctx, input)
+					if commitErr != nil {
+						return sessionruntime.RunAdmissionView{}, commitErr
+					}
+					return sessionruntime.ResolvedDecisionAdmission(preserved.Kind, preserved.ID, userInputStatus), nil
 				},
 					func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, _ <-chan struct{}, _ <-chan conversation.InjectMessage) error {
-						input := responseInput
-						input.SuppressActivePromptAttach = suppressActivePromptAttach
-						return h.resolver.RespondUserInput(ctx, input, eventCh)
+						return h.resolver.ContinueCommittedUserInputResponse(ctx, committed, eventCh)
 					},
 				)
 			}

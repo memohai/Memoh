@@ -35,6 +35,8 @@ type routerTestResolver struct {
 	reconcileHandled bool
 	reconcileErr     error
 	reconcileCalls   int
+	commitErr        error
+	lifecycle        []string
 }
 
 func (r *routerTestResolver) AllocateRuntimePersistenceFence(context.Context, string, string) (runtimefence.Fence, error) {
@@ -64,6 +66,32 @@ func (r *routerTestResolver) RespondToolApproval(ctx context.Context, input flow
 func (r *routerTestResolver) RespondUserInput(ctx context.Context, input flow.UserInputResponseInput, eventCh chan<- flow.WSStreamEvent) error {
 	r.respondInput = append(r.respondInput, input)
 	r.respondFence, _ = runtimefence.FromContext(ctx)
+	return emitRouterTestEvents(eventCh, r.respondEvents)
+}
+
+func (r *routerTestResolver) CommitToolApprovalResponse(ctx context.Context, input flow.ToolApprovalResponseInput) (flow.CommittedToolApprovalResponse, error) {
+	r.respondApproval = append(r.respondApproval, input)
+	r.respondFence, _ = runtimefence.FromContext(ctx)
+	r.lifecycle = append(r.lifecycle, "commit")
+	return flow.CommittedToolApprovalResponse{}, r.commitErr
+}
+
+func (r *routerTestResolver) ContinueCommittedToolApprovalResponse(ctx context.Context, _ flow.CommittedToolApprovalResponse, eventCh chan<- flow.WSStreamEvent) error {
+	r.respondFence, _ = runtimefence.FromContext(ctx)
+	r.lifecycle = append(r.lifecycle, "continue")
+	return emitRouterTestEvents(eventCh, r.respondEvents)
+}
+
+func (r *routerTestResolver) CommitUserInputResponse(ctx context.Context, input flow.UserInputResponseInput) (flow.CommittedUserInputResponse, error) {
+	r.respondInput = append(r.respondInput, input)
+	r.respondFence, _ = runtimefence.FromContext(ctx)
+	r.lifecycle = append(r.lifecycle, "commit")
+	return flow.CommittedUserInputResponse{}, r.commitErr
+}
+
+func (r *routerTestResolver) ContinueCommittedUserInputResponse(ctx context.Context, _ flow.CommittedUserInputResponse, eventCh chan<- flow.WSStreamEvent) error {
+	r.respondFence, _ = runtimefence.FromContext(ctx)
+	r.lifecycle = append(r.lifecycle, "continue")
 	return emitRouterTestEvents(eventCh, r.respondEvents)
 }
 
@@ -107,6 +135,7 @@ type routerTestManager struct {
 	finalizeErr       error
 	finishes          int
 	ownershipCancel   context.CancelCauseFunc
+	admissions        []sessionruntime.RunAdmissionView
 }
 
 func (m *routerTestManager) SetCommandHandler(handler func(context.Context, sessionruntime.Command) error) {
@@ -142,9 +171,11 @@ func (m *routerTestManager) StartRunWithOptions(ctx context.Context, options ses
 		BotID: options.BotID, SessionID: options.SessionID, StreamID: options.StreamID, Generation: "generation-1",
 	}
 	if options.AdmissionBuilder != nil {
-		if _, err := options.AdmissionBuilder(ctx, handle); err != nil {
+		admission, err := options.AdmissionBuilder(ctx, handle)
+		if err != nil {
 			return sessionruntime.RunHandle{}, err
 		}
+		m.admissions = append(m.admissions, admission)
 	}
 	return handle, nil
 }
@@ -196,7 +227,7 @@ func TestRouterRoutesActiveApprovalToCanonicalOwner(t *testing.T) {
 	}
 }
 
-func TestRouterMemoryFallbackStaysLocalAndUnfenced(t *testing.T) {
+func TestRouterMemoryFallbackUsesRuntimeLifecycleWithoutFence(t *testing.T) {
 	resolver := &routerTestResolver{prepared: runtimefence.PreservedDecision{
 		Kind: runtimefence.DecisionUserInput, ID: decisionTargetID, BotID: decisionBotID, SessionID: decisionSessionID,
 	}}
@@ -209,8 +240,40 @@ func TestRouterMemoryFallbackStaysLocalAndUnfenced(t *testing.T) {
 	if len(resolver.respondInput) != 1 || resolver.respondInput[0].SessionID != decisionSessionID {
 		t.Fatalf("local response inputs = %#v", resolver.respondInput)
 	}
-	if resolver.respondFence.Valid() || resolver.allocated != 0 || manager.starts != 0 {
-		t.Fatalf("memory fallback used distributed state: fence=%#v allocated=%d starts=%d", resolver.respondFence, resolver.allocated, manager.starts)
+	if resolver.respondFence.Valid() || resolver.allocated != 0 || manager.starts != 1 {
+		t.Fatalf("memory continuation lifecycle = fence:%#v allocated:%d starts:%d", resolver.respondFence, resolver.allocated, manager.starts)
+	}
+	if len(manager.admissions) != 1 || manager.admissions[0].ResolvedDecision == nil || manager.admissions[0].ResolvedDecision.Status != "submitted" {
+		t.Fatalf("memory continuation admission = %#v", manager.admissions)
+	}
+	if got := strings.Join(resolver.lifecycle, ","); got != "commit,continue" {
+		t.Fatalf("memory decision lifecycle = %q, want commit,continue", got)
+	}
+}
+
+func TestRouterCommitFailureDoesNotPublishOrContinue(t *testing.T) {
+	wantErr := errors.New("durable decision commit failed")
+	resolver := &routerTestResolver{
+		prepared: runtimefence.PreservedDecision{
+			Kind: runtimefence.DecisionToolApproval, ID: decisionTargetID, BotID: decisionBotID, SessionID: decisionSessionID,
+		},
+		commitErr: wantErr,
+	}
+	manager := &routerTestManager{}
+	router := newRouter(slog.New(slog.DiscardHandler), manager, resolver)
+
+	err := router.RespondToolApproval(context.Background(), flow.ToolApprovalResponseInput{
+		ApprovalID: decisionTargetID,
+		Decision:   "approve",
+	}, nil)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("RespondToolApproval() error = %v, want %v", err, wantErr)
+	}
+	if got := strings.Join(resolver.lifecycle, ","); got != "commit" {
+		t.Fatalf("failed decision lifecycle = %q, want commit", got)
+	}
+	if len(manager.admissions) != 0 || len(manager.handledEvents) != 0 || len(manager.finalizedEvents) != 0 {
+		t.Fatalf("failed decision was projected: admissions=%#v handled=%#v finalized=%#v", manager.admissions, manager.handledEvents, manager.finalizedEvents)
 	}
 }
 

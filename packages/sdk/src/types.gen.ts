@@ -2799,6 +2799,12 @@ export type SessionruntimeCurrentRunView = {
     owner_id?: string;
     owner_lease_expires_at?: string;
     request_user_turn?: ConversationUiTurn;
+    /**
+     * ResolvedDecision anchors a deferred ask_user / tool-approval continuation
+     * to the parent interactive turn so every subscriber can close the pending
+     * UI and reuse that assistant turn instead of opening a second one.
+     */
+    resolved_decision?: SessionruntimeResolvedDecisionView;
     started_at?: string;
     status?: string;
     steer?: SessionruntimeSteerState;
@@ -2808,6 +2814,12 @@ export type SessionruntimeCurrentRunView = {
 
 export type SessionruntimeQueuedRunView = {
     stream_id?: string;
+};
+
+export type SessionruntimeResolvedDecisionView = {
+    id: string;
+    kind: 'user_input' | 'tool_approval';
+    status: 'submitted' | 'canceled' | 'approved' | 'rejected';
 };
 
 export type SessionruntimeRunOperationView = {

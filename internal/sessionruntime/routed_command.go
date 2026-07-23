@@ -57,7 +57,7 @@ func (m *Manager) DispatchActiveCommand(ctx context.Context, botID, sessionID, c
 			return true, loadErr
 		} else if ok {
 			resultErr := commandResultErrorFor(cmd, result)
-			if resultErr != nil || !userInputCommandProjectionPending(run, cmd) {
+			if resultErr != nil || !commandDecisionProjectionPending(run, cmd) {
 				return true, resultErr
 			}
 		}
@@ -294,6 +294,10 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 	}
 	commandCtx, cancel := ctrl.commandContext(ctx)
 	defer cancel()
+	if strings.TrimSpace(cmd.Type) != CommandAbort {
+		ctrl.eventMu.Lock()
+		defer ctrl.eventMu.Unlock()
+	}
 	if !ctrl.commandsActive() || commandCtx.Err() != nil {
 		return ErrCommandTargetNotActive
 	}
@@ -335,23 +339,51 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 	if err = handler(commandCtx, cmd); err != nil {
 		return err
 	}
-	projectionCtx, projectionCancel := context.WithTimeout(context.WithoutCancel(commandCtx), m.commandTimeout())
-	defer projectionCancel()
-	if err = m.projectUserInputCommandDecision(projectionCtx, handle, cmd); err != nil && !errors.Is(err, ErrRunOwnershipLost) {
-		m.logger.Warn("project routed user input decision failed; subscribers will reconcile from later runtime state",
-			slog.Any("error", err),
-			slog.String("stream_id", cmd.StreamID),
-			slog.String("target_id", cmd.TargetID),
-		)
-	}
+	m.projectCommandDecisionWithRetry(commandCtx, ctrl, handle, cmd)
 	return nil
 }
 
-// projectUserInputCommandDecision publishes the committed decision only after
+// projectCommandDecisionWithRetry keeps the event ordering barrier held after
+// the durable decision commit. Agent events may continue only after the shared
+// runtime snapshot reflects that commit or this owner loses the run.
+func (m *Manager) projectCommandDecisionWithRetry(ctx context.Context, ctrl *runControl, handle RunHandle, cmd Command) {
+	retryCtx, retryCancel := ctrl.commandContext(context.WithoutCancel(ctx))
+	defer retryCancel()
+	delay := 10 * time.Millisecond
+	for attempt := 0; ; attempt++ {
+		projectionCtx, projectionCancel := context.WithTimeout(retryCtx, m.commandTimeout())
+		err := m.projectCommandDecision(projectionCtx, handle, cmd)
+		projectionCancel()
+		if err == nil || errors.Is(err, ErrRunOwnershipLost) || retryCtx.Err() != nil {
+			return
+		}
+		m.logger.Warn("project routed decision failed; retrying before continuation",
+			slog.Any("error", err),
+			slog.Int("attempt", attempt+1),
+			slog.String("stream_id", cmd.StreamID),
+			slog.String("target_id", cmd.TargetID),
+		)
+		timer := time.NewTimer(delay)
+		select {
+		case <-retryCtx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		if delay < 250*time.Millisecond {
+			delay *= 2
+			if delay > 250*time.Millisecond {
+				delay = 250 * time.Millisecond
+			}
+		}
+	}
+}
+
+// projectCommandDecision publishes the committed decision only after
 // the owner-local handler has successfully updated the durable request. It is
 // an observer projection, so a run that finishes concurrently is a safe no-op.
-func (m *Manager) projectUserInputCommandDecision(ctx context.Context, handle RunHandle, cmd Command) error {
-	status, ok := userInputCommandDecisionStatus(cmd)
+func (m *Manager) projectCommandDecision(ctx context.Context, handle RunHandle, cmd Command) error {
+	status, reason, ok := commandDecisionStatus(cmd)
 	if !ok {
 		return nil
 	}
@@ -365,21 +397,9 @@ func (m *Manager) projectUserInputCommandDecision(ctx context.Context, handle Ru
 			return snapshot, false, nil
 		}
 		for i := range run.Messages {
-			userInput := run.Messages[i].UserInput
-			if userInput == nil || strings.TrimSpace(userInput.UserInputID) != targetID {
+			if !projectDecisionMessage(&run.Messages[i], cmd.Type, targetID, status, reason) {
 				continue
 			}
-			currentStatus := strings.ToLower(strings.TrimSpace(userInput.Status))
-			if currentStatus != "" && currentStatus != "pending" && currentStatus != status {
-				return snapshot, false, nil
-			}
-			if currentStatus == status && !userInput.CanRespond {
-				return snapshot, false, nil
-			}
-			projected := *userInput
-			projected.Status = status
-			projected.CanRespond = false
-			run.Messages[i].UserInput = &projected
 			snapshot.Seq++
 			snapshot.Queue = nonNilQueue(snapshot.Queue)
 			snapshot.UpdatedAt = now
@@ -393,7 +413,7 @@ func (m *Manager) projectUserInputCommandDecision(ctx context.Context, handle Ru
 			return RuntimeDelta{}
 		}
 		for _, message := range run.Messages {
-			if message.UserInput != nil && strings.TrimSpace(message.UserInput.UserInputID) == targetID {
+			if commandDecisionMessageMatches(message, cmd.Type, targetID) {
 				return RuntimeDelta{MessageUpserts: []conversation.UIMessage{message}}
 			}
 		}
@@ -402,34 +422,106 @@ func (m *Manager) projectUserInputCommandDecision(ctx context.Context, handle Ru
 	return err
 }
 
-func userInputCommandDecisionStatus(cmd Command) (string, bool) {
-	if strings.TrimSpace(cmd.Type) != CommandUserInputResponse {
-		return "", false
-	}
+func commandDecisionStatus(cmd Command) (string, string, bool) {
 	var payload map[string]any
 	if err := unmarshalRuntimeJSON(cmd.Payload, &payload); err != nil {
-		return "", false
+		return "", "", false
 	}
-	if canceled, _ := runtimeCommandMapValue(payload, "canceled").(bool); canceled {
-		return "canceled", true
+	switch strings.TrimSpace(cmd.Type) {
+	case CommandUserInputResponse:
+		if canceled, _ := runtimeCommandMapValue(payload, "canceled").(bool); canceled {
+			return "canceled", runtimeCommandString(runtimeCommandMapValue(payload, "reason")), true
+		}
+		return "submitted", "", true
+	case CommandToolApprovalResponse:
+		decision := strings.ToLower(runtimeCommandString(runtimeCommandMapValue(payload, "decision")))
+		switch decision {
+		case "approve", "approved":
+			return "approved", runtimeCommandString(runtimeCommandMapValue(payload, "reason")), true
+		case "reject", "rejected":
+			return "rejected", runtimeCommandString(runtimeCommandMapValue(payload, "reason")), true
+		default:
+			return "", "", false
+		}
+	default:
+		return "", "", false
 	}
-	return "submitted", true
 }
 
-func userInputCommandProjectionPending(run *CurrentRunView, cmd Command) bool {
-	expectedStatus, ok := userInputCommandDecisionStatus(cmd)
+func projectDecisionMessage(message *conversation.UIMessage, commandType, targetID, status, reason string) bool {
+	if message == nil {
+		return false
+	}
+	switch strings.TrimSpace(commandType) {
+	case CommandUserInputResponse:
+		decision := message.UserInput
+		if decision == nil || strings.TrimSpace(decision.UserInputID) != targetID ||
+			!decisionCanTransition(decision.Status, status, decision.CanRespond) {
+			return false
+		}
+		projected := *decision
+		projected.Status = status
+		projected.CanRespond = false
+		message.UserInput = &projected
+		return true
+	case CommandToolApprovalResponse:
+		decision := message.Approval
+		if decision == nil || strings.TrimSpace(decision.ApprovalID) != targetID ||
+			!decisionCanTransition(decision.Status, status, decision.CanApprove) {
+			return false
+		}
+		projected := *decision
+		projected.Status = status
+		projected.DecisionReason = reason
+		projected.CanApprove = false
+		message.Approval = &projected
+		return true
+	default:
+		return false
+	}
+}
+
+func decisionCanTransition(currentStatus, expectedStatus string, actionable bool) bool {
+	currentStatus = strings.ToLower(strings.TrimSpace(currentStatus))
+	expectedStatus = strings.ToLower(strings.TrimSpace(expectedStatus))
+	if currentStatus == "" || currentStatus == "pending" {
+		return true
+	}
+	return currentStatus == expectedStatus && actionable
+}
+
+func commandDecisionMessageMatches(message conversation.UIMessage, commandType, targetID string) bool {
+	switch strings.TrimSpace(commandType) {
+	case CommandUserInputResponse:
+		return message.UserInput != nil && strings.TrimSpace(message.UserInput.UserInputID) == targetID
+	case CommandToolApprovalResponse:
+		return message.Approval != nil && strings.TrimSpace(message.Approval.ApprovalID) == targetID
+	default:
+		return false
+	}
+}
+
+func commandDecisionProjectionPending(run *CurrentRunView, cmd Command) bool {
+	expectedStatus, _, ok := commandDecisionStatus(cmd)
 	if !ok || run == nil {
 		return false
 	}
 	targetID := strings.TrimSpace(cmd.TargetID)
 	for _, message := range run.Messages {
-		userInput := message.UserInput
-		if userInput == nil || strings.TrimSpace(userInput.UserInputID) != targetID {
+		if !commandDecisionMessageMatches(message, cmd.Type, targetID) {
 			continue
 		}
-		status := strings.ToLower(strings.TrimSpace(userInput.Status))
+		status := ""
+		canRespond := false
+		if strings.TrimSpace(cmd.Type) == CommandUserInputResponse {
+			status = strings.ToLower(strings.TrimSpace(message.UserInput.Status))
+			canRespond = message.UserInput.CanRespond
+		} else {
+			status = strings.ToLower(strings.TrimSpace(message.Approval.Status))
+			canRespond = message.Approval.CanApprove
+		}
 		if status == expectedStatus {
-			return userInput.CanRespond
+			return canRespond
 		}
 		return status == "" || status == "pending"
 	}
@@ -446,8 +538,8 @@ func (m *Manager) replayStoredCommandProjection(ctx context.Context, cmd, result
 	}
 	projectionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.commandTimeout())
 	defer cancel()
-	if err := m.projectUserInputCommandDecision(projectionCtx, runHandleForCommand(cmd), cmd); err != nil && !errors.Is(err, ErrRunOwnershipLost) {
-		m.logger.Warn("replay stored user input projection failed",
+	if err := m.projectCommandDecision(projectionCtx, runHandleForCommand(cmd), cmd); err != nil && !errors.Is(err, ErrRunOwnershipLost) {
+		m.logger.Warn("replay stored decision projection failed",
 			slog.Any("error", err),
 			slog.String("stream_id", cmd.StreamID),
 			slog.String("target_id", cmd.TargetID),

@@ -69,6 +69,7 @@ type runControl struct {
 	injectCh          chan<- conversation.InjectMessage
 	injectMu          sync.Mutex
 	injectClosed      bool
+	eventMu           sync.Mutex
 	converter         *conversation.UIMessageStreamConverter
 	leaseStop         func()
 	leaseDone         chan struct{}
@@ -474,7 +475,7 @@ func (m *Manager) StartRun(ctx context.Context, botID, sessionID, streamID strin
 // admission builder, then publishes the running view only after admission is
 // ready. This is the single advanced run-start entry point.
 func (m *Manager) StartRunWithOptions(ctx context.Context, options RunStartOptions) (RunHandle, error) {
-	if options.AdmissionBuilder != nil && (options.Admission.RequestUserTurn != nil || options.Admission.Operation != nil) {
+	if options.AdmissionBuilder != nil && (options.Admission.RequestUserTurn != nil || options.Admission.Operation != nil || options.Admission.ResolvedDecision != nil) {
 		if options.OwnershipCancel != nil {
 			options.OwnershipCancel(ErrRunOwnershipLost)
 		}
@@ -731,6 +732,7 @@ func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessi
 		run.Status = RunStatusRunning
 		run.RequestUserTurn = admission.RequestUserTurn
 		run.Operation = admission.Operation
+		run.ResolvedDecision = admission.ResolvedDecision
 		run.UpdatedAt = now
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
@@ -817,6 +819,11 @@ func (m *Manager) FinalizeAgentEvent(ctx context.Context, handle RunHandle, even
 	if err := waitRunControlReady(ctx, ctrl); err != nil {
 		return nil, err
 	}
+	if m.localControlForHandle(handle) != ctrl {
+		return nil, ErrRunOwnershipLost
+	}
+	ctrl.eventMu.Lock()
+	defer ctrl.eventMu.Unlock()
 	if m.localControlForHandle(handle) != ctrl {
 		return nil, ErrRunOwnershipLost
 	}
@@ -960,7 +967,7 @@ func (m *Manager) finalizeRunState(ctx context.Context, handle RunHandle, outcom
 			return RuntimeDelta{CurrentRunView: snapshot.CurrentRunView}
 		}
 		delta := runtimeRunPatch(snapshot, true, true, true, m.distributed != nil)
-		delta.MessageUpserts = append([]conversation.UIMessage(nil), outcome.Messages...)
+		delta.MessageUpserts = resolvedUIMessageUpserts(snapshot.CurrentRunView, outcome.Messages)
 		return delta
 	})
 	return changed, err
@@ -1105,6 +1112,11 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	if m.localControlForHandle(handle) != ctrl {
 		return nil, ErrRunOwnershipLost
 	}
+	ctrl.eventMu.Lock()
+	defer ctrl.eventMu.Unlock()
+	if m.localControlForHandle(handle) != ctrl {
+		return nil, ErrRunOwnershipLost
+	}
 
 	var messages []conversation.UIMessage
 	switch event.Type {
@@ -1159,6 +1171,7 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 		}
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
+		delta.MessageUpserts = resolvedUIMessageUpserts(snapshot.CurrentRunView, delta.MessageUpserts)
 		switch event.Type {
 		case agentpkg.EventError:
 			delta.Run = runtimeRunPatch(snapshot, false, true, false, false).Run

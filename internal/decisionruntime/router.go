@@ -29,6 +29,10 @@ type resolver interface {
 	ActivateRuntimePersistenceFenceWithOptions(context.Context, runtimefence.Fence, runtimefence.ActivationOptions) error
 	PrepareToolApprovalResponseTarget(context.Context, flow.ToolApprovalResponseInput) (runtimefence.PreservedDecision, error)
 	PrepareUserInputResponseTarget(context.Context, flow.UserInputResponseInput) (runtimefence.PreservedDecision, error)
+	CommitToolApprovalResponse(context.Context, flow.ToolApprovalResponseInput) (flow.CommittedToolApprovalResponse, error)
+	ContinueCommittedToolApprovalResponse(context.Context, flow.CommittedToolApprovalResponse, chan<- flow.WSStreamEvent) error
+	CommitUserInputResponse(context.Context, flow.UserInputResponseInput) (flow.CommittedUserInputResponse, error)
+	ContinueCommittedUserInputResponse(context.Context, flow.CommittedUserInputResponse, chan<- flow.WSStreamEvent) error
 	ReconcileToolApprovalResponse(context.Context, flow.ToolApprovalResponseInput) (bool, error)
 	ReconcileUserInputResponse(context.Context, flow.UserInputResponseInput) (bool, error)
 	DeferSessionCompaction(botID, sessionID, streamID string) func()
@@ -106,10 +110,15 @@ func (r *Router) RespondToolApproval(ctx context.Context, input flow.ToolApprova
 	if err != nil {
 		return fmt.Errorf("encode tool approval response: %w", err)
 	}
+	var committed flow.CommittedToolApprovalResponse
 	return r.routeOrContinue(ctx, prepared, sessionruntime.CommandToolApprovalResponse, payload, output, func(reconcileCtx context.Context) (bool, error) {
 		return r.resolver.ReconcileToolApprovalResponse(reconcileCtx, routed)
+	}, func(commitCtx context.Context) error {
+		var commitErr error
+		committed, commitErr = r.resolver.CommitToolApprovalResponse(commitCtx, input)
+		return commitErr
 	}, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
-		return r.resolver.RespondToolApproval(runCtx, input, eventCh)
+		return r.resolver.ContinueCommittedToolApprovalResponse(runCtx, committed, eventCh)
 	})
 }
 
@@ -135,18 +144,25 @@ func (r *Router) RespondUserInput(ctx context.Context, input flow.UserInputRespo
 	if err != nil {
 		return fmt.Errorf("encode user input response: %w", err)
 	}
+	var committed flow.CommittedUserInputResponse
 	return r.routeOrContinue(ctx, prepared, sessionruntime.CommandUserInputResponse, payload, output, func(reconcileCtx context.Context) (bool, error) {
 		return r.resolver.ReconcileUserInputResponse(reconcileCtx, routed)
+	}, func(commitCtx context.Context) error {
+		var commitErr error
+		committed, commitErr = r.resolver.CommitUserInputResponse(commitCtx, input)
+		return commitErr
 	}, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
-		return r.resolver.RespondUserInput(runCtx, input, eventCh)
+		return r.resolver.ContinueCommittedUserInputResponse(runCtx, committed, eventCh)
 	})
 }
 
 type continuation func(context.Context, chan<- flow.WSStreamEvent) error
 
+type decisionCommit func(context.Context) error
+
 type decisionReconciler func(context.Context) (bool, error)
 
-func (r *Router) routeOrContinue(ctx context.Context, prepared runtimefence.PreservedDecision, commandType string, payload []byte, output chan<- flow.WSStreamEvent, reconcile decisionReconciler, run continuation) error {
+func (r *Router) routeOrContinue(ctx context.Context, prepared runtimefence.PreservedDecision, commandType string, payload []byte, output chan<- flow.WSStreamEvent, reconcile decisionReconciler, commit decisionCommit, run continuation) error {
 	if strings.TrimSpace(prepared.BotID) == "" || strings.TrimSpace(prepared.SessionID) == "" || strings.TrimSpace(prepared.ID) == "" {
 		return errors.New("prepared decision is missing canonical scope")
 	}
@@ -161,8 +177,11 @@ func (r *Router) routeOrContinue(ctx context.Context, prepared runtimefence.Pres
 			return err
 		}
 	}
-	if r.manager == nil || !r.manager.IsDistributed() {
+	if r.manager == nil {
+		if err := commit(ctx); err != nil {
+			return err
+		}
 		return run(ctx, output)
 	}
-	return r.runDistributedContinuation(ctx, prepared, commandType, payload, output, reconcile, run)
+	return r.runContinuation(ctx, prepared, commandType, payload, output, reconcile, commit, run)
 }

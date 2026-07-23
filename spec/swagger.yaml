@@ -4720,6 +4720,13 @@ definitions:
         type: string
       request_user_turn:
         $ref: '#/definitions/conversation.UITurn'
+      resolved_decision:
+        allOf:
+        - $ref: '#/definitions/sessionruntime.ResolvedDecisionView'
+        description: |-
+          ResolvedDecision anchors a deferred ask_user / tool-approval continuation
+          to the parent interactive turn so every subscriber can close the pending
+          UI and reuse that assistant turn instead of opening a second one.
       started_at:
         type: string
       status:
@@ -4737,6 +4744,27 @@ definitions:
     properties:
       stream_id:
         type: string
+    type: object
+  sessionruntime.ResolvedDecisionView:
+    properties:
+      id:
+        type: string
+      kind:
+        enum:
+        - user_input
+        - tool_approval
+        type: string
+      status:
+        enum:
+        - submitted
+        - canceled
+        - approved
+        - rejected
+        type: string
+    required:
+    - id
+    - kind
+    - status
     type: object
   sessionruntime.RunOperationView:
     properties:

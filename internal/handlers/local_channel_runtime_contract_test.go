@@ -2016,7 +2016,7 @@ func TestLocalChannelDistributedInactiveDurableResponseAdmission(t *testing.T) {
 				Resolver:  &flow.Resolver{},
 				fence:     wantFence,
 				preserved: tt.preserved,
-				stages:    make(chan deferredResponseStage, 3),
+				stages:    make(chan deferredResponseStage, 4),
 			}
 			handler := runtimeContractLocalChannelHandler(manager)
 			handler.SetResolver(resolver)
@@ -2025,7 +2025,7 @@ func TestLocalChannelDistributedInactiveDurableResponseAdmission(t *testing.T) {
 				t.Fatalf("write deferred response: %v", err)
 			}
 
-			wantStages := []string{"prepare", "activate", "respond"}
+			wantStages := []string{"prepare", "activate", "commit", "continue"}
 			for _, wantStage := range wantStages {
 				select {
 				case stage := <-resolver.stages:
@@ -2037,10 +2037,10 @@ func TestLocalChannelDistributedInactiveDurableResponseAdmission(t *testing.T) {
 							t.Fatalf("activation = fence:%#v options:%#v", stage.fence, stage.options)
 						}
 					}
-					if stage.name == "respond" && (stage.fence != wantFence || stage.resolveOnly) {
-						t.Fatalf("response ran with fence:%#v resolveOnly:%v", stage.fence, stage.resolveOnly)
+					if (stage.name == "commit" || stage.name == "continue") && (stage.fence != wantFence || stage.resolveOnly) {
+						t.Fatalf("%s ran with fence:%#v resolveOnly:%v", stage.name, stage.fence, stage.resolveOnly)
 					}
-					if stage.name == "respond" && tt.preserved.Kind == runtimefence.DecisionUserInput && stage.canceled != tt.canceled {
+					if stage.name == "commit" && tt.preserved.Kind == runtimefence.DecisionUserInput && stage.canceled != tt.canceled {
 						t.Fatalf("response canceled = %v, want %v", stage.canceled, tt.canceled)
 					}
 				case <-time.After(2 * time.Second):
@@ -2118,21 +2118,22 @@ func TestLocalChannelDistributedInactiveDurableResponseDoesNotReplaceActiveRun(t
 			if err := client.WriteJSON(tt.command); err != nil {
 				t.Fatalf("write colliding response: %v", err)
 			}
-			select {
-			case stage := <-resolver.stages:
-				if stage.name != "prepare" {
-					t.Fatalf("first response stage = %q", stage.name)
-				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("timed out waiting for response preparation")
+			commandEvent := readCommandEventUntil(t, client, strings.TrimSpace(fmt.Sprint(tt.command["stream_id"])))
+			if commandEvent.Type != "command_error" {
+				t.Fatalf("collision command event = %#v", commandEvent)
 			}
-			errorEvent := readRuntimeWireEventUntil(t, client, func(event runtimeWireEvent) bool { return event["type"] == "error" })
-			feedback, _ := errorEvent["feedback"].(map[string]any)
-			if errorEvent["message"] != "The agent run failed." || feedback["code"] != string(apperror.CodeSessionRuntimeRunFailed) {
-				t.Fatalf("collision error = %#v", errorEvent)
+			wantAction := sessionruntime.CommandToolApprovalResponse
+			if strings.TrimSpace(fmt.Sprint(tt.command["type"])) == sessionruntime.CommandUserInputResponse {
+				wantAction = sessionruntime.CommandUserInputResponse
 			}
-			if strings.Contains(fmt.Sprint(errorEvent), "already has an active runtime run") {
-				t.Fatalf("collision error leaked private runtime detail: %#v", errorEvent)
+			if commandEvent.ActionID != wantAction {
+				t.Fatalf("collision action = %q, want %q", commandEvent.ActionID, wantAction)
+			}
+			if commandEvent.Error == nil || commandEvent.Error.Code != string(apperror.CodeSessionRuntimeTargetNotActive) {
+				t.Fatalf("collision error = %#v", commandEvent.Error)
+			}
+			if strings.Contains(fmt.Sprint(commandEvent), "already has an active runtime run") {
+				t.Fatalf("collision error leaked private runtime detail: %#v", commandEvent)
 			}
 			select {
 			case stage := <-resolver.stages:
@@ -2194,6 +2195,63 @@ func TestLocalChannelInvalidUserInputResponseFailsBeforeRunAdmission(t *testing.
 	}
 	if snapshot.CurrentRunView != nil {
 		t.Fatalf("invalid response admitted a runtime run: %#v", snapshot.CurrentRunView)
+	}
+}
+
+func TestLocalChannelDecisionCommitFailureDoesNotPublishOrContinue(t *testing.T) {
+	t.Parallel()
+
+	manager := startHandlerRuntimeManager(t, sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+		OwnerID: "handler-decision-commit-failure", StateTTL: time.Hour, OwnerLeaseTTL: time.Minute,
+	})
+	resolver := &deferredResponseResolver{
+		Resolver: &flow.Resolver{},
+		preserved: runtimefence.PreservedDecision{
+			Kind: runtimefence.DecisionUserInput, ID: "88888888-8888-8888-8888-888888888888",
+		},
+		commitErr: errors.New("durable decision commit failed"),
+		stages:    make(chan deferredResponseStage, 3),
+	}
+	handler := runtimeContractLocalChannelHandler(manager)
+	handler.SetResolver(resolver)
+	client := openLocalChannelTestWS(t, handler, runtimeContractBotID, runtimeContractUserID)
+	if err := client.WriteJSON(map[string]any{
+		"type": "user_input_response", "stream_id": "input-commit-failure", "session_id": runtimeContractSessionID,
+		"user_input_id": "88888888-8888-8888-8888-888888888888",
+		"answers":       []map[string]any{{"question_id": "q1", "option_ids": []string{"q1.o1"}}},
+	}); err != nil {
+		t.Fatalf("write user input response: %v", err)
+	}
+	for _, want := range []string{"prepare", "commit"} {
+		select {
+		case stage := <-resolver.stages:
+			if stage.name != want {
+				t.Fatalf("response stage = %q, want %q", stage.name, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %s stage", want)
+		}
+	}
+	errorEvent := readRuntimeContractEventUntil(t, client, func(event sessionruntime.Event) bool {
+		return event.Type == "error" && event.StreamID == "input-commit-failure"
+	})
+	if errorEvent.Message == "" {
+		t.Fatalf("commit failure event = %#v", errorEvent)
+	}
+	select {
+	case stage := <-resolver.stages:
+		t.Fatalf("unexpected response stage after failed commit: %q", stage.name)
+	default:
+	}
+	snapshot, err := manager.Snapshot(context.Background(), runtimeContractBotID, runtimeContractSessionID)
+	if err != nil {
+		t.Fatalf("load runtime snapshot: %v", err)
+	}
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != sessionruntime.RunStatusErrored {
+		t.Fatalf("failed decision commit checkpoint = %#v, want errored", snapshot.CurrentRunView)
+	}
+	if snapshot.CurrentRunView.ResolvedDecision != nil || len(snapshot.CurrentRunView.Messages) != 0 {
+		t.Fatalf("failed decision commit published decision state: %#v", snapshot.CurrentRunView)
 	}
 }
 
@@ -2987,6 +3045,7 @@ type deferredResponseResolver struct {
 	fence      runtimefence.Fence
 	preserved  runtimefence.PreservedDecision
 	prepareErr error
+	commitErr  error
 	stages     chan deferredResponseStage
 }
 
@@ -3022,6 +3081,30 @@ func (r *deferredResponseResolver) RespondToolApproval(ctx context.Context, inpu
 func (r *deferredResponseResolver) RespondUserInput(ctx context.Context, input flow.UserInputResponseInput, _ chan<- flow.WSStreamEvent) error {
 	fence, _ := runtimefence.FromContext(ctx)
 	r.stages <- deferredResponseStage{name: "respond", fence: fence, resolveOnly: input.ResolveOnly, canceled: input.Canceled}
+	return nil
+}
+
+func (r *deferredResponseResolver) CommitToolApprovalResponse(ctx context.Context, input flow.ToolApprovalResponseInput) (flow.CommittedToolApprovalResponse, error) {
+	fence, _ := runtimefence.FromContext(ctx)
+	r.stages <- deferredResponseStage{name: "commit", fence: fence, resolveOnly: input.ResolveOnly}
+	return flow.CommittedToolApprovalResponse{}, r.commitErr
+}
+
+func (r *deferredResponseResolver) ContinueCommittedToolApprovalResponse(ctx context.Context, _ flow.CommittedToolApprovalResponse, _ chan<- flow.WSStreamEvent) error {
+	fence, _ := runtimefence.FromContext(ctx)
+	r.stages <- deferredResponseStage{name: "continue", fence: fence}
+	return nil
+}
+
+func (r *deferredResponseResolver) CommitUserInputResponse(ctx context.Context, input flow.UserInputResponseInput) (flow.CommittedUserInputResponse, error) {
+	fence, _ := runtimefence.FromContext(ctx)
+	r.stages <- deferredResponseStage{name: "commit", fence: fence, resolveOnly: input.ResolveOnly, canceled: input.Canceled}
+	return flow.CommittedUserInputResponse{}, r.commitErr
+}
+
+func (r *deferredResponseResolver) ContinueCommittedUserInputResponse(ctx context.Context, _ flow.CommittedUserInputResponse, _ chan<- flow.WSStreamEvent) error {
+	fence, _ := runtimefence.FromContext(ctx)
+	r.stages <- deferredResponseStage{name: "continue", fence: fence}
 	return nil
 }
 

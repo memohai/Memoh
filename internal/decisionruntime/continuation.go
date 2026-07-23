@@ -14,18 +14,25 @@ import (
 	"github.com/memohai/memoh/internal/sessionruntime"
 )
 
-func (r *Router) runDistributedContinuation(ctx context.Context, prepared runtimefence.PreservedDecision, commandType string, payload []byte, output chan<- flow.WSStreamEvent, reconcile decisionReconciler, run continuation) error {
+func (r *Router) runContinuation(ctx context.Context, prepared runtimefence.PreservedDecision, commandType string, payload []byte, output chan<- flow.WSStreamEvent, reconcile decisionReconciler, commit decisionCommit, run continuation) error {
 	streamID := "decision-" + uuid.NewString()
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	abortCh := make(chan struct{}, 1)
 	injectCh := make(chan conversation.InjectMessage, 16)
 
-	fence, err := r.resolver.AllocateRuntimePersistenceFence(runCtx, prepared.BotID, prepared.SessionID)
-	if err != nil {
-		return err
+	var fence runtimefence.Fence
+	var err error
+	if r.manager.IsDistributed() {
+		fence, err = r.resolver.AllocateRuntimePersistenceFence(runCtx, prepared.BotID, prepared.SessionID)
+		if err != nil {
+			return err
+		}
 	}
-	fencedCtx := runtimefence.WithContext(runCtx, fence)
+	fencedCtx := runCtx
+	if fence.Valid() {
+		fencedCtx = runtimefence.WithContext(runCtx, fence)
+	}
 	authorityCtx, revokeOwnership := context.WithCancelCause(context.WithoutCancel(fencedCtx))
 	var handle sessionruntime.RunHandle
 	runtimeCtx := flow.WithTerminalHookAuthority(fencedCtx, agentpkg.TerminalHookAuthority{
@@ -44,15 +51,25 @@ func (r *Router) runDistributedContinuation(ctx context.Context, prepared runtim
 		Cancel:          cancel,
 		InjectCh:        injectCh,
 		AdmissionBuilder: func(admissionCtx context.Context, admitted sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
-			admissionCtx = runtimefence.WithContext(admissionCtx, fence)
-			if err := r.manager.ValidateRunOwnership(admissionCtx, admitted); err != nil {
-				return sessionruntime.RunAdmissionView{}, err
-			}
-			if err := r.resolver.ActivateRuntimePersistenceFenceWithOptions(admissionCtx, fence, runtimefence.ActivationOptions{PreserveDecision: &prepared}); err != nil {
-				return sessionruntime.RunAdmissionView{}, err
+			if fence.Valid() {
+				admissionCtx = runtimefence.WithContext(admissionCtx, fence)
 			}
 			if err := r.manager.ValidateRunOwnership(admissionCtx, admitted); err != nil {
 				return sessionruntime.RunAdmissionView{}, err
+			}
+			if fence.Valid() {
+				if err := r.resolver.ActivateRuntimePersistenceFenceWithOptions(admissionCtx, fence, runtimefence.ActivationOptions{PreserveDecision: &prepared}); err != nil {
+					return sessionruntime.RunAdmissionView{}, err
+				}
+			}
+			if err := r.manager.ValidateRunOwnership(admissionCtx, admitted); err != nil {
+				return sessionruntime.RunAdmissionView{}, err
+			}
+			if err := commit(admissionCtx); err != nil {
+				return sessionruntime.RunAdmissionView{}, err
+			}
+			if decision := sessionruntime.ResolvedDecisionFromCommand(prepared.Kind, prepared.ID, commandType, payload); decision != nil {
+				return sessionruntime.RunAdmissionView{ResolvedDecision: decision}, nil
 			}
 			return sessionruntime.RunAdmissionView{}, nil
 		},

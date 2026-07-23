@@ -20899,6 +20899,14 @@ const docTemplate = `{
                 "request_user_turn": {
                     "$ref": "#/definitions/conversation.UITurn"
                 },
+                "resolved_decision": {
+                    "description": "ResolvedDecision anchors a deferred ask_user / tool-approval continuation\nto the parent interactive turn so every subscriber can close the pending\nUI and reuse that assistant turn instead of opening a second one.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/sessionruntime.ResolvedDecisionView"
+                        }
+                    ]
+                },
                 "started_at": {
                     "type": "string"
                 },
@@ -20921,6 +20929,35 @@ const docTemplate = `{
             "properties": {
                 "stream_id": {
                     "type": "string"
+                }
+            }
+        },
+        "sessionruntime.ResolvedDecisionView": {
+            "type": "object",
+            "required": [
+                "id",
+                "kind",
+                "status"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "user_input",
+                        "tool_approval"
+                    ]
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "submitted",
+                        "canceled",
+                        "approved",
+                        "rejected"
+                    ]
                 }
             }
         },

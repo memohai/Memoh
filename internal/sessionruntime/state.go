@@ -214,7 +214,70 @@ func normalizeRunAdmission(admission RunAdmissionView) (RunAdmissionView, error)
 	if err != nil {
 		return RunAdmissionView{}, err
 	}
-	return RunAdmissionView{RequestUserTurn: requestUserTurn, Operation: operation}, nil
+	resolvedDecision, err := normalizeResolvedDecision(admission.ResolvedDecision)
+	if err != nil {
+		return RunAdmissionView{}, err
+	}
+	return RunAdmissionView{
+		RequestUserTurn:  requestUserTurn,
+		Operation:        operation,
+		ResolvedDecision: resolvedDecision,
+	}, nil
+}
+
+func normalizeResolvedDecision(decision *ResolvedDecisionView) (*ResolvedDecisionView, error) {
+	if decision == nil {
+		return nil, nil
+	}
+	kind := strings.TrimSpace(decision.Kind)
+	id := strings.TrimSpace(decision.ID)
+	status := strings.ToLower(strings.TrimSpace(decision.Status))
+	switch kind {
+	case "user_input", "tool_approval":
+	default:
+		return nil, fmt.Errorf("runtime resolved_decision kind %q is unsupported", decision.Kind)
+	}
+	if id == "" {
+		return nil, errors.New("runtime resolved_decision requires an id")
+	}
+	switch status {
+	case "submitted", "canceled", "approved", "rejected":
+	default:
+		return nil, fmt.Errorf("runtime resolved_decision status %q is unsupported", decision.Status)
+	}
+	if kind == "user_input" && status != "submitted" && status != "canceled" {
+		return nil, fmt.Errorf("user_input resolved_decision status %q is unsupported", decision.Status)
+	}
+	if kind == "tool_approval" && status != "approved" && status != "rejected" {
+		return nil, fmt.Errorf("tool_approval resolved_decision status %q is unsupported", decision.Status)
+	}
+	return &ResolvedDecisionView{Kind: kind, ID: id, Status: status}, nil
+}
+
+// ResolvedDecisionAdmission builds the admission payload for a deferred
+// ask_user / tool-approval continuation run.
+func ResolvedDecisionAdmission(kind, id, status string) RunAdmissionView {
+	return RunAdmissionView{
+		ResolvedDecision: &ResolvedDecisionView{
+			Kind:   strings.TrimSpace(kind),
+			ID:     strings.TrimSpace(id),
+			Status: strings.ToLower(strings.TrimSpace(status)),
+		},
+	}
+}
+
+// ResolvedDecisionFromCommand derives a continuation admission anchor from a
+// routed decision command payload.
+func ResolvedDecisionFromCommand(kind, id, commandType string, payload []byte) *ResolvedDecisionView {
+	status, _, ok := commandDecisionStatus(Command{Type: commandType, Payload: payload, TargetID: id})
+	if !ok {
+		return nil
+	}
+	decision, err := normalizeResolvedDecision(&ResolvedDecisionView{Kind: kind, ID: id, Status: status})
+	if err != nil {
+		return nil
+	}
+	return decision
 }
 
 func normalizeRequestUserTurn(turn *conversation.UITurn) (*conversation.UITurn, error) {
@@ -229,6 +292,19 @@ func normalizeRequestUserTurn(turn *conversation.UITurn) (*conversation.UITurn, 
 	clone.Attachments = append([]conversation.UIAttachment(nil), turn.Attachments...)
 	clone.Messages = append([]conversation.UIMessage(nil), turn.Messages...)
 	return &clone, nil
+}
+
+// ApprovalDecisionStatus maps a tool-approval response decision onto the
+// resolved_decision status published to runtime subscribers.
+func ApprovalDecisionStatus(decision string) string {
+	switch strings.ToLower(strings.TrimSpace(decision)) {
+	case "approve", "approved":
+		return "approved"
+	case "reject", "rejected":
+		return "rejected"
+	default:
+		return ""
+	}
 }
 
 func leaseRenewInterval(ttl time.Duration) time.Duration {
@@ -278,15 +354,61 @@ func enqueueRuntimeEvent(ch chan Event, event Event) {
 }
 
 func upsertUIMessage(messages []conversation.UIMessage, incoming conversation.UIMessage) []conversation.UIMessage {
-	for i := range messages {
-		if incoming.Type == conversation.UIMessageTool && strings.TrimSpace(incoming.ToolCallID) != "" && messages[i].Type == conversation.UIMessageTool && messages[i].ToolCallID == incoming.ToolCallID {
-			messages[i] = incoming
-			return messages
-		}
-		if messages[i].ID == incoming.ID {
-			messages[i] = incoming
-			return messages
-		}
+	if i := uiMessageIndex(messages, incoming); i >= 0 {
+		messages[i] = preserveTerminalDecision(messages[i], incoming)
+		return messages
 	}
 	return append(messages, incoming)
+}
+
+func uiMessageIndex(messages []conversation.UIMessage, incoming conversation.UIMessage) int {
+	for i := range messages {
+		if incoming.Type == conversation.UIMessageTool && strings.TrimSpace(incoming.ToolCallID) != "" && messages[i].Type == conversation.UIMessageTool && messages[i].ToolCallID == incoming.ToolCallID {
+			return i
+		}
+		if messages[i].ID == incoming.ID {
+			return i
+		}
+	}
+	return -1
+}
+
+func preserveTerminalDecision(existing, incoming conversation.UIMessage) conversation.UIMessage {
+	if existing.Type != conversation.UIMessageTool || incoming.Type != conversation.UIMessageTool {
+		return incoming
+	}
+	if existing.Approval != nil && terminalDecisionStatus(existing.Approval.Status) &&
+		(incoming.Approval == nil || (sameDecisionID(existing.Approval.ApprovalID, incoming.Approval.ApprovalID) && !terminalDecisionStatus(incoming.Approval.Status))) {
+		approval := *existing.Approval
+		incoming.Approval = &approval
+	}
+	if existing.UserInput != nil && terminalDecisionStatus(existing.UserInput.Status) &&
+		(incoming.UserInput == nil || (sameDecisionID(existing.UserInput.UserInputID, incoming.UserInput.UserInputID) && !terminalDecisionStatus(incoming.UserInput.Status))) {
+		userInput := *existing.UserInput
+		incoming.UserInput = &userInput
+	}
+	return incoming
+}
+
+func terminalDecisionStatus(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return status != "" && status != "pending"
+}
+
+func sameDecisionID(left, right string) bool {
+	left = strings.TrimSpace(left)
+	return left != "" && left == strings.TrimSpace(right)
+}
+
+func resolvedUIMessageUpserts(run *CurrentRunView, requested []conversation.UIMessage) []conversation.UIMessage {
+	if run == nil || len(requested) == 0 {
+		return nil
+	}
+	resolved := make([]conversation.UIMessage, 0, len(requested))
+	for _, message := range requested {
+		if i := uiMessageIndex(run.Messages, message); i >= 0 {
+			resolved = append(resolved, run.Messages[i])
+		}
+	}
+	return resolved
 }
