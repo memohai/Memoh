@@ -28,12 +28,13 @@
                  the last message can always scroll clear of it. -->
             <div
               class="w-full max-w-[840px] mx-auto px-4 pt-6 space-y-6 sm:px-6 lg:px-10"
+              :class="messagesLandingHidden ? 'invisible' : ''"
               :style="{ paddingBottom: messagesBottomPad }"
             >
               <div
                 ref="loadMoreSentinel"
                 aria-hidden="true"
-                class="h-px w-full"
+                class="h-px w-full [overflow-anchor:none]"
               />
               <div
                 v-if="loadingOlder"
@@ -739,6 +740,7 @@ import MessageItem from './message-item.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
 import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
+import { canTriggerHistorySentinel } from '../composables/chat-sentinel-readiness'
 import { useChatScroll } from '../composables/useChatScroll'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
@@ -2143,11 +2145,15 @@ const lastMessageId = computed(() => messages.value[messages.value.length - 1]?.
 
 const {
   isScrolling,
+  sessionLandingPending,
+  historyLoadIntent,
   highlightedMessageId,
   showJumpToBottom: showJumpToBottomFromScroll,
   scrollToBottom,
   scrollToMessage,
-  suppressAutoScrollForPrepend,
+  beginHistoryPrepend,
+  finishHistoryPrepend,
+  consumeHistoryLoadIntent,
   markEscaped,
   pinAfterSend,
   onActivatedRestoreScroll,
@@ -2162,10 +2168,15 @@ const {
   contentEl: descEl,
   lastTurnEl,
   messages,
+  loadingMessages,
   isActive: isVisible,
   sessionId: computed(() => paneTarget.value.sessionId ?? `draft:${paneTarget.value.viewId}`),
 })
 const showJumpToBottom = computed(() => showJumpToBottomFromScroll.value && !loadingChats.value)
+const messagesLandingHidden = computed(() =>
+  messages.value.length > 0
+  && sessionLandingPending.value,
+)
 
 // Rail navigation parks the reader on a chosen turn, so escape follow —
 // otherwise the next streamed mutation would drag them back to the bottom.
@@ -2186,26 +2197,38 @@ onBeforeUnmount(() => {
   stopAuthSessionCleanup()
 })
 
-// Sentinel-based infinite scroll for older history. Position preservation
-// across the prepend itself is owned by useChatScroll (see
-// suppressAutoScrollForPrepend's doc comment for why no manual scrollTop
-// correction is needed).
+// Sentinel-based infinite scroll for older history. Intersection is only the
+// geometry half of the trigger: an upward physical gesture arms exactly one
+// cursor request, preventing initial/short-page layout from cascading history.
 async function ensureOlderLoaded() {
-  if (loadingOlder.value || !hasMoreOlder.value) return
-  if (!messages.value.length) return
-  suppressAutoScrollForPrepend()
+  if (!canTriggerHistorySentinel({
+    isVisible: isVisible.value,
+    loadingMessages: loadingMessages.value,
+    sessionLandingPending: sessionLandingPending.value,
+    userRequestedHistory: historyLoadIntent.value,
+    loadingOlder: loadingOlder.value,
+    hasMoreOlder: hasMoreOlder.value,
+    messageCount: messages.value.length,
+  })) return
+  if (!consumeHistoryLoadIntent()) return
+  beginHistoryPrepend()
   try {
     await chatStore.loadOlderMessages(paneTarget.value)
+    await nextTick()
   } catch (error) {
     console.error('Failed to load older messages:', error)
+  } finally {
+    finishHistoryPrepend()
   }
 }
+
+const historySentinelIntersecting = ref(false)
 
 useIntersectionObserver(
   loadMoreSentinel,
   ([entry]) => {
-    if (!isVisible.value) return
-    if (!entry?.isIntersecting) return
+    historySentinelIntersecting.value = Boolean(entry?.isIntersecting)
+    if (!historySentinelIntersecting.value) return
     void ensureOlderLoaded()
   },
   {
@@ -2215,8 +2238,15 @@ useIntersectionObserver(
   },
 )
 
+watch(historyLoadIntent, (requested) => {
+  // A short first page can leave the sentinel intersecting continuously, so
+  // IntersectionObserver has no threshold transition to report after the user
+  // starts scrolling up. The intent edge completes that missing half.
+  if (requested && historySentinelIntersecting.value) void ensureOlderLoaded()
+})
+
 onActivated(() => {
-  onActivatedRestoreScroll(loadingMessages)
+  onActivatedRestoreScroll()
 })
 
 onDeactivated(() => {

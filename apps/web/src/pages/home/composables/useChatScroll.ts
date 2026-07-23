@@ -8,6 +8,7 @@ import {
 } from 'vue'
 import { useScroll } from '@vueuse/core'
 import type { ChatMessage } from '@/store/chat-list'
+import { historyPrependAnchorDelta } from './chat-sentinel-readiness'
 
 export interface ScrollTweenOptions {
   duration?: number
@@ -82,6 +83,7 @@ export interface UseChatScrollOptions {
    */
   lastTurnEl: Ref<HTMLElement | null>
   messages: Ref<ChatMessage[]>
+  loadingMessages: Ref<boolean>
   isActive: Ref<boolean>
   sessionId: Ref<string | null | undefined>
 }
@@ -119,10 +121,9 @@ export interface UseChatScrollOptions {
  *
  * ─── State model ──────────────────────────────────────────────────────────
  * The hot-path latches are plain closure vars, NOT refs on purpose: they move
- * on every frame of a scroll and must never trigger a re-render. Exactly ONE
- * reactive mirror, `isAtBottom`, is exposed to the UI (the jump-to-bottom
- * button); update it wherever scrollTop changes, never read the latches from a
- * template.
+ * on every frame of a scroll and must never trigger a re-render. Reactive refs
+ * are reserved for UI contracts: `isAtBottom`, `sessionLandingPending`, and
+ * the one-shot `historyLoadIntent`.
  *
  *   isProgrammaticScroll  code is mid-scroll → treat scroll events as "ours"
  *   followEnabled         content growth may pull the viewport to the bottom;
@@ -132,6 +133,8 @@ export interface UseChatScrollOptions {
  *   lastScrollTop         previous frame's scrollTop, for the up/down test
  *   lockScroll (ref)      init / cross-tab restore running → freeze BOTH follow
  *                         and escape so their setup scrolls latch nothing
+ *   sessionLandingPending hide rows until bottom/anchor placement is complete
+ *   historyLoadIntent     upward physical gesture may trigger one cursor load
  *
  * ─── Event flow ───────────────────────────────────────────────────────────
  *   MutationObserver(content subtree) ─ streaming mutates the DOM ─▶ apply an
@@ -159,24 +162,20 @@ export interface UseChatScrollOptions {
  * the next streamed token would yank the parked view to the bottom.
  *
  * ─── Prepend (older history) ──────────────────────────────────────────────
- * Loading older messages is treated as an escape (suppressAutoScrollForPrepend
- * → markEscaped): follow stays off, and the browser's native `overflow-anchor`
- * keeps the visible content stationary across the insert. There is NO manual
- * scrollTop compensation — and you must NOT set `overflow-anchor: none` on the
- * viewport. That was tried (to protect a browser-native smooth entrance
- * scroll, which anchoring can cancel) and it broke two things at once: each
- * prepend batch twitched, and the pin drifted off its offset — a
- * one-shot manual compensation / one-shot landing cannot track the ASYNC
- * layout settles (code highlighting, images, fonts) that keep resizing rows
- * after the DOM lands. Native anchoring corrects continuously; the pin's JS
- * tween is immune to it (it rewrites scrollTop every frame), so they coexist.
+ * Loading older history calls beginHistoryPrepend → markEscaped (follow off),
+ * then finishHistoryPrepend after the store prepends rows. It preserves one
+ * existing row's viewport offset. Do not use scrollHeight delta here: the live
+ * assistant can grow below the reader during the request, and counting that
+ * unrelated growth as prepended history pushes the reader down. A physical
+ * gesture during the request cancels correction. Each capture is bound to the
+ * active session and scroll root.
  *
  * ─── Browser vs hand-written scroll (read before changing pin/reserve) ───
  * We do NOT replace the browser's scroller. Most of the time the browser
  * owns scrollTop:
  *   • everyday wheel/touch scrolling
- *   • native overflow-anchor during history prepend and async reflow
- *     (Shiki / KaTeX / images / fonts) — see Prepend above
+ *   • native overflow-anchor during async reflow after the initial prepend
+ *     correction (Shiki / KaTeX / images / fonts)
  *   • clamp when content shrinks past the max scroll
  *
  * What the browser does NOT know is chat product geometry:
@@ -186,8 +185,9 @@ export interface UseChatScrollOptions {
  *     send's handover (legal layout — never trimmed while the view lives)
  *   • entrance needs a quintic ease-out tween, not native smooth
  *
- * So we hand-write scrollTop only on a NARROW boundary: the frame that
- * hands a pin from one turn to the next, plus the entrance tween itself.
+ * So we hand-write scrollTop only on NARROW boundaries: first-frame landing,
+ * one prepend correction, the frame that hands a pin from one turn to the
+ * next, and the entrance tween itself.
  * That is intentional policy, not a temporary hack — but the surface must
  * stay narrow. If a new height-change path (Thought expand, tool group,
  * split pane, tab restore, …) seems to need the same compensation, do NOT
@@ -246,13 +246,21 @@ export interface UseChatScrollOptions {
  * ─── chat-pane contract ───────────────────────────────────────────────────
  * chat-pane owns the DOM refs and drives this composable through:
  *   scrollToBottom (jump button) · scrollToMessage (reply refs) · pinAfterSend
- *   (on send) · suppressAutoScrollForPrepend (top sentinel) · markEscaped +
- *   startScrollTween + findMessageElement + getElementAbsoluteTop (scroll rail)
+ *   (on send) · beginHistoryPrepend/finishHistoryPrepend (top sentinel) ·
+ *   markEscaped + startScrollTween + findMessageElement + getElementAbsoluteTop
  *   · onMessageActive (per message-item) · onActivatedRestoreScroll /
  *   onDeactivatedResetScroll (its own KeepAlive hooks).
  */
 export function useChatScroll(options: UseChatScrollOptions) {
-  const { scrollEl, contentEl, lastTurnEl, messages, isActive, sessionId } = options
+  const {
+    scrollEl,
+    contentEl,
+    lastTurnEl,
+    messages,
+    loadingMessages,
+    isActive,
+    sessionId,
+  } = options
 
   const highlightedMessageId = ref('')
   // Reactive mirror of "is the viewport at the bottom". This is the ONLY
@@ -263,6 +271,14 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // Held true during session load / cross-tab restore so neither the follow
   // nor the escape latch reacts to the programmatic scrolls those flows make.
   const lockScroll = ref(true)
+  // Explicit first-frame phase. Messages stay hidden and top pagination stays
+  // disabled until the current session has been positioned at the bottom (or
+  // a remembered KeepAlive anchor has been restored).
+  const sessionLandingPending = ref(true)
+  // IntersectionObserver reports geometry, not intent. This one-shot latch is
+  // armed only by an upward physical gesture and consumed by chat-pane before
+  // one cursor request.
+  const historyLoadIntent = ref(false)
 
   const { isScrolling } = useScroll(scrollEl)
 
@@ -436,6 +452,85 @@ export function useChatScroll(options: UseChatScrollOptions) {
   let contentResizeObserver: ResizeObserver | null = null
   let pinAttemptId = 0
   let appliedPinAttemptId = 0
+  let landingEpoch = 0
+  let landingCanCompleteEpoch = -1
+  let cancelActivationRestore: (() => void) | null = null
+  let historyPrependCapture: {
+    sessionId: string
+    root: HTMLElement
+    anchorId: string
+    anchorTop: number
+    userIntervenedDuringLoad: boolean
+  } | null = null
+
+  function clearHistoryPrependCapture() {
+    historyPrependCapture = null
+  }
+
+  function noteHistoryPrependUserIntervention() {
+    if (historyPrependCapture) historyPrependCapture.userIntervenedDuringLoad = true
+  }
+
+  function beginSessionLanding() {
+    cancelActivationRestore?.()
+    cancelActivationRestore = null
+    lockScroll.value = true
+    sessionLandingPending.value = true
+    historyLoadIntent.value = false
+    landingEpoch += 1
+    landingCanCompleteEpoch = -1
+    clearHistoryPrependCapture()
+    isProgrammaticScroll = false
+  }
+
+  function isLandingEpochActive(epoch: number): boolean {
+    return epoch === landingEpoch
+  }
+
+  function completeFreshSessionLanding() {
+    if (!sessionLandingPending.value) return
+    const epoch = landingEpoch
+    const el = scrollEl.value
+    if (!el) return
+    followBottom()
+    isProgrammaticScroll = true
+    const target = bottomTarget(el)
+    el.scrollTop = target
+    lastScrollTop = target
+    isAtBottom.value = true
+    requestAnimationFrame(() => {
+      if (!isLandingEpochActive(epoch)) return
+      isProgrammaticScroll = false
+      const current = scrollEl.value
+      if (!current) return
+      sessionLandingPending.value = false
+      lockScroll.value = false
+      isAtBottom.value = isNearBottom(current)
+      lastScrollTop = current.scrollTop
+    })
+  }
+
+  function maybeCompleteFreshSessionLanding() {
+    if (!isActive.value) return
+    if (!sessionLandingPending.value) return
+    if (landingCanCompleteEpoch !== landingEpoch) return
+    if (loadingMessages.value) return
+    // A remembered row belongs to the KeepAlive restore path.
+    if (elId.size > 0) return
+    completeFreshSessionLanding()
+  }
+
+  function allowFreshSessionLandingAfterBindings(epoch: number) {
+    void nextTick(() => {
+      if (!isLandingEpochActive(epoch) || !isActive.value) return
+      // Parent panel activation/session binding starts the REST load
+      // synchronously. Deferring this decision one Vue flush prevents the
+      // child's activated hook from mistaking the pre-bind false state for a
+      // completed load.
+      landingCanCompleteEpoch = epoch
+      maybeCompleteFreshSessionLanding()
+    })
+  }
 
   // "At the bottom" = the plain scrollHeight test. The pin reserve is LEGAL
   // LAYOUT (Grok-parity business rule): parked at the pin IS the physical
@@ -464,12 +559,20 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // bottom (jump-to-message, rail navigation, prepend of older history).
   function markEscaped() {
     followEnabled = false
+    historyLoadIntent.value = false
   }
 
   // Re-arm following. The content heartbeat picks it back up on the next
   // growth; used by the jump-to-bottom button and session switches.
   function followBottom() {
     followEnabled = true
+    historyLoadIntent.value = false
+  }
+
+  function consumeHistoryLoadIntent(): boolean {
+    if (!historyLoadIntent.value) return false
+    historyLoadIntent.value = false
+    return true
   }
 
   // Called when the user sends. Pin and follow are MUTUALLY EXCLUSIVE phases:
@@ -488,6 +591,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     let active = true
 
     followEnabled = false
+    historyLoadIntent.value = false
     pinPending = true
     pinAnchorId = lastUserMessage()?.id ?? null
     // Arm only — do NOT clear / set reserves here.
@@ -825,6 +929,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
       turnReserves.value = new Map()
       return
     }
+    if (prev && prev !== _next) {
+      beginSessionLanding()
+      allowFreshSessionLandingAfterBindings(landingEpoch)
+    }
+    clearHistoryPrependCapture()
     followBottom()
     // A send pin armed in the previous session must not fire against the new
     // session's rows.
@@ -844,74 +953,119 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
   })
 
-  function onActivatedRestoreScroll(loadingMessages: Ref<boolean>) {
+  function onActivatedRestoreScroll() {
     if (!isActive.value) return
-    let done = false
-    const unwatch = watch(loadingMessages, async (newValue) => {
-      if (done) return
-      try {
-        // Pick the anchor closest to the top edge of the viewport so the
-        // restore lands on the message the user was reading rather than an
-        // arbitrary entry from earlier hover state.
-        let anchorId: string | undefined
-        let anchorTop = Number.POSITIVE_INFINITY
-        for (const [id, top] of elId) {
-          if (Math.abs(top) < Math.abs(anchorTop)) {
-            anchorId = id
-            anchorTop = top
-          }
-        }
+    const hadRememberedAnchor = elId.size > 0
+    beginSessionLanding()
+    const epoch = landingEpoch
 
-        if (anchorId && !newValue) {
-          const el: HTMLElement | null = document.querySelector(`[data-message-id="${anchorId}"]`)
-          if (el) {
-            const cachePos = anchorTop
-            el.scrollIntoView()
-            requestAnimationFrame(() => {
+    void nextTick(() => {
+      if (!isLandingEpochActive(epoch) || !isActive.value) return
+      landingCanCompleteEpoch = epoch
+      if (!hadRememberedAnchor || elId.size === 0) {
+        maybeCompleteFreshSessionLanding()
+        return
+      }
+
+      let done = false
+      const stopLoadingWatch: { current?: () => void } = {}
+      const cancel = () => {
+        if (done) return
+        done = true
+        stopLoadingWatch.current?.()
+        if (cancelActivationRestore === cancel) cancelActivationRestore = null
+      }
+      const finalizeRestore = () => {
+        if (done) return
+        done = true
+        queueMicrotask(() => {
+          stopLoadingWatch.current?.()
+          if (cancelActivationRestore === cancel) cancelActivationRestore = null
+        })
+      }
+      cancelActivationRestore = cancel
+
+      function finishAnchorRestore(root: HTMLElement) {
+        if (!isLandingEpochActive(epoch)) {
+          finalizeRestore()
+          return
+        }
+        finalizeRestore()
+        sessionLandingPending.value = false
+        lockScroll.value = false
+        // Restored to a remembered position: follow only if it is at the bottom.
+        followEnabled = isNearBottom(root)
+        isAtBottom.value = isNearBottom(root)
+        isProgrammaticScroll = false
+        lastScrollTop = root.scrollTop
+      }
+
+      stopLoadingWatch.current = watch(loadingMessages, (newValue) => {
+        if (done || newValue) return
+        try {
+          // Pick the anchor closest to the top edge of the viewport so the
+          // restore lands on the message the user was reading rather than an
+          // arbitrary entry from earlier hover state.
+          let anchorId: string | undefined
+          let anchorTop = Number.POSITIVE_INFINITY
+          for (const [id, top] of elId) {
+            if (Math.abs(top) < Math.abs(anchorTop)) {
+              anchorId = id
+              anchorTop = top
+            }
+          }
+
+          if (anchorId) {
+            const root = scrollEl.value
+            const el = findMessageElement(anchorId)
+            if (root && el) {
+              const cachePos = anchorTop
+              isProgrammaticScroll = true
+              el.scrollIntoView()
               requestAnimationFrame(() => {
-                scrollEl.value?.scrollBy({
-                  top: -cachePos,
+                if (!isLandingEpochActive(epoch)) {
+                  finalizeRestore()
+                  return
+                }
+                requestAnimationFrame(() => {
+                  if (!isLandingEpochActive(epoch)) {
+                    finalizeRestore()
+                    return
+                  }
+                  root.scrollBy({ top: -cachePos })
+                  requestAnimationFrame(() => {
+                    finishAnchorRestore(root)
+                  })
                 })
               })
-            })
+              return
+            }
           }
-          setTimeout(() => {
-            lockScroll.value = false
-            done = true
-            unwatch()
-            // Restored to a remembered position: follow only if it is at the
-            // bottom.
-            const root = scrollEl.value
-            followEnabled = root ? isNearBottom(root) : true
-            if (root) isAtBottom.value = isNearBottom(root)
-          })
-        } else {
-          if (!newValue) {
-            setTimeout(() => {
-              lockScroll.value = false
-              done = true
-              unwatch()
-              // No remembered anchor (fresh open / previously at bottom):
-              // land at the bottom and let the follow heartbeat keep it
-              // there (entry pin was cut — see the sessionId watch).
-              followBottom()
-              stickToBottomNow()
-            })
-          }
+
+          finalizeRestore()
+          elId.clear()
+          maybeCompleteFreshSessionLanding()
+        } catch (error) {
+          finalizeRestore()
+          throw error
         }
-      } catch (error) {
-        done = true
-        unwatch()
-        throw error
-      }
-    }, {
-      immediate: true,
-      flush: 'post',
+      }, {
+        immediate: true,
+        flush: 'post',
+      })
     })
   }
 
+  watch(loadingMessages, (loading) => {
+    if (!loading) maybeCompleteFreshSessionLanding()
+  }, { flush: 'post' })
+
+  watch([() => messages.value.length, scrollEl], () => {
+    maybeCompleteFreshSessionLanding()
+  }, { flush: 'post' })
+
   function onDeactivatedResetScroll() {
-    lockScroll.value = true
+    beginSessionLanding()
     followBottom()
     // The pin reserve (last-turn min-height) intentionally SURVIVES tab
     // switches: KeepAlive preserves the DOM, and clearing it here would make
@@ -929,6 +1083,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   const KEY_NAV_GRACE_MS = 500
   let lastWheelAt = Number.NEGATIVE_INFINITY
   let touchActive = false
+  let lastTouchY: number | null = null
   let lastTouchScrollAt = Number.NEGATIVE_INFINITY
 
   function onWheel(ev: WheelEvent) {
@@ -942,18 +1097,25 @@ export function useChatScroll(options: UseChatScrollOptions) {
     handleUserScroll(ev.deltaY < 0)
   }
 
-  function onTouchStart() {
+  function onTouchStart(ev: TouchEvent) {
     isProgrammaticScroll = false
     touchActive = true
+    lastTouchY = ev.touches[0]?.clientY ?? null
     lastTouchScrollAt = performance.now()
   }
 
-  function onTouchMove() {
+  function onTouchMove(ev: TouchEvent) {
     lastTouchScrollAt = performance.now()
+    const y = ev.touches[0]?.clientY
+    if (y === undefined || lastTouchY === null || y === lastTouchY) return
+    // A finger moving down moves the document toward older content.
+    handleUserScroll(y > lastTouchY)
+    lastTouchY = y
   }
 
   function onTouchEnd() {
     touchActive = false
+    lastTouchY = null
     lastTouchScrollAt = performance.now()
   }
 
@@ -977,6 +1139,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const t = ev.target as HTMLElement | null
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
     lastKeyNavAt = performance.now()
+    const isUpward = ev.key === 'ArrowUp'
+      || ev.key === 'PageUp'
+      || ev.key === 'Home'
+      || (ev.key === ' ' && ev.shiftKey)
+    handleUserScroll(isUpward)
   }
 
   function onScrollEvent() {
@@ -1028,6 +1195,13 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const el = scrollEl.value
     if (!el) return
     if (lockScroll.value) return
+    historyLoadIntent.value = isScrollingUp
+    if (
+      historyPrependCapture
+      && (!isScrollingUp || el.scrollTop > 0)
+    ) {
+      noteHistoryPrependUserIntervention()
+    }
     if (isScrollingUp) {
       // Any upward move parks the view immediately (and a pinned turn stays
       // parked).
@@ -1084,7 +1258,13 @@ export function useChatScroll(options: UseChatScrollOptions) {
   function onContentChanged() {
     const el = scrollEl.value
     if (!el) return
-    if (!isActive.value || lockScroll.value) return
+    if (!isActive.value) return
+    if (lockScroll.value) {
+      // KeepAlive anchor restore owns landing until offset correction finishes.
+      if (elId.size > 0) return
+      maybeCompleteFreshSessionLanding()
+      return
+    }
     if (pinPending && tryApplyPin(el)) return
     if (followEnabled) stickToBottomNow()
     else if (!pinScrollActive) {
@@ -1130,6 +1310,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     window.removeEventListener('keydown', onKeyNav)
     pointerActive = false
     touchActive = false
+    lastTouchY = null
     lastTouchScrollAt = Number.NEGATIVE_INFINITY
     lastWheelAt = Number.NEGATIVE_INFINITY
     lastKeyNavAt = Number.NEGATIVE_INFINITY
@@ -1150,16 +1331,74 @@ export function useChatScroll(options: UseChatScrollOptions) {
     contentResizeObserver.observe(el)
   }, { immediate: true })
 
+  function historyPrependAnchor(root: HTMLElement): { id: string, top: number } | null {
+    const rootRect = root.getBoundingClientRect()
+    let candidate: { id: string, top: number, distance: number } | null = null
+    for (const element of Array.from(root.querySelectorAll<HTMLElement>('[data-message-id]'))) {
+      const id = element.dataset.messageId?.trim()
+      if (!id) continue
+      const rect = element.getBoundingClientRect()
+      if (rect.bottom <= rootRect.top) continue
+      const top = rect.top - rootRect.top
+      const distance = Math.abs(top)
+      if (!candidate || distance < candidate.distance) {
+        candidate = { id, top, distance }
+      }
+    }
+    return candidate ? { id: candidate.id, top: candidate.top } : null
+  }
+
   // Prepend of older history is a deliberate move away from the bottom, so it
-  // escapes: the browser's native `overflow-anchor` keeps the visible content
-  // stationary across the insert — continuously, including through the async
-  // layout settles that follow it. No manual scrollTop compensation (see the
-  // header's Prepend section for the failed attempt).
-  function suppressAutoScrollForPrepend() {
+  // escapes. finishHistoryPrepend preserves an existing row's viewport offset
+  // instead of treating every concurrent scrollHeight change as old history.
+  function beginHistoryPrepend() {
     markEscaped()
+    clearHistoryPrependCapture()
+    const el = scrollEl.value
+    const sid = (sessionId.value ?? '').trim()
+    if (!el || !sid) return
+    const anchor = historyPrependAnchor(el)
+    if (!anchor) return
+    historyPrependCapture = {
+      sessionId: sid,
+      root: el,
+      anchorId: anchor.id,
+      anchorTop: anchor.top,
+      userIntervenedDuringLoad: false,
+    }
+  }
+
+  function finishHistoryPrepend() {
+    const el = scrollEl.value
+    const capture = historyPrependCapture
+    historyPrependCapture = null
+    if (!el || !capture) return
+    if (capture.sessionId !== (sessionId.value ?? '').trim()) return
+    if (capture.root !== el) return
+    const anchor = findMessageElement(capture.anchorId)
+    if (!anchor) return
+    const delta = historyPrependAnchorDelta({
+      capturedAnchorTop: capture.anchorTop,
+      currentAnchorTop: anchor.getBoundingClientRect().top - el.getBoundingClientRect().top,
+      userIntervenedDuringLoad: capture.userIntervenedDuringLoad,
+    })
+    if (delta === null) return
+    const epoch = landingEpoch
+    isProgrammaticScroll = true
+    el.scrollTop = Math.max(0, el.scrollTop + delta)
+    lastScrollTop = el.scrollTop
+    requestAnimationFrame(() => {
+      if (epoch !== landingEpoch) return
+      if (scrollEl.value !== el) return
+      if (capture.sessionId !== (sessionId.value ?? '').trim()) return
+      isProgrammaticScroll = false
+      isAtBottom.value = isNearBottom(el)
+    })
   }
 
   onBeforeUnmount(() => {
+    cancelActivationRestore?.()
+    cancelActivationRestore = null
     if (atBottomRefreshRaf) cancelAnimationFrame(atBottomRefreshRaf)
     if (highlightTimer) clearTimeout(highlightTimer)
     if (tweenFlagTimer) clearTimeout(tweenFlagTimer)
@@ -1174,13 +1413,17 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // state
     isScrolling,
     lockScroll,
+    sessionLandingPending,
+    historyLoadIntent,
     highlightedMessageId,
     showJumpToBottom,
 
     // primary actions
     scrollToBottom,
     scrollToMessage,
-    suppressAutoScrollForPrepend,
+    beginHistoryPrepend,
+    finishHistoryPrepend,
+    consumeHistoryLoadIntent,
     markEscaped,
     followBottom,
     pinAfterSend,
