@@ -163,7 +163,7 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 		logger:         slog.New(slog.DiscardHandler),
 	}
 
-	persisted := resolver.storeMessages(context.Background(), ChatRequest{
+	persisted, err := resolver.storeMessages(context.Background(), ChatRequest{
 		BotID:       storeRoundBotID,
 		ThreadID:    "33333333-3333-3333-3333-333333333333",
 		Query:       "hello",
@@ -175,6 +175,9 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 		{Role: "tool", Content: newTextContent("tool result")},
 		{Role: "assistant", Content: newTextContent("done")},
 	}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("storeMessages() error = %v", err)
+	}
 
 	if len(messages.batchInputs) != 4 {
 		t.Fatalf("batch inputs = %d, want 4", len(messages.batchInputs))
@@ -184,6 +187,42 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 	}
 	if len(persisted) != 4 {
 		t.Fatalf("persisted messages = %d, want 4", len(persisted))
+	}
+}
+
+func TestStoreRoundReplacementRequiresAtomicPersister(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	_, err := resolver.storeRoundWithOptionsResult(
+		context.Background(),
+		ChatRequest{
+			BotID:    storeRoundBotID,
+			ThreadID: "33333333-3333-3333-3333-333333333333",
+			Query:    "hello",
+		},
+		[]ModelMessage{
+			{Role: "user", Content: newTextContent("hello")},
+			{Role: "assistant", Content: newTextContent("done")},
+		},
+		"",
+		storeRoundOptions{
+			Replacement: &messagepkg.TurnReplacement{
+				OldTurnID: "turn-old",
+				Reason:    "edit",
+			},
+		},
+	)
+	if err == nil {
+		t.Fatal("storeRoundWithOptionsResult() error = nil, want unsupported atomic replacement")
+	}
+	if len(messages.persisted) != 0 {
+		t.Fatalf("fallback Persist called %d times, want 0", len(messages.persisted))
 	}
 }
 

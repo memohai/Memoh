@@ -283,7 +283,13 @@ func (s *Service) streamChatWSResult(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) ([]messagepkg.Message, error) {
-	return s.streamChatWSResultWithHooks(ctx, req, eventCh, abortCh, nil, nil)
+	return s.streamChatWSResultWithHooks(ctx, req, eventCh, abortCh, streamPersistenceHooks{})
+}
+
+type streamPersistenceHooks struct {
+	preflight   func(context.Context) error
+	postPersist func(context.Context, []messagepkg.Message) error
+	replacement *messagepkg.TurnReplacement
 }
 
 func (s *Service) streamChatWSResultWithHooks(
@@ -291,8 +297,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	req ChatRequest,
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
-	preflight func(context.Context) error,
-	postPersist func(context.Context, []messagepkg.Message) error,
+	hooks streamPersistenceHooks,
 ) ([]messagepkg.Message, error) {
 	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
 		return nil, err
@@ -311,7 +316,7 @@ func (s *Service) streamChatWSResultWithHooks(
 		if err := rejectACPWorkspaceTarget(req); err != nil {
 			return nil, err
 		}
-		return nil, s.streamACPAgentWSWithHooks(ctx, req, eventCh, abortCh, preflight, postPersist)
+		return nil, s.streamACPAgentWSWithHooks(ctx, req, eventCh, abortCh, hooks)
 	}
 	var prepareErr error
 	ctx, req, prepareErr = s.prepareWorkspaceRequest(ctx, req)
@@ -322,8 +327,8 @@ func (s *Service) streamChatWSResultWithHooks(
 	doneTurn := s.enterSessionTurn(ctx, req.BotID, req.ThreadID)
 	defer doneTurn()
 
-	if preflight != nil {
-		if err := preflight(ctx); err != nil {
+	if hooks.preflight != nil {
+		if err := hooks.preflight(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -427,8 +432,8 @@ func (s *Service) streamChatWSResultWithHooks(
 			}
 		}
 
-		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
-			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
+		if event.IsTerminal() && hooks.postPersist != nil && !postPersistApplied {
+			if err := hooks.postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 				return persistedMessages, err
 			}
 			postPersistApplied = true
@@ -478,8 +483,8 @@ func (s *Service) streamChatWSResultWithHooks(
 		}
 	}
 
-	if postPersist != nil && !postPersistApplied {
-		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
+	if hooks.postPersist != nil && !postPersistApplied {
+		if err := hooks.postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 			return persistedMessages, err
 		}
 	}

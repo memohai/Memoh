@@ -1050,6 +1050,56 @@ func TestPersistACPRoundReusesRetryUserMessage(t *testing.T) {
 	}
 }
 
+func TestPersistACPRoundAtomicReplacementFailureSkipsMemory(t *testing.T) {
+	t.Parallel()
+
+	messages := &acpReplacementMessageService{atomicErr: errors.New("replace transaction failed")}
+	memory := &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 1)}
+	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
+	registry.Register(storeRoundMemoryProviderID, memory)
+	resolver := &Service{
+		messageService:  messages,
+		memoryRegistry:  registry,
+		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
+		logger:          slog.New(slog.DiscardHandler),
+	}
+
+	_, err := resolver.persistACPRoundResult(
+		context.Background(),
+		ChatRequest{
+			BotID:                     storeRoundBotID,
+			ThreadID:                  "33333333-3333-3333-3333-333333333333",
+			Query:                     "inspect the project",
+			ReusePersistedUserMessage: true,
+			PersistedUserMessageID:    "user-original",
+			SkipHistoryTurn:           true,
+		},
+		"codex",
+		"/data/app",
+		withTranscriptOutput(acpclient.PromptResult{
+			Text:       "done",
+			StopReason: "end_turn",
+		}),
+		nil,
+		&messagepkg.TurnReplacement{
+			OldTurnID:        "turn-old",
+			RequestMessageID: "user-original",
+			Reason:           "retry",
+		},
+	)
+	if err == nil {
+		t.Fatal("persistACPRoundResult() error = nil, want atomic replacement failure")
+	}
+	if messages.atomicCalls != 1 || len(messages.persisted) != 0 {
+		t.Fatalf("atomic calls = %d, persisted messages = %d, want 1 and 0", messages.atomicCalls, len(messages.persisted))
+	}
+	select {
+	case got := <-memory.afterChat:
+		t.Fatalf("memory was written for failed replacement: %#v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 	t.Parallel()
 

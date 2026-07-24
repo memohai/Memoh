@@ -99,6 +99,9 @@
     "channel": {
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。"
     },
+    "chat": {
+      "turn_replacement_failed": "未能替换这条消息，原对话内容已保留，请重试。"
+    },
     "profile": {
       "request_invalid": "个人资料更新请求无效。",
       "title_model_invalid": "所选标题模型不可用或不是聊天模型。",

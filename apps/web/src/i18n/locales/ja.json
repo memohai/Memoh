@@ -96,6 +96,9 @@
     "channel": {
       "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。"
     },
+    "chat": {
+      "turn_replacement_failed": "メッセージを置き換えられませんでした。元の会話は保持されています。もう一度お試しください。"
+    },
     "profile": {
       "request_invalid": "プロフィール更新リクエストが無効です。",
       "title_model_invalid": "選択したタイトルModelは利用できないか、チャットModelではありません。",

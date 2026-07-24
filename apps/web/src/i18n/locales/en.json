@@ -99,6 +99,9 @@
     "channel": {
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly."
     },
+    "chat": {
+      "turn_replacement_failed": "The message could not be replaced. Your previous turn was kept. Please try again."
+    },
     "profile": {
       "request_invalid": "The profile update request is invalid.",
       "title_model_invalid": "The selected title model is unavailable or is not a chat model.",

@@ -24,6 +24,7 @@ const (
 	CodeProviderNameTaken                Code = "provider.name_taken"
 	CodeProviderTemplateRequestInvalid   Code = "provider_template.request_invalid"
 	CodeSearchProviderTypeConflict       Code = "search_provider.type_conflict"
+	CodeChatTurnReplacementFailed        Code = "chat.turn_replacement_failed"
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed              Code = "profile.update_failed"
@@ -103,6 +104,10 @@ var catalog = map[Code]Definition{
 	CodeSearchProviderTypeConflict: {
 		HTTPStatus: http.StatusConflict,
 		Detail:     "This web search provider is already configured.",
+	},
+	CodeChatTurnReplacementFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The message could not be replaced. Your previous turn was kept. Please try again.",
 	},
 	CodeProfileTitleModelInvalid: {
 		HTTPStatus: http.StatusBadRequest,
