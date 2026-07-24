@@ -1238,10 +1238,6 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		files = fs.LoadSystemFiles(ctx)
 	}
 
-	now := time.Now().UTC()
-	if cfg.Identity.TimezoneLocation != nil {
-		now = now.In(cfg.Identity.TimezoneLocation)
-	}
 	platformIdentitiesSection := ""
 	if s.platformIdentities != nil {
 		identities, err := s.platformIdentities.ListPlatformIdentities(ctx, cfg.Identity.BotID)
@@ -1260,7 +1256,6 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		Skills:                    cfg.Skills,
 		Files:                     files,
 		MaxFilesBytes:             limits.SystemFilesMaxBytes,
-		Now:                       now,
 		Timezone:                  cfg.Identity.Timezone,
 		PlatformIdentitiesSection: platformIdentitiesSection,
 	})

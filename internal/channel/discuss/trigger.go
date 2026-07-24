@@ -60,7 +60,6 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			ToolHTTPURL:             cfg.ToolHTTPURL,
 			DiscussMessages:         msgs,
 			DiscussImageRefs:        imageRefs,
-			DiscussMentioned:        isMentioned,
 			DiscussAddressed:        addressed,
 		},
 		consumedMs:      latestRCReceivedAtMs(rc),

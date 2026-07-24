@@ -80,9 +80,6 @@ func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 	if len(cmd.DiscussMessages) == 0 {
 		t.Fatal("expected composed discuss messages")
 	}
-	if cmd.DiscussMentioned {
-		t.Fatal("plain message must not be flagged as mentioned")
-	}
 }
 
 func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
@@ -319,11 +316,6 @@ func TestHandleReplyWithTurn_ACPRepliesInDirectConversation(t *testing.T) {
 	}
 	if sess.lastProcessedMs != 200 {
 		t.Fatalf("lastProcessedMs = %d, want 200 (cursor advanced after direct reply)", sess.lastProcessedMs)
-	}
-	// A direct conversation is "addressed" without being mentioned; the ACP
-	// runtime uses this to render the addressed-directly nudge.
-	if svc.lastCmd.DiscussMentioned {
-		t.Fatal("DM without @-mention must not be flagged as mentioned")
 	}
 }
 
