@@ -10,6 +10,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	"github.com/memohai/memoh/internal/apperror"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
 
@@ -283,13 +284,7 @@ func (s *Service) streamChatWSResult(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) ([]messagepkg.Message, error) {
-	return s.streamChatWSResultWithHooks(ctx, req, eventCh, abortCh, streamPersistenceHooks{})
-}
-
-type streamPersistenceHooks struct {
-	preflight   func(context.Context) error
-	postPersist func(context.Context, []messagepkg.Message) error
-	replacement *messagepkg.TurnReplacement
+	return s.streamChatWSResultWithHooks(ctx, req, eventCh, abortCh, nil, nil)
 }
 
 func (s *Service) streamChatWSResultWithHooks(
@@ -297,7 +292,8 @@ func (s *Service) streamChatWSResultWithHooks(
 	req ChatRequest,
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
-	hooks streamPersistenceHooks,
+	preflight func(context.Context) error,
+	postPersist func(context.Context, []messagepkg.Message) error,
 ) ([]messagepkg.Message, error) {
 	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
 		return nil, err
@@ -316,7 +312,13 @@ func (s *Service) streamChatWSResultWithHooks(
 		if err := rejectACPWorkspaceTarget(req); err != nil {
 			return nil, err
 		}
-		return nil, s.streamACPAgentWSWithHooks(ctx, req, eventCh, abortCh, hooks)
+		// Hooks currently mean retry/edit turn replacement. ACP runtimes have
+		// no rewind primitive, so running the turn would leave their in-process
+		// context inconsistent with the visible history.
+		if preflight != nil || postPersist != nil {
+			return nil, apperror.New(apperror.CodeACPTurnReplacementUnsupported, nil)
+		}
+		return nil, s.streamACPAgentWS(ctx, req, eventCh, abortCh)
 	}
 	var prepareErr error
 	ctx, req, prepareErr = s.prepareWorkspaceRequest(ctx, req)
@@ -327,8 +329,8 @@ func (s *Service) streamChatWSResultWithHooks(
 	doneTurn := s.enterSessionTurn(ctx, req.BotID, req.ThreadID)
 	defer doneTurn()
 
-	if hooks.preflight != nil {
-		if err := hooks.preflight(ctx); err != nil {
+	if preflight != nil {
+		if err := preflight(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -432,8 +434,8 @@ func (s *Service) streamChatWSResultWithHooks(
 			}
 		}
 
-		if event.IsTerminal() && hooks.postPersist != nil && !postPersistApplied {
-			if err := hooks.postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
+		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
+			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 				return persistedMessages, err
 			}
 			postPersistApplied = true
@@ -483,8 +485,8 @@ func (s *Service) streamChatWSResultWithHooks(
 		}
 	}
 
-	if hooks.postPersist != nil && !postPersistApplied {
-		if err := hooks.postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
+	if postPersist != nil && !postPersistApplied {
+		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 			return persistedMessages, err
 		}
 	}

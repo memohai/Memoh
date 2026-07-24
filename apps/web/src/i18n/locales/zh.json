@@ -99,9 +99,6 @@
     "channel": {
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。"
     },
-    "chat": {
-      "turn_replacement_failed": "未能替换这条消息，原对话内容已保留，请重试。"
-    },
     "profile": {
       "request_invalid": "个人资料更新请求无效。",
       "title_model_invalid": "所选标题模型不可用或不是聊天模型。",
@@ -128,6 +125,7 @@
     },
     "acp": {
       "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。",
+      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。",
       "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
       "model_id_required": "请选择模型后重试。",
       "model_unavailable": "所选模型已不再可用于这个外部 Agent。",

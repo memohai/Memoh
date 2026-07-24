@@ -3,8 +3,6 @@ package application
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -23,7 +21,6 @@ type storeRoundOptions struct {
 	SkipMemory              bool
 	AllowEmptyAssistantText bool
 	MessageMetadataByIndex  map[int]map[string]any
-	Replacement             *messagepkg.TurnReplacement
 }
 
 func (s *Service) storeRoundWithOptions(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) error {
@@ -68,13 +65,7 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 		return nil, nil
 	}
 
-	persisted, err := s.storeMessages(ctx, req, filtered, modelID, opts)
-	if err != nil {
-		return nil, err
-	}
-	if opts.Replacement != nil && firstAssistantID(persisted) == "" {
-		return nil, errors.New("replacement assistant message was not persisted")
-	}
+	persisted := s.storeMessages(ctx, req, filtered, modelID, opts)
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
 		go s.storeMemory(context.WithoutCancel(ctx), req, filtered)
 	}
@@ -118,12 +109,12 @@ func (s *Service) StoreRound(ctx context.Context, botID, sessionID, channelIdent
 	return s.storeRound(ctx, req, modelMessages, modelID)
 }
 
-func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.Message, error) {
+func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) []messagepkg.Message {
 	if s.messageService == nil {
-		return nil, nil
+		return nil
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return nil, nil
+		return nil
 	}
 
 	// Check bot setting for full tool result persistence.
@@ -170,9 +161,6 @@ func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages [
 		content, err := json.Marshal(msg)
 		if err != nil {
 			s.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))
-			if opts.Replacement != nil {
-				return nil, fmt.Errorf("marshal replacement message %d: %w", i, err)
-			}
 			continue
 		}
 		messageSenderChannelIdentityID := ""
@@ -259,32 +247,16 @@ func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages [
 			SkipHistoryTurn:         req.SkipHistoryTurn,
 		})
 	}
-	if opts.Replacement != nil {
-		persister, ok := s.messageService.(messagepkg.AtomicRoundPersister)
-		if !ok {
-			return nil, errors.New("message service does not support atomic turn replacement")
-		}
-		persisted, handled, err := persister.PersistRound(ctx, persistInputs, messagepkg.RoundPersistenceOptions{
-			Replacement: opts.Replacement,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("persist replacement round: %w", err)
-		}
-		if !handled {
-			return nil, errors.New("message service declined atomic turn replacement")
-		}
-		return persisted, nil
-	}
 	if batcher, ok := s.messageService.(messagepkg.ToolTailRoundPersister); ok {
 		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
 			if err != nil {
 				s.logger.Warn("persist tool tail round failed", slog.Any("error", err))
-				return nil, nil
+				return nil
 			}
-			return persisted, nil
+			return persisted
 		}
 	}
-	return s.persistMessageInputs(ctx, persistInputs, turnRequestMessageID), nil
+	return s.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
 }
 
 func workspaceTargetMetadata(target *WorkspaceTarget) map[string]any {

@@ -200,24 +200,16 @@ func (s *Service) streamReplacementWS(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) error {
-	replacement := &messagepkg.TurnReplacement{
-		OldTurnID:        oldTurnID,
-		RequestMessageID: requestMessageID,
-		Reason:           reason,
-	}
 	_, err := s.streamChatWSResultWithHooks(
 		ctx,
 		req,
 		eventCh,
 		abortCh,
-		streamPersistenceHooks{
-			preflight: func(ctx context.Context) error {
-				return s.ensureLatestVisibleTurn(ctx, req.ThreadID, oldTurnID)
-			},
-			postPersist: func(ctx context.Context, persisted []messagepkg.Message) error {
-				return s.replacePersistedTurn(ctx, req, oldTurnID, requestMessageID, reason, persisted)
-			},
-			replacement: replacement,
+		func(ctx context.Context) error {
+			return s.ensureLatestVisibleTurn(ctx, req.ThreadID, oldTurnID)
+		},
+		func(ctx context.Context, persisted []messagepkg.Message) error {
+			return s.replacePersistedTurn(ctx, req, oldTurnID, requestMessageID, reason, persisted)
 		},
 	)
 	return err

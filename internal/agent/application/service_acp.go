@@ -89,16 +89,6 @@ func (s *Service) isACPAgentSession(ctx context.Context, req ChatRequest) (bool,
 }
 
 func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
-	return s.streamACPAgentWSWithHooks(ctx, req, eventCh, abortCh, streamPersistenceHooks{})
-}
-
-func (s *Service) streamACPAgentWSWithHooks(
-	ctx context.Context,
-	req ChatRequest,
-	eventCh chan<- WSStreamEvent,
-	abortCh <-chan struct{},
-	hooks streamPersistenceHooks,
-) error {
 	if s.acpPool == nil {
 		return errors.New("ACP session pool is not configured")
 	}
@@ -138,11 +128,7 @@ func (s *Service) streamACPAgentWSWithHooks(
 		)
 	}
 	defer doneTurn()
-	if hooks.preflight != nil {
-		if err := hooks.preflight(ctx); err != nil {
-			return err
-		}
-	}
+
 	preparedAttachments, err := s.prepareACPAttachments(ctx, req)
 	if err != nil {
 		return err
@@ -157,29 +143,11 @@ func (s *Service) streamACPAgentWSWithHooks(
 	}
 	req.Query = strings.TrimSpace(req.Query)
 	var leadingUser *messagepkg.Message
-	if hooks.replacement == nil {
-		req, leadingUser = s.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
-	}
+	req, leadingUser = s.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
 	cleanupLeadingUser := func() {
 		if leadingUser != nil {
 			s.cleanupReplacementMessages(context.WithoutCancel(ctx), []messagepkg.Message{*leadingUser})
 		}
-	}
-	applyPostPersist := func(persisted []messagepkg.Message) error {
-		if hooks.replacement != nil {
-			if firstAssistantID(persisted) == "" {
-				return apperror.New(apperror.CodeChatTurnReplacementFailed, nil)
-			}
-			s.publishReplacementMessageCreated(req.BotID, persisted)
-			return nil
-		}
-		if hooks.postPersist == nil {
-			return nil
-		}
-		if leadingUser != nil {
-			persisted = append([]messagepkg.Message{*leadingUser}, persisted...)
-		}
-		return hooks.postPersist(context.WithoutCancel(ctx), persisted)
 	}
 	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
@@ -318,19 +286,8 @@ func (s *Service) streamACPAgentWSWithHooks(
 		if failureDelta != "" {
 			emit(native.StreamEvent{Type: native.EventTextDelta, Delta: failureDelta})
 		}
-		persisted, persistErr := s.persistACPRoundResult(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err, hooks.replacement)
-		if persistErr != nil {
-			s.logger.Error("ACP failure persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
-			if hooks.replacement != nil {
-				cleanupLeadingUser()
-				return apperror.Wrap(apperror.CodeChatTurnReplacementFailed, persistErr, nil)
-			}
-			if hooks.postPersist != nil {
-				cleanupLeadingUser()
-				return persistErr
-			}
-		} else if err := applyPostPersist(persisted); err != nil {
-			return err
+		if err := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err); err != nil {
+			s.logger.Error("ACP failure persist failed", slog.Any("error", err), slog.String("session_id", req.ThreadID))
 		}
 		emit(native.StreamEvent{Type: native.EventTextEnd})
 		emit(acpTerminalStreamEvent(native.EventAbort, failedResult))
@@ -341,19 +298,8 @@ func (s *Service) streamACPAgentWSWithHooks(
 	projected := projectedSnapshot()
 	result = ensureACPPromptOutput(result)
 	result.Output = filterACPProjectedOutput(result.Output, projected)
-	persisted, persistErr := s.persistACPRoundResult(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil, hooks.replacement)
-	if persistErr != nil {
-		s.logger.Error("ACP persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
-		if hooks.replacement != nil {
-			cleanupLeadingUser()
-			return apperror.Wrap(apperror.CodeChatTurnReplacementFailed, persistErr, nil)
-		}
-		if hooks.postPersist != nil {
-			cleanupLeadingUser()
-			return persistErr
-		}
-	} else if err := applyPostPersist(persisted); err != nil {
-		return err
+	if err := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil); err != nil {
+		s.logger.Error("ACP persist failed", slog.Any("error", err), slog.String("session_id", req.ThreadID))
 	}
 	emit(acpTerminalStreamEvent(native.EventEnd, result))
 	return nil
@@ -624,7 +570,7 @@ func acpDecisionProjectionStatus(ev native.StreamEvent) string {
 }
 
 func (s *Service) persistACPLeadingUserMessage(ctx context.Context, req ChatRequest) (ChatRequest, *messagepkg.Message) {
-	if req.UserMessagePersisted || req.ReusePersistedUserMessage || s == nil || s.messageService == nil || strings.TrimSpace(req.BotID) == "" {
+	if req.UserMessagePersisted || s == nil || s.messageService == nil || strings.TrimSpace(req.BotID) == "" {
 		return req, nil
 	}
 	displayText := strings.TrimSpace(req.RawQuery)
@@ -663,7 +609,6 @@ func (s *Service) persistACPLeadingUserMessage(ctx context.Context, req ChatRequ
 		DisplayText:             displayText,
 		SessionMode:             sessionMode,
 		RuntimeType:             runtimeType,
-		SkipHistoryTurn:         req.SkipHistoryTurn,
 	})
 	if err != nil {
 		s.logger.Warn("persist ACP leading user message failed",
@@ -776,19 +721,6 @@ func (s *Service) cancelPendingACPApprovals(ctx context.Context, req ChatRequest
 }
 
 func (s *Service) persistACPRound(ctx context.Context, req ChatRequest, agentID, projectPath string, result acpclient.PromptResult, promptErr error) error {
-	_, err := s.persistACPRoundResult(ctx, req, agentID, projectPath, result, promptErr, nil)
-	return err
-}
-
-func (s *Service) persistACPRoundResult(
-	ctx context.Context,
-	req ChatRequest,
-	agentID string,
-	projectPath string,
-	result acpclient.PromptResult,
-	promptErr error,
-	replacement *messagepkg.TurnReplacement,
-) ([]messagepkg.Message, error) {
 	meta := map[string]any{
 		"acp_agent_id": agentID,
 		"project_path": projectPath,
@@ -824,10 +756,9 @@ func (s *Service) persistACPRoundResult(
 	round = append(round, ModelMessage{Role: "user", Content: newTextContent(req.Query)})
 	round = append(round, output...)
 
-	userMessageAlreadyPersisted := req.UserMessagePersisted || req.ReusePersistedUserMessage
 	metadataByIndex := make(map[int]map[string]any, len(output))
 	metadataOffset := 1
-	if userMessageAlreadyPersisted {
+	if req.UserMessagePersisted {
 		metadataOffset = 0
 	}
 	for idx, msg := range output {
@@ -835,22 +766,16 @@ func (s *Service) persistACPRoundResult(
 			metadataByIndex[idx+metadataOffset] = meta
 		}
 	}
-	skipMemory := promptErr != nil || userMessageAlreadyPersisted || req.SkipMemoryExtraction
-	if replacement != nil {
-		if update := s.prepareForkAnchorUpdate(ctx, req.ThreadID, req.HistoryCutoffBeforeMessageID); update != nil {
-			replacement.SessionMetadata = update.metadata
-		}
-	}
-	persisted, err := s.storeRoundWithOptionsResult(ctx, req, round, "", storeRoundOptions{
+	skipMemory := promptErr != nil || req.UserMessagePersisted || req.SkipMemoryExtraction
+	err := s.storeRoundWithOptions(ctx, req, round, "", storeRoundOptions{
 		SkipMemory:              skipMemory,
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex:  metadataByIndex,
-		Replacement:             replacement,
 	})
-	if err == nil && promptErr == nil && userMessageAlreadyPersisted && !req.SkipMemoryExtraction {
+	if err == nil && promptErr == nil && req.UserMessagePersisted && !req.SkipMemoryExtraction {
 		go s.storeMemory(context.WithoutCancel(ctx), req, round)
 	}
-	return persisted, err
+	return err
 }
 
 // acpFailureResult appends a short, sanitized failure marker to the partial
