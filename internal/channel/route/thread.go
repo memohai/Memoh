@@ -113,28 +113,56 @@ func (s *DBService) SetActiveThread(ctx context.Context, routeID, threadID strin
 }
 
 // EnrichThreads projects Channel-owned route metadata onto Thread view
-// records. It performs one route query for the bot and leaves unbound Threads
-// unchanged.
+// records. It fetches only routes referenced by the supplied Threads and
+// leaves unbound Threads unchanged.
 func (s *DBService) EnrichThreads(ctx context.Context, botID string, threads []session.Thread) ([]session.Thread, error) {
 	if len(threads) == 0 {
 		return []session.Thread{}, nil
 	}
-	routes, err := s.List(ctx, botID)
+	pgBotID, err := dbpkg.ParseUUID(botID)
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[string]Route, len(routes))
-	for _, route := range routes {
-		byID[route.ID] = route
+
+	routeIDs := make([]pgtype.UUID, 0, len(threads))
+	threadRouteIDs := make([]pgtype.UUID, len(threads))
+	seen := make(map[pgtype.UUID]struct{}, len(threads))
+	for i := range threads {
+		routeID, parseErr := dbpkg.ParseUUID(threads[i].RouteID)
+		if parseErr != nil {
+			continue
+		}
+		threadRouteIDs[i] = routeID
+		if _, ok := seen[routeID]; ok {
+			continue
+		}
+		seen[routeID] = struct{}{}
+		routeIDs = append(routeIDs, routeID)
 	}
+
 	out := append([]session.Thread(nil), threads...)
+	if len(routeIDs) == 0 {
+		return out, nil
+	}
+
+	projections, err := s.queries.ListChatRouteThreadProjectionsByIDs(ctx, sqlc.ListChatRouteThreadProjectionsByIDsParams{
+		BotID:    pgBotID,
+		RouteIds: routeIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[pgtype.UUID]sqlc.ListChatRouteThreadProjectionsByIDsRow, len(projections))
+	for _, projection := range projections {
+		byID[projection.ID] = projection
+	}
 	for i := range out {
-		route, ok := byID[out[i].RouteID]
+		projection, ok := byID[threadRouteIDs[i]]
 		if !ok {
 			continue
 		}
-		out[i].RouteMetadata = route.Metadata
-		out[i].RouteConversationType = route.ConversationType
+		out[i].RouteMetadata = parseJSONMap(projection.Metadata)
+		out[i].RouteConversationType = dbpkg.TextToString(projection.ConversationType)
 	}
 	return out, nil
 }

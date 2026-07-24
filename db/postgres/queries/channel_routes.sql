@@ -83,6 +83,16 @@ FROM bot_channel_routes
 WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id)
 ORDER BY created_at ASC;
 
+-- name: ListChatRouteThreadProjectionsByIDs :many
+SELECT
+  id,
+  conversation_type,
+  metadata
+FROM bot_channel_routes
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND id = ANY(sqlc.arg(route_ids)::uuid[]);
+
 -- name: UpdateChatRouteReplyTarget :exec
 UPDATE bot_channel_routes
 SET default_reply_target = sqlc.arg(reply_target), updated_at = now()

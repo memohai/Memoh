@@ -93,23 +93,26 @@ func TestThreadCoordinatorCreateNewPreservesBestEffortActivation(t *testing.T) {
 
 type routeThreadQueries struct {
 	dbstore.Queries
-	routes []sqlc.ListChatRoutesRow
+	projections []sqlc.ListChatRouteThreadProjectionsByIDsRow
+	params      sqlc.ListChatRouteThreadProjectionsByIDsParams
+	calls       int
 }
 
-func (q routeThreadQueries) ListChatRoutes(context.Context, pgtype.UUID) ([]sqlc.ListChatRoutesRow, error) {
-	return q.routes, nil
+func (q *routeThreadQueries) ListChatRouteThreadProjectionsByIDs(_ context.Context, params sqlc.ListChatRouteThreadProjectionsByIDsParams) ([]sqlc.ListChatRouteThreadProjectionsByIDsRow, error) {
+	q.params = params
+	q.calls++
+	return q.projections, nil
 }
 
 func TestEnrichThreadsPreservesRouteProjection(t *testing.T) {
 	routeID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 	botID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
-	service := NewService(nil, routeThreadQueries{routes: []sqlc.ListChatRoutesRow{{
+	queries := &routeThreadQueries{projections: []sqlc.ListChatRouteThreadProjectionsByIDsRow{{
 		ID:               routeID,
-		BotID:            botID,
-		Platform:         "telegram",
 		ConversationType: pgtype.Text{String: "group", Valid: true},
 		Metadata:         []byte(`{"conversation_name":"Memoh"}`),
-	}}})
+	}}}
+	service := NewService(nil, queries)
 
 	got, err := service.EnrichThreads(context.Background(), botID.String(), []session.Thread{{
 		ID:      "thread-1",
@@ -123,5 +126,63 @@ func TestEnrichThreadsPreservesRouteProjection(t *testing.T) {
 	}
 	if got[0].RouteMetadata["conversation_name"] != "Memoh" {
 		t.Fatalf("RouteMetadata = %#v", got[0].RouteMetadata)
+	}
+	if queries.calls != 1 || queries.params.BotID != botID {
+		t.Fatalf("projection query calls = %d, bot id = %s", queries.calls, queries.params.BotID.String())
+	}
+	if len(queries.params.RouteIds) != 1 || queries.params.RouteIds[0] != routeID {
+		t.Fatalf("projection route ids = %#v", queries.params.RouteIds)
+	}
+}
+
+func TestEnrichThreadsQueriesOnlyUniqueReferencedRoutes(t *testing.T) {
+	firstRouteID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	secondRouteID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	botID := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	queries := &routeThreadQueries{}
+	service := NewService(nil, queries)
+
+	threads := []session.Thread{
+		{ID: "thread-1", RouteID: firstRouteID.String()},
+		{ID: "thread-2", RouteID: firstRouteID.String()},
+		{ID: "thread-3", RouteID: secondRouteID.String()},
+		{ID: "thread-4"},
+		{ID: "thread-5", RouteID: "not-a-uuid"},
+	}
+	got, err := service.EnrichThreads(context.Background(), botID.String(), threads)
+	if err != nil {
+		t.Fatalf("EnrichThreads() error = %v", err)
+	}
+	if len(got) != len(threads) {
+		t.Fatalf("EnrichThreads() returned %d threads, want %d", len(got), len(threads))
+	}
+	if queries.calls != 1 {
+		t.Fatalf("projection query calls = %d, want 1", queries.calls)
+	}
+	if queries.params.BotID != botID {
+		t.Fatalf("projection bot id = %s, want %s", queries.params.BotID.String(), botID.String())
+	}
+	if len(queries.params.RouteIds) != 2 ||
+		queries.params.RouteIds[0] != firstRouteID ||
+		queries.params.RouteIds[1] != secondRouteID {
+		t.Fatalf("projection route ids = %#v", queries.params.RouteIds)
+	}
+}
+
+func TestEnrichThreadsSkipsProjectionQueryWithoutRouteIDs(t *testing.T) {
+	botID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	queries := &routeThreadQueries{}
+	service := NewService(nil, queries)
+	threads := []session.Thread{{ID: "thread-1"}, {ID: "thread-2", RouteID: "not-a-uuid"}}
+
+	got, err := service.EnrichThreads(context.Background(), botID.String(), threads)
+	if err != nil {
+		t.Fatalf("EnrichThreads() error = %v", err)
+	}
+	if queries.calls != 0 {
+		t.Fatalf("projection query calls = %d, want 0", queries.calls)
+	}
+	if len(got) != len(threads) || got[0].ID != "thread-1" || got[1].ID != "thread-2" {
+		t.Fatalf("EnrichThreads() = %#v", got)
 	}
 }
