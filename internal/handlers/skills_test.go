@@ -831,7 +831,6 @@ func promptFromLoadedSkills(items []SkillItem) string {
 	return native.GenerateSystemPrompt(native.SystemPromptParams{
 		SessionType: "chat",
 		Skills:      skills,
-		Now:         time.Date(2026, 4, 13, 12, 0, 0, 0, time.UTC),
 		Timezone:    "UTC",
 	})
 }

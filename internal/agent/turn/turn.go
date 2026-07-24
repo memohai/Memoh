@@ -99,12 +99,10 @@ type StartTurnCommand struct {
 	// image inlining so vision parts land on the last real user message.
 	DiscussMessages  []DiscussMessage
 	DiscussImageRefs []DiscussImageRef
-	// DiscussMentioned reports an explicit @-mention or reply-to in the
-	// new context window; DiscussAddressed additionally covers direct
-	// (1:1) conversations. Expensive external runtimes (ACP) use
-	// DiscussAddressed as a participation gate and skip the run when
-	// false.
-	DiscussMentioned bool
+	// DiscussAddressed covers an explicit @-mention, a reply-to, or a direct
+	// (1:1) conversation. Expensive external runtimes (ACP) use it as a
+	// participation gate and skip the run when false. Mention/reply details
+	// stay attached to their canonical timeline messages.
 	DiscussAddressed bool
 }
 
