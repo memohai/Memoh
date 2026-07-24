@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -144,7 +145,44 @@ func (m *Manager) abortLocal(ctx context.Context, ctrl *runControl) (bool, error
 	if ctrl.cancel != nil {
 		ctrl.cancel()
 	}
+	m.scheduleAbortGrace(context.WithoutCancel(ctx), ctrl)
 	return true, nil
+}
+
+func (m *Manager) scheduleAbortGrace(ctx context.Context, ctrl *runControl) {
+	if m == nil || ctrl == nil || m.abortGraceTTL <= 0 {
+		return
+	}
+	ctrl.abortGraceOnce.Do(func() {
+		ctrl.abortGraceMu.Lock()
+		defer ctrl.abortGraceMu.Unlock()
+		if ctrl.abortGraceStopped {
+			return
+		}
+		ctrl.abortGraceTimer = time.AfterFunc(m.abortGraceTTL, func() {
+			m.forceAbortAfterGrace(ctx, ctrl)
+		})
+	})
+}
+
+func (m *Manager) forceAbortAfterGrace(ctx context.Context, ctrl *runControl) {
+	if ctrl == nil || m.localControlForHandle(ctrl.handle()) != ctrl {
+		return
+	}
+	finishCtx, cancel := context.WithTimeout(ctx, m.commandTimeout())
+	err := m.FinishRun(finishCtx, ctrl.handle(), RunStatusAborted, "")
+	cancel()
+	if err == nil {
+		return
+	}
+	m.logger.Warn("force runtime abort after grace period failed", slog.Any("error", err), slog.String("stream_id", ctrl.streamID))
+	stopCtx, stopCancel := context.WithTimeout(ctx, m.commandTimeout())
+	stopErr := m.stopLeaseRenewalContext(stopCtx, ctrl)
+	stopCancel()
+	if stopErr != nil {
+		m.logger.Warn("stop runtime owner lease after abort grace period failed", slog.Any("error", stopErr), slog.String("stream_id", ctrl.streamID))
+	}
+	m.removeLocalControl(ctrl.streamID, ctrl)
 }
 
 const (

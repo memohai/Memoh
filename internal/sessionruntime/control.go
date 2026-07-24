@@ -408,7 +408,17 @@ func (*Manager) cancelRunControl(ctrl *runControl) {
 }
 
 func (c *runControl) revokeOwnership(cause error) {
-	if c == nil || c.ownershipCancel == nil {
+	if c == nil {
+		return
+	}
+	c.abortGraceMu.Lock()
+	c.abortGraceStopped = true
+	if c.abortGraceTimer != nil {
+		c.abortGraceTimer.Stop()
+		c.abortGraceTimer = nil
+	}
+	c.abortGraceMu.Unlock()
+	if c.ownershipCancel == nil {
 		return
 	}
 	c.ownershipOnce.Do(func() { c.ownershipCancel(cause) })

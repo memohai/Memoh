@@ -1407,6 +1407,65 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 		t.Parallel()
 		runRuntimeManagerDetectsFirstDeltaGapContract(t, suite)
 	})
+	t.Run("forces an aborted terminal after the runner ignores cancellation", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerForcesAbortAfterGraceContract(t, suite)
+	})
+}
+
+func runRuntimeManagerForcesAbortAfterGraceContract(t *testing.T, suite runtimeBackendContractSuite) {
+	t.Helper()
+	const abortGrace = 40 * time.Millisecond
+	backend := suite.newBackend(t)
+	manager := testRuntimeManagerWithOptions(t, backend, Options{
+		OwnerID:           "owner-abort-grace",
+		StateTTL:          time.Hour,
+		OwnerLeaseTTL:     time.Second,
+		AbortGraceTimeout: abortGrace,
+	})
+	cancelCalled := make(chan struct{}, 1)
+	handle, err := startTestRunHandle(
+		context.Background(), manager, testBotID, testSessionID, "stream-abort-grace",
+		make(chan struct{}, 1),
+		func() {
+			select {
+			case cancelCalled <- struct{}{}:
+			default:
+			}
+		},
+		make(chan conversation.InjectMessage, 1),
+	)
+	if err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	aborted, err := manager.AbortRun(context.Background(), handle)
+	if err != nil || !aborted {
+		t.Fatalf("abort run = aborted:%v err:%v", aborted, err)
+	}
+	select {
+	case <-cancelCalled:
+	case <-time.After(time.Second):
+		t.Fatal("abort did not cancel runner")
+	}
+	snapshot := waitRuntimeSnapshot(t, manager, testBotID, testSessionID, func(snapshot Snapshot) bool {
+		return runMatchesHandle(snapshot.CurrentRunView, handle) && snapshot.CurrentRunView.Status == RunStatusAborted
+	})
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusAborted {
+		t.Fatalf("forced abort snapshot = %#v", snapshot.CurrentRunView)
+	}
+	if manager.localControlForHandle(handle) != nil {
+		t.Fatal("forced abort retained local owner control")
+	}
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{
+		Type: agentpkg.EventTextDelta, Delta: "late output",
+	}); !errors.Is(err, ErrRunOwnershipLost) {
+		t.Fatalf("late runner event error = %v, want ErrRunOwnershipLost", err)
+	}
+	if distributed, ok := backend.(DistributedBackend); ok {
+		if _, exists, loadErr := distributed.LoadStreamRef(context.Background(), handle.key(), handle.StreamID); loadErr != nil || exists {
+			t.Fatalf("forced abort stream reference = exists:%v err:%v", exists, loadErr)
+		}
+	}
 }
 
 func runRuntimeManagerProjectsUserInputDecisionsContract(t *testing.T, suite runtimeBackendContractSuite) {
