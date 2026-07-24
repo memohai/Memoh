@@ -386,43 +386,6 @@ func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg ForkS
 	return i, err
 }
 
-const getActiveSessionForRoute = `-- name: GetActiveSessionForRoute :one
-SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.next_turn_position, s.compaction_epoch, s.runtime_fencing_token, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at, s.team_id
-FROM bot_sessions s
-JOIN bot_channel_routes r ON r.active_session_id = s.id
-WHERE s.team_id = public.memoh_current_team_id()
-  AND r.team_id = public.memoh_current_team_id()
-  AND r.id = $1
-  AND s.deleted_at IS NULL
-`
-
-func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID pgtype.UUID) (BotSession, error) {
-	row := q.db.QueryRow(ctx, getActiveSessionForRoute, routeID)
-	var i BotSession
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.RouteID,
-		&i.ChannelType,
-		&i.Type,
-		&i.SessionMode,
-		&i.RuntimeType,
-		&i.RuntimeMetadata,
-		&i.Title,
-		&i.Metadata,
-		&i.NextTurnPosition,
-		&i.CompactionEpoch,
-		&i.RuntimeFencingToken,
-		&i.ParentSessionID,
-		&i.CreatedByUserID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.TeamID,
-	)
-	return i, err
-}
-
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id
 FROM bot_sessions
@@ -527,11 +490,8 @@ func (q *Queries) ListSessionDiscussCursorsByBot(ctx context.Context, botID pgty
 const listSessionsByBot = `-- name: ListSessionsByBot :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = public.memoh_current_team_id()
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = $1
   AND s.deleted_at IS NULL
@@ -539,23 +499,21 @@ ORDER BY s.updated_at DESC
 `
 
 type ListSessionsByBotRow struct {
-	ID                    pgtype.UUID        `json:"id"`
-	BotID                 pgtype.UUID        `json:"bot_id"`
-	RouteID               pgtype.UUID        `json:"route_id"`
-	ChannelType           pgtype.Text        `json:"channel_type"`
-	Type                  string             `json:"type"`
-	SessionMode           string             `json:"session_mode"`
-	RuntimeType           string             `json:"runtime_type"`
-	RuntimeMetadata       []byte             `json:"runtime_metadata"`
-	Title                 string             `json:"title"`
-	Metadata              []byte             `json:"metadata"`
-	ParentSessionID       pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID       pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
-	RouteMetadata         []byte             `json:"route_metadata"`
-	RouteConversationType pgtype.Text        `json:"route_conversation_type"`
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	RouteID         pgtype.UUID        `json:"route_id"`
+	ChannelType     pgtype.Text        `json:"channel_type"`
+	Type            string             `json:"type"`
+	SessionMode     string             `json:"session_mode"`
+	RuntimeType     string             `json:"runtime_type"`
+	RuntimeMetadata []byte             `json:"runtime_metadata"`
+	Title           string             `json:"title"`
+	Metadata        []byte             `json:"metadata"`
+	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
 func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]ListSessionsByBotRow, error) {
@@ -583,8 +541,6 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]L
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.RouteMetadata,
-			&i.RouteConversationType,
 		); err != nil {
 			return nil, err
 		}
@@ -599,11 +555,8 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]L
 const listSessionsByBotAndCreatedByUser = `-- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = public.memoh_current_team_id()
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = $1
   AND s.created_by_user_id = $2
@@ -617,23 +570,21 @@ type ListSessionsByBotAndCreatedByUserParams struct {
 }
 
 type ListSessionsByBotAndCreatedByUserRow struct {
-	ID                    pgtype.UUID        `json:"id"`
-	BotID                 pgtype.UUID        `json:"bot_id"`
-	RouteID               pgtype.UUID        `json:"route_id"`
-	ChannelType           pgtype.Text        `json:"channel_type"`
-	Type                  string             `json:"type"`
-	SessionMode           string             `json:"session_mode"`
-	RuntimeType           string             `json:"runtime_type"`
-	RuntimeMetadata       []byte             `json:"runtime_metadata"`
-	Title                 string             `json:"title"`
-	Metadata              []byte             `json:"metadata"`
-	ParentSessionID       pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID       pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
-	RouteMetadata         []byte             `json:"route_metadata"`
-	RouteConversationType pgtype.Text        `json:"route_conversation_type"`
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	RouteID         pgtype.UUID        `json:"route_id"`
+	ChannelType     pgtype.Text        `json:"channel_type"`
+	Type            string             `json:"type"`
+	SessionMode     string             `json:"session_mode"`
+	RuntimeType     string             `json:"runtime_type"`
+	RuntimeMetadata []byte             `json:"runtime_metadata"`
+	Title           string             `json:"title"`
+	Metadata        []byte             `json:"metadata"`
+	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
 func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg ListSessionsByBotAndCreatedByUserParams) ([]ListSessionsByBotAndCreatedByUserRow, error) {
@@ -661,8 +612,6 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.RouteMetadata,
-			&i.RouteConversationType,
 		); err != nil {
 			return nil, err
 		}
@@ -677,11 +626,8 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 const listSessionsByBotAndCreatedByUserPaged = `-- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = public.memoh_current_team_id()
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = $1
   AND s.created_by_user_id = $2
@@ -712,23 +658,21 @@ type ListSessionsByBotAndCreatedByUserPagedParams struct {
 }
 
 type ListSessionsByBotAndCreatedByUserPagedRow struct {
-	ID                    pgtype.UUID        `json:"id"`
-	BotID                 pgtype.UUID        `json:"bot_id"`
-	RouteID               pgtype.UUID        `json:"route_id"`
-	ChannelType           pgtype.Text        `json:"channel_type"`
-	Type                  string             `json:"type"`
-	SessionMode           string             `json:"session_mode"`
-	RuntimeType           string             `json:"runtime_type"`
-	RuntimeMetadata       []byte             `json:"runtime_metadata"`
-	Title                 string             `json:"title"`
-	Metadata              []byte             `json:"metadata"`
-	ParentSessionID       pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID       pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
-	RouteMetadata         []byte             `json:"route_metadata"`
-	RouteConversationType pgtype.Text        `json:"route_conversation_type"`
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	RouteID         pgtype.UUID        `json:"route_id"`
+	ChannelType     pgtype.Text        `json:"channel_type"`
+	Type            string             `json:"type"`
+	SessionMode     string             `json:"session_mode"`
+	RuntimeType     string             `json:"runtime_type"`
+	RuntimeMetadata []byte             `json:"runtime_metadata"`
+	Title           string             `json:"title"`
+	Metadata        []byte             `json:"metadata"`
+	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
 func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, arg ListSessionsByBotAndCreatedByUserPagedParams) ([]ListSessionsByBotAndCreatedByUserPagedRow, error) {
@@ -766,8 +710,6 @@ func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.RouteMetadata,
-			&i.RouteConversationType,
 		); err != nil {
 			return nil, err
 		}
@@ -782,11 +724,8 @@ func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 const listSessionsByBotPaged = `-- name: ListSessionsByBotPaged :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
-  r.metadata AS route_metadata,
-  r.conversation_type AS route_conversation_type
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = public.memoh_current_team_id()
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = $1
   AND s.deleted_at IS NULL
@@ -815,23 +754,21 @@ type ListSessionsByBotPagedParams struct {
 }
 
 type ListSessionsByBotPagedRow struct {
-	ID                    pgtype.UUID        `json:"id"`
-	BotID                 pgtype.UUID        `json:"bot_id"`
-	RouteID               pgtype.UUID        `json:"route_id"`
-	ChannelType           pgtype.Text        `json:"channel_type"`
-	Type                  string             `json:"type"`
-	SessionMode           string             `json:"session_mode"`
-	RuntimeType           string             `json:"runtime_type"`
-	RuntimeMetadata       []byte             `json:"runtime_metadata"`
-	Title                 string             `json:"title"`
-	Metadata              []byte             `json:"metadata"`
-	ParentSessionID       pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID       pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
-	RouteMetadata         []byte             `json:"route_metadata"`
-	RouteConversationType pgtype.Text        `json:"route_conversation_type"`
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	RouteID         pgtype.UUID        `json:"route_id"`
+	ChannelType     pgtype.Text        `json:"channel_type"`
+	Type            string             `json:"type"`
+	SessionMode     string             `json:"session_mode"`
+	RuntimeType     string             `json:"runtime_type"`
+	RuntimeMetadata []byte             `json:"runtime_metadata"`
+	Title           string             `json:"title"`
+	Metadata        []byte             `json:"metadata"`
+	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
 // Cursor uses (updated_at, id) so pages stay stable when many rows share an
@@ -871,8 +808,6 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.RouteMetadata,
-			&i.RouteConversationType,
 		); err != nil {
 			return nil, err
 		}

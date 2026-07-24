@@ -16,6 +16,7 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 const (
@@ -135,7 +136,7 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		}
 		return nil
 	case channel.StreamEventError:
-		errText := channel.RedactIMErrorText(strings.TrimSpace(event.Error))
+		errText := redact.Text(strings.TrimSpace(event.Error))
 		if errText == "" {
 			return nil
 		}

@@ -13,6 +13,7 @@ import (
 	slackapi "github.com/slack-go/slack"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 const (
@@ -93,7 +94,7 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		return nil
 
 	case channel.StreamEventError:
-		errText := channel.RedactIMErrorText(strings.TrimSpace(event.Error))
+		errText := redact.Text(strings.TrimSpace(event.Error))
 		if errText == "" {
 			return nil
 		}

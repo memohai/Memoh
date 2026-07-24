@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 const Type channel.ChannelType = "line"
@@ -57,7 +58,7 @@ func parseConfigForUse(raw map[string]any) (Config, error) {
 }
 
 func registerConfigSecrets(cfg Config) {
-	channel.SetIMErrorSecrets("line:"+hashValue(cfg.ChannelAccessToken), cfg.ChannelSecret, cfg.ChannelAccessToken)
+	redact.SetSecrets("line:"+hashValue(cfg.ChannelAccessToken), cfg.ChannelSecret, cfg.ChannelAccessToken)
 }
 
 func normalizeUserConfig(raw map[string]any) (map[string]any, error) {

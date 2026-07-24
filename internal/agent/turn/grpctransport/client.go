@@ -12,9 +12,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/agent/turn/turnpb"
-	"github.com/memohai/memoh/internal/userinput"
 )
 
 type Client struct {
@@ -45,7 +45,7 @@ func NewClient(conn grpc.ClientConnInterface, opts ...ClientOption) *Client {
 }
 
 func (c *Client) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
-	data, err := json.Marshal(cmd)
+	data, err := marshalStartTurnCommand(cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (c *Client) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn
 }
 
 func (c *Client) RespondToolApproval(ctx context.Context, input turn.ToolApprovalResponse, eventCh chan<- json.RawMessage) error {
-	data, err := json.Marshal(input)
+	data, err := marshalToolApprovalResponse(input)
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func (c *Client) RespondToolApproval(ctx context.Context, input turn.ToolApprova
 }
 
 func (c *Client) RespondUserInput(ctx context.Context, input turn.UserInputResponse, eventCh chan<- json.RawMessage) error {
-	data, err := json.Marshal(input)
+	data, err := marshalUserInputResponse(input)
 	if err != nil {
 		return err
 	}
@@ -230,10 +230,7 @@ func (h *runHandle) pump() {
 			continue
 		}
 		select {
-		case h.events <- turn.Event{
-			RunID: event.GetRunId(), TeamID: event.GetTeamId(), SessionID: event.GetSessionId(),
-			Seq: event.GetSeq(), Kind: event.GetKind(), Payload: json.RawMessage(event.GetPayload()),
-		}:
+		case h.events <- eventFromProto(event):
 		case <-h.ctx.Done():
 			return
 		}

@@ -19,23 +19,23 @@ import (
 	"unicode"
 
 	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/acpfeedback"
-	"github.com/memohai/memoh/internal/acpprofile"
+	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/discuss"
 	"github.com/memohai/memoh/internal/channel/route"
+	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/memohai/memoh/internal/chat/timeline"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/media"
-	messagepkg "github.com/memohai/memoh/internal/message"
-	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
-	sessionpkg "github.com/memohai/memoh/internal/session"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/slash"
-	"github.com/memohai/memoh/internal/userinput"
 )
 
 var base64Std = base64.StdEncoding
@@ -199,12 +199,13 @@ type ChannelInboundProcessor struct {
 	transcriber         transcriptionRecognizer
 	sttModelResolver    transcriptionModelResolver
 	sessionEnsurer      SessionEnsurer
-	pipeline            *pipelinepkg.Pipeline
-	eventStore          *pipelinepkg.EventStore
-	discussDriver       *pipelinepkg.DiscussDriver
+	pipeline            *timeline.Pipeline
+	eventStore          *timeline.EventStore
+	discussDriver       *discuss.DiscussDriver
 	imDisplayOptions    IMDisplayOptionsReader
 	defaultChatRuntime  DefaultChatRuntimeReader
 	acpAgentSetup       ACPAgentSetupReader
+	acpProfiles         turn.ACPProfileResolver
 	permissionChecker   BotPermissionChecker
 	skillResolver       RequestedSkillResolver
 
@@ -331,7 +332,7 @@ func (p *ChannelInboundProcessor) SetRequestedSkillResolver(resolver RequestedSk
 }
 
 // SetPipeline configures the DCP pipeline, event store, and discuss driver.
-func (p *ChannelInboundProcessor) SetPipeline(pipeline *pipelinepkg.Pipeline, store *pipelinepkg.EventStore, driver *pipelinepkg.DiscussDriver) {
+func (p *ChannelInboundProcessor) SetPipeline(pipeline *timeline.Pipeline, store *timeline.EventStore, driver *discuss.DiscussDriver) {
 	if p == nil {
 		return
 	}
@@ -370,6 +371,13 @@ func (p *ChannelInboundProcessor) SetACPAgentSetupReader(reader ACPAgentSetupRea
 		return
 	}
 	p.acpAgentSetup = reader
+}
+
+func (p *ChannelInboundProcessor) SetACPProfileResolver(resolver turn.ACPProfileResolver) {
+	if p == nil {
+		return
+	}
+	p.acpProfiles = resolver
 }
 
 func (p *ChannelInboundProcessor) SetBotPermissionChecker(checker BotPermissionChecker) {
@@ -611,15 +619,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	routeMetadata := buildRouteMetadata(msg, identity)
 	p.enrichConversationAvatar(ctx, cfg, msg, routeMetadata)
 	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
-		BotID:             identity.BotID,
-		Platform:          msg.Channel.String(),
-		ConversationID:    msg.Conversation.ID,
-		ThreadID:          threadID,
-		ConversationType:  msg.Conversation.Type,
-		ChannelIdentityID: identity.ChannelIdentityID,
-		ChannelConfigID:   identity.ChannelConfigID,
-		ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
-		Metadata:          routeMetadata,
+		BotID:                  identity.BotID,
+		Platform:               msg.Channel.String(),
+		ExternalConversationID: msg.Conversation.ID,
+		ExternalThreadID:       threadID,
+		ConversationType:       msg.Conversation.Type,
+		ChannelConfigID:        identity.ChannelConfigID,
+		ReplyTarget:            strings.TrimSpace(msg.ReplyTarget),
+		Metadata:               routeMetadata,
 	})
 	if err != nil {
 		return fmt.Errorf("resolve route conversation: %w", err)
@@ -763,7 +770,19 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			return p.sendSlashError(ctx, sender, msg, code)
 		}
-		requestedSkillContexts = skillset.RequestedSkillContexts(resolvedSkills)
+		resolvedSkillContexts := skillset.RequestedSkillContexts(resolvedSkills)
+		requestedSkillContexts = make([]turn.RequestedSkillContext, len(resolvedSkillContexts))
+		for i := range resolvedSkillContexts {
+			requestedSkillContexts[i] = turn.RequestedSkillContext{
+				Name:           resolvedSkillContexts[i].Name,
+				Description:    resolvedSkillContexts[i].Description,
+				Content:        resolvedSkillContexts[i].Content,
+				SourceKind:     resolvedSkillContexts[i].SourceKind,
+				OpaqueSourceID: resolvedSkillContexts[i].OpaqueSourceID,
+				ContentHash:    resolvedSkillContexts[i].ContentHash,
+				Identity:       resolvedSkillContexts[i].Identity,
+			}
+		}
 		skillActivation = turn.NewSkillActivation(requestedSkillContexts, pendingSkillIntent.Prompt)
 		text = strings.TrimSpace(pendingSkillIntent.Prompt)
 		modelText = strings.TrimSpace(turn.SkillActivationModelQuery(skillActivation))
@@ -831,7 +850,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	// Push event into the DCP pipeline (persist + in-memory projection).
 	// On first access for a session, replay persisted events to warm the pipeline.
-	var latestRC pipelinepkg.RenderedContext
+	var latestRC timeline.RenderedContext
 	var eventID string
 	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil {
 		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
@@ -840,7 +859,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		pipelineMsg := msg
 		pipelineMsg.Message = msg.Message
 		pipelineMsg.Message.Attachments = resolvedAttachments
-		event := pipelinepkg.AdaptInbound(pipelineMsg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
+		event := AdaptInbound(pipelineMsg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
 		if p.eventStore != nil {
 			eid, persistErr := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event)
 			if persistErr != nil {
@@ -859,10 +878,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
 		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 		sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
-		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, pipelinepkg.DiscussSessionConfig{
+		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, discuss.DiscussSessionConfig{
 			TeamID:            cfg.TeamID,
 			BotID:             identity.BotID,
-			SessionID:         sessionID,
+			ThreadID:          sessionID,
 			RouteID:           resolved.RouteID,
 			ChannelIdentityID: identity.ChannelIdentityID,
 			ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
@@ -881,7 +900,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
 	activeChatID := strings.TrimSpace(identity.BotID)
 	if activeChatID == "" {
-		activeChatID = strings.TrimSpace(resolved.ChatID)
+		activeChatID = strings.TrimSpace(resolved.BotID)
 	}
 
 	if sessionType == sessionpkg.TypeDiscuss || shouldTrigger {
@@ -1143,7 +1162,7 @@ startStream:
 		Mode:                      turn.ModeChat,
 		BotID:                     identity.BotID,
 		ChatID:                    activeChatID,
-		SessionID:                 sessionID,
+		ThreadID:                  sessionID,
 		Token:                     token,
 		UserID:                    identity.UserID,
 		SourceChannelIdentityID:   identity.ChannelIdentityID,
@@ -3493,15 +3512,14 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 	routeMetadata := buildRouteMetadata(msg, identity)
 	p.enrichConversationAvatar(ctx, cfg, msg, routeMetadata)
 	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
-		BotID:             identity.BotID,
-		Platform:          msg.Channel.String(),
-		ConversationID:    msg.Conversation.ID,
-		ThreadID:          threadID,
-		ConversationType:  msg.Conversation.Type,
-		ChannelIdentityID: identity.ChannelIdentityID,
-		ChannelConfigID:   identity.ChannelConfigID,
-		ReplyTarget:       target,
-		Metadata:          routeMetadata,
+		BotID:                  identity.BotID,
+		Platform:               msg.Channel.String(),
+		ExternalConversationID: msg.Conversation.ID,
+		ExternalThreadID:       threadID,
+		ConversationType:       msg.Conversation.Type,
+		ChannelConfigID:        identity.ChannelConfigID,
+		ReplyTarget:            target,
+		Metadata:               routeMetadata,
 	})
 	if err != nil {
 		if p.logger != nil {
@@ -3585,7 +3603,7 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 	}
 	return p.streamToolApprovalCommand(ctx, msg, sender, identity, routeID, approvalRunner, turn.ToolApprovalResponse{
 		BotID:                  strings.TrimSpace(identity.BotID),
-		SessionID:              strings.TrimSpace(sessionID),
+		ThreadID:               strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
 		ActorUserID:            strings.TrimSpace(identity.UserID),
 		ExplicitID:             explicitID,
@@ -3626,7 +3644,7 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 	answers := userInputAnswersFromMetadata(msg.Metadata)
 	return p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, userInputRunner, turn.UserInputResponse{
 		BotID:                  strings.TrimSpace(identity.BotID),
-		SessionID:              strings.TrimSpace(sessionID),
+		ThreadID:               strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
 		ActorUserID:            strings.TrimSpace(identity.UserID),
 		ExplicitID:             explicitID,
@@ -3640,7 +3658,7 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 // userInputAnswersFromMetadata extracts structured ask_user answers attached by
 // platform adapters (e.g. Telegram's multi-step wizard). Returns nil when the
 // metadata has no usable answers so the resolver can fall back to TextAnswer.
-func userInputAnswersFromMetadata(meta map[string]any) []userinput.QuestionAnswer {
+func userInputAnswersFromMetadata(meta map[string]any) []turn.QuestionAnswer {
 	if len(meta) == 0 {
 		return nil
 	}
@@ -3667,7 +3685,7 @@ func userInputAnswersFromMetadata(meta map[string]any) []userinput.QuestionAnswe
 			return nil
 		}
 	}
-	out := make([]userinput.QuestionAnswer, 0, len(entries))
+	out := make([]turn.QuestionAnswer, 0, len(entries))
 	for _, entry := range entries {
 		m, ok := entry.(map[string]any)
 		if !ok {
@@ -3682,7 +3700,7 @@ func userInputAnswersFromMetadata(meta map[string]any) []userinput.QuestionAnswe
 		if qID == "" || qID == "<nil>" {
 			continue
 		}
-		answer := userinput.QuestionAnswer{QuestionID: qID}
+		answer := turn.QuestionAnswer{QuestionID: qID}
 		if skipped, ok := m["skipped"].(bool); ok {
 			answer.Skipped = skipped
 		}
@@ -3706,6 +3724,23 @@ func userInputAnswersFromMetadata(meta map[string]any) []userinput.QuestionAnswe
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+func turnQuestionAnswers(answers []userinput.QuestionAnswer) []turn.QuestionAnswer {
+	if answers == nil {
+		return nil
+	}
+	out := make([]turn.QuestionAnswer, len(answers))
+	for i := range answers {
+		out[i] = turn.QuestionAnswer{
+			QuestionID: answers[i].QuestionID,
+			OptionIDs:  answers[i].OptionIDs,
+			CustomText: answers[i].CustomText,
+			Text:       answers[i].Text,
+			Skipped:    answers[i].Skipped,
+		}
 	}
 	return out
 }
@@ -3998,7 +4033,7 @@ func looksLikeApprovalID(value string) bool {
 // resolveNewSessionSpecParsed determines the session mode/runtime for /new.
 // /new chat → chat+model, /new codex → default-mode+ACP, /new chat codex →
 // chat+ACP, /new discuss codex → discuss+ACP.
-func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.InboundMessage) (NewSessionSpec, error) {
+func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.InboundMessage, profiles turn.ACPProfileResolver) (NewSessionSpec, error) {
 	operands := newSessionOperands(parsed)
 	explicit := ""
 	var args []string
@@ -4030,10 +4065,11 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 			mode = sessionpkg.TypeDiscuss
 		}
 	default:
-		if _, ok := acpprofile.Lookup(explicit); !ok {
+		profile := resolveACPProfile(profiles, explicit)
+		if !profile.Known {
 			return NewSessionSpec{}, fmt.Errorf("unknown session type %q — use /new, /new chat, or /new discuss", explicit)
 		}
-		agentID = explicit
+		agentID = profile.ID
 		switch {
 		case isLocalChannelType(msg.Channel), channel.IsPrivateConversationType(msg.Conversation.Type):
 			mode = sessionpkg.TypeChat
@@ -4049,11 +4085,12 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 		Runtime: sessionpkg.RuntimeModel,
 		Type:    mode,
 	}
-	agentID = acpprofile.NormalizeAgentID(agentID)
+	agentID = normalizeACPAgentID(agentID)
 	if agentID == "" {
 		return spec, nil
 	}
-	if _, ok := acpprofile.Lookup(agentID); !ok {
+	profile := resolveACPProfile(profiles, agentID)
+	if !profile.Known {
 		return NewSessionSpec{}, acpfeedback.New(
 			acpfeedback.CodeAgentNotFound,
 			"unknown_agent",
@@ -4063,6 +4100,7 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 			map[string]string{"agent_id": agentID},
 		)
 	}
+	agentID = profile.ID
 	spec.Runtime = sessionpkg.RuntimeACPAgent
 	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{"acp_agent_id": agentID})
 	if mode == sessionpkg.TypeChat {
@@ -4103,7 +4141,7 @@ func firstNewSessionAgentArg(args []string) string {
 		if arg == "" || strings.HasPrefix(arg, "-") {
 			continue
 		}
-		return acpprofile.NormalizeAgentID(arg)
+		return normalizeACPAgentID(arg)
 	}
 	return ""
 }
@@ -4128,7 +4166,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	caps := p.channelCaps(msg.Channel)
 
 	parsed := invocation.Parsed
-	spec, err := resolveNewSessionSpecParsed(parsed, msg)
+	spec, err := resolveNewSessionSpecParsed(parsed, msg, p.acpProfiles)
 	if err != nil {
 		if feedback := acpFeedbackFromError(err); feedback != nil {
 			return p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
@@ -4165,7 +4203,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	// --confirm" which lands back here with newCommandConfirmed == true and
 	// performs the reset. Non-button channels reset immediately (unchanged).
 	modeText := newSessionConfirmModeText(spec)
-	modeLabel := newSessionDisplayModeLabel(loc, spec)
+	modeLabel := newSessionDisplayModeLabel(loc, spec, p.acpProfiles)
 	if caps.Buttons && !newCommandConfirmedParsed(parsed) {
 		return p.sendNewConfirmation(ctx, msg, sender, loc, modeText, modeLabel, caps)
 	}
@@ -4187,15 +4225,14 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	routeMetadata := buildRouteMetadata(msg, identity)
 	p.enrichConversationAvatar(ctx, cfg, msg, routeMetadata)
 	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
-		BotID:             identity.BotID,
-		Platform:          msg.Channel.String(),
-		ConversationID:    msg.Conversation.ID,
-		ThreadID:          threadID,
-		ConversationType:  msg.Conversation.Type,
-		ChannelIdentityID: identity.ChannelIdentityID,
-		ChannelConfigID:   identity.ChannelConfigID,
-		ReplyTarget:       target,
-		Metadata:          routeMetadata,
+		BotID:                  identity.BotID,
+		Platform:               msg.Channel.String(),
+		ExternalConversationID: msg.Conversation.ID,
+		ExternalThreadID:       threadID,
+		ConversationType:       msg.Conversation.Type,
+		ChannelConfigID:        identity.ChannelConfigID,
+		ReplyTarget:            target,
+		Metadata:               routeMetadata,
 	})
 	if err != nil {
 		if p.logger != nil {
@@ -4230,7 +4267,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 	p.cancelActiveStreamForRoute(identity.BotID, resolved.RouteID, "new session created")
 
-	modeLabel = newSessionDisplayModeLabel(loc, spec)
+	modeLabel = newSessionDisplayModeLabel(loc, spec, p.acpProfiles)
 	if p.logger != nil {
 		p.logger.Info("new session created via /new command",
 			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
@@ -4247,7 +4284,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	renderedSessionDetails := false
 	if p.commandHandler != nil {
 		if cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID); err == nil {
-			cc = currentContextForNewSessionSpec(cc, spec)
+			cc = currentContextForNewSessionSpec(cc, spec, p.acpProfiles)
 			text = formatNewSessionMessage(loc, modeLabel, cc, botUsername)
 			renderedSessionDetails = true
 		}
@@ -4310,12 +4347,12 @@ func newSessionModeKey(spec NewSessionSpec) string {
 	return "newSession.modeChat"
 }
 
-func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec) string {
+func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec, profiles turn.ACPProfileResolver) string {
 	mode := loc.T(newSessionModeKey(spec))
 	if spec.Runtime != sessionpkg.RuntimeACPAgent {
 		return mode
 	}
-	runtime := newSessionACPRuntimeLabel(spec)
+	runtime := newSessionACPRuntimeLabel(spec, profiles)
 	if runtime == "" {
 		runtime = "ACP"
 	}
@@ -4363,7 +4400,7 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	if strings.TrimSpace(defaults.Runtime) != sessionpkg.RuntimeACPAgent {
 		return spec, nil
 	}
-	agentID := acpprofile.NormalizeAgentID(defaults.ACPAgentID)
+	agentID := normalizeACPAgentID(defaults.ACPAgentID)
 	if agentID == "" {
 		return NewSessionSpec{}, acpfeedback.New(
 			acpfeedback.CodeAgentNotConfigured,
@@ -4374,7 +4411,8 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 			nil,
 		)
 	}
-	if _, ok := acpprofile.Lookup(agentID); !ok {
+	profile := resolveACPProfile(p.acpProfiles, agentID)
+	if !profile.Known {
 		return NewSessionSpec{}, acpfeedback.New(
 			acpfeedback.CodeAgentNotFound,
 			"unknown_agent",
@@ -4384,6 +4422,7 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 			map[string]string{"agent_id": agentID},
 		)
 	}
+	agentID = profile.ID
 	if p.permissionChecker == nil {
 		return NewSessionSpec{}, p.missingWorkspaceExecFeedback("permission_checker_unavailable", "Current identity cannot be verified for workspace execution.")
 	}
@@ -4421,7 +4460,7 @@ func (p *ChannelInboundProcessor) applyDefaultACPProjectToExplicitSpec(ctx conte
 		return spec, nil
 	}
 	agentID := acpNewSessionAgentID(spec)
-	defaultAgentID := acpprofile.NormalizeAgentID(defaults.ACPAgentID)
+	defaultAgentID := normalizeACPAgentID(defaults.ACPAgentID)
 	if agentID == "" || agentID != defaultAgentID {
 		return spec, nil
 	}
@@ -4476,8 +4515,8 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 			nil,
 		)
 	}
-	profile, ok := acpprofile.Lookup(agentID)
-	if !ok {
+	profile := resolveACPProfile(p.acpProfiles, agentID)
+	if !profile.Known {
 		return acpfeedback.New(
 			acpfeedback.CodeAgentNotFound,
 			"unknown_agent",
@@ -4533,7 +4572,7 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	setup := acpprofile.ParseAgentSetup(metadata, agentID)
+	setup := p.acpProfiles.ResolveACPSetupPreflight(profile.ID, metadata)
 	if !setup.Enabled {
 		return acpfeedback.New(
 			acpfeedback.CodeAgentNotEnabled,
@@ -4544,7 +4583,7 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 			map[string]string{"agent_id": agentID},
 		)
 	}
-	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+	if field := setup.MissingManagedField; field != nil {
 		return acpfeedback.New(
 			acpfeedback.CodeAgentNotConfigured,
 			"missing_managed_field",
@@ -4692,11 +4731,11 @@ func acpFeedbackFromError(err error) *acpfeedback.Error {
 	}
 }
 
-func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionSpec) command.CurrentContext {
+func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionSpec, profiles turn.ACPProfileResolver) command.CurrentContext {
 	if spec.Runtime != sessionpkg.RuntimeACPAgent {
 		return cc
 	}
-	label := newSessionACPRuntimeLabel(spec)
+	label := newSessionACPRuntimeLabel(spec, profiles)
 	if label == "" {
 		cc.ChatModel = "ACP agent"
 		return cc
@@ -4705,12 +4744,12 @@ func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionS
 	return cc
 }
 
-func newSessionACPRuntimeLabel(spec NewSessionSpec) string {
+func newSessionACPRuntimeLabel(spec NewSessionSpec, profiles turn.ACPProfileResolver) string {
 	agentID := acpNewSessionAgentID(spec)
 	if agentID == "" {
 		return ""
 	}
-	if profile, ok := acpprofile.Lookup(agentID); ok && strings.TrimSpace(profile.DisplayName) != "" {
+	if profile := resolveACPProfile(profiles, agentID); profile.Known && strings.TrimSpace(profile.DisplayName) != "" {
 		return profile.DisplayName + " / ACP"
 	}
 	return agentID + " / ACP"
@@ -4720,7 +4759,24 @@ func acpNewSessionAgentID(spec NewSessionSpec) string {
 	if spec.Runtime != sessionpkg.RuntimeACPAgent {
 		return ""
 	}
-	return acpprofile.NormalizeAgentID(newSessionMetadataString(spec.Metadata, "acp_agent_id"))
+	return normalizeACPAgentID(newSessionMetadataString(spec.Metadata, "acp_agent_id"))
+}
+
+func normalizeACPAgentID(agentID string) string {
+	return strings.ToLower(strings.TrimSpace(agentID))
+}
+
+func resolveACPProfile(profiles turn.ACPProfileResolver, agentID string) turn.ACPAgentProfile {
+	agentID = normalizeACPAgentID(agentID)
+	if profiles == nil {
+		return turn.ACPAgentProfile{ID: agentID}
+	}
+	profile := profiles.ResolveACPProfile(agentID)
+	profile.ID = normalizeACPAgentID(profile.ID)
+	if profile.ID == "" {
+		profile.ID = agentID
+	}
+	return profile
 }
 
 func newSessionMetadataString(metadata map[string]any, key string) string {
@@ -4796,15 +4852,14 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 	routeMetadata := buildRouteMetadata(msg, identity)
 	p.enrichConversationAvatar(ctx, cfg, msg, routeMetadata)
 	resolved, err := p.routeResolver.ResolveConversation(ctx, route.ResolveInput{
-		BotID:             identity.BotID,
-		Platform:          msg.Channel.String(),
-		ConversationID:    msg.Conversation.ID,
-		ThreadID:          threadID,
-		ConversationType:  msg.Conversation.Type,
-		ChannelIdentityID: identity.ChannelIdentityID,
-		ChannelConfigID:   identity.ChannelConfigID,
-		ReplyTarget:       target,
-		Metadata:          routeMetadata,
+		BotID:                  identity.BotID,
+		Platform:               msg.Channel.String(),
+		ExternalConversationID: msg.Conversation.ID,
+		ExternalThreadID:       threadID,
+		ConversationType:       msg.Conversation.Type,
+		ChannelConfigID:        identity.ChannelConfigID,
+		ReplyTarget:            target,
+		Metadata:               routeMetadata,
 	})
 	if err != nil {
 		if p.logger != nil {

@@ -14,11 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/acpprofile"
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/bots"
+	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/session"
 )
 
 type sessionCreateQueries struct {
@@ -67,7 +67,7 @@ func TestCreateSessionRejectsUnknownTypeAsBadRequest(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -91,7 +91,7 @@ func TestCreateSessionAuthorizesFinalDescriptor(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
@@ -120,7 +120,7 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -169,7 +169,7 @@ func TestCreateSessionRejectsSystemACPRuntime(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
@@ -193,7 +193,7 @@ func TestCreateSessionRejectsSubagentTypeForChatUser(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
@@ -222,7 +222,7 @@ func TestCreateSessionDefaultsACPProjectPath(t *testing.T) {
 	}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		nil,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -267,7 +267,7 @@ func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
 	binder := &recordingRuntimeBinder{}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		binder,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -302,7 +302,7 @@ func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
 	binder := &recordingRuntimeBinder{bindErr: errors.New("runtime gone")}
 	handler := NewSessionHandler(
 		slog.Default(),
-		session.NewService(nil, queries, nil),
+		newThreadServiceForTest(queries),
 		binder,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),

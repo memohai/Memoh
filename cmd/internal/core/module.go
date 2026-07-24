@@ -4,17 +4,17 @@ import (
 	"go.uber.org/fx"
 
 	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/agent/context/compaction"
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channelaccess"
-	"github.com/memohai/memoh/internal/compaction"
-	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/chat/event"
 	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthclients"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
@@ -23,8 +23,6 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/toolapproval"
-	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/userruntime"
 	videopkg "github.com/memohai/memoh/internal/video"
 	"github.com/memohai/memoh/internal/workspace"
@@ -45,11 +43,9 @@ func FoundationModule() fx.Option {
 			provideAccountService,
 			acl.NewService,
 			channelaccess.NewService,
-			toolapproval.NewService,
 			userinput.NewService,
 			policy.NewService,
 			oauthclients.NewRegistry,
-			conversation.NewService,
 			event.NewHub,
 			provideSessionService,
 			provideMessageService,
@@ -69,6 +65,7 @@ func ServerModule() fx.Option {
 			provideNetworkService,
 			provideNetworkController,
 			settings.NewService,
+			provideToolApprovalService,
 			providePGVectorStore,
 			provideUserRuntimeStore,
 			provideBotRemoteRuntimeBindingStore,
@@ -103,7 +100,7 @@ func ServerModule() fx.Option {
 			provideAudioTempStore,
 			provideMediaService,
 			provideAgent,
-			provideChatResolver,
+			provideAgentService,
 			provideTurnService,
 			provideScheduleTriggerer,
 			provideHeartbeatSessionCreator,

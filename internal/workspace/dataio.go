@@ -260,8 +260,9 @@ var errMountNotSupported = errors.New("snapshot mount not supported on this back
 
 // Workspace archive filtering is intentionally enforced at this layer because
 // container backups can bypass higher-level bot/profile metadata scrub. Keep
-// these ACP home prefixes in sync with acpclient managed/self home locations;
-// workspace stays agent-agnostic otherwise, so do not import acpclient here.
+// these ACP home prefixes in sync with agent/runtime/acp/client managed/self
+// home locations; workspace stays agent-agnostic otherwise, so do not import
+// the Agent runtime client here.
 var (
 	workspaceACPSecretDirPrefixes = []string{".memoh-hermes/", ".hermes/", ".codex/"}
 	workspaceACPSecretDirNames    = map[string]struct{}{

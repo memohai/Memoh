@@ -12,12 +12,12 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/acpagent"
-	"github.com/memohai/memoh/internal/acpclient"
-	"github.com/memohai/memoh/internal/acpprofile"
+	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/session"
+	session "github.com/memohai/memoh/internal/chat/thread"
 )
 
 type ACPRuntimeHandler struct {
@@ -396,7 +396,7 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 	return c.JSON(http.StatusOK, status)
 }
 
-func acpRuntimeSessionMetadata(sess session.Session) map[string]any {
+func acpRuntimeSessionMetadata(sess session.Thread) map[string]any {
 	out := make(map[string]any, len(sess.Metadata)+len(sess.RuntimeMetadata))
 	for key, value := range sess.Metadata {
 		out[key] = value
@@ -494,41 +494,41 @@ func (h *ACPRuntimeHandler) authorizedRuntimeByID(c echo.Context) (bots.Bot, str
 	return bot, runtimeID, status, nil
 }
 
-func (h *ACPRuntimeHandler) authorizedACPSession(c echo.Context) (bots.Bot, string, session.Session, error) {
+func (h *ACPRuntimeHandler) authorizedACPSession(c echo.Context) (bots.Bot, string, session.Thread, error) {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
-		return bots.Bot{}, "", session.Session{}, err
+		return bots.Bot{}, "", session.Thread{}, err
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return bots.Bot{}, "", session.Session{}, echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return bots.Bot{}, "", session.Thread{}, echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
 	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
 	if err != nil {
 		if isHTTPStatus(err, http.StatusForbidden) {
 			feedback := acpNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
-			return bots.Bot{}, "", session.Session{}, echo.NewHTTPError(feedback.HTTPStatus, feedback)
+			return bots.Bot{}, "", session.Thread{}, echo.NewHTTPError(feedback.HTTPStatus, feedback)
 		}
-		return bots.Bot{}, "", session.Session{}, err
+		return bots.Bot{}, "", session.Thread{}, err
 	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
-		return bots.Bot{}, "", session.Session{}, echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+		return bots.Bot{}, "", session.Thread{}, echo.NewHTTPError(http.StatusBadRequest, "session id is required")
 	}
 	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
 	if err != nil || sess.BotID != bot.ID {
-		return bots.Bot{}, "", session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return bots.Bot{}, "", session.Thread{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
 	if !session.IsACPRuntime(sess) {
-		return bots.Bot{}, "", session.Session{}, echo.NewHTTPError(http.StatusBadRequest, "session is not an ACP agent session")
+		return bots.Bot{}, "", session.Thread{}, echo.NewHTTPError(http.StatusBadRequest, "session is not an ACP agent session")
 	}
 	perms, err := h.resolveCurrentUserPermissions(c, channelIdentityID, bot.ID)
 	if err != nil {
-		return bots.Bot{}, "", session.Session{}, err
+		return bots.Bot{}, "", session.Thread{}, err
 	}
 	acpMeta := acpRuntimeSessionMetadata(sess)
 	if err := authorizeACPRuntimeSessionAccess(channelIdentityID, perms, sessionMetadataString(acpMeta, "runtime_owner_account_id")); err != nil {
-		return bots.Bot{}, "", session.Session{}, err
+		return bots.Bot{}, "", session.Thread{}, err
 	}
 	return bot, sessionID, sess, nil
 }

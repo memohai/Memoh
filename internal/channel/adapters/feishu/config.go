@@ -7,6 +7,7 @@ import (
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 const (
@@ -197,7 +198,7 @@ func (c Config) openBaseURL() string {
 }
 
 func (c Config) registerIMErrorSecrets() {
-	channel.SetIMErrorSecrets("feishu:"+c.AppID, c.AppSecret, c.EncryptKey, c.VerificationToken)
+	redact.SetSecrets("feishu:"+c.AppID, c.AppSecret, c.EncryptKey, c.VerificationToken)
 }
 
 func (c Config) newClient() *lark.Client {

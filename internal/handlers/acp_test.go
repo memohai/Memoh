@@ -9,7 +9,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/acpprofile"
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 )
 
 func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {

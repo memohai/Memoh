@@ -8,10 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	messageevent "github.com/memohai/memoh/internal/chat/event"
+	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
-	messageevent "github.com/memohai/memoh/internal/message/event"
-	"github.com/memohai/memoh/internal/session"
 )
 
 // sessionCreateRecorder is a minimal sqlc-shaped fake that records the row a
@@ -129,7 +129,7 @@ func TestPayloadSessionIDExtractsTopLevelSnakeCase(t *testing.T) {
 		t.Fatalf("background_task payload: got %q, want s-bg", got)
 	}
 	// Realistic AgentStream wire shape — same top-level convention (see
-	// internal/conversation/flow/resolver_trigger.go).
+	// internal/agent/application/resolver_trigger.go).
 	agentPayload := map[string]any{
 		"event":      "delta",
 		"session_id": "s-agent",

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -15,12 +16,13 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/session"
+	session "github.com/memohai/memoh/internal/chat/thread"
 )
 
 // SessionHandler handles bot session CRUD endpoints.
 type SessionHandler struct {
 	sessionService *session.Service
+	threadEnricher threadEnricher
 	acpPool        acpSessionCloser
 	botService     *bots.Service
 	accountService *accounts.Service
@@ -32,6 +34,10 @@ type acpSessionCloser interface {
 	BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error
 }
 
+type threadEnricher interface {
+	EnrichThreads(ctx context.Context, botID string, threads []session.Thread) ([]session.Thread, error)
+}
+
 // NewSessionHandler creates a SessionHandler.
 func NewSessionHandler(log *slog.Logger, sessionService *session.Service, acpPool acpSessionCloser, botService *bots.Service, accountService *accounts.Service) *SessionHandler {
 	return &SessionHandler{
@@ -41,6 +47,12 @@ func NewSessionHandler(log *slog.Logger, sessionService *session.Service, acpPoo
 		accountService: accountService,
 		logger:         log.With(slog.String("handler", "session")),
 	}
+}
+
+// SetThreadEnricher installs the Channel-owned route projection used by list
+// responses. Thread persistence stays independent from the route table.
+func (h *SessionHandler) SetThreadEnricher(enricher threadEnricher) {
+	h.threadEnricher = enricher
 }
 
 // Register registers session routes.
@@ -87,7 +99,7 @@ type forkSessionRequest struct {
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
 // @Param body body createSessionRequest true "Session data"
-// @Success 201 {object} session.Session
+// @Success 201 {object} session.Thread
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Router /bots/{bot_id}/sessions [post].
@@ -169,7 +181,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Source session ID"
 // @Param body body forkSessionRequest true "Fork source message"
-// @Success 201 {object} session.Session
+// @Success 201 {object} session.Thread
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -210,7 +222,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 
 	forked, err := h.sessionService.ForkFromAssistantMessage(c.Request().Context(), session.ForkFromAssistantInput{
 		BotID:           bot.ID,
-		SessionID:       source.ID,
+		ThreadID:        source.ID,
 		MessageID:       messageID,
 		Title:           strings.TrimSpace(req.Title),
 		CreatedByUserID: channelIdentityID,
@@ -267,13 +279,13 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	filter := session.ListFilter{ParentSessionID: parentSessionID}
+	filter := session.ListFilter{ParentThreadID: parentSessionID}
 
 	// Initialize to an empty slice so an empty page serializes as `"items": []`
 	// rather than `"items": null`, sparing clients a null check.
-	sessions := []session.Session{}
+	sessions := []session.Thread{}
 	var (
-		nextCursor   session.SessionCursor
+		nextCursor   session.Cursor
 		hasMorePages bool
 	)
 	// Probe one row past the requested page so we can answer "is there more?"
@@ -281,30 +293,36 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	// extra row is sliced off before the response is built.
 	probeLimit := limit + 1
 	if bots.HasPermission(perms, bots.PermissionManage) {
-		var rows []session.Session
+		var rows []session.Thread
 		rows, err = h.sessionService.ListByBotPagedWithFilter(c.Request().Context(), bot.ID, types, cursor, probeLimit, filter)
 		if err == nil {
 			sessions, hasMorePages = trimPagedSessions(rows, limit)
 			if hasMorePages {
 				last := sessions[len(sessions)-1]
-				nextCursor = session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+				nextCursor = session.Cursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
 			}
 		}
 	} else {
-		var preFilter []session.Session
+		var preFilter []session.Thread
 		preFilter, err = h.sessionService.ListByBotAndCreatedByUserPagedWithFilter(c.Request().Context(), bot.ID, channelIdentityID, types, cursor, probeLimit, filter)
 		if err == nil {
-			var page []session.Session
+			var page []session.Thread
 			page, hasMorePages = trimPagedSessions(preFilter, limit)
 			if hasMorePages {
 				last := page[len(page)-1]
-				nextCursor = session.SessionCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+				nextCursor = session.Cursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
 			}
 			sessions = filterSessionsForPermissions(page, channelIdentityID, perms)
 		}
 	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if h.threadEnricher != nil {
+		sessions, err = h.threadEnricher.EnrichThreads(c.Request().Context(), bot.ID, sessions)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 	}
 
 	encoded := ""
@@ -323,7 +341,7 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 // position to resume from, not filter survivorship — otherwise a page whose
 // rows were all dropped by the permission filter would terminate pagination
 // while older accessible rows still exist on disk.
-func trimPagedSessions(rows []session.Session, limit int64) ([]session.Session, bool) {
+func trimPagedSessions(rows []session.Thread, limit int64) ([]session.Thread, bool) {
 	if int64(len(rows)) > limit {
 		return rows[:limit], true
 	}
@@ -334,8 +352,8 @@ func trimPagedSessions(rows []session.Session, limit int64) ([]session.Session, 
 // exactly when the caller has reached the end of the listing — clients should
 // stop paging on an empty cursor and never expect a follow-up empty page.
 type listSessionsResponse struct {
-	Items      []session.Session `json:"items"`
-	NextCursor string            `json:"next_cursor"`
+	Items      []session.Thread `json:"items"`
+	NextCursor string           `json:"next_cursor"`
 }
 
 const (
@@ -403,32 +421,32 @@ func parseSessionParentIDParam(raw string) (string, error) {
 // encodeSessionCursor packs the keyset cursor as base64(updated_at|id) where
 // the timestamp is RFC3339Nano. The id tiebreak in the SQL handles uniqueness
 // when two rows share the same timestamp.
-func encodeSessionCursor(c session.SessionCursor) string {
+func encodeSessionCursor(c session.Cursor) string {
 	raw := c.UpdatedAt.UTC().Format(time.RFC3339Nano) + "|" + c.ID
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
 
-func decodeSessionCursor(raw string) (session.SessionCursor, error) {
+func decodeSessionCursor(raw string) (session.Cursor, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return session.SessionCursor{}, nil
+		return session.Cursor{}, nil
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
-		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+		return session.Cursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
 	}
 	parts := strings.SplitN(string(decoded), "|", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+		return session.Cursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
 	}
 	updatedAt, err := time.Parse(time.RFC3339Nano, parts[0])
 	if err != nil {
-		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+		return session.Cursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
 	}
 	if _, err := uuid.Parse(parts[1]); err != nil {
-		return session.SessionCursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+		return session.Cursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
 	}
-	return session.SessionCursor{UpdatedAt: updatedAt, ID: parts[1]}, nil
+	return session.Cursor{UpdatedAt: updatedAt, ID: parts[1]}, nil
 }
 
 // GetSession godoc
@@ -436,7 +454,7 @@ func decodeSessionCursor(raw string) (session.SessionCursor, error) {
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
-// @Success 200 {object} session.Session
+// @Success 200 {object} session.Thread
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -467,7 +485,7 @@ func (h *SessionHandler) GetSession(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Param body body updateSessionRequest true "Fields to update"
-// @Success 200 {object} session.Session
+// @Success 200 {object} session.Thread
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -655,17 +673,17 @@ func (h *SessionHandler) authorizeBotSessionAccess(c echo.Context, channelIdenti
 	return bot, perms, nil
 }
 
-func (h *SessionHandler) authorizeSession(c echo.Context, channelIdentityID, botID, sessionID string) (bots.Bot, []string, session.Session, error) {
+func (h *SessionHandler) authorizeSession(c echo.Context, channelIdentityID, botID, sessionID string) (bots.Bot, []string, session.Thread, error) {
 	bot, perms, err := h.authorizeBotSessionAccess(c, channelIdentityID, botID)
 	if err != nil {
-		return bots.Bot{}, nil, session.Session{}, err
+		return bots.Bot{}, nil, session.Thread{}, err
 	}
 	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
 	if err != nil || sess.BotID != bot.ID {
-		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return bots.Bot{}, nil, session.Thread{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
 	if !canAccessSession(sess, channelIdentityID, perms) {
-		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return bots.Bot{}, nil, session.Thread{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
 	return bot, perms, sess, nil
 }
@@ -735,7 +753,7 @@ func requiredPermissionForSessionRuntime(sessionType, runtimeType string) string
 	return requiredWritePermissionForSessionType(sessionType)
 }
 
-func canAccessSession(sess session.Session, userID string, perms []string) bool {
+func canAccessSession(sess session.Thread, userID string, perms []string) bool {
 	if bots.HasPermission(perms, bots.PermissionManage) {
 		return true
 	}
@@ -764,11 +782,11 @@ func authorizeACPRuntimeSessionAccess(actorUserID string, perms []string, runtim
 	return nil
 }
 
-func filterSessionsForPermissions(items []session.Session, userID string, perms []string) []session.Session {
+func filterSessionsForPermissions(items []session.Thread, userID string, perms []string) []session.Thread {
 	if bots.HasPermission(perms, bots.PermissionManage) {
 		return items
 	}
-	out := make([]session.Session, 0, len(items))
+	out := make([]session.Thread, 0, len(items))
 	for _, item := range items {
 		if canAccessSession(item, userID, perms) {
 			out = append(out, item)
@@ -830,7 +848,7 @@ func sessionForkError(err error) error {
 	}
 }
 
-func normalizedSessionDescriptor(sess session.Session) (string, string) {
+func normalizedSessionDescriptor(sess session.Thread) (string, string) {
 	mode := strings.TrimSpace(sess.SessionMode)
 	runtimeType := strings.TrimSpace(sess.RuntimeType)
 	if !session.IsKnownSessionMode(mode) || !session.IsKnownRuntimeType(runtimeType) {
@@ -845,7 +863,7 @@ func normalizedSessionDescriptor(sess session.Session) (string, string) {
 	return mode, runtimeType
 }
 
-func sessionAgentConfigChanged(existing session.Session, targetMode, targetRuntime string, targetMetadata, targetRuntimeMetadata map[string]any) bool {
+func sessionAgentConfigChanged(existing session.Thread, targetMode, targetRuntime string, targetMetadata, targetRuntimeMetadata map[string]any) bool {
 	existingMode, existingRuntime := normalizedSessionDescriptor(existing)
 	if existingMode != strings.TrimSpace(targetMode) || existingRuntime != strings.TrimSpace(targetRuntime) {
 		return true

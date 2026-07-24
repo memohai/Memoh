@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/textutil"
-	"github.com/memohai/memoh/internal/userinput"
 )
 
 // toolFormatter produces a structured presentation for a specific built-in

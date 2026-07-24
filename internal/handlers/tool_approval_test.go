@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,15 +11,15 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/conversation/flow"
 )
 
 type recordingToolApprovalResponder struct {
-	input flow.ToolApprovalResponseInput
+	input turn.ToolApprovalResponse
 }
 
-func (r *recordingToolApprovalResponder) RespondToolApproval(_ context.Context, input flow.ToolApprovalResponseInput, _ chan<- flow.WSStreamEvent) error {
+func (r *recordingToolApprovalResponder) RespondToolApproval(_ context.Context, input turn.ToolApprovalResponse, _ chan<- json.RawMessage) error {
 	r.input = input
 	return nil
 }
@@ -42,7 +43,7 @@ func TestToolApprovalHTTPUsesJWTUserIDForPermissionActor(t *testing.T) {
 	}
 
 	responder := &recordingToolApprovalResponder{}
-	handler := &ToolApprovalHandler{resolver: responder}
+	handler := &ToolApprovalHandler{turnService: responder}
 	e := echo.New()
 	e.Use(auth.JWTMiddleware(secret, func(echo.Context) bool { return false }))
 	handler.Register(e)

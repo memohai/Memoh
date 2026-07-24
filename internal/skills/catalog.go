@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/slash"
 )
 
@@ -232,10 +232,10 @@ func contentHashForEntry(entry Entry) string {
 // request shape. Both public entry points (the web WS handler and the channel
 // inbound processor) call this one converter, so they can never diverge on
 // which fields a requested skill carries into the model context.
-func RequestedSkillContexts(resolved []ResolvedSkill) []conversation.RequestedSkillContext {
-	out := make([]conversation.RequestedSkillContext, 0, len(resolved))
+func RequestedSkillContexts(resolved []ResolvedSkill) []turn.RequestedSkillContext {
+	out := make([]turn.RequestedSkillContext, 0, len(resolved))
 	for _, item := range resolved {
-		out = append(out, conversation.RequestedSkillContext{
+		out = append(out, turn.RequestedSkillContext{
 			Name:           item.Name,
 			Description:    item.Description,
 			Content:        item.Content,

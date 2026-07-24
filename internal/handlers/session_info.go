@@ -11,10 +11,10 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
+	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -96,7 +96,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
-	sessionMode, runtimeType := normalizedSessionDescriptor(session.Session{
+	sessionMode, runtimeType := normalizedSessionDescriptor(session.Thread{
 		Type:        sessionRow.Type,
 		SessionMode: sessionRow.SessionMode,
 		RuntimeType: sessionRow.RuntimeType,
@@ -112,7 +112,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	sess := session.Session{
+	sess := session.Thread{
 		ID:          sessionRow.ID.String(),
 		BotID:       sessionRow.BotID.String(),
 		Type:        sessionRow.Type,

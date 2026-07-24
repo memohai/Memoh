@@ -11,7 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/accounts"
-	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -22,7 +22,7 @@ type HooksHandler struct {
 	botService     *bots.Service
 	accountService *accounts.Service
 	service        *hooks.Service
-	agent          *agentpkg.Agent
+	agent          *native.Agent
 	bridgeProvider bridge.Provider
 }
 
@@ -56,7 +56,7 @@ type HookTestResponse struct {
 	Result       hooks.Result `json:"result"`
 }
 
-func NewHooksHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, service *hooks.Service, agent *agentpkg.Agent, provider bridge.Provider) *HooksHandler {
+func NewHooksHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, service *hooks.Service, agent *native.Agent, provider bridge.Provider) *HooksHandler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -163,10 +163,10 @@ func (h *HooksHandler) Test(c echo.Context) error {
 		Extra:     input.Extra,
 		Error:     strings.TrimSpace(input.Error),
 	}
-	result, err := h.service.RunConfig(ctx, cfg, req, hookTestToolRunner{agent: h.agent, cfg: agentpkg.RunConfig{
+	result, err := h.service.RunConfig(ctx, cfg, req, hookTestToolRunner{agent: h.agent, cfg: native.RunConfig{
 		SupportsImageInput: true,
 		SupportsToolCall:   true,
-		Identity: agentpkg.SessionContext{
+		Identity: native.SessionContext{
 			BotID:     botID,
 			ChatID:    req.ChatID,
 			SessionID: req.SessionID,
@@ -204,8 +204,8 @@ func (h *HooksHandler) workspaceInfo(ctx context.Context, botID string) hooks.Wo
 }
 
 type hookTestToolRunner struct {
-	agent *agentpkg.Agent
-	cfg   agentpkg.RunConfig
+	agent *native.Agent
+	cfg   native.RunConfig
 }
 
 func (r hookTestToolRunner) RunHookTool(ctx context.Context, toolName string, input map[string]any) (any, error) {

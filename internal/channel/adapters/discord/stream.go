@@ -12,6 +12,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 type discordOutboundStream struct {
@@ -83,7 +84,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		return nil
 
 	case channel.StreamEventError:
-		errText := channel.RedactIMErrorText(strings.TrimSpace(event.Error))
+		errText := redact.Text(strings.TrimSpace(event.Error))
 		if errText == "" {
 			return nil
 		}

@@ -9,6 +9,7 @@ import (
 	"github.com/line/line-bot-sdk-go/v8/linebot/messaging_api"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 func TestOpenStreamRequiresTarget(t *testing.T) {
@@ -129,11 +130,11 @@ func TestLineStreamSuppressesPartialSendFailure(t *testing.T) {
 }
 
 func TestLineStreamErrorRedactsSecretsAndClearsBuffer(t *testing.T) {
-	channel.ResetIMErrorSecretsForTest()
-	t.Cleanup(channel.ResetIMErrorSecretsForTest)
+	redact.ResetForTest()
+	t.Cleanup(redact.ResetForTest)
 
 	const secret = "line-secret-value-123456"
-	channel.SetIMErrorSecrets("line-stream-test", secret)
+	redact.SetSecrets("line-stream-test", secret)
 
 	client := &testMessagingClient{}
 	adapter := NewAdapter(nil)

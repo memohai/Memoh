@@ -18,9 +18,9 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/bots"
+	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/session"
 )
 
 // sessionListQueries records the arguments passed to the paged list queries
@@ -35,6 +35,20 @@ type sessionListQueries struct {
 	userPagedCall      sqlc.ListSessionsByBotAndCreatedByUserPagedParams
 	userPagedCallCount int
 	userPagedRows      []sqlc.ListSessionsByBotAndCreatedByUserPagedRow
+}
+
+type sessionListEnricher struct {
+	called bool
+}
+
+func (e *sessionListEnricher) EnrichThreads(_ context.Context, _ string, threads []session.Thread) ([]session.Thread, error) {
+	e.called = true
+	out := append([]session.Thread(nil), threads...)
+	for i := range out {
+		out[i].RouteConversationType = "group"
+		out[i].RouteMetadata = map[string]any{"conversation_name": "Memoh"}
+	}
+	return out, nil
 }
 
 func (q *sessionListQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -261,6 +275,34 @@ func TestListSessionsEmptyResultSerializesAsEmptyArray(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `"items":[]`) {
 		t.Fatalf("empty page body = %s, want items rendered as []", body)
+	}
+}
+
+func TestListSessionsPreservesRouteProjection(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionListQueries{
+		bot: testBotRow(botID, nil),
+		pagedRows: []sqlc.ListSessionsByBotPagedRow{
+			pagedRow("33333333-3333-3333-3333-333333333333", time.Now()),
+		},
+	}
+	handler := newListSessionHandler(t, queries)
+	enricher := &sessionListEnricher{}
+	handler.SetThreadEnricher(enricher)
+
+	rec, err := callListSessions(handler, botID, "")
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	response := decodeListResponse(t, rec)
+	if !enricher.called {
+		t.Fatal("route projection enricher was not called")
+	}
+	if len(response.Items) != 1 || response.Items[0].RouteConversationType != "group" {
+		t.Fatalf("items = %#v", response.Items)
+	}
+	if response.Items[0].RouteMetadata["conversation_name"] != "Memoh" {
+		t.Fatalf("route metadata = %#v", response.Items[0].RouteMetadata)
 	}
 }
 

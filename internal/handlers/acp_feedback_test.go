@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/acpfeedback"
+	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
 )
 
 func TestACPFeedbackHTTPErrorPreservesStructuredPayload(t *testing.T) {

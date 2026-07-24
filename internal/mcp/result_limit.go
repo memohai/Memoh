@@ -3,7 +3,7 @@ package mcp
 import (
 	"strings"
 
-	"github.com/memohai/memoh/internal/contextlimit"
+	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
 	textprune "github.com/memohai/memoh/internal/prune"
 )
 

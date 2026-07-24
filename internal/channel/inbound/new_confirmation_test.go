@@ -8,15 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/acpfeedback"
-	"github.com/memohai/memoh/internal/acpprofile"
-	turninprocess "github.com/memohai/memoh/internal/agent/turn/inprocess"
+	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
+	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/route"
+	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"
-	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/slash"
 )
 
@@ -29,9 +28,52 @@ func mustCommandInvocation(t *testing.T, text string) command.Invocation {
 	return invocation
 }
 
+type testACPProfiles struct{}
+
+func (testACPProfiles) ResolveACPProfile(agentID string) turn.ACPAgentProfile {
+	agentID = strings.ToLower(strings.TrimSpace(agentID))
+	names := map[string]string{
+		"claude-code": "Claude Code",
+		"codex":       "Codex",
+		"hermes":      "Hermes",
+	}
+	displayName, ok := names[agentID]
+	return turn.ACPAgentProfile{
+		ID:          agentID,
+		DisplayName: displayName,
+		Known:       ok,
+	}
+}
+
+func (testACPProfiles) ResolveACPSetupPreflight(agentID string, metadata map[string]any) turn.ACPSetupPreflight {
+	acp, _ := metadata["acp"].(map[string]any)
+	agents, _ := acp["agents"].(map[string]any)
+	config, _ := agents[strings.ToLower(strings.TrimSpace(agentID))].(map[string]any)
+	enabled, _ := config["enabled"].(bool)
+	result := turn.ACPSetupPreflight{Enabled: enabled}
+	mode, modeSet := config["setup_mode"].(string)
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if !modeSet || mode == "" || mode == "self" || (agentID == "codex" && mode == "oauth") {
+		return result
+	}
+	managed, _ := config["managed"].(map[string]any)
+	requiredID, requiredLabel := "api_key", "API key"
+	if agentID == "claude-code" {
+		requiredLabel = "Anthropic API key"
+		if mode == "oauth" {
+			requiredID = "oauth_token"
+			requiredLabel = "Claude Code OAuth token"
+		}
+	}
+	if value, _ := managed[requiredID].(string); strings.TrimSpace(value) == "" {
+		result.MissingManagedField = &turn.ACPManagedField{ID: requiredID, Label: requiredLabel}
+	}
+	return result
+}
+
 func resolveNewSessionTypeForTest(t *testing.T, text string, msg channel.InboundMessage) (string, error) {
 	t.Helper()
-	spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, text).Parsed, msg)
+	spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, text).Parsed, msg, testACPProfiles{})
 	if err != nil {
 		return "", err
 	}
@@ -90,7 +132,7 @@ func TestResolveNewSessionSpec_ACPAgent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, tc.cmd).Parsed, tc.msg)
+			spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, tc.cmd).Parsed, tc.msg, testACPProfiles{})
 			if err != nil {
 				t.Fatalf("resolveNewSessionSpec(%q) error = %v", tc.cmd, err)
 			}
@@ -126,7 +168,7 @@ func TestResolveNewSessionSpecCanonicalBotMentionIsNotAnAgent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseInvocation() error = %v", err)
 			}
-			spec, err := resolveNewSessionSpecParsed(invocation.Parsed, group)
+			spec, err := resolveNewSessionSpecParsed(invocation.Parsed, group, testACPProfiles{})
 			if err != nil {
 				t.Fatalf("resolveNewSessionSpecParsed() error = %v", err)
 			}
@@ -214,10 +256,10 @@ func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) 
 	for _, text := range []string{"/new @memoh1bot", "/new discuss @memoh1bot", "/new discuss@memoh1bot"} {
 		t.Run(text, func(t *testing.T) {
 			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channel-identity-1"}}
-			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "route-1"}}
 			gateway := &fakeChatGateway{}
 			ensurer := &fakeSessionEnsurer{}
-			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, turninprocess.New(gateway), channelIdentitySvc, &fakePolicyService{}, "", 0)
+			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
 			processor.SetACLService(&fakeChatACL{allowed: true})
 			processor.SetSessionEnsurer(ensurer)
 			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
@@ -252,7 +294,7 @@ func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) 
 
 func TestResolveNewSessionSpec_GroupChatACPUnsupported(t *testing.T) {
 	group := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "group"}}
-	_, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new chat codex").Parsed, group)
+	_, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new chat codex").Parsed, group, testACPProfiles{})
 	if err == nil {
 		t.Fatal("resolveNewSessionSpec error = nil, want group chat ACP unsupported")
 	}
@@ -266,10 +308,10 @@ func TestCurrentContextForNewSessionSpecUsesACPDisplayName(t *testing.T) {
 	cc := currentContextForNewSessionSpec(command.CurrentContext{ChatModel: "gpt-4.1"}, NewSessionSpec{
 		Runtime: sessionpkg.RuntimeACPAgent,
 		Metadata: map[string]any{
-			"acp_agent_id": acpprofile.AgentCodexID,
+			"acp_agent_id": "codex",
 		},
-	})
-	if cc.ChatModel != acpprofile.AgentCodexName+" / ACP" {
+	}, testACPProfiles{})
+	if cc.ChatModel != "Codex / ACP" {
 		t.Fatalf("ChatModel = %q, want ACP display label", cc.ChatModel)
 	}
 }
@@ -277,12 +319,13 @@ func TestCurrentContextForNewSessionSpecUsesACPDisplayName(t *testing.T) {
 func TestHandleNewSessionCommandCreatesACPChatSpec(t *testing.T) {
 	ownerID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	channelIdentityID := "cccccccc-cccc-cccc-cccc-cccccccccccc"
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
 	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{ID: "22222222-2222-2222-2222-222222222222", Type: sessionpkg.TypeACPAgent}}
 	p := &ChannelInboundProcessor{
 		routeResolver:     chatSvc,
 		sessionEnsurer:    ensurer,
 		permissionChecker: &fakeBotPermissionChecker{allowed: true},
+		acpProfiles:       testACPProfiles{},
 	}
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
@@ -323,7 +366,7 @@ func TestHandleNewSessionCommandCreatesACPChatSpec(t *testing.T) {
 
 func TestHandleNewSessionCommandCreatesNativeSessionWithCreator(t *testing.T) {
 	creatorID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
 	ensurer := &fakeSessionEnsurer{}
 	p := &ChannelInboundProcessor{
 		routeResolver:  chatSvc,
@@ -362,7 +405,7 @@ func TestHandleNewSessionCommandCreatesNativeSessionWithCreator(t *testing.T) {
 
 func TestHandleNewSessionCommandCancelsActiveStream(t *testing.T) {
 	routeID := "11111111-1111-1111-1111-111111111111"
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: routeID}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: routeID}}
 	ensurer := &fakeSessionEnsurer{}
 	p := &ChannelInboundProcessor{
 		routeResolver:  chatSvc,
@@ -400,12 +443,13 @@ func TestHandleNewSessionCommandCancelsActiveStream(t *testing.T) {
 
 func TestHandleNewSessionCommandBareNewInheritsDefaultACP(t *testing.T) {
 	ownerID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
 	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{ID: "22222222-2222-2222-2222-222222222222", Type: sessionpkg.TypeACPAgent}}
 	p := &ChannelInboundProcessor{
 		routeResolver:     chatSvc,
 		sessionEnsurer:    ensurer,
 		permissionChecker: &fakeBotPermissionChecker{allowed: true},
+		acpProfiles:       testACPProfiles{},
 		defaultChatRuntime: fakeDefaultChatRuntimeReader{settings: DefaultChatRuntimeSettings{
 			Runtime:     sessionpkg.RuntimeACPAgent,
 			ACPAgentID:  "codex",
@@ -446,12 +490,13 @@ func TestHandleNewSessionCommandBareNewInheritsDefaultACP(t *testing.T) {
 
 func TestHandleNewSessionCommandExplicitACPInheritsDefaultProject(t *testing.T) {
 	ownerID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
 	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{ID: "22222222-2222-2222-2222-222222222222", Type: sessionpkg.TypeACPAgent}}
 	p := &ChannelInboundProcessor{
 		routeResolver:     chatSvc,
 		sessionEnsurer:    ensurer,
 		permissionChecker: &fakeBotPermissionChecker{allowed: true},
+		acpProfiles:       testACPProfiles{},
 		defaultChatRuntime: fakeDefaultChatRuntimeReader{settings: DefaultChatRuntimeSettings{
 			Runtime:     sessionpkg.RuntimeACPAgent,
 			ACPAgentID:  "codex",
@@ -485,16 +530,17 @@ func TestHandleNewSessionCommandExplicitACPInheritsDefaultProject(t *testing.T) 
 }
 
 func TestHandleNewSessionCommandPreflightsACPSetup(t *testing.T) {
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
 	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{ID: "22222222-2222-2222-2222-222222222222", Type: sessionpkg.TypeACPAgent}}
 	p := &ChannelInboundProcessor{
 		routeResolver:     chatSvc,
 		sessionEnsurer:    ensurer,
 		permissionChecker: &fakeBotPermissionChecker{allowed: true},
+		acpProfiles:       testACPProfiles{},
 		acpAgentSetup: fakeACPAgentSetupReader{metadata: map[string]any{
-			acpprofile.MetadataKeyACP: map[string]any{
+			"acp": map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentClaudeCodeID: map[string]any{
+					"claude-code": map[string]any{
 						"enabled":    true,
 						"setup_mode": "api_key",
 						"managed":    map[string]any{},
@@ -560,12 +606,13 @@ func TestSendACPFeedbackErrorUsesI18nKey(t *testing.T) {
 }
 
 func TestHandleNewSessionCommandACPRequiresWorkspaceExec(t *testing.T) {
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
 	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{ID: "22222222-2222-2222-2222-222222222222", Type: sessionpkg.TypeACPAgent}}
 	p := &ChannelInboundProcessor{
 		routeResolver:     chatSvc,
 		sessionEnsurer:    ensurer,
 		permissionChecker: &fakeBotPermissionChecker{allowed: false},
+		acpProfiles:       testACPProfiles{},
 	}
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
@@ -654,14 +701,14 @@ func TestSendNewConfirmation_LocalizesActionLabels(t *testing.T) {
 }
 
 func TestSendNewConfirmationShowsACPRuntimeLabel(t *testing.T) {
-	p := &ChannelInboundProcessor{}
+	p := &ChannelInboundProcessor{acpProfiles: testACPProfiles{}}
 	s := &fakeReplySender{}
 	loc := i18n.New("en")
 	spec := NewSessionSpec{
 		Mode:    sessionpkg.TypeChat,
 		Runtime: sessionpkg.RuntimeACPAgent,
 		Metadata: map[string]any{
-			"acp_agent_id": acpprofile.AgentCodexID,
+			"acp_agent_id": "codex",
 		},
 	}
 
@@ -671,7 +718,7 @@ func TestSendNewConfirmationShowsACPRuntimeLabel(t *testing.T) {
 		s,
 		loc,
 		newSessionConfirmModeText(spec),
-		newSessionDisplayModeLabel(loc, spec),
+		newSessionDisplayModeLabel(loc, spec, p.acpProfiles),
 		channel.ChannelCapabilities{Buttons: true, Markdown: true, Text: true},
 	)
 	if err != nil {
@@ -681,7 +728,7 @@ func TestSendNewConfirmationShowsACPRuntimeLabel(t *testing.T) {
 		t.Fatalf("expected 1 sent message, got %d", len(s.sent))
 	}
 	out := s.sent[0].Message
-	if !strings.Contains(out.Text, "chat with "+acpprofile.AgentCodexName+" / ACP") {
+	if !strings.Contains(out.Text, "chat with Codex / ACP") {
 		t.Fatalf("confirmation text = %q, want ACP runtime label", out.Text)
 	}
 	if len(out.Actions) != 2 || out.Actions[0].Value != command.EncodeConfirmNewCallback("chat codex") {

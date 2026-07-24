@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/memohai/memoh/internal/acpprofile"
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/bots"
 )
 

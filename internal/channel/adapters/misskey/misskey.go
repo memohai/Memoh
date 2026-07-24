@@ -14,6 +14,7 @@ import (
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/common"
+	"github.com/memohai/memoh/internal/redact"
 	"github.com/memohai/memoh/internal/textutil"
 )
 
@@ -175,7 +176,7 @@ func (a *MisskeyAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 	if err != nil {
 		return nil, err
 	}
-	channel.SetIMErrorSecrets("misskey:"+cfg.ID, mkCfg.AccessToken)
+	redact.SetSecrets("misskey:"+cfg.ID, mkCfg.AccessToken)
 
 	// Fetch self info for mention detection.
 	me, err := getMe(ctx, mkCfg)

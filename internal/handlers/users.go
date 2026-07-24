@@ -16,8 +16,8 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/acpclient"
-	"github.com/memohai/memoh/internal/acpprofile"
+	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"

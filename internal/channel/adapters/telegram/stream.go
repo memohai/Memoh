@@ -14,6 +14,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 const (
@@ -904,7 +905,7 @@ func (s *telegramOutboundStream) pushFinalAttachments(ctx context.Context, msg c
 }
 
 func (s *telegramOutboundStream) pushError(ctx context.Context, event channel.PreparedStreamEvent) error {
-	errText := channel.RedactIMErrorText(strings.TrimSpace(event.Error))
+	errText := redact.Text(strings.TrimSpace(event.Error))
 	if errText == "" {
 		return nil
 	}

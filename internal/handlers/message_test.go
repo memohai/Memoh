@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/session"
-	"github.com/memohai/memoh/internal/toolapproval"
+	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
+	chatview "github.com/memohai/memoh/internal/agent/view"
+	session "github.com/memohai/memoh/internal/chat/thread"
 )
 
 type testFlusher struct{}
@@ -48,12 +48,12 @@ func TestIsUserFacingSessionType(t *testing.T) {
 func TestMergeToolApprovalsUsesCanApproveFunction(t *testing.T) {
 	t.Parallel()
 
-	turns := []conversation.UITurn{
+	turns := []chatview.UITurn{
 		{
 			Role: "assistant",
-			Messages: []conversation.UIMessage{
+			Messages: []chatview.UIMessage{
 				{
-					Type:       conversation.UIMessageTool,
+					Type:       chatview.UIMessageTool,
 					ToolCallID: "call-1",
 				},
 			},

@@ -1,11 +1,6 @@
 // Package turn defines the application-level contract for starting and
 // observing agent turns. It is the only agent surface Channel may depend
-// on; it must not import Echo, fx, sqlc, or any channel package.
-//
-// Data-carrier types are currently aliases of the conversation package's
-// wire shapes: consumers decode the same bytes either way, and the alias
-// keeps this migration behavior-preserving. When a cross-process transport
-// versions the payload format these aliases become owned types.
+// on; it must not import Echo, fx, sqlc, conversation, or any channel package.
 package turn
 
 import (
@@ -13,9 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/userinput"
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 )
 
 // ErrDuplicateTurn reports that a StartTurnCommand's (TeamID,
@@ -38,57 +31,18 @@ const (
 	ModeDiscuss Mode = "discuss"
 )
 
-// Data-carrier aliases (see package comment).
-type (
-	Attachment            = conversation.ChatAttachment
-	SkillActivation       = conversation.SkillActivation
-	SkillActivationSkill  = conversation.SkillActivationSkill
-	RequestedSkillContext = conversation.RequestedSkillContext
-	OutboundAssetRef      = conversation.OutboundAssetRef
-	InjectMessage         = conversation.InjectMessage
-	ModelMessage          = conversation.ModelMessage
-	AssistantOutput       = conversation.AssistantOutput
-	ContentPart           = conversation.ContentPart
-	ToolCall              = conversation.ToolCall
-	QuestionAnswer        = userinput.QuestionAnswer
-)
-
-// UserMessageKindSkillActivation re-exports the skill-activation message kind.
-const UserMessageKindSkillActivation = conversation.UserMessageKindSkillActivation
-
-// NewSkillActivation re-exports the deduplicating constructor.
-func NewSkillActivation(items []RequestedSkillContext, prompt string) *SkillActivation {
-	return conversation.NewSkillActivation(items, prompt)
-}
-
-// SkillActivationModelQuery re-exports the model-query renderer.
-func SkillActivationModelQuery(activation *SkillActivation) string {
-	return conversation.SkillActivationModelQuery(activation)
-}
-
-// NewTextContent re-exports the plain-text content encoder.
-func NewTextContent(text string) json.RawMessage {
-	return conversation.NewTextContent(text)
-}
-
-// AttachmentFromBundle re-exports the bundle-to-attachment converter.
-func AttachmentFromBundle(bundle attachment.Bundle) Attachment {
-	return conversation.ChatAttachmentFromBundle(bundle)
-}
-
 // StartTurnCommand is a pure-data command. Field set mirrors exactly what
-// the channel inbound processor supplies today (audited against
-// conversation.ChatRequest); function- and channel-typed fields are
+// the channel inbound processor supplies today; function- and channel-typed fields are
 // intentionally excluded — injection goes through RunHandle.Inject and
 // outbound assets through RunHandle.AddOutboundAssets.
 type StartTurnCommand struct {
 	SchemaVersion int
-	TeamID        string // required; adapter fails closed when empty
+	TeamID        string // required; the service fails closed when empty
 	Mode          Mode
 
 	BotID                   string
 	ChatID                  string
-	SessionID               string
+	ThreadID                string
 	RouteID                 string
 	Token                   string
 	ChatToken               string
@@ -183,11 +137,11 @@ type DiscussRunResolvedPayload struct {
 	RuntimeType string `json:"runtime_type"`
 }
 
-// ToolApprovalResponse resumes a turn deferred on tool approval
-// (RFC ResumeApprovalCommand). Mirrors flow.ToolApprovalResponseInput.
+// ToolApprovalResponse resumes a thread's turn deferred on tool approval
+// (RFC ResumeApprovalCommand).
 type ToolApprovalResponse struct {
 	BotID                      string
-	SessionID                  string
+	ThreadID                   string
 	ActorChannelIdentityID     string
 	ActorUserID                string
 	ApprovalID                 string
@@ -199,11 +153,11 @@ type ToolApprovalResponse struct {
 	SuppressActivePromptAttach bool
 }
 
-// UserInputResponse resumes a turn deferred on ask_user
-// (RFC ResumeUserInputCommand). Mirrors flow.UserInputResponseInput.
+// UserInputResponse resumes a thread's turn deferred on ask_user
+// (RFC ResumeUserInputCommand).
 type UserInputResponse struct {
 	BotID                      string
-	SessionID                  string
+	ThreadID                   string
 	ActorChannelIdentityID     string
 	ActorUserID                string
 	UserInputID                string
@@ -217,17 +171,17 @@ type UserInputResponse struct {
 	SuppressActivePromptAttach bool
 }
 
-// Event is one element of a turn's event stream. Payload is the raw JSON
+// Event is one element of a thread turn's event stream. Payload is the raw JSON
 // chunk exactly as produced by the runtime; Kind is the parsed "type"
 // field (best effort, empty when unparsable). Seq is monotonically
 // increasing per run.
 type Event struct {
-	RunID     string
-	TeamID    string
-	SessionID string
-	Seq       int64
-	Kind      string
-	Payload   json.RawMessage
+	RunID    string
+	TeamID   string
+	ThreadID string
+	Seq      int64
+	Kind     string
+	Payload  json.RawMessage
 }
 
 // RunHandle observes and steers one running turn. Events and Errs mirror
@@ -241,11 +195,10 @@ type RunHandle interface {
 	Cancel()
 }
 
-// Service starts and resumes turns. Implementations: inprocess (wraps
-// flow.Resolver); a cross-process transport will implement the same
-// contract later. The eventCh parameters mirror the resolver's raw JSON
-// stream for resumed turns; they are an in-process surface, not part of
-// the serialized command shape.
+// Service starts and resumes turns. The application service implements this
+// contract directly; cross-process transports expose the same contract. The
+// eventCh parameters mirror the application's raw JSON stream for resumed
+// turns and are not part of the serialized command shape.
 type Service interface {
 	StartTurn(ctx context.Context, cmd StartTurnCommand) (RunHandle, error)
 	RespondToolApproval(ctx context.Context, input ToolApprovalResponse, eventCh chan<- json.RawMessage) error

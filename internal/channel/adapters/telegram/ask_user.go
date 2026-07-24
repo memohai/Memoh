@@ -6,9 +6,9 @@ import (
 	"strings"
 	"sync"
 
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/userinput"
 )
 
 // Telegram ask_user rendering over the durable interaction state.

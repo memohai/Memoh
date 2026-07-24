@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/redact"
 )
 
 func (a *Adapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.PreparedOutboundStream, error) {
@@ -60,7 +61,7 @@ func (s *outboundStream) Push(ctx context.Context, event channel.PreparedStreamE
 		s.mu.Unlock()
 		return s.sendSnapshot(ctx, prepared)
 	case channel.StreamEventError:
-		errText := channel.RedactIMErrorText(strings.TrimSpace(event.Error))
+		errText := redact.Text(strings.TrimSpace(event.Error))
 		s.textBuilder.Reset()
 		s.attachments = nil
 		s.mu.Unlock()

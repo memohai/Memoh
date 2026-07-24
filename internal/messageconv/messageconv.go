@@ -7,15 +7,15 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/agent/turn"
 )
 
-func SDKMessagesToModelMessages(msgs []sdk.Message) []conversation.ModelMessage {
+func SDKMessagesToModelMessages(msgs []sdk.Message) []turn.ModelMessage {
 	return SDKMessagesToModelMessagesWithLogger(nil, msgs)
 }
 
-func SDKMessagesToModelMessagesWithLogger(log *slog.Logger, msgs []sdk.Message) []conversation.ModelMessage {
-	result := make([]conversation.ModelMessage, 0, len(msgs))
+func SDKMessagesToModelMessagesWithLogger(log *slog.Logger, msgs []sdk.Message) []turn.ModelMessage {
+	result := make([]turn.ModelMessage, 0, len(msgs))
 	for _, msg := range msgs {
 		data, err := json.Marshal(msg)
 		if err != nil {
@@ -37,7 +37,7 @@ func SDKMessagesToModelMessagesWithLogger(log *slog.Logger, msgs []sdk.Message) 
 		if msg.Usage != nil {
 			usage, _ = json.Marshal(msg.Usage)
 		}
-		result = append(result, conversation.ModelMessage{
+		result = append(result, turn.ModelMessage{
 			Role:    string(msg.Role),
 			Content: envelope.Content,
 			Usage:   usage,
@@ -46,7 +46,7 @@ func SDKMessagesToModelMessagesWithLogger(log *slog.Logger, msgs []sdk.Message) 
 	return result
 }
 
-func ModelMessageToSDKMessage(mm conversation.ModelMessage) sdk.Message {
+func ModelMessageToSDKMessage(mm turn.ModelMessage) sdk.Message {
 	var s string
 	if err := json.Unmarshal(mm.Content, &s); err == nil {
 		return sdk.Message{
@@ -70,7 +70,7 @@ func ModelMessageToSDKMessage(mm conversation.ModelMessage) sdk.Message {
 	return sdk.Message{Role: sdk.MessageRole(mm.Role)}
 }
 
-func ModelMessagesToSDKMessages(msgs []conversation.ModelMessage) []sdk.Message {
+func ModelMessagesToSDKMessages(msgs []turn.ModelMessage) []sdk.Message {
 	result := make([]sdk.Message, 0, len(msgs))
 	for _, mm := range msgs {
 		result = append(result, ModelMessageToSDKMessage(mm))
@@ -78,14 +78,14 @@ func ModelMessagesToSDKMessages(msgs []conversation.ModelMessage) []sdk.Message 
 	return result
 }
 
-func PrependUserMessage(query string, output []conversation.ModelMessage) []conversation.ModelMessage {
+func PrependUserMessage(query string, output []turn.ModelMessage) []turn.ModelMessage {
 	if strings.TrimSpace(query) == "" {
 		return output
 	}
-	round := make([]conversation.ModelMessage, 0, 1+len(output))
-	round = append(round, conversation.ModelMessage{
+	round := make([]turn.ModelMessage, 0, 1+len(output))
+	round = append(round, turn.ModelMessage{
 		Role:    "user",
-		Content: conversation.NewTextContent(query),
+		Content: turn.NewTextContent(query),
 	})
 	return append(round, output...)
 }
