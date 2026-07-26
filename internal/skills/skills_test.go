@@ -164,7 +164,7 @@ func TestIsValidNameRejectsTraversalPatterns(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"alpha", "alpha-beta", "alpha_beta", "alpha.beta"} {
+	for _, name := range []string{"alpha", "alpha-beta", "alpha_beta", "alpha.beta", "registry+package+skill"} {
 		if !IsValidName(name) {
 			t.Fatalf("IsValidName(%q) = false, want true", name)
 		}

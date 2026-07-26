@@ -186,3 +186,20 @@ func TestShouldSkipJWTOnlyForRuntimeConnectEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldSkipJWTOnlyForDigestAddressedSupermarketSkillImages(t *testing.T) {
+	t.Parallel()
+	digest := strings.Repeat("a", 64)
+	if !shouldSkipJWT("/supermarket/skill-images/" + digest) {
+		t.Fatal("digest-addressed Skill image must be readable by img elements")
+	}
+	for _, path := range []string{
+		"/supermarket/skill-images/", "/supermarket/skill-images/short",
+		"/supermarket/skill-images/" + strings.ToUpper(digest),
+		"/supermarket/skill-images/" + digest + "/extra",
+	} {
+		if shouldSkipJWT(path) {
+			t.Fatalf("path=%q unexpectedly skips JWT", path)
+		}
+	}
+}

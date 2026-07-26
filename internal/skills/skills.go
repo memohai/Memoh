@@ -495,7 +495,7 @@ func IsValidName(name string) bool {
 		case r >= 'a' && r <= 'z':
 		case r >= 'A' && r <= 'Z':
 		case r >= '0' && r <= '9':
-		case r == '-' || r == '_' || r == '.':
+		case r == '-' || r == '_' || r == '.' || r == '+':
 		default:
 			return false
 		}

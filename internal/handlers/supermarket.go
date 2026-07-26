@@ -23,6 +23,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
+	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -31,6 +32,7 @@ type SupermarketHandler struct {
 	httpClient     *http.Client
 	pluginService  pluginInstaller
 	containers     bridge.Provider
+	workspaces     *workspace.Manager
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
@@ -87,6 +89,7 @@ func NewSupermarketHandler(
 	cfg config.Config,
 	pluginService *pluginspkg.Service,
 	containers bridge.Provider,
+	workspaces *workspace.Manager,
 	botService *bots.Service,
 	accountService *accounts.Service,
 ) *SupermarketHandler {
@@ -95,6 +98,7 @@ func NewSupermarketHandler(
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
 		pluginService:  pluginService,
 		containers:     containers,
+		workspaces:     workspaces,
 		botService:     botService,
 		accountService: accountService,
 		logger:         log.With(slog.String("handler", "supermarket")),
@@ -108,6 +112,11 @@ func (h *SupermarketHandler) Register(e *echo.Echo) {
 	g.GET("/skills", h.ListSkills)
 	g.GET("/skills/:id", h.GetSkill)
 	g.GET("/tags", h.ListTags)
+	g.GET("/registries", h.ListRegistries)
+	g.GET("/registries/:registry_id/categories", h.ListRegistryCategories)
+	g.GET("/catalog/skills", h.SearchRegistrySkills)
+	g.GET("/registries/:registry_id/packages/:package_id/skills/:skill_id", h.GetRegistrySkill)
+	g.GET("/skill-images/:digest", h.GetRegistrySkillImage)
 
 	ig := e.Group("/bots/:bot_id/supermarket")
 	ig.POST("/install-plugin", h.InstallPlugin)
@@ -226,7 +235,10 @@ type InstallPluginRequest struct {
 
 // InstallSkillRequest is the request body for installing a skill from supermarket.
 type InstallSkillRequest struct {
-	SkillID string `json:"skill_id"`
+	RegistryID        string `json:"registry_id"`
+	PackageID         string `json:"package_id"`
+	SkillID           string `json:"skill_id"`
+	WorkspaceTargetID string `json:"workspace_target_id,omitempty"`
 }
 
 // InstallPlugin godoc
@@ -289,7 +301,7 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 // @Tags supermarket
 // @Param bot_id path string true "Bot ID"
 // @Param payload body InstallSkillRequest true "Install skill request"
-// @Success 200 {object} map[string]bool
+// @Success 200 {object} InstallRegistrySkillResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
@@ -304,91 +316,11 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	skillID := strings.TrimSpace(req.SkillID)
-	if skillID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "skill_id is required")
-	}
-	if strings.Contains(skillID, "..") || strings.Contains(skillID, "/") {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid skill_id")
-	}
-
-	ctx := c.Request().Context()
-	client, err := h.containers.MCPClient(ctx, botID)
+	result, err := h.installRegistrySkill(c.Request().Context(), botID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
+		return err
 	}
-
-	downloadURL := h.baseURL + "/api/skills/" + skillID + "/download"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	resp, err := h.httpClient.Do(httpReq) //nolint:gosec // URL constructed from trusted config
-	if err != nil {
-		h.logger.Error("supermarket skill download failed", slog.String("url", downloadURL), slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("skill %q not found in supermarket", skillID))
-	}
-	if resp.StatusCode != http.StatusOK {
-		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
-	}
-
-	gz, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "invalid gzip response from supermarket")
-	}
-	defer func() { _ = gz.Close() }()
-
-	skillDir := path.Join(skillset.ManagedDir(), skillID)
-	if err := client.Mkdir(ctx, skillDir); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("mkdir failed: %v", err))
-	}
-
-	tr := tar.NewReader(gz)
-	filesWritten := 0
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("invalid tar: %v", err))
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
-		}
-
-		relativePath := strings.TrimPrefix(hdr.Name, skillID+"/")
-		if relativePath == "" || strings.Contains(relativePath, "..") {
-			continue
-		}
-
-		content, err := io.ReadAll(tr)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("read tar entry failed: %v", err))
-		}
-
-		filePath := path.Join(skillDir, relativePath)
-		dir := path.Dir(filePath)
-		if dir != skillDir {
-			_ = client.Mkdir(ctx, dir)
-		}
-
-		if err := client.WriteFile(ctx, filePath, content); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("write file %s failed: %v", relativePath, err))
-		}
-		filesWritten++
-	}
-
-	if filesWritten == 0 {
-		return echo.NewHTTPError(http.StatusBadGateway, "skill archive was empty")
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{"ok": true, "files_written": filesWritten})
+	return c.JSON(http.StatusOK, result)
 }
 
 // --- Supermarket upstream types (for swagger) ---
