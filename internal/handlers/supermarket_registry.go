@@ -31,6 +31,7 @@ const (
 	maxRegistrySkillArtifactCompressedBytes   = 25 * 1024 * 1024
 	maxRegistrySkillArtifactUncompressedBytes = 100 * 1024 * 1024
 	maxRegistrySkillArtifactFiles             = 10_000
+	maxRegistrySkillArtifactEntries           = 20_000
 	maxRegistrySkillMetadataBytes             = 2 * 1024 * 1024
 )
 
@@ -270,11 +271,18 @@ func (h *SupermarketHandler) proxySkillImage(c echo.Context, digest string) erro
 }
 
 func copySkillImageHeaders(target, source http.Header) {
-	for _, name := range []string{"Cache-Control", "Content-Security-Policy", "ETag", "X-Content-SHA256", "X-Content-Type-Options"} {
+	for _, name := range []string{"Cache-Control", "ETag", "X-Content-SHA256"} {
 		if value := source.Get(name); value != "" {
 			target.Set(name, value)
 		}
 	}
+	// These images are served unauthenticated on our own origin and may be SVG,
+	// which can carry script. Enforce a strict policy regardless of what the
+	// upstream sent: sandbox blocks script execution on direct navigation and
+	// nosniff prevents MIME confusion. Do not forward the upstream CSP — a laxer
+	// upstream value must never be able to weaken this.
+	target.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	target.Set("X-Content-Type-Options", "nosniff")
 }
 
 func requireRegistryComponent(value, field string) (string, error) {
@@ -516,6 +524,7 @@ func readRegistrySkillArchive(content []byte, installID string) (registrySkillAr
 	archive := registrySkillArchive{installID: installID}
 	seen := make(map[string]bool)
 	var totalSize int64
+	totalEntries := 0
 	hasManifest := false
 	tr := tar.NewReader(gz)
 	for {
@@ -525,6 +534,10 @@ func readRegistrySkillArchive(content []byte, installID string) (registrySkillAr
 		}
 		if err != nil {
 			return registrySkillArchive{}, fmt.Errorf("registry Skill Artifact contains invalid tar data: %w", err)
+		}
+		totalEntries++
+		if totalEntries > maxRegistrySkillArtifactEntries {
+			return registrySkillArchive{}, errors.New("registry Skill Artifact contains too many entries")
 		}
 		if header.Name == "" || path.IsAbs(header.Name) || strings.Contains(header.Name, `\`) {
 			return registrySkillArchive{}, fmt.Errorf("registry Skill Artifact contains unsafe path %q", header.Name)

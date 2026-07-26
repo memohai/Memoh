@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -201,6 +202,87 @@ func TestProxySkillImageVerifiesDigestAndHeaders(t *testing.T) {
 	})}
 	if err := handler.proxySkillImage(e.NewContext(request, httptest.NewRecorder()), digestText); err == nil {
 		t.Fatal("proxySkillImage() accepted content with the wrong digest")
+	}
+}
+
+func TestReadRegistrySkillArchiveRejectsEntryFlood(t *testing.T) {
+	installID := "registry+package+skill"
+	entries := []registrySkillTestEntry{
+		{name: installID + "/SKILL.md", content: validRegistrySkillManifest},
+	}
+	// Directory headers carry no body, so neither the file-count nor the
+	// uncompressed-size cap bounds them. Without a total-entry cap a tiny gzip of
+	// directory headers could expand into an unbounded seen map.
+	for i := 0; i <= maxRegistrySkillArtifactEntries; i++ {
+		entries = append(entries, registrySkillTestEntry{name: fmt.Sprintf("%s/dir%d/", installID, i), entryType: tar.TypeDir})
+	}
+	_, err := readRegistrySkillArchive(registrySkillTestArchive(t, entries), installID)
+	if err == nil || !strings.Contains(err.Error(), "too many entries") {
+		t.Fatalf("want too-many-entries rejection, got %v", err)
+	}
+}
+
+func TestProxySkillImageOverridesUpstreamSecurityHeaders(t *testing.T) {
+	content := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
+	digest := sha256.Sum256(content)
+	digestText := hex.EncodeToString(digest[:])
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			header := make(http.Header)
+			header.Set("Content-Type", "image/svg+xml")
+			// A compromised/misconfigured upstream sends a permissive CSP; the
+			// proxy must not forward it.
+			header.Set("Content-Security-Policy", "default-src *")
+			return &http.Response{
+				StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(content)),
+				ContentLength: int64(len(content)), Request: req, Header: header,
+			}, nil
+		})},
+	}
+	e := echo.New()
+	request := httptest.NewRequest(http.MethodGet, "/supermarket/skill-images/"+digestText, nil)
+	recorder := httptest.NewRecorder()
+	if err := handler.proxySkillImage(e.NewContext(request, recorder), digestText); err != nil {
+		t.Fatalf("proxySkillImage() error = %v", err)
+	}
+	if got := recorder.Header().Get("Content-Security-Policy"); !strings.Contains(got, "sandbox") || strings.Contains(got, "*") {
+		t.Fatalf("upstream CSP was not overridden: %q", got)
+	}
+	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+}
+
+func TestReadRegistrySkillArchiveRejectsMalformedFrontmatter(t *testing.T) {
+	installID := "registry+package+skill"
+	cases := map[string]string{
+		"missing closing fence": "---\nname: skill\n",
+		"not a mapping":         "---\n- a\n- b\n---\n# Body\n",
+		"missing frontmatter":   "# Body only\n",
+	}
+	for name, manifest := range cases {
+		t.Run(name, func(t *testing.T) {
+			entries := []registrySkillTestEntry{{name: installID + "/SKILL.md", content: manifest}}
+			if _, err := readRegistrySkillArchive(registrySkillTestArchive(t, entries), installID); err == nil {
+				t.Fatal("readRegistrySkillArchive() accepted malformed SKILL.md frontmatter")
+			}
+		})
+	}
+}
+
+func TestSupportsWorkspaceOSEdgeCases(t *testing.T) {
+	if supportsWorkspaceOS(nil, "darwin") {
+		t.Fatal("nil OS requirement must reject install")
+	}
+	if supportsWorkspaceOS([]string{}, "linux") {
+		t.Fatal("empty OS requirement must reject install")
+	}
+	if !supportsWorkspaceOS([]string{"DARWIN"}, "darwin") {
+		t.Fatal("OS requirement match must be case-insensitive")
+	}
+	if !supportsWorkspaceOS([]string{"win32"}, "Windows") {
+		t.Fatal("windows normalization must be case-insensitive")
 	}
 }
 
