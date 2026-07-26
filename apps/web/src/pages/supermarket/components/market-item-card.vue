@@ -45,11 +45,17 @@
       <p class="mt-1 line-clamp-2 min-h-8 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
         {{ description }}
       </p>
+      <div
+        v-if="$slots.meta"
+        class="mt-3 flex min-w-0 flex-wrap items-center gap-2"
+      >
+        <slot name="meta" />
+      </div>
     </div>
 
     <div
       v-if="$slots.actions"
-      class="shrink-0"
+      class="shrink-0 self-end sm:self-auto"
       @click.stop
       @keydown.stop
     >
@@ -63,7 +69,7 @@ import { ExternalLink } from 'lucide-vue-next'
 import { Card } from '@felinic/ui'
 
 // 整卡可点,hover 是刻意的 owner 级交互反馈(修掉 plugin 卡原本没有反馈的 bug)
-const rootClass = 'group flex cursor-pointer flex-row items-start gap-3 p-4 transition-colors hover:border-foreground/20 hover:bg-accent/20' /* ui-allow-style */
+const rootClass = 'group flex cursor-pointer flex-col items-stretch gap-3 p-4 transition-colors hover:border-foreground/20 hover:bg-accent/20 sm:flex-row sm:items-start' /* ui-allow-style */
 const homepageLinkClass = 'shrink-0 text-muted-foreground transition-colors hover:text-foreground' /* ui-allow-style */
 
 defineProps<{

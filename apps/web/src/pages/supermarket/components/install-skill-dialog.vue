@@ -22,15 +22,15 @@
           <p class="text-xs font-medium">
             {{ skill.name }}
           </p>
-          <p class="text-[11px] text-muted-foreground line-clamp-3">
+          <p class="line-clamp-3 text-xs text-muted-foreground">
             {{ skill.description }}
           </p>
-          <p
-            v-if="skill.files?.length"
-            class="text-[11px] text-muted-foreground"
+          <Badge
+            variant="outline"
+            size="sm"
           >
-            {{ $t('supermarket.files') }}: {{ skill.files.length }}
-          </p>
+            {{ registryName || skill.registry_id }}
+          </Badge>
         </div>
       </div>
       <DialogFooter>
@@ -60,18 +60,19 @@ import { useI18n } from 'vue-i18n'
 import { FieldStack, toast } from '@felinic/ui'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button,
+  Badge, Button,
 } from '@felinic/ui'
 import {
   postBotsByBotIdSupermarketInstallSkill,
-  type HandlersSupermarketSkillEntry,
+  type HandlersSupermarketCatalogSkill,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import BotSelect from '@/components/bot-select/index.vue'
 
 const props = defineProps<{
   open: boolean
-  skill: HandlersSupermarketSkillEntry | null
+  skill: HandlersSupermarketCatalogSkill | null
+  registryName?: string
 }>()
 
 const emit = defineEmits<{
@@ -92,13 +93,15 @@ watch(() => props.open, (open) => {
 })
 
 async function handleInstall() {
-  if (!selectedBotId.value || !props.skill?.id) return
+  if (!selectedBotId.value || !props.skill?.registry_id || !props.skill.package_id || !props.skill.skill_id) return
   installing.value = true
   try {
     await postBotsByBotIdSupermarketInstallSkill({
       path: { bot_id: selectedBotId.value },
       body: {
-        skill_id: props.skill.id,
+        registry_id: props.skill.registry_id,
+        package_id: props.skill.package_id,
+        skill_id: props.skill.skill_id,
       },
       throwOnError: true,
     })

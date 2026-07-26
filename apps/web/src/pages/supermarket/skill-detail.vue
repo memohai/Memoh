@@ -27,13 +27,16 @@
 
     <template v-else>
       <MarketDetailHeader
-        :name="skill.name || skill.id"
-        :tags="skill.metadata?.tags"
+        :name="skill.name || skill.skill_id"
+        :tags="skill.tags"
         @back="router.push({ name: 'supermarket' })"
         @install="installDialogOpen = true"
       >
         <template #icon>
-          <Zap class="size-8 text-muted-foreground" />
+          <SkillIcon
+            :icon="skill.icon"
+            variant="detail"
+          />
         </template>
       </MarketDetailHeader>
 
@@ -68,42 +71,40 @@
         </SettingsSection>
       </section>
 
-      <section
-        v-if="skill.content"
-        class="mt-8"
-      >
-        <h2 class="text-lg font-semibold">
-          {{ $t('supermarket.instructions') }}
-        </h2>
-        <pre class="mt-4 max-h-[420px] overflow-auto rounded-md border bg-muted/30 p-4 text-xs leading-6 whitespace-pre-wrap">{{ skill.content }}</pre>
-      </section>
-
       <section class="mt-10">
         <h2 class="text-lg font-semibold">
           {{ $t('supermarket.information') }}
         </h2>
         <div class="mt-4 grid gap-x-12 gap-y-5 md:grid-cols-2">
           <InfoItem
+            :label="$t('supermarket.registry')"
+            :value="registryName || skill.registry_id || $t('common.none')"
+          />
+          <InfoItem
+            :label="$t('supermarket.package')"
+            :value="skill.package_id || $t('common.none')"
+          />
+          <InfoItem
             :label="$t('supermarket.category')"
-            :value="$t('supermarket.skillsSection')"
+            :value="skill.category_name || skill.category || $t('common.none')"
           />
           <InfoItem
             :label="$t('supermarket.developer')"
-            :value="skill.metadata?.author?.name || $t('common.none')"
+            :value="skill.author?.name || $t('common.none')"
           />
           <InfoItem
-            :label="$t('supermarket.files')"
-            :value="String(skill.files?.length ?? 0)"
+            :label="$t('supermarket.supportedSystems')"
+            :value="supportedSystems"
           />
           <div
-            v-if="skill.metadata?.homepage"
+            v-if="skill.homepage"
             class="space-y-1"
           >
             <p class="text-sm text-muted-foreground">
               {{ $t('supermarket.links') }}
             </p>
             <a
-              :href="skill.metadata.homepage"
+              :href="skill.homepage"
               target="_blank"
               rel="noopener noreferrer"
               class="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
@@ -119,6 +120,7 @@
     <InstallSkillDialog
       v-model:open="installDialogOpen"
       :skill="skill"
+      :registry-name="registryName"
       @installed="loadSkill"
     />
   </div>
@@ -128,34 +130,66 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, ExternalLink, FileText, Zap } from 'lucide-vue-next'
-import { Button, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
-import { getSupermarketSkillsById, type HandlersSupermarketSkillEntry } from '@memohai/sdk'
+import { ArrowLeft, ExternalLink, FileText } from 'lucide-vue-next'
+import { Button, toast } from '@felinic/ui'
+import {
+  getSupermarketRegistries,
+  getSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillId,
+  type HandlersSupermarketCatalogSkill,
+} from '@memohai/sdk'
+import SettingsRow from '@/components/settings/row.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallSkillDialog from './components/install-skill-dialog.vue'
 import InfoItem from './components/info-item.vue'
 import MarketDetailHeader from './components/market-detail-header.vue'
+import SkillIcon from './components/skill-icon.vue'
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 
-const skill = ref<HandlersSupermarketSkillEntry | null>(null)
+const skill = ref<HandlersSupermarketCatalogSkill | null>(null)
+const registryName = ref('')
 const loading = ref(false)
 const installDialogOpen = ref(false)
 
+const registryId = computed(() => String(route.params.registryId || ''))
+const packageId = computed(() => String(route.params.packageId || ''))
 const skillId = computed(() => String(route.params.skillId || ''))
+const skillIdentity = computed(() => `${registryId.value}/${packageId.value}/${skillId.value}`)
+const supportedSystems = computed(() => {
+  const names: Record<string, string> = {
+    darwin: 'macOS',
+    linux: 'Linux',
+    win32: 'Windows',
+  }
+  return skill.value?.runtime_requirements?.os
+    ?.map(os => names[os] || os)
+    .join(', ') || t('common.none')
+})
 
 async function loadSkill() {
-  if (!skillId.value) return
+  if (!registryId.value || !packageId.value || !skillId.value) return
   loading.value = true
   try {
-    const { data } = await getSupermarketSkillsById({
-      path: { id: skillId.value },
-      throwOnError: true,
-    })
+    const [{ data }, registryResponse] = await Promise.all([
+      getSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillId({
+        path: {
+          registry_id: registryId.value,
+          package_id: packageId.value,
+          skill_id: skillId.value,
+        },
+        throwOnError: true,
+      }),
+      getSupermarketRegistries({ throwOnError: true }).catch(() => null),
+    ])
+    registryName.value = registryResponse?.data.data
+      ?.find(registry => registry.id === registryId.value)?.name || registryId.value
     skill.value = data
   } catch (error) {
+    registryName.value = registryId.value
     skill.value = null
     toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
   } finally {
@@ -164,5 +198,5 @@ async function loadSkill() {
 }
 
 onMounted(loadSkill)
-watch(skillId, loadSkill)
+watch(skillIdentity, loadSkill)
 </script>

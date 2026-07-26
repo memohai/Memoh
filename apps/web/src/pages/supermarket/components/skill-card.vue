@@ -2,11 +2,21 @@
   <MarketItemCard
     :name="skill.name"
     :description="skill.description"
-    :homepage="skill.metadata?.homepage"
+    :homepage="skill.homepage"
     @open="openDetail"
   >
     <template #leading>
-      <Zap class="size-4 text-muted-foreground" />
+      <SkillIcon :icon="skill.icon" />
+    </template>
+
+    <template #meta>
+      <Badge
+        variant="outline"
+        size="sm"
+        class="max-w-full truncate"
+      >
+        {{ registryName || skill.registry_id }}
+      </Badge>
     </template>
 
     <template #actions>
@@ -24,23 +34,32 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { Zap, Download } from 'lucide-vue-next'
-import { Button } from '@felinic/ui'
-import type { HandlersSupermarketSkillEntry } from '@memohai/sdk'
+import { Download } from 'lucide-vue-next'
+import { Badge, Button } from '@felinic/ui'
+import type { HandlersSupermarketCatalogSkill } from '@memohai/sdk'
 import MarketItemCard from './market-item-card.vue'
+import SkillIcon from './skill-icon.vue'
 
 const props = defineProps<{
-  skill: HandlersSupermarketSkillEntry
+  skill: HandlersSupermarketCatalogSkill
+  registryName?: string
 }>()
 
 defineEmits<{
-  'install': [skill: HandlersSupermarketSkillEntry]
+  'install': [skill: HandlersSupermarketCatalogSkill]
 }>()
 
 const router = useRouter()
 
 function openDetail() {
-  if (!props.skill.id) return
-  router.push({ name: 'supermarket-skill-detail', params: { skillId: props.skill.id } })
+  if (!props.skill.registry_id || !props.skill.package_id || !props.skill.skill_id) return
+  router.push({
+    name: 'supermarket-skill-detail',
+    params: {
+      registryId: props.skill.registry_id,
+      packageId: props.skill.package_id,
+      skillId: props.skill.skill_id,
+    },
+  })
 }
 </script>
