@@ -178,8 +178,8 @@
               :message="$t('bots.skills.deleteConfirm')"
               :cancel-text="$t('common.cancel')"
               :confirm-text="$t('common.confirm')"
-              :loading="isDeleting && deletingName === skill.name"
-              @confirm="handleDelete(skill.name)"
+              :loading="isDeleting && deletingPath === skill.source_path"
+              @confirm="handleDelete(skill)"
             >
               <template #trigger>
                 <Button
@@ -399,7 +399,7 @@ const SKILL_DISCOVERY_ROOTS_METADATA_KEY = 'skill_discovery_roots'
 const isLoading = ref(false)
 const isSaving = ref(false)
 const isDeleting = ref(false)
-const deletingName = ref('')
+const deletingPath = ref('')
 const isActioning = ref(false)
 const actionTargetPath = ref('')
 const actionName = ref('')
@@ -412,6 +412,7 @@ const savedDiscoveryRoots = ref<string[]>([...DEFAULT_DISCOVERY_ROOTS])
 const isDialogOpen = ref(false)
 const isEditing = ref(false)
 const draftRaw = ref('')
+const editingSourcePath = ref('')
 
 const SKILL_TEMPLATE = `---
 name: my-skill
@@ -588,12 +589,14 @@ function closeDiscoveryDialog() {
 
 function handleCreate() {
   isEditing.value = false
+  editingSourcePath.value = ''
   draftRaw.value = SKILL_TEMPLATE
   isDialogOpen.value = true
 }
 
-function handleEdit(skill: HandlersSkillItem) {
+function handleEdit(skill: SkillItem) {
   isEditing.value = true
+  editingSourcePath.value = skill.source_path || ''
   draftRaw.value = skill.raw || ''
   isDialogOpen.value = true
 }
@@ -686,11 +689,15 @@ async function handleSave() {
       path: { bot_id: props.botId },
       body: {
         skills: [draftRaw.value],
+        ...(isEditing.value && editingSourcePath.value
+          ? { source_path: editingSourcePath.value }
+          : {}),
       },
       throwOnError: true,
     })
     toast.success(t('bots.skills.saveSuccess'))
     isDialogOpen.value = false
+    editingSourcePath.value = ''
     await fetchSkills()
     invalidateSidebarSkills()
   } catch (error) {
@@ -735,15 +742,18 @@ async function handleSaveDiscoveryRoots() {
   }
 }
 
-async function handleDelete(name?: string) {
-  if (!name) return
+async function handleDelete(skill: SkillItem) {
+  // Deleting by source_path keeps registry skills (nested under their registry
+  // and package) distinct from a flat managed skill that shares the short name.
+  const sourcePath = skill.source_path
+  if (!sourcePath) return
   isDeleting.value = true
-  deletingName.value = name
+  deletingPath.value = sourcePath
   try {
     await deleteBotsByBotIdContainerSkills({
       path: { bot_id: props.botId },
       body: {
-        names: [name],
+        source_paths: [sourcePath],
       },
       throwOnError: true,
     })
@@ -754,7 +764,7 @@ async function handleDelete(name?: string) {
     toast.error(resolveApiErrorMessage(error, t('bots.skills.deleteFailed')))
   } finally {
     isDeleting.value = false
-    deletingName.value = ''
+    deletingPath.value = ''
   }
 }
 
