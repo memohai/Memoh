@@ -26,10 +26,11 @@ const (
 	PluginDirPath             = config.DefaultDataMount + "/.memoh/plugins"
 	SkillDiscoveryRootsEnvVar = "MEMOH_SKILL_DISCOVERY_ROOTS"
 
-	SourceKindManaged = "managed"
-	SourceKindLegacy  = "legacy"
-	SourceKindCompat  = "compat"
-	SourceKindPlugin  = "plugin"
+	SourceKindManaged  = "managed"
+	SourceKindLegacy   = "legacy"
+	SourceKindCompat   = "compat"
+	SourceKindPlugin   = "plugin"
+	SourceKindRegistry = "registry"
 
 	StateEffective = "effective"
 	StateShadowed  = "shadowed"
@@ -123,6 +124,221 @@ func ManagedSkillDirForName(name string) (string, error) {
 	return dirPath, nil
 }
 
+// RegistrySkillDirForIDs returns the install path for one Registry Skill:
+// /data/skills/<registry_id>/<package_id>/<skill_id>.
+func RegistrySkillDirForIDs(registryID, packageID, skillID string) (string, error) {
+	registryID = strings.TrimSpace(registryID)
+	packageID = strings.TrimSpace(packageID)
+	skillID = strings.TrimSpace(skillID)
+	if !IsValidName(registryID) || !IsValidName(packageID) || !IsValidName(skillID) {
+		return "", bridge.ErrBadRequest
+	}
+	dirPath := path.Clean(path.Join(ManagedDirPath, registryID, packageID, skillID))
+	if !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
+		return "", bridge.ErrBadRequest
+	}
+	return dirPath, nil
+}
+
+// RegistryPackageSkillsDirForIDs is the discovery root for one registry package
+// (skills are direct children, matching plugin skill roots).
+func RegistryPackageSkillsDirForIDs(registryID, packageID string) (string, error) {
+	registryID = strings.TrimSpace(registryID)
+	packageID = strings.TrimSpace(packageID)
+	if !IsValidName(registryID) || !IsValidName(packageID) {
+		return "", bridge.ErrBadRequest
+	}
+	dirPath := path.Clean(path.Join(ManagedDirPath, registryID, packageID))
+	if !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
+		return "", bridge.ErrBadRequest
+	}
+	return dirPath, nil
+}
+
+func RegistryDirForID(registryID string) (string, error) {
+	registryID = strings.TrimSpace(registryID)
+	if !IsValidName(registryID) {
+		return "", bridge.ErrBadRequest
+	}
+	dirPath := path.Clean(path.Join(ManagedDirPath, registryID))
+	if dirPath == ManagedDirPath || !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
+		return "", bridge.ErrBadRequest
+	}
+	return dirPath, nil
+}
+
+// UpsertPlan is the filesystem plan for creating or updating one skill.
+type UpsertPlan struct {
+	WritePath string // absolute SKILL.md path to write
+	RemoveDir string // optional managed skill dir to delete after a successful write (rename)
+}
+
+// BuiltinSkillDirForName returns /data/.memoh/skills/<name> for Memoh built-in skills.
+func BuiltinSkillDirForName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if !IsValidName(name) {
+		return "", bridge.ErrBadRequest
+	}
+	dirPath := path.Clean(path.Join(IndexDirPath, name))
+	if dirPath == IndexDirPath || !strings.HasPrefix(dirPath, IndexDirPath+"/") {
+		return "", bridge.ErrBadRequest
+	}
+	return dirPath, nil
+}
+
+// PlanUpsert resolves where to write skill content.
+//
+// sourcePath is the existing SKILL.md being edited (empty for create):
+//   - flat managed /data/skills/<name>/SKILL.md: write by frontmatter name; remove old dir on rename
+//   - built-in /data/.memoh/skills/<name>/SKILL.md: write under IndexDirPath; remove old dir on rename
+//   - registry /data/skills/<registry>/<package>/<skill>/SKILL.md: write in place
+//   - anything else (compat/plugin/…): create/overwrite a managed override by name
+func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
+	parsed := ParseFile(raw, "")
+	if !IsValidName(parsed.Name) {
+		return UpsertPlan{}, bridge.ErrBadRequest
+	}
+	managedDir, err := ManagedSkillDirForName(parsed.Name)
+	if err != nil {
+		return UpsertPlan{}, err
+	}
+	managedWrite := path.Join(managedDir, "SKILL.md")
+
+	sourcePath = strings.TrimSpace(sourcePath)
+	if sourcePath == "" {
+		return UpsertPlan{WritePath: managedWrite}, nil
+	}
+	sourcePath = path.Clean(sourcePath)
+	if path.Base(sourcePath) != "SKILL.md" || !path.IsAbs(sourcePath) {
+		return UpsertPlan{}, bridge.ErrBadRequest
+	}
+
+	if oldName, ok := FlatManagedSkillName(sourcePath); ok {
+		plan := UpsertPlan{WritePath: managedWrite}
+		if oldName != parsed.Name {
+			oldDir, dirErr := ManagedSkillDirForName(oldName)
+			if dirErr != nil {
+				return UpsertPlan{}, dirErr
+			}
+			plan.RemoveDir = oldDir
+		}
+		return plan, nil
+	}
+	if oldName, ok := BuiltinSkillName(sourcePath); ok {
+		builtinDir, dirErr := BuiltinSkillDirForName(parsed.Name)
+		if dirErr != nil {
+			return UpsertPlan{}, dirErr
+		}
+		plan := UpsertPlan{WritePath: path.Join(builtinDir, "SKILL.md")}
+		if oldName != parsed.Name {
+			oldDir, oldErr := BuiltinSkillDirForName(oldName)
+			if oldErr != nil {
+				return UpsertPlan{}, oldErr
+			}
+			plan.RemoveDir = oldDir
+		}
+		return plan, nil
+	}
+	if IsRegistrySkillPath(sourcePath) {
+		return UpsertPlan{WritePath: sourcePath}, nil
+	}
+	// Discovered sources: managed override by frontmatter name (leave original in place).
+	return UpsertPlan{WritePath: managedWrite}, nil
+}
+
+// DeletableSkillDirForSourcePath resolves the directory to remove when deleting
+// the skill at sourcePath. Only Memoh-managed layouts are deletable: flat
+// /data/skills/<name>, built-in /data/.memoh/skills/<name>, and registry
+// /data/skills/<registry>/<package>/<skill>. Discovered sources (compat roots,
+// plugin-owned skills) are rejected.
+func DeletableSkillDirForSourcePath(sourcePath string) (string, error) {
+	sourcePath = path.Clean(strings.TrimSpace(sourcePath))
+	if !path.IsAbs(sourcePath) || path.Base(sourcePath) != "SKILL.md" {
+		return "", bridge.ErrBadRequest
+	}
+	if name, ok := FlatManagedSkillName(sourcePath); ok {
+		return ManagedSkillDirForName(name)
+	}
+	if name, ok := BuiltinSkillName(sourcePath); ok {
+		return BuiltinSkillDirForName(name)
+	}
+	if IsRegistrySkillPath(sourcePath) {
+		return path.Dir(sourcePath), nil
+	}
+	return "", bridge.ErrBadRequest
+}
+
+// PrunableRegistryDirs returns the package and registry directories above a
+// deleted registry skill, so callers can drop them once they are empty.
+func PrunableRegistryDirs(skillDir string) []string {
+	skillDir = path.Clean(strings.TrimSpace(skillDir))
+	packageDir := path.Dir(skillDir)
+	registryDir := path.Dir(packageDir)
+	if path.Dir(registryDir) != ManagedDirPath {
+		return nil
+	}
+	if !IsValidName(path.Base(skillDir)) ||
+		!IsValidName(path.Base(packageDir)) ||
+		!IsValidName(path.Base(registryDir)) {
+		return nil
+	}
+	return []string{packageDir, registryDir}
+}
+
+// FlatManagedSkillName reports the skill directory name for
+// /data/skills/<name>/SKILL.md.
+func FlatManagedSkillName(skillMDPath string) (string, bool) {
+	skillMDPath = path.Clean(strings.TrimSpace(skillMDPath))
+	if path.Base(skillMDPath) != "SKILL.md" {
+		return "", false
+	}
+	dir := path.Dir(skillMDPath)
+	if path.Dir(dir) != ManagedDirPath {
+		return "", false
+	}
+	name := path.Base(dir)
+	if !IsValidName(name) {
+		return "", false
+	}
+	return name, true
+}
+
+// BuiltinSkillName reports the skill directory name for
+// /data/.memoh/skills/<name>/SKILL.md.
+func BuiltinSkillName(skillMDPath string) (string, bool) {
+	skillMDPath = path.Clean(strings.TrimSpace(skillMDPath))
+	if path.Base(skillMDPath) != "SKILL.md" {
+		return "", false
+	}
+	dir := path.Dir(skillMDPath)
+	if path.Dir(dir) != IndexDirPath {
+		return "", false
+	}
+	name := path.Base(dir)
+	if !IsValidName(name) {
+		return "", false
+	}
+	return name, true
+}
+
+// IsRegistrySkillPath reports whether path is
+// /data/skills/<registry_id>/<package_id>/<skill_id>/SKILL.md.
+func IsRegistrySkillPath(skillMDPath string) bool {
+	skillMDPath = path.Clean(strings.TrimSpace(skillMDPath))
+	if path.Base(skillMDPath) != "SKILL.md" {
+		return false
+	}
+	skillDir := path.Dir(skillMDPath)
+	packageDir := path.Dir(skillDir)
+	registryDir := path.Dir(packageDir)
+	if path.Dir(registryDir) != ManagedDirPath {
+		return false
+	}
+	return IsValidName(path.Base(skillDir)) &&
+		IsValidName(path.Base(packageDir)) &&
+		IsValidName(path.Base(registryDir))
+}
+
 func PluginSkillsDirForID(pluginID string) (string, error) {
 	pluginRoot, err := PluginDirForID(pluginID)
 	if err != nil {
@@ -199,13 +415,95 @@ func DiscoveryRootsWithPluginRoots(rawCompatRoots []string, rawPluginRoots []str
 	return roots
 }
 
+func appendDiscoveryRoots(roots []Root, extra ...Root) []Root {
+	if len(extra) == 0 {
+		return roots
+	}
+	seen := make(map[string]struct{}, len(roots)+len(extra))
+	for _, root := range roots {
+		seen[root.Path] = struct{}{}
+	}
+	for _, root := range extra {
+		if root.Path == "" {
+			continue
+		}
+		if _, ok := seen[root.Path]; ok {
+			continue
+		}
+		seen[root.Path] = struct{}{}
+		roots = append(roots, root)
+	}
+	return roots
+}
+
+// discoverRegistryPackageRoots walks /data/skills/<registry>/<package> and
+// returns each package directory as a skill discovery root. Flat managed skills
+// (/data/skills/<name>/SKILL.md) are skipped.
+func discoverRegistryPackageRoots(ctx context.Context, client fileClient) []Root {
+	if client == nil {
+		return nil
+	}
+	registries, err := client.ListDirAll(ctx, ManagedDirPath, false)
+	if err != nil {
+		return nil
+	}
+	slices.SortFunc(registries, func(a, b *pb.FileEntry) int {
+		return strings.Compare(a.GetPath(), b.GetPath())
+	})
+	roots := make([]Root, 0)
+	for _, registryEntry := range registries {
+		if !registryEntry.GetIsDir() {
+			continue
+		}
+		registryID := path.Base(registryEntry.GetPath())
+		if !IsValidName(registryID) {
+			continue
+		}
+		registryPath, err := RegistryDirForID(registryID)
+		if err != nil {
+			continue
+		}
+		// Flat managed skill: /data/skills/<name>/SKILL.md
+		if _, err := readRawFile(ctx, client, path.Join(registryPath, "SKILL.md")); err == nil {
+			continue
+		}
+		packages, err := client.ListDirAll(ctx, registryPath, false)
+		if err != nil {
+			continue
+		}
+		slices.SortFunc(packages, func(a, b *pb.FileEntry) int {
+			return strings.Compare(a.GetPath(), b.GetPath())
+		})
+		for _, packageEntry := range packages {
+			if !packageEntry.GetIsDir() {
+				continue
+			}
+			packageID := path.Base(packageEntry.GetPath())
+			if !IsValidName(packageID) {
+				continue
+			}
+			packagePath, err := RegistryPackageSkillsDirForIDs(registryID, packageID)
+			if err != nil {
+				continue
+			}
+			roots = append(roots, Root{
+				Path:    packagePath,
+				Kind:    SourceKindRegistry,
+				Managed: true,
+			})
+		}
+	}
+	return roots
+}
+
 func List(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
 	return ListWithPluginRoots(ctx, client, rawCompatRoots, nil)
 }
 
 func ListWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, error) {
 	idx := readIndex(ctx, client)
-	items := scan(ctx, client, DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots))
+	roots := appendDiscoveryRoots(DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots), discoverRegistryPackageRoots(ctx, client)...)
+	items := scan(ctx, client, roots)
 	resolved := resolve(items, idx.Overrides)
 	writeIndex(ctx, client, idx.withItems(resolved))
 	return resolved, nil
@@ -261,7 +559,7 @@ func computeRuntimeUsability(entry Entry) (bool, string) {
 		return false, "content"
 	}
 	switch entry.SourceKind {
-	case SourceKindManaged, SourceKindLegacy, SourceKindCompat, SourceKindPlugin:
+	case SourceKindManaged, SourceKindLegacy, SourceKindCompat, SourceKindPlugin, SourceKindRegistry:
 	default:
 		return false, "source_kind"
 	}
@@ -314,7 +612,7 @@ func ApplyActionWithPluginRoots(ctx context.Context, client fileClient, rawCompa
 		return bridge.ErrBadRequest
 	}
 
-	roots := DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots)
+	roots := appendDiscoveryRoots(DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots), discoverRegistryPackageRoots(ctx, client)...)
 	switch strings.TrimSpace(req.Action) {
 	case ActionDisable:
 		idx := readIndex(ctx, client)
@@ -395,7 +693,7 @@ func normalizeCompatDiscoveryRoots(paths []string) []string {
 		if !strings.HasPrefix(p, "/") {
 			continue
 		}
-		if p == ManagedDirPath || p == IndexDirPath || p == LegacyDirPath {
+		if p == ManagedDirPath || p == IndexDirPath || p == LegacyDirPath || p == PluginDirPath {
 			continue
 		}
 		if _, ok := seen[p]; ok {

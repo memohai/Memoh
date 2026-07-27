@@ -17,7 +17,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func TestReadRegistrySkillArchiveRewritesNamespacedManifest(t *testing.T) {
+func TestReadRegistrySkillArchivePreservesManifestName(t *testing.T) {
 	installID := "registry+package+skill"
 	archive, err := readRegistrySkillArchive(registrySkillTestArchive(t, []registrySkillTestEntry{
 		{name: installID + "/SKILL.md", content: "---\nname: skill\ndescription: Demo\n---\n\n# Demo\n"},
@@ -30,8 +30,11 @@ func TestReadRegistrySkillArchiveRewritesNamespacedManifest(t *testing.T) {
 		t.Fatalf("files = %d, want 2", len(archive.files))
 	}
 	manifest := registrySkillArchiveFileByPath(t, archive, "SKILL.md")
-	if !strings.Contains(string(manifest.content), "name: "+installID) {
-		t.Fatalf("manifest did not receive namespaced name:\n%s", manifest.content)
+	if !strings.Contains(string(manifest.content), "name: skill") {
+		t.Fatalf("manifest name should stay original:\n%s", manifest.content)
+	}
+	if strings.Contains(string(manifest.content), "name: "+installID) {
+		t.Fatalf("manifest should not be rewritten to install_id:\n%s", manifest.content)
 	}
 	if !strings.Contains(string(manifest.content), "# Demo") {
 		t.Fatalf("manifest body was not preserved:\n%s", manifest.content)
@@ -115,15 +118,6 @@ func TestValidateRegistrySkillRequiresNamespacedIdentity(t *testing.T) {
 	skill.InstallID = "skill"
 	if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
 		t.Fatal("validateRegistrySkill(unnamespaced) error = nil")
-	}
-}
-
-func TestSupportsWorkspaceOSNormalizesWindows(t *testing.T) {
-	if !supportsWorkspaceOS([]string{"win32"}, "windows") {
-		t.Fatal("windows workspace should satisfy win32 requirement")
-	}
-	if supportsWorkspaceOS([]string{"darwin"}, "linux") {
-		t.Fatal("linux workspace should not satisfy darwin requirement")
 	}
 }
 
@@ -268,21 +262,6 @@ func TestReadRegistrySkillArchiveRejectsMalformedFrontmatter(t *testing.T) {
 				t.Fatal("readRegistrySkillArchive() accepted malformed SKILL.md frontmatter")
 			}
 		})
-	}
-}
-
-func TestSupportsWorkspaceOSEdgeCases(t *testing.T) {
-	if supportsWorkspaceOS(nil, "darwin") {
-		t.Fatal("nil OS requirement must reject install")
-	}
-	if supportsWorkspaceOS([]string{}, "linux") {
-		t.Fatal("empty OS requirement must reject install")
-	}
-	if !supportsWorkspaceOS([]string{"DARWIN"}, "darwin") {
-		t.Fatal("OS requirement match must be case-insensitive")
-	}
-	if !supportsWorkspaceOS([]string{"win32"}, "Windows") {
-		t.Fatal("windows normalization must be case-insensitive")
 	}
 }
 

@@ -187,6 +187,126 @@ func TestManagedSkillDirForNameRejectsEscapingNames(t *testing.T) {
 	}
 }
 
+func TestDeletableSkillDirForSourcePath(t *testing.T) {
+	flat, err := DeletableSkillDirForSourcePath(pathJoin(ManagedDirPath, "alpha", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("DeletableSkillDirForSourcePath(flat) error = %v", err)
+	}
+	if flat != pathJoin(ManagedDirPath, "alpha") {
+		t.Fatalf("DeletableSkillDirForSourcePath(flat) = %q", flat)
+	}
+
+	builtin, err := DeletableSkillDirForSourcePath(pathJoin(IndexDirPath, "skill-creator", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("DeletableSkillDirForSourcePath(builtin) error = %v", err)
+	}
+	if builtin != pathJoin(IndexDirPath, "skill-creator") {
+		t.Fatalf("DeletableSkillDirForSourcePath(builtin) = %q", builtin)
+	}
+
+	registrySkillDir := pathJoin(ManagedDirPath, "openai-api-curated", "docs", "xlsx")
+	registry, err := DeletableSkillDirForSourcePath(pathJoin(registrySkillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("DeletableSkillDirForSourcePath(registry) error = %v", err)
+	}
+	if registry != registrySkillDir {
+		t.Fatalf("DeletableSkillDirForSourcePath(registry) = %q", registry)
+	}
+
+	for _, sourcePath := range []string{
+		"",
+		"relative/SKILL.md",
+		pathJoin(ManagedDirPath, "alpha", "README.md"),
+		"/data/.agents/skills/alpha/SKILL.md",
+		pathJoin(PluginDirPath, "github", "skills", "review", "SKILL.md"),
+		pathJoin(ManagedDirPath, "..", "escape", "SKILL.md"),
+	} {
+		if _, err := DeletableSkillDirForSourcePath(sourcePath); !errors.Is(err, bridge.ErrBadRequest) {
+			t.Fatalf("DeletableSkillDirForSourcePath(%q) err = %v, want ErrBadRequest", sourcePath, err)
+		}
+	}
+}
+
+func TestPrunableRegistryDirs(t *testing.T) {
+	got := PrunableRegistryDirs(pathJoin(ManagedDirPath, "openai-api-curated", "docs", "xlsx"))
+	want := []string{
+		pathJoin(ManagedDirPath, "openai-api-curated", "docs"),
+		pathJoin(ManagedDirPath, "openai-api-curated"),
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("PrunableRegistryDirs(registry) = %+v, want %+v", got, want)
+	}
+	if got := PrunableRegistryDirs(pathJoin(ManagedDirPath, "alpha")); got != nil {
+		t.Fatalf("PrunableRegistryDirs(flat) = %+v, want nil", got)
+	}
+}
+
+func TestPlanUpsertCreateAndRenameAndRegistryInPlace(t *testing.T) {
+	create, err := PlanUpsert("---\nname: alpha\ndescription: A\n---\n\n# A\n", "")
+	if err != nil {
+		t.Fatalf("PlanUpsert(create) error = %v", err)
+	}
+	if create.WritePath != pathJoin(ManagedDirPath, "alpha", "SKILL.md") || create.RemoveDir != "" {
+		t.Fatalf("PlanUpsert(create) = %+v", create)
+	}
+
+	same, err := PlanUpsert("---\nname: alpha\ndescription: A\n---\n\n# A\n", pathJoin(ManagedDirPath, "alpha", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("PlanUpsert(same) error = %v", err)
+	}
+	if same.WritePath != pathJoin(ManagedDirPath, "alpha", "SKILL.md") || same.RemoveDir != "" {
+		t.Fatalf("PlanUpsert(same) = %+v", same)
+	}
+
+	rename, err := PlanUpsert("---\nname: beta\ndescription: B\n---\n\n# B\n", pathJoin(ManagedDirPath, "alpha", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("PlanUpsert(rename) error = %v", err)
+	}
+	if rename.WritePath != pathJoin(ManagedDirPath, "beta", "SKILL.md") {
+		t.Fatalf("PlanUpsert(rename).WritePath = %q", rename.WritePath)
+	}
+	if rename.RemoveDir != pathJoin(ManagedDirPath, "alpha") {
+		t.Fatalf("PlanUpsert(rename).RemoveDir = %q", rename.RemoveDir)
+	}
+
+	registryPath := pathJoin(ManagedDirPath, "openai-api-curated", "docs", "xlsx", "SKILL.md")
+	registry, err := PlanUpsert("---\nname: xlsx\ndescription: Sheet\n---\n\n# Sheet\n", registryPath)
+	if err != nil {
+		t.Fatalf("PlanUpsert(registry) error = %v", err)
+	}
+	if registry.WritePath != registryPath || registry.RemoveDir != "" {
+		t.Fatalf("PlanUpsert(registry) = %+v", registry)
+	}
+
+	builtinPath := pathJoin(IndexDirPath, "skill-creator", "SKILL.md")
+	builtinSame, err := PlanUpsert("---\nname: skill-creator\ndescription: Creator\n---\n\n# Creator\n", builtinPath)
+	if err != nil {
+		t.Fatalf("PlanUpsert(builtin same) error = %v", err)
+	}
+	if builtinSame.WritePath != builtinPath || builtinSame.RemoveDir != "" {
+		t.Fatalf("PlanUpsert(builtin same) = %+v", builtinSame)
+	}
+
+	builtinRename, err := PlanUpsert("---\nname: skill-builder\ndescription: Builder\n---\n\n# Builder\n", builtinPath)
+	if err != nil {
+		t.Fatalf("PlanUpsert(builtin rename) error = %v", err)
+	}
+	if builtinRename.WritePath != pathJoin(IndexDirPath, "skill-builder", "SKILL.md") {
+		t.Fatalf("PlanUpsert(builtin rename).WritePath = %q", builtinRename.WritePath)
+	}
+	if builtinRename.RemoveDir != pathJoin(IndexDirPath, "skill-creator") {
+		t.Fatalf("PlanUpsert(builtin rename).RemoveDir = %q", builtinRename.RemoveDir)
+	}
+
+	override, err := PlanUpsert("---\nname: alpha\ndescription: A\n---\n\n# A\n", "/data/.agents/skills/alpha/SKILL.md")
+	if err != nil {
+		t.Fatalf("PlanUpsert(override) error = %v", err)
+	}
+	if override.WritePath != pathJoin(ManagedDirPath, "alpha", "SKILL.md") || override.RemoveDir != "" {
+		t.Fatalf("PlanUpsert(override) = %+v", override)
+	}
+}
+
 func TestPluginPathsForIDRejectEscapingIDs(t *testing.T) {
 	for _, id := range []string{".", "..", ".plugin", "alpha..beta", "alpha/beta"} {
 		for name, fn := range map[string]func(string) (string, error){
@@ -228,6 +348,70 @@ func TestPluginPathsForIDRejectEscapingIDs(t *testing.T) {
 	}
 	if gotScripts != pathJoin(PluginDirPath, "github", "scripts") {
 		t.Fatalf("PluginScriptsDirForID(valid) = %q, want %q", gotScripts, pathJoin(PluginDirPath, "github", "scripts"))
+	}
+}
+
+func TestRegistrySkillPaths(t *testing.T) {
+	for _, tc := range []struct {
+		registryID, packageID, skillID string
+	}{
+		{".", "pkg", "skill"},
+		{"reg", "..", "skill"},
+		{"reg", "pkg", "alpha/beta"},
+		{"reg", "pkg", ".hidden"},
+	} {
+		if _, err := RegistrySkillDirForIDs(tc.registryID, tc.packageID, tc.skillID); !errors.Is(err, bridge.ErrBadRequest) {
+			t.Fatalf("RegistrySkillDirForIDs(%q,%q,%q) err = %v, want ErrBadRequest", tc.registryID, tc.packageID, tc.skillID, err)
+		}
+	}
+
+	dirPath, err := RegistrySkillDirForIDs("openai-api-curated", "docs", "xlsx")
+	if err != nil {
+		t.Fatalf("RegistrySkillDirForIDs(valid) error = %v", err)
+	}
+	want := pathJoin(ManagedDirPath, "openai-api-curated", "docs", "xlsx")
+	if dirPath != want {
+		t.Fatalf("RegistrySkillDirForIDs(valid) = %q, want %q", dirPath, want)
+	}
+
+	packagePath, err := RegistryPackageSkillsDirForIDs("openai-api-curated", "docs")
+	if err != nil {
+		t.Fatalf("RegistryPackageSkillsDirForIDs(valid) error = %v", err)
+	}
+	wantPackage := pathJoin(ManagedDirPath, "openai-api-curated", "docs")
+	if packagePath != wantPackage {
+		t.Fatalf("RegistryPackageSkillsDirForIDs(valid) = %q, want %q", packagePath, wantPackage)
+	}
+}
+
+func TestListDiscoversRegistrySkillsWithoutRenaming(t *testing.T) {
+	client := newFakeClient()
+	packagePath := pathJoin(ManagedDirPath, "openai-api-curated", "docs")
+	skillPath := pathJoin(packagePath, "xlsx")
+	client.listings[ManagedDirPath] = []*pb.FileEntry{{Path: "openai-api-curated", IsDir: true}}
+	client.listings[pathJoin(ManagedDirPath, "openai-api-curated")] = []*pb.FileEntry{{Path: "docs", IsDir: true}}
+	client.listings[packagePath] = []*pb.FileEntry{{Path: "xlsx", IsDir: true}}
+	client.files[pathJoin(skillPath, "SKILL.md")] = "---\nname: xlsx\ndescription: Spreadsheet helper\n---\n\n# XLSX\n"
+
+	items, err := ListWithPluginRoots(context.Background(), client, []string{}, nil)
+	if err != nil {
+		t.Fatalf("ListWithPluginRoots() error = %v", err)
+	}
+	got, ok := findBySourcePath(items, pathJoin(skillPath, "SKILL.md"))
+	if !ok {
+		t.Fatalf("registry skill not discovered: %+v", items)
+	}
+	if got.Name != "xlsx" {
+		t.Fatalf("name = %q, want xlsx", got.Name)
+	}
+	if got.SourceKind != SourceKindRegistry {
+		t.Fatalf("source_kind = %q, want %q", got.SourceKind, SourceKindRegistry)
+	}
+	if !got.Managed {
+		t.Fatal("registry skill should be managed")
+	}
+	if got.State != StateEffective {
+		t.Fatalf("state = %q, want %q", got.State, StateEffective)
 	}
 }
 
@@ -314,7 +498,8 @@ func TestListScansConfiguredDiscoveryRootsInOrder(t *testing.T) {
 		t.Fatalf("List() items = %+v, want managed alpha only", items)
 	}
 
-	wantCalls := make([]string, 0, len(DiscoveryRoots(rawCompatRoots)))
+	// discoverRegistryPackageRoots lists ManagedDirPath first, then each discovery root is scanned.
+	wantCalls := []string{ManagedDirPath}
 	for _, root := range DiscoveryRoots(rawCompatRoots) {
 		wantCalls = append(wantCalls, root.Path)
 	}

@@ -339,12 +339,6 @@ func (h *SupermarketHandler) installRegistrySkill(
 	if err := validateRegistrySkill(skill, registryID, packageID, skillID); err != nil {
 		return InstallRegistrySkillResponse{}, echo.NewHTTPError(http.StatusBadGateway, err.Error())
 	}
-	if !supportsWorkspaceOS(skill.RuntimeRequirements.OS, target.Info.OS) {
-		return InstallRegistrySkillResponse{}, echo.NewHTTPError(
-			http.StatusConflict,
-			fmt.Sprintf("skill %q does not support workspace OS %q", skill.InstallID, target.Info.OS),
-		)
-	}
 
 	artifactBytes, err := h.downloadRegistrySkillArtifact(ctx, skill.Artifact)
 	if err != nil {
@@ -354,7 +348,7 @@ func (h *SupermarketHandler) installRegistrySkill(
 	if err != nil {
 		return InstallRegistrySkillResponse{}, echo.NewHTTPError(http.StatusBadGateway, err.Error())
 	}
-	if err := installRegistrySkillArchive(targetContext, target.Client, target.Info.OS, archive); err != nil {
+	if err := installRegistrySkillArchive(targetContext, target.Client, target.Info.OS, registryID, packageID, skillID, archive); err != nil {
 		return InstallRegistrySkillResponse{}, echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("install skill: %v", err))
 	}
 
@@ -431,19 +425,6 @@ func validateRegistrySkill(skill SupermarketCatalogSkill, registryID, packageID,
 		return errors.New("registry Skill Artifact download URL is missing")
 	}
 	return nil
-}
-
-func supportsWorkspaceOS(supported []string, workspaceOS string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(workspaceOS))
-	if normalized == "windows" {
-		normalized = "win32"
-	}
-	for _, candidate := range supported {
-		if strings.EqualFold(strings.TrimSpace(candidate), normalized) {
-			return true
-		}
-	}
-	return false
 }
 
 func (h *SupermarketHandler) downloadRegistrySkillArtifact(
@@ -583,8 +564,7 @@ func readRegistrySkillArchive(content []byte, installID string) (registrySkillAr
 		totalSize += int64(len(fileContent))
 		relativePath := strings.Join(parts[1:], "/")
 		if relativePath == "SKILL.md" {
-			fileContent, err = rewriteRegistrySkillManifestName(fileContent, installID)
-			if err != nil {
+			if err := validateRegistrySkillManifest(fileContent); err != nil {
 				return registrySkillArchive{}, err
 			}
 			hasManifest = true
@@ -630,76 +610,59 @@ func rejectArchivePathConflict(seen map[string]bool, name string) error {
 	return nil
 }
 
-func rewriteRegistrySkillManifestName(content []byte, installID string) ([]byte, error) {
+func validateRegistrySkillManifest(content []byte) error {
 	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
 	if !strings.HasPrefix(normalized, "---\n") {
-		return nil, errors.New("registry Skill SKILL.md is missing YAML frontmatter")
+		return errors.New("registry Skill SKILL.md is missing YAML frontmatter")
 	}
 	rest := normalized[4:]
 	closing := strings.Index(rest, "\n---\n")
-	closingDelimiterLength := len("\n---\n")
 	if closing < 0 && strings.HasSuffix(rest, "\n---") {
 		closing = len(rest) - len("\n---")
-		closingDelimiterLength = len("\n---")
 	}
 	if closing < 0 {
-		return nil, errors.New("registry Skill SKILL.md has malformed YAML frontmatter")
+		return errors.New("registry Skill SKILL.md has malformed YAML frontmatter")
 	}
-	frontmatter := rest[:closing]
-	bodyStart := 4 + closing + closingDelimiterLength
-
 	var document yaml.Node
-	if err := yaml.Unmarshal([]byte(frontmatter), &document); err != nil || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
-		return nil, errors.New("registry Skill SKILL.md has invalid YAML frontmatter")
+	if err := yaml.Unmarshal([]byte(rest[:closing]), &document); err != nil || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return errors.New("registry Skill SKILL.md has invalid YAML frontmatter")
 	}
-	mapping := document.Content[0]
-	nameUpdated := false
-	for index := 0; index+1 < len(mapping.Content); index += 2 {
-		if mapping.Content[index].Value == "name" {
-			mapping.Content[index+1].Kind = yaml.ScalarNode
-			mapping.Content[index+1].Tag = "!!str"
-			mapping.Content[index+1].Value = installID
-			nameUpdated = true
-			break
-		}
-	}
-	if !nameUpdated {
-		mapping.Content = append([]*yaml.Node{
-			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "name"},
-			{Kind: yaml.ScalarNode, Tag: "!!str", Value: installID},
-		}, mapping.Content...)
-	}
-	encoded, err := yaml.Marshal(mapping)
-	if err != nil {
-		return nil, errors.New("registry Skill SKILL.md frontmatter could not be encoded")
-	}
-	return []byte("---\n" + strings.TrimSuffix(string(encoded), "\n") + "\n---\n" + normalized[bodyStart:]), nil
+	return nil
 }
 
 func installRegistrySkillArchive(
 	ctx context.Context,
 	client *bridge.Client,
 	workspaceOS string,
+	registryID, packageID, skillID string,
 	archive registrySkillArchive,
 ) error {
 	if client == nil {
 		return errors.New("workspace is not reachable")
 	}
-	targetDir, err := skillset.ManagedSkillDirForName(archive.installID)
+	targetDir, err := skillset.RegistrySkillDirForIDs(registryID, packageID, skillID)
 	if err != nil {
-		return errors.New("registry Skill install_id is invalid")
+		return errors.New("registry Skill identity is invalid")
+	}
+	packageDir, err := skillset.RegistryPackageSkillsDirForIDs(registryID, packageID)
+	if err != nil {
+		return errors.New("registry Skill identity is invalid")
 	}
 	suffix, err := randomRegistryInstallSuffix()
 	if err != nil {
 		return err
 	}
-	tempDir := path.Join(skillset.ManagedDir(), "registry-install-"+suffix)
-	backupDir := path.Join(skillset.ManagedDir(), "registry-backup-"+suffix)
+	stagingRoot := path.Join(skillset.ManagedDir(), ".staging")
+	tempDir := path.Join(stagingRoot, "install-"+suffix)
+	backupDir := path.Join(stagingRoot, "backup-"+suffix)
 	_ = client.DeleteFile(ctx, tempDir, true)
 	_ = client.DeleteFile(ctx, backupDir, true)
 	defer func() {
 		_ = client.DeleteFile(context.WithoutCancel(ctx), tempDir, true)
 	}()
+	if err := client.Mkdir(ctx, stagingRoot); err != nil {
+		return fmt.Errorf("create registry Skill staging directory: %w", err)
+	}
 	if err := client.Mkdir(ctx, tempDir); err != nil {
 		return fmt.Errorf("create temporary Skill directory: %w", err)
 	}
@@ -721,6 +684,17 @@ func installRegistrySkillArchive(
 	}
 	if err := applyRegistrySkillExecutableModes(ctx, client, workspaceOS, executablePaths); err != nil {
 		return err
+	}
+
+	registryDir, err := skillset.RegistryDirForID(registryID)
+	if err != nil {
+		return errors.New("registry Skill identity is invalid")
+	}
+	if err := client.Mkdir(ctx, registryDir); err != nil {
+		return fmt.Errorf("create registry Skill registry directory: %w", err)
+	}
+	if err := client.Mkdir(ctx, packageDir); err != nil {
+		return fmt.Errorf("create registry Skill package directory: %w", err)
 	}
 
 	targetExists := false
