@@ -3223,7 +3223,10 @@ definitions:
     type: object
   handlers.SkillsDeleteRequest:
     properties:
-      names:
+      source_paths:
+        description: |-
+          SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
+          cannot address registry skills, which are nested by registry and package.
         items:
           type: string
         type: array
@@ -3241,6 +3244,9 @@ definitions:
         items:
           type: string
         type: array
+      source_path:
+        description: Existing SKILL.md path when editing a single skill.
+        type: string
     type: object
   handlers.SnapshotInfo:
     properties:

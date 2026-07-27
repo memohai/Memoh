@@ -19365,7 +19365,8 @@ const docTemplate = `{
         "handlers.SkillsDeleteRequest": {
             "type": "object",
             "properties": {
-                "names": {
+                "source_paths": {
+                    "description": "SourcePaths are SKILL.md paths reported in the skill list. Deleting by name\ncannot address registry skills, which are nested by registry and package.",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -19392,6 +19393,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "source_path": {
+                    "description": "Existing SKILL.md path when editing a single skill.",
+                    "type": "string"
                 }
             }
         },

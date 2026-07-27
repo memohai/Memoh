@@ -13,6 +13,7 @@ import (
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 type SkillItem struct {
@@ -39,10 +40,15 @@ type SafeSkillsResponse struct {
 
 type SkillsUpsertRequest struct {
 	Skills []string `json:"skills"`
+	// SourcePath is the existing SKILL.md being edited when saving a single skill.
+	// Empty means create (or overwrite by frontmatter name under /data/skills/<name>/).
+	SourcePath string `json:"source_path,omitempty"`
 }
 
 type SkillsDeleteRequest struct {
-	Names []string `json:"names"`
+	// SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
+	// cannot address registry skills, which are nested by registry and package.
+	SourcePaths []string `json:"source_paths"`
 }
 
 type SkillsActionRequest struct {
@@ -131,6 +137,10 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 	if len(req.Skills) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "skills is required")
 	}
+	sourcePath := strings.TrimSpace(req.SourcePath)
+	if sourcePath != "" && len(req.Skills) != 1 {
+		return echo.NewHTTPError(http.StatusBadRequest, "source_path requires exactly one skill")
+	}
 
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
@@ -138,21 +148,29 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		return workspaceUnavailableError(err)
 	}
 
-	for _, raw := range req.Skills {
-		parsed := skillset.ParseFile(raw, "")
-		dirPath, dirErr := skillset.ManagedSkillDirForName(parsed.Name)
-		if dirErr != nil {
+	for i, raw := range req.Skills {
+		editPath := ""
+		if i == 0 {
+			editPath = sourcePath
+		}
+		plan, planErr := skillset.PlanUpsert(raw, editPath)
+		if planErr != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
 		}
+		dirPath := path.Dir(plan.WritePath)
 		// A pooled client can pass getGRPCClient and still fail on first use
 		// when the workspace just stopped; classify per-op errors so the dial
 		// diagnostics never reach the response body.
 		if err := client.Mkdir(ctx, dirPath); err != nil {
 			return fsHTTPError(fmt.Errorf("mkdir skill dir: %w", err))
 		}
-		filePath := path.Join(dirPath, "SKILL.md")
-		if err := client.WriteFile(ctx, filePath, []byte(raw)); err != nil {
+		if err := client.WriteFile(ctx, plan.WritePath, []byte(raw)); err != nil {
 			return fsHTTPError(fmt.Errorf("write skill file: %w", err))
+		}
+		if plan.RemoveDir != "" {
+			if err := client.DeleteFile(ctx, plan.RemoveDir, true); err != nil {
+				return fsHTTPError(fmt.Errorf("remove renamed skill dir: %w", err))
+			}
 		}
 	}
 
@@ -180,8 +198,8 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if len(req.Names) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "names is required")
+	if len(req.SourcePaths) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "source_paths is required")
 	}
 
 	ctx := c.Request().Context()
@@ -190,21 +208,41 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		return workspaceUnavailableError(err)
 	}
 
-	for _, name := range req.Names {
-		skillName := strings.TrimSpace(name)
-		managedDir, dirErr := skillset.ManagedSkillDirForName(skillName)
+	targets := make([]string, 0, len(req.SourcePaths))
+	for _, sourcePath := range req.SourcePaths {
+		skillDir, dirErr := skillset.DeletableSkillDirForSourcePath(sourcePath)
 		if dirErr != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid skill name")
+			return echo.NewHTTPError(http.StatusBadRequest, "only Memoh-managed skills can be deleted")
 		}
-		if _, statErr := client.Stat(ctx, managedDir); statErr != nil {
+		targets = append(targets, skillDir)
+	}
+
+	for _, skillDir := range targets {
+		if _, statErr := client.Stat(ctx, skillDir); statErr != nil {
 			return fsHTTPError(statErr)
 		}
-		if err := client.DeleteFile(ctx, managedDir, true); err != nil {
+		if err := client.DeleteFile(ctx, skillDir, true); err != nil {
 			return fsHTTPError(err)
 		}
+		pruneEmptyRegistryDirs(ctx, client, skillDir)
 	}
 
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
+}
+
+// pruneEmptyRegistryDirs drops the package and registry directories left behind
+// by the last uninstalled skill. Best effort: a concurrent install may refill
+// them, and a stale empty directory is harmless to discovery.
+func pruneEmptyRegistryDirs(ctx context.Context, client *bridge.Client, skillDir string) {
+	for _, dir := range skillset.PrunableRegistryDirs(skillDir) {
+		entries, err := client.ListDirAll(ctx, dir, false)
+		if err != nil || len(entries) > 0 {
+			return
+		}
+		if err := client.DeleteFile(ctx, dir, false); err != nil {
+			return
+		}
+	}
 }
 
 // ApplySkillAction godoc

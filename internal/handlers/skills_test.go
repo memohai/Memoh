@@ -168,7 +168,7 @@ func TestSkillsActionsAPIAdoptDisableEnableAndDeleteManaged(t *testing.T) {
 	}
 
 	rec, err = env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
-		Names: []string{"alpha"},
+		SourcePaths: []string{managedPath},
 	}, env.handler.DeleteSkills)
 	if err != nil {
 		t.Fatalf("DeleteSkills returned error: %v", err)
@@ -189,22 +189,75 @@ func TestSkillsActionsAPIAdoptDisableEnableAndDeleteManaged(t *testing.T) {
 	}
 }
 
-func TestDeleteSkillsAPIRejectsExternalOnlySkill(t *testing.T) {
+func TestDeleteSkillsAPIReportsMissingManagedSkill(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	env.writeSkillFile(t, path.Join("/data/.agents/skills", "alpha", "SKILL.md"), managedSkillRaw("alpha", "Compat Alpha"))
 
 	_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
-		Names: []string{"alpha"},
+		SourcePaths: []string{path.Join(skillset.ManagedDir(), "alpha", "SKILL.md")},
 	}, env.handler.DeleteSkills)
 	if err == nil {
-		t.Fatal("expected deleting external-only skill to fail")
+		t.Fatal("expected deleting a skill that was never adopted to fail")
 	}
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) {
 		t.Fatalf("expected echo.HTTPError, got %T", err)
 	}
 	if httpErr.Code != http.StatusNotFound {
-		t.Fatalf("delete external-only status = %d, want 404", httpErr.Code)
+		t.Fatalf("delete missing managed status = %d, want 404", httpErr.Code)
+	}
+}
+
+func TestDeleteSkillsAPIRemovesRegistrySkillBySourcePath(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	registrySkillDir := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx")
+	registryPath := path.Join(registrySkillDir, "SKILL.md")
+	env.writeSkillFile(t, registryPath, managedSkillRaw("xlsx", "Spreadsheet"))
+	// A flat managed skill shares the short name; deleting the registry copy must not touch it.
+	flatPath := path.Join(skillset.ManagedDir(), "xlsx", "SKILL.md")
+	env.writeSkillFile(t, flatPath, managedSkillRaw("xlsx", "Local Spreadsheet"))
+
+	rec, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
+		SourcePaths: []string{registryPath},
+	}, env.handler.DeleteSkills)
+	if err != nil {
+		t.Fatalf("DeleteSkills(source_path) error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DeleteSkills status = %d, want 200", rec.Code)
+	}
+	if _, err := os.Stat(env.localPath(registrySkillDir)); !os.IsNotExist(err) {
+		t.Fatalf("registry skill should be removed, stat err = %v", err)
+	}
+	if _, err := os.Stat(env.localPath(flatPath)); err != nil {
+		t.Fatalf("flat skill with the same name should survive: %v", err)
+	}
+	// The now-empty package and registry directories are pruned, the flat one is not.
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "openai-api-curated"))); !os.IsNotExist(err) {
+		t.Fatalf("empty registry directory should be pruned, stat err = %v", err)
+	}
+}
+
+func TestDeleteSkillsAPIRejectsNonManagedSourcePath(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	compatPath := path.Join("/data/.agents/skills", "alpha", "SKILL.md")
+	env.writeSkillFile(t, compatPath, managedSkillRaw("alpha", "Compat Alpha"))
+
+	_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
+		SourcePaths: []string{compatPath},
+	}, env.handler.DeleteSkills)
+	if err == nil {
+		t.Fatal("expected deleting a discovered skill by source_path to fail")
+	}
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected echo.HTTPError, got %T", err)
+	}
+	if httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("delete non-managed status = %d, want 400", httpErr.Code)
+	}
+	if _, err := os.Stat(env.localPath(compatPath)); err != nil {
+		t.Fatalf("discovered skill should be untouched: %v", err)
 	}
 }
 
@@ -223,6 +276,113 @@ func TestUpsertSkillsAPIRejectsTraversalName(t *testing.T) {
 	}
 	if httpErr.Code != http.StatusBadRequest {
 		t.Fatalf("upsert traversal status = %d, want 400", httpErr.Code)
+	}
+}
+
+func TestUpsertSkillsAPIRenamesManagedSkillAndEditsRegistryInPlace(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	oldPath := path.Join(skillset.ManagedDir(), "alpha", "SKILL.md")
+	env.writeSkillFile(t, oldPath, managedSkillRaw("alpha", "Managed Alpha"))
+
+	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
+		Skills:     []string{managedSkillRaw("beta", "Renamed Beta")},
+		SourcePath: oldPath,
+	}, env.handler.UpsertSkills)
+	if err != nil {
+		t.Fatalf("UpsertSkills(rename) error = %v", err)
+	}
+
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "alpha"))); !os.IsNotExist(err) {
+		t.Fatalf("old managed skill directory should be removed after rename, stat err = %v", err)
+	}
+	newRaw, err := os.ReadFile(env.localPath(path.Join(skillset.ManagedDir(), "beta", "SKILL.md")))
+	if err != nil {
+		t.Fatalf("read renamed skill: %v", err)
+	}
+	if !strings.Contains(string(newRaw), "name: beta") {
+		t.Fatalf("renamed skill content = %q", newRaw)
+	}
+
+	registryPath := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx", "SKILL.md")
+	env.writeSkillFile(t, registryPath, managedSkillRaw("xlsx", "Spreadsheet"))
+	updated := "---\nname: xlsx\ndescription: Updated sheet\n---\n\n# Updated\n"
+	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
+		Skills:     []string{updated},
+		SourcePath: registryPath,
+	}, env.handler.UpsertSkills)
+	if err != nil {
+		t.Fatalf("UpsertSkills(registry) error = %v", err)
+	}
+	got, err := os.ReadFile(env.localPath(registryPath))
+	if err != nil {
+		t.Fatalf("read registry skill: %v", err)
+	}
+	if string(got) != updated {
+		t.Fatalf("registry skill was not updated in place:\n%s", got)
+	}
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "xlsx"))); !os.IsNotExist(err) {
+		t.Fatalf("registry edit should not create a flat managed skill, stat err = %v", err)
+	}
+}
+
+func TestUpsertAndDeleteSkillsAPIKeepBuiltinUnderMemohPath(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	builtinPath := path.Join(skillset.IndexDirPath, "skill-creator", "SKILL.md")
+	env.writeSkillFile(t, builtinPath, managedSkillRaw("skill-creator", "Create skills"))
+
+	updated := "---\nname: skill-creator\ndescription: Updated creator\n---\n\n# Updated\n"
+	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
+		Skills:     []string{updated},
+		SourcePath: builtinPath,
+	}, env.handler.UpsertSkills)
+	if err != nil {
+		t.Fatalf("UpsertSkills(builtin) error = %v", err)
+	}
+	got, err := os.ReadFile(env.localPath(builtinPath))
+	if err != nil {
+		t.Fatalf("read builtin skill: %v", err)
+	}
+	if string(got) != updated {
+		t.Fatalf("builtin skill was not updated in place:\n%s", got)
+	}
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "skill-creator"))); !os.IsNotExist(err) {
+		t.Fatalf("builtin edit should not create a flat managed skill, stat err = %v", err)
+	}
+
+	renamed := "---\nname: skill-builder\ndescription: Builder\n---\n\n# Builder\n"
+	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
+		Skills:     []string{renamed},
+		SourcePath: builtinPath,
+	}, env.handler.UpsertSkills)
+	if err != nil {
+		t.Fatalf("UpsertSkills(builtin rename) error = %v", err)
+	}
+	newPath := path.Join(skillset.IndexDirPath, "skill-builder", "SKILL.md")
+	if _, err := os.Stat(env.localPath(path.Join(skillset.IndexDirPath, "skill-creator"))); !os.IsNotExist(err) {
+		t.Fatalf("old builtin skill directory should be removed after rename, stat err = %v", err)
+	}
+	got, err = os.ReadFile(env.localPath(newPath))
+	if err != nil {
+		t.Fatalf("read renamed builtin skill: %v", err)
+	}
+	if string(got) != renamed {
+		t.Fatalf("renamed builtin skill content = %q", got)
+	}
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "skill-builder"))); !os.IsNotExist(err) {
+		t.Fatalf("builtin rename should stay under .memoh/skills, stat err = %v", err)
+	}
+
+	rec, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
+		SourcePaths: []string{newPath},
+	}, env.handler.DeleteSkills)
+	if err != nil {
+		t.Fatalf("DeleteSkills(builtin) error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DeleteSkills status = %d, want 200", rec.Code)
+	}
+	if _, err := os.Stat(env.localPath(path.Join(skillset.IndexDirPath, "skill-builder"))); !os.IsNotExist(err) {
+		t.Fatalf("builtin skill should be removed, stat err = %v", err)
 	}
 }
 

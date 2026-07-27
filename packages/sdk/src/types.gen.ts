@@ -1911,7 +1911,11 @@ export type HandlersSkillsActionRequest = {
 };
 
 export type HandlersSkillsDeleteRequest = {
-    names?: Array<string>;
+    /**
+     * SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
+     * cannot address registry skills, which are nested by registry and package.
+     */
+    source_paths?: Array<string>;
 };
 
 export type HandlersSkillsResponse = {
@@ -1920,6 +1924,10 @@ export type HandlersSkillsResponse = {
 
 export type HandlersSkillsUpsertRequest = {
     skills?: Array<string>;
+    /**
+     * Existing SKILL.md path when editing a single skill.
+     */
+    source_path?: string;
 };
 
 export type HandlersSnapshotInfo = {
