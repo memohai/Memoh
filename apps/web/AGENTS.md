@@ -267,7 +267,8 @@ Chat routes register **null stub components** in the router. The real UI (`MainS
 | `/settings/email` | email | `email/index.vue` | Email provider management |
 | `/settings/supermarket` | supermarket | `supermarket/index.vue` | Template/skill marketplace |
 | `/settings/supermarket/plugins/:pluginId` | supermarket-plugin-detail | `supermarket/plugin-detail.vue` | Plugin detail |
-| `/settings/supermarket/skills/:skillId` | supermarket-skill-detail | `supermarket/skill-detail.vue` | Skill detail |
+| `/settings/supermarket/skills/:registryId/:packageId/:skillId` | supermarket-skill-detail | `supermarket/skill-detail.vue` | Registry Skill detail |
+| `/settings/supermarket/skills/:skillId` | supermarket-skill-detail-legacy | redirect | Legacy Skill link → Supermarket |
 | `/settings/usage` | usage | `usage/index.vue` | Token usage statistics |
 | `/settings/people` | people | `people/index.vue` | User management (admin only) |
 | `/settings/appearance` | appearance | `appearance/index.vue` | Theme, locale, and appearance settings |
