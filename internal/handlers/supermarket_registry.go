@@ -22,6 +22,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"gopkg.in/yaml.v3"
 
+	"github.com/memohai/memoh/internal/apperror"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -323,7 +324,11 @@ func (h *SupermarketHandler) installRegistrySkill(
 		return InstallRegistrySkillResponse{}, err
 	}
 	if h.workspaces == nil {
-		return InstallRegistrySkillResponse{}, echo.NewHTTPError(http.StatusInternalServerError, "workspace manager is not configured")
+		return InstallRegistrySkillResponse{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInstallFailed,
+			errors.New("workspace manager is not configured"),
+			nil,
+		)
 	}
 
 	targetContext := workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
@@ -331,13 +336,23 @@ func (h *SupermarketHandler) installRegistrySkill(
 	if err != nil {
 		return InstallRegistrySkillResponse{}, workspaceTargetHTTPError(h.logger, err)
 	}
+	if err := skillset.GuardRegistryInstall(targetContext, target.Client, registryID); err != nil {
+		if errors.Is(err, skillset.ErrFlatSkillOccupiesRegistry) {
+			return InstallRegistrySkillResponse{}, apperror.New(apperror.CodeRegistrySkillLayoutConflict, nil)
+		}
+		return InstallRegistrySkillResponse{}, apperror.Wrap(
+			apperror.CodeWorkspaceUnreachable,
+			fmt.Errorf("inspect registry install directory: %w", err),
+			nil,
+		)
+	}
 
 	skill, err := h.fetchRegistrySkill(ctx, registryID, packageID, skillID)
 	if err != nil {
 		return InstallRegistrySkillResponse{}, err
 	}
 	if err := validateRegistrySkill(skill, registryID, packageID, skillID); err != nil {
-		return InstallRegistrySkillResponse{}, echo.NewHTTPError(http.StatusBadGateway, err.Error())
+		return InstallRegistrySkillResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 	}
 
 	artifactBytes, err := h.downloadRegistrySkillArtifact(ctx, skill.Artifact)
@@ -346,10 +361,17 @@ func (h *SupermarketHandler) installRegistrySkill(
 	}
 	archive, err := readRegistrySkillArchive(artifactBytes, skill.InstallID)
 	if err != nil {
-		return InstallRegistrySkillResponse{}, echo.NewHTTPError(http.StatusBadGateway, err.Error())
+		return InstallRegistrySkillResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 	}
 	if err := installRegistrySkillArchive(targetContext, target.Client, target.Info.OS, registryID, packageID, skillID, archive); err != nil {
-		return InstallRegistrySkillResponse{}, echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("install skill: %v", err))
+		if errors.Is(err, skillset.ErrFlatSkillOccupiesRegistry) {
+			return InstallRegistrySkillResponse{}, apperror.New(apperror.CodeRegistrySkillLayoutConflict, nil)
+		}
+		return InstallRegistrySkillResponse{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInstallFailed,
+			fmt.Errorf("install registry Skill: %w", err),
+			nil,
+		)
 	}
 
 	return InstallRegistrySkillResponse{
@@ -371,28 +393,48 @@ func (h *SupermarketHandler) fetchRegistrySkill(
 	endpoint := strings.TrimRight(h.baseURL, "/") + registrySkillUpstreamPath(registryID, packageID, skillID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return SupermarketCatalogSkill{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return SupermarketCatalogSkill{}, apperror.Wrap(
+			apperror.CodeRegistryUnavailable,
+			fmt.Errorf("create Registry Skill request: %w", err),
+			nil,
+		)
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := h.httpClient.Do(req) //nolint:gosec // Endpoint is built from configured Supermarket URL.
 	if err != nil {
-		return SupermarketCatalogSkill{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+		return SupermarketCatalogSkill{}, apperror.Wrap(
+			apperror.CodeRegistryUnavailable,
+			fmt.Errorf("fetch Registry Skill: %w", err),
+			nil,
+		)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
-		return SupermarketCatalogSkill{}, echo.NewHTTPError(http.StatusNotFound, "registry skill not found")
+		return SupermarketCatalogSkill{}, apperror.New(apperror.CodeRegistrySkillNotFound, nil)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return SupermarketCatalogSkill{}, echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
+		return SupermarketCatalogSkill{}, apperror.Wrap(
+			apperror.CodeRegistryUnavailable,
+			fmt.Errorf("fetch Registry Skill: Supermarket returned status %d", resp.StatusCode),
+			nil,
+		)
 	}
 
 	var skill SupermarketCatalogSkill
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, maxRegistrySkillMetadataBytes+1))
 	if err := decoder.Decode(&skill); err != nil {
-		return SupermarketCatalogSkill{}, echo.NewHTTPError(http.StatusBadGateway, "invalid Registry Skill response")
+		return SupermarketCatalogSkill{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			fmt.Errorf("decode Registry Skill response: %w", err),
+			nil,
+		)
 	}
 	if decoder.Decode(&struct{}{}) != io.EOF {
-		return SupermarketCatalogSkill{}, echo.NewHTTPError(http.StatusBadGateway, "Registry Skill response is too large or malformed")
+		return SupermarketCatalogSkill{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill response is too large or malformed"),
+			nil,
+		)
 	}
 	return skill, nil
 }
@@ -432,54 +474,117 @@ func (h *SupermarketHandler) downloadRegistrySkillArtifact(
 	artifact SupermarketSkillArtifact,
 ) ([]byte, error) {
 	base, err := url.Parse(h.baseURL)
-	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Supermarket URL is invalid")
+	if err != nil {
+		return nil, apperror.Wrap(
+			apperror.CodeRegistryUnavailable,
+			fmt.Errorf("parse configured Supermarket URL: %w", err),
+			nil,
+		)
+	}
+	if (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil {
+		return nil, apperror.Wrap(
+			apperror.CodeRegistryUnavailable,
+			errors.New("configured Supermarket URL is invalid"),
+			nil,
+		)
 	}
 	download, err := base.Parse(artifact.DownloadURL)
-	if err != nil || download.Scheme != base.Scheme || !strings.EqualFold(download.Host, base.Host) || download.User != nil {
-		return nil, echo.NewHTTPError(http.StatusBadGateway, "Registry Skill Artifact URL is not on the configured Supermarket origin")
+	if err != nil {
+		return nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			fmt.Errorf("parse Registry Skill Artifact URL: %w", err),
+			nil,
+		)
+	}
+	if download.Scheme != base.Scheme || !strings.EqualFold(download.Host, base.Host) || download.User != nil {
+		return nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact URL is not on the configured Supermarket origin"),
+			nil,
+		)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, download.String(), nil)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			fmt.Errorf("create Registry Skill Artifact request: %w", err),
+			nil,
+		)
 	}
 	req.Header.Set("Accept", "application/gzip")
 	client := *h.httpClient
+	errArtifactRedirectOrigin := errors.New("artifact redirect left the configured Supermarket origin")
 	client.CheckRedirect = func(next *http.Request, _ []*http.Request) error {
 		if next.URL.Scheme != base.Scheme || !strings.EqualFold(next.URL.Host, base.Host) || next.URL.User != nil {
-			return errors.New("artifact redirect left the configured Supermarket origin")
+			return errArtifactRedirectOrigin
 		}
 		return nil
 	}
 	resp, err := client.Do(req) //nolint:gosec // URL and every redirect are restricted to the configured origin.
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadGateway, "Registry Skill Artifact download failed")
+		code := apperror.CodeRegistryUnavailable
+		if errors.Is(err, errArtifactRedirectOrigin) {
+			code = apperror.CodeRegistrySkillInvalid
+		}
+		return nil, apperror.Wrap(code, fmt.Errorf("download Registry Skill Artifact: %w", err), nil)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, echo.NewHTTPError(http.StatusNotFound, "Registry Skill Artifact not found")
+		return nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact was not found"),
+			nil,
+		)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned Artifact status %d", resp.StatusCode))
+		code := apperror.CodeRegistrySkillInvalid
+		if resp.StatusCode >= http.StatusInternalServerError {
+			code = apperror.CodeRegistryUnavailable
+		}
+		return nil, apperror.Wrap(
+			code,
+			fmt.Errorf("download Registry Skill Artifact: Supermarket returned status %d", resp.StatusCode),
+			nil,
+		)
 	}
-	if resp.Request.URL.Scheme != base.Scheme || !strings.EqualFold(resp.Request.URL.Host, base.Host) {
-		return nil, echo.NewHTTPError(http.StatusBadGateway, "Registry Skill Artifact response left the configured Supermarket origin")
+	if resp.Request == nil || resp.Request.URL.Scheme != base.Scheme || !strings.EqualFold(resp.Request.URL.Host, base.Host) {
+		return nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact response left the configured Supermarket origin"),
+			nil,
+		)
 	}
 	if resp.ContentLength >= 0 && resp.ContentLength != artifact.Size {
-		return nil, echo.NewHTTPError(http.StatusBadGateway, "Registry Skill Artifact content length does not match its descriptor")
+		return nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact content length does not match its descriptor"),
+			nil,
+		)
 	}
 
 	content, err := io.ReadAll(io.LimitReader(resp.Body, artifact.Size+1))
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadGateway, "Registry Skill Artifact download failed")
+		return nil, apperror.Wrap(
+			apperror.CodeRegistryUnavailable,
+			fmt.Errorf("read Registry Skill Artifact: %w", err),
+			nil,
+		)
 	}
 	if int64(len(content)) != artifact.Size {
-		return nil, echo.NewHTTPError(http.StatusBadGateway, "Registry Skill Artifact size does not match its descriptor")
+		return nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact size does not match its descriptor"),
+			nil,
+		)
 	}
 	digest := sha256.Sum256(content)
 	if hex.EncodeToString(digest[:]) != artifact.Digest {
-		return nil, echo.NewHTTPError(http.StatusBadGateway, "Registry Skill Artifact SHA-256 verification failed")
+		return nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact SHA-256 verification failed"),
+			nil,
+		)
 	}
 	return content, nil
 }
@@ -689,6 +794,9 @@ func installRegistrySkillArchive(
 	registryDir, err := skillset.RegistryDirForID(registryID)
 	if err != nil {
 		return errors.New("registry Skill identity is invalid")
+	}
+	if err := skillset.GuardRegistryInstall(ctx, client, registryID); err != nil {
+		return err
 	}
 	if err := client.Mkdir(ctx, registryDir); err != nil {
 		return fmt.Errorf("create registry Skill registry directory: %w", err)

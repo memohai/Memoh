@@ -111,6 +111,39 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
+    ['en', 'skill.builtin_read_only', 'Built-in Skills are managed by Memoh and cannot be edited or deleted.'],
+    ['zh', 'skill.builtin_read_only', 'Memoh 自带 Skill 由系统管理，无法编辑或删除。'],
+    ['ja', 'skill.builtin_read_only', 'Memoh 組み込みの Skill はシステムによって管理されているため、編集または削除できません。'],
+    ['en', 'skill.name_taken', 'A Skill with this name already exists. Choose a different name.'],
+    ['zh', 'skill.name_taken', '已存在同名 Skill，请换一个名称。'],
+    ['ja', 'skill.name_taken', '同じ名前の Skill がすでに存在します。別の名前を使用してください。'],
+    ['en', 'skill.save_failed', 'The Skill could not be saved. Please try again.'],
+    ['zh', 'skill.save_failed', 'Skill 保存失败，请重试。'],
+    ['ja', 'skill.save_failed', 'Skill を保存できませんでした。もう一度お試しください。'],
+    ['en', 'skill.registry_layout_conflict', 'This Skill name conflicts with an installed Registry ID. Choose a different name.'],
+    ['zh', 'skill.registry_layout_conflict', '该 Skill 名称与已安装的 Registry ID 冲突，请换一个名称。'],
+    ['ja', 'skill.registry_layout_conflict', 'この Skill 名はインストール済みの Registry ID と競合しています。別の名前を使用してください。'],
+    ['en', 'registry.unavailable', 'The Supermarket Registry is unavailable. Please try again later.'],
+    ['zh', 'registry.unavailable', '暂时无法连接 Supermarket Registry，请稍后重试。'],
+    ['ja', 'registry.unavailable', 'Supermarket Registry に接続できません。しばらくしてからもう一度お試しください。'],
+    ['en', 'registry.skill_not_found', 'This Registry Skill is no longer available.'],
+    ['zh', 'registry.skill_not_found', '该 Registry Skill 已不存在。'],
+    ['ja', 'registry.skill_not_found', 'この Registry Skill は現在利用できません。'],
+    ['en', 'registry.skill_invalid', 'This Registry Skill package is invalid and cannot be installed.'],
+    ['zh', 'registry.skill_invalid', '该 Registry Skill 包无效，无法安装。'],
+    ['ja', 'registry.skill_invalid', 'この Registry Skill Package は無効なため、インストールできません。'],
+    ['en', 'registry.skill_layout_conflict', 'This Registry ID conflicts with an existing Workspace Skill. Rename or delete that Skill before installing.'],
+    ['zh', 'registry.skill_layout_conflict', '该 Registry ID 与现有 Workspace Skill 冲突，请先重命名或删除该 Skill。'],
+    ['ja', 'registry.skill_layout_conflict', 'この Registry ID は既存の Workspace Skill と競合しています。インストールする前に、その Skill の名前を変更するか削除してください。'],
+    ['en', 'registry.skill_install_failed', 'The Registry Skill could not be installed. Please try again.'],
+    ['zh', 'registry.skill_install_failed', 'Registry Skill 安装失败，请重试。'],
+    ['ja', 'registry.skill_install_failed', 'Registry Skill をインストールできませんでした。もう一度お試しください。'],
+  ])('localizes %s error %s', (language, code, expected) => {
+    locale = language
+    expect(resolveApiErrorMessage({ code, detail: 'backend fallback' }, 'fallback')).toBe(expected)
+  })
+
+  it.each([
     ['en', 'The workspace could not be reached.'],
     ['zh', '暂时无法连接工作区，请稍后重试。'],
     ['ja', 'Workspace に接続できません。しばらくしてからもう一度お試しください。'],

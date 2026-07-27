@@ -52,6 +52,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FieldStack, toast } from '@felinic/ui'
+import { useQueryCache } from '@pinia/colada'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
   Button,
@@ -61,6 +62,7 @@ import {
   type HandlersSupermarketCatalogSkill,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { safeSkillCatalogQueryKey } from '@/composables/api/useChat'
 import BotSelect from '@/components/bot-select/index.vue'
 import { formatNamespacedSkillName } from '../utils/display'
 
@@ -76,6 +78,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const queryCache = useQueryCache()
 
 const selectedBotId = ref('')
 const installing = ref(false)
@@ -106,6 +109,7 @@ async function handleInstall() {
       throwOnError: true,
     })
     toast.success(t('supermarket.installSuccess'))
+    void queryCache.invalidateQueries({ key: safeSkillCatalogQueryKey(selectedBotId.value) })
     emit('update:open', false)
     emit('installed')
   } catch (error) {

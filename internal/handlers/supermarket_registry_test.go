@@ -7,14 +7,24 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/apperror"
+	"github.com/memohai/memoh/internal/config"
+	skillset "github.com/memohai/memoh/internal/skills"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 func TestReadRegistrySkillArchivePreservesManifestName(t *testing.T) {
@@ -148,13 +158,178 @@ func TestDownloadRegistrySkillArtifactVerifiesOriginAndDigest(t *testing.T) {
 	}
 
 	artifact.DownloadURL = "https://attacker.example/artifact"
-	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); err == nil {
-		t.Fatal("cross-origin artifact URL was accepted")
+	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); apperror.CodeOf(err) != apperror.CodeRegistrySkillInvalid {
+		t.Fatalf("cross-origin artifact code = %q, want %q", apperror.CodeOf(err), apperror.CodeRegistrySkillInvalid)
 	}
 	artifact.DownloadURL = "/api/artifacts/digest/download"
 	artifact.Digest = strings.Repeat("0", 64)
-	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); err == nil {
-		t.Fatal("invalid Artifact digest was accepted")
+	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); apperror.CodeOf(err) != apperror.CodeRegistrySkillInvalid {
+		t.Fatalf("invalid Artifact digest code = %q, want %q", apperror.CodeOf(err), apperror.CodeRegistrySkillInvalid)
+	}
+}
+
+func TestFetchRegistrySkillUsesStablePrivateErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		transport roundTripFunc
+		wantCode  apperror.Code
+	}{
+		{
+			name: "unavailable",
+			transport: func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("SECRET upstream dial failure")
+			},
+			wantCode: apperror.CodeRegistryUnavailable,
+		},
+		{
+			name: "not found",
+			transport: func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Body:       io.NopCloser(strings.NewReader("SECRET missing response")),
+					Request:    req,
+					Header:     make(http.Header),
+				}, nil
+			},
+			wantCode: apperror.CodeRegistrySkillNotFound,
+		},
+		{
+			name: "invalid response",
+			transport: func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader("SECRET malformed response")),
+					Request:    req,
+					Header:     make(http.Header),
+				}, nil
+			},
+			wantCode: apperror.CodeRegistrySkillInvalid,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handler := &SupermarketHandler{
+				baseURL:    "https://supermarket.example",
+				httpClient: &http.Client{Transport: test.transport},
+			}
+			_, err := handler.fetchRegistrySkill(context.Background(), "registry", "package", "skill")
+			if got := apperror.CodeOf(err); got != test.wantCode {
+				t.Fatalf("fetch code = %q, want %q", got, test.wantCode)
+			}
+			public, ok := apperror.PublicFrom(err, "request-id")
+			if !ok {
+				t.Fatal("fetch error is not a public app error")
+			}
+			if strings.Contains(public.Detail, "SECRET") || strings.Contains(public.Detail, "supermarket.example") {
+				t.Fatalf("public fetch error leaked private detail: %q", public.Detail)
+			}
+		})
+	}
+}
+
+func TestInstallRegistrySkillRejectsLayoutConflictBeforeNetwork(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	registryID := "openai-api-curated"
+	flatSkillPath := path.Join(skillset.ManagedDir(), registryID, "SKILL.md")
+	env.writeSkillFile(t, flatSkillPath, managedSkillRaw(registryID, "Local skill"))
+
+	upstreamCalls := 0
+	manager := workspace.NewManager(
+		slog.Default(),
+		nil,
+		nil,
+		config.WorkspaceConfig{DataRoot: env.dataRoot},
+		"",
+		nil,
+	)
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			upstreamCalls++
+			return nil, errors.New("unexpected upstream request")
+		})},
+		workspaces: manager,
+	}
+
+	_, err := handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
+		RegistryID: registryID,
+		PackageID:  "docs",
+		SkillID:    "xlsx",
+	})
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillLayoutConflict {
+		t.Fatalf("install conflict code = %q, want %q", got, apperror.CodeRegistrySkillLayoutConflict)
+	}
+	if upstreamCalls != 0 {
+		t.Fatalf("upstream calls = %d, want 0", upstreamCalls)
+	}
+	if _, statErr := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), registryID, "docs"))); !os.IsNotExist(statErr) {
+		t.Fatalf("registry package directory should not be created, stat err = %v", statErr)
+	}
+}
+
+func TestInstallRegistrySkillHidesWorkspaceFailureDetails(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	env.writeSkillFile(t, path.Join(skillset.ManagedDir(), ".staging"), "not a directory")
+
+	skill := validRegistrySkillDescriptor()
+	artifact := registrySkillTestArchive(t, []registrySkillTestEntry{
+		{name: skill.InstallID + "/SKILL.md", content: validRegistrySkillManifest},
+	})
+	digest := sha256.Sum256(artifact)
+	skill.Artifact.Digest = hex.EncodeToString(digest[:])
+	skill.Artifact.Size = int64(len(artifact))
+	descriptor, err := json.Marshal(skill)
+	if err != nil {
+		t.Fatalf("marshal registry Skill descriptor: %v", err)
+	}
+
+	manager := workspace.NewManager(
+		slog.Default(),
+		nil,
+		nil,
+		config.WorkspaceConfig{DataRoot: env.dataRoot},
+		"",
+		nil,
+	)
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body := descriptor
+			contentType := "application/json"
+			if req.URL.Path == skill.Artifact.DownloadURL {
+				body = artifact
+				contentType = "application/gzip"
+			}
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				Body:          io.NopCloser(bytes.NewReader(body)),
+				ContentLength: int64(len(body)),
+				Request:       req,
+				Header:        http.Header{"Content-Type": []string{contentType}},
+			}, nil
+		})},
+		workspaces: manager,
+	}
+
+	_, err = handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
+		RegistryID: skill.RegistryID,
+		PackageID:  skill.PackageID,
+		SkillID:    skill.SkillID,
+	})
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInstallFailed {
+		t.Fatalf("install failure code = %q, want %q", got, apperror.CodeRegistrySkillInstallFailed)
+	}
+	public, ok := apperror.PublicFrom(err, "request-id")
+	if !ok {
+		t.Fatal("install failure is not a public app error")
+	}
+	if strings.Contains(public.Detail, ".staging") || strings.Contains(public.Detail, env.dataRoot) {
+		t.Fatalf("public install failure leaked workspace path: %q", public.Detail)
+	}
+	cause := apperror.CauseOf(err)
+	if cause == nil || !strings.Contains(cause.Error(), ".staging") {
+		t.Fatalf("private install failure cause = %v, want staging diagnostic", cause)
 	}
 }
 

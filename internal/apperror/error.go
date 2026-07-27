@@ -32,6 +32,15 @@ const (
 	CodeConnectorRequestRejected         Code = "connector.request_rejected"
 	CodeConnectorUpstreamUnavailable     Code = "connector.upstream_unavailable"
 	CodeConnectorOperationFailed         Code = "connector.operation_failed"
+	CodeSkillBuiltinReadOnly             Code = "skill.builtin_read_only"
+	CodeSkillNameTaken                   Code = "skill.name_taken"
+	CodeSkillSaveFailed                  Code = "skill.save_failed"
+	CodeSkillRegistryLayoutConflict      Code = "skill.registry_layout_conflict"
+	CodeRegistryUnavailable              Code = "registry.unavailable"
+	CodeRegistrySkillNotFound            Code = "registry.skill_not_found"
+	CodeRegistrySkillInvalid             Code = "registry.skill_invalid"
+	CodeRegistrySkillLayoutConflict      Code = "registry.skill_layout_conflict"
+	CodeRegistrySkillInstallFailed       Code = "registry.skill_install_failed"
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed              Code = "profile.update_failed"
@@ -148,6 +157,42 @@ var catalog = map[Code]Definition{
 	CodeConnectorOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The connector operation failed. Please try again.",
+	},
+	CodeSkillBuiltinReadOnly: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Built-in Skills are managed by Memoh and cannot be edited or deleted.",
+	},
+	CodeSkillNameTaken: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "A Skill with this name already exists.",
+	},
+	CodeSkillSaveFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The Skill could not be saved.",
+	},
+	CodeSkillRegistryLayoutConflict: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This Skill name conflicts with an installed Registry ID. Choose a different name.",
+	},
+	CodeRegistryUnavailable: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The Supermarket Registry is unavailable.",
+	},
+	CodeRegistrySkillNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The Registry Skill was not found.",
+	},
+	CodeRegistrySkillInvalid: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The Registry Skill package is invalid.",
+	},
+	CodeRegistrySkillLayoutConflict: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This Registry ID conflicts with an existing Workspace Skill. Rename or delete that Skill before installing.",
+	},
+	CodeRegistrySkillInstallFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The Registry Skill could not be installed.",
 	},
 	CodeProfileTitleModelInvalid: {
 		HTTPStatus: http.StatusBadRequest,

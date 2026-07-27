@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
@@ -26,6 +28,8 @@ type SkillItem struct {
 	SourceRoot  string         `json:"source_root,omitempty"`
 	SourceKind  string         `json:"source_kind,omitempty"`
 	Managed     bool           `json:"managed,omitempty"`
+	Editable    bool           `json:"editable"`
+	Deletable   bool           `json:"deletable"`
 	State       string         `json:"state,omitempty"`
 	ShadowedBy  string         `json:"shadowed_by,omitempty"`
 }
@@ -120,8 +124,9 @@ func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 // @Param payload body SkillsUpsertRequest true "Skills payload"
 // @Success 200 {object} skillsOpResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 409 {object} apperror.Problem
 // @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills [post].
 func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
@@ -155,26 +160,69 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		}
 		plan, planErr := skillset.PlanUpsert(raw, editPath)
 		if planErr != nil {
+			if errors.Is(planErr, skillset.ErrBuiltinSkillReadOnly) {
+				return apperror.New(apperror.CodeSkillBuiltinReadOnly, nil)
+			}
 			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
 		}
+		if guardErr := skillset.GuardFlatManagedWrite(ctx, client, plan.WritePath); guardErr != nil {
+			if errors.Is(guardErr, skillset.ErrRegistryLayoutConflict) {
+				return apperror.New(apperror.CodeSkillRegistryLayoutConflict, nil)
+			}
+			return apperror.Wrap(
+				apperror.CodeWorkspaceUnreachable,
+				fmt.Errorf("inspect skill directory layout: %w", guardErr),
+				nil,
+			)
+		}
 		dirPath := path.Dir(plan.WritePath)
+		if plan.RenameFromDir != "" {
+			if _, statErr := client.Stat(ctx, dirPath); statErr == nil {
+				return apperror.New(apperror.CodeSkillNameTaken, nil)
+			} else if !errors.Is(statErr, bridge.ErrNotFound) {
+				return skillSaveHTTPError(fmt.Errorf("inspect renamed skill destination: %w", statErr))
+			}
+			if err := client.Rename(ctx, plan.RenameFromDir, dirPath); err != nil {
+				return skillSaveHTTPError(fmt.Errorf("rename skill dir: %w", err))
+			}
+			if err := client.WriteFile(ctx, plan.WritePath, []byte(raw)); err != nil {
+				rollbackErr := client.Rename(context.WithoutCancel(ctx), dirPath, plan.RenameFromDir)
+				if rollbackErr != nil {
+					return apperror.Wrap(
+						apperror.CodeSkillSaveFailed,
+						fmt.Errorf("write renamed skill file: %w; restore original skill directory: %w", err, rollbackErr),
+						nil,
+					)
+				}
+				return skillSaveHTTPError(fmt.Errorf("write renamed skill file: %w", err))
+			}
+			continue
+		}
 		// A pooled client can pass getGRPCClient and still fail on first use
 		// when the workspace just stopped; classify per-op errors so the dial
 		// diagnostics never reach the response body.
 		if err := client.Mkdir(ctx, dirPath); err != nil {
-			return fsHTTPError(fmt.Errorf("mkdir skill dir: %w", err))
+			return skillSaveHTTPError(fmt.Errorf("mkdir skill dir: %w", err))
 		}
 		if err := client.WriteFile(ctx, plan.WritePath, []byte(raw)); err != nil {
-			return fsHTTPError(fmt.Errorf("write skill file: %w", err))
-		}
-		if plan.RemoveDir != "" {
-			if err := client.DeleteFile(ctx, plan.RemoveDir, true); err != nil {
-				return fsHTTPError(fmt.Errorf("remove renamed skill dir: %w", err))
-			}
+			return skillSaveHTTPError(fmt.Errorf("write skill file: %w", err))
 		}
 	}
 
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
+}
+
+func skillSaveHTTPError(err error) error {
+	switch {
+	case errors.Is(err, bridge.ErrNotFound),
+		errors.Is(err, bridge.ErrBadRequest),
+		errors.Is(err, bridge.ErrForbidden):
+		return fsHTTPError(err)
+	case errors.Is(err, bridge.ErrUnavailable):
+		return workspaceUnavailableError(err)
+	default:
+		return apperror.Wrap(apperror.CodeSkillSaveFailed, err, nil)
+	}
 }
 
 // DeleteSkills godoc
@@ -184,6 +232,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 // @Param payload body SkillsDeleteRequest true "Delete skills payload"
 // @Success 200 {object} skillsOpResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 409 {object} apperror.Problem
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} apperror.Problem
@@ -212,6 +261,9 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 	for _, sourcePath := range req.SourcePaths {
 		skillDir, dirErr := skillset.DeletableSkillDirForSourcePath(sourcePath)
 		if dirErr != nil {
+			if errors.Is(dirErr, skillset.ErrBuiltinSkillReadOnly) {
+				return apperror.New(apperror.CodeSkillBuiltinReadOnly, nil)
+			}
 			return echo.NewHTTPError(http.StatusBadRequest, "only Memoh-managed skills can be deleted")
 		}
 		targets = append(targets, skillDir)
@@ -253,6 +305,7 @@ func pruneEmptyRegistryDirs(ctx context.Context, client *bridge.Client, skillDir
 // @Success 200 {object} skillsOpResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills/actions [post].
@@ -281,6 +334,9 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 		Action:     req.Action,
 		TargetPath: req.TargetPath,
 	}); err != nil {
+		if errors.Is(err, skillset.ErrRegistryLayoutConflict) {
+			return apperror.New(apperror.CodeSkillRegistryLayoutConflict, nil)
+		}
 		return fsHTTPError(err)
 	}
 
@@ -400,6 +456,7 @@ func (h *ContainerdHandler) pluginSkillRoots(ctx context.Context, botID string) 
 func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 	items := make([]SkillItem, len(entries))
 	for i, entry := range entries {
+		_, builtin := skillset.BuiltinSkillName(entry.SourcePath)
 		items[i] = SkillItem{
 			Name:        entry.Name,
 			Description: entry.Description,
@@ -410,6 +467,8 @@ func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 			SourceRoot:  entry.SourceRoot,
 			SourceKind:  entry.SourceKind,
 			Managed:     entry.Managed,
+			Editable:    !builtin,
+			Deletable:   entry.Managed && !builtin,
 			State:       entry.State,
 			ShadowedBy:  entry.ShadowedBy,
 		}

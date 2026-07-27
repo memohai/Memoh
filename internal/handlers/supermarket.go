@@ -303,8 +303,10 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 // @Param payload body InstallSkillRequest true "Install skill request"
 // @Success 200 {object} InstallRegistrySkillResponse
 // @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /bots/{bot_id}/supermarket/install-skill [post].
 func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)

@@ -29,6 +29,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -261,6 +262,48 @@ func TestDeleteSkillsAPIRejectsNonManagedSourcePath(t *testing.T) {
 	}
 }
 
+func TestUpsertSkillsAPIRejectsFlatWriteIntoRegistryTree(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	registrySkillPath := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx", "SKILL.md")
+	env.writeSkillFile(t, registrySkillPath, managedSkillRaw("xlsx", "Spreadsheet"))
+
+	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
+		Skills: []string{managedSkillRaw("openai-api-curated", "Should fail")},
+	}, env.handler.UpsertSkills)
+	if err == nil {
+		t.Fatal("expected upsert into registry tree to fail")
+	}
+	if got := apperror.CodeOf(err); got != apperror.CodeSkillRegistryLayoutConflict {
+		t.Fatalf("upsert conflict code = %q, want %q", got, apperror.CodeSkillRegistryLayoutConflict)
+	}
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "openai-api-curated", "SKILL.md"))); !os.IsNotExist(err) {
+		t.Fatalf("flat SKILL.md should not be written into registry root, stat err = %v", err)
+	}
+}
+
+func TestAdoptSkillAPIRejectsFlatWriteIntoRegistryTree(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	registryID := "openai-api-curated"
+	registrySkillPath := path.Join(skillset.ManagedDir(), registryID, "docs", "xlsx", "SKILL.md")
+	env.writeSkillFile(t, registrySkillPath, managedSkillRaw("xlsx", "Spreadsheet"))
+	externalPath := path.Join("/data/.agents/skills", registryID, "SKILL.md")
+	env.writeSkillFile(t, externalPath, managedSkillRaw(registryID, "Compat"))
+
+	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills/actions", SkillsActionRequest{
+		Action:     skillset.ActionAdopt,
+		TargetPath: externalPath,
+	}, env.handler.ApplySkillAction)
+	if err == nil {
+		t.Fatal("expected adopt into registry tree to fail")
+	}
+	if got := apperror.CodeOf(err); got != apperror.CodeSkillRegistryLayoutConflict {
+		t.Fatalf("adopt conflict code = %q, want %q", got, apperror.CodeSkillRegistryLayoutConflict)
+	}
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), registryID, "SKILL.md"))); !os.IsNotExist(err) {
+		t.Fatalf("adopt should not write a flat SKILL.md into registry root, stat err = %v", err)
+	}
+}
+
 func TestUpsertSkillsAPIRejectsTraversalName(t *testing.T) {
 	env := newSkillsTestEnv(t)
 
@@ -289,7 +332,7 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndEditsRegistryInPlace(t *testing.T)
 		SourcePath: oldPath,
 	}, env.handler.UpsertSkills)
 	if err != nil {
-		t.Fatalf("UpsertSkills(rename) error = %v", err)
+		t.Fatalf("UpsertSkills(rename) error = %v cause = %v", err, apperror.CauseOf(err))
 	}
 
 	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "alpha"))); !os.IsNotExist(err) {
@@ -325,64 +368,98 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndEditsRegistryInPlace(t *testing.T)
 	}
 }
 
-func TestUpsertAndDeleteSkillsAPIKeepBuiltinUnderMemohPath(t *testing.T) {
+func TestUpsertSkillsAPIRenameRejectsExistingDestination(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	alphaPath := path.Join(skillset.ManagedDir(), "alpha", "SKILL.md")
+	betaPath := path.Join(skillset.ManagedDir(), "beta", "SKILL.md")
+	alphaRaw := managedSkillRaw("alpha", "Managed Alpha")
+	betaRaw := managedSkillRaw("beta", "Managed Beta")
+	env.writeSkillFile(t, alphaPath, alphaRaw)
+	env.writeSkillFile(t, betaPath, betaRaw)
+
+	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
+		Skills:     []string{managedSkillRaw("beta", "Overwrite Beta")},
+		SourcePath: alphaPath,
+	}, env.handler.UpsertSkills)
+	if got := apperror.CodeOf(err); got != apperror.CodeSkillNameTaken {
+		t.Fatalf("rename conflict code = %q, want %q", got, apperror.CodeSkillNameTaken)
+	}
+	if got, readErr := os.ReadFile(env.localPath(alphaPath)); readErr != nil || string(got) != alphaRaw {
+		t.Fatalf("source skill changed after rejected rename: content=%q err=%v", got, readErr)
+	}
+	if got, readErr := os.ReadFile(env.localPath(betaPath)); readErr != nil || string(got) != betaRaw {
+		t.Fatalf("destination skill changed after rejected rename: content=%q err=%v", got, readErr)
+	}
+}
+
+func TestUpsertSkillsAPIRenameRollsBackWhenWriteFails(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	alphaDir := path.Join(skillset.ManagedDir(), "alpha")
+	alphaPath := path.Join(alphaDir, "SKILL.md")
+	betaDir := path.Join(skillset.ManagedDir(), "beta")
+	betaPath := path.Join(betaDir, "SKILL.md")
+	alphaRaw := managedSkillRaw("alpha", "Managed Alpha")
+	env.writeSkillFile(t, alphaPath, alphaRaw)
+	env.bridge.writeErrors[betaPath] = errors.New("injected write failure")
+
+	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
+		Skills:     []string{managedSkillRaw("beta", "Renamed Beta")},
+		SourcePath: alphaPath,
+	}, env.handler.UpsertSkills)
+	if got := apperror.CodeOf(err); got != apperror.CodeSkillSaveFailed {
+		t.Fatalf("rename write failure code = %q, want %q", got, apperror.CodeSkillSaveFailed)
+	}
+	if got, readErr := os.ReadFile(env.localPath(alphaPath)); readErr != nil || string(got) != alphaRaw {
+		t.Fatalf("source skill was not restored after failed rename: content=%q err=%v", got, readErr)
+	}
+	if _, statErr := os.Stat(env.localPath(betaPath)); !os.IsNotExist(statErr) {
+		t.Fatalf("destination skill should not remain after rollback, stat err=%v", statErr)
+	}
+}
+
+func TestBuiltinSkillsAreReadOnlyAndNotDeletable(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	builtinPath := path.Join(skillset.IndexDirPath, "skill-creator", "SKILL.md")
-	env.writeSkillFile(t, builtinPath, managedSkillRaw("skill-creator", "Create skills"))
+	original := managedSkillRaw("skill-creator", "Create skills")
+	env.writeSkillFile(t, builtinPath, original)
 
 	updated := "---\nname: skill-creator\ndescription: Updated creator\n---\n\n# Updated\n"
 	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
 		Skills:     []string{updated},
 		SourcePath: builtinPath,
 	}, env.handler.UpsertSkills)
-	if err != nil {
-		t.Fatalf("UpsertSkills(builtin) error = %v", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeSkillBuiltinReadOnly {
+		t.Fatalf("builtin upsert code = %q, want %q", got, apperror.CodeSkillBuiltinReadOnly)
 	}
+
+	_, err = env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
+		SourcePaths: []string{builtinPath},
+	}, env.handler.DeleteSkills)
+	if got := apperror.CodeOf(err); got != apperror.CodeSkillBuiltinReadOnly {
+		t.Fatalf("builtin delete code = %q, want %q", got, apperror.CodeSkillBuiltinReadOnly)
+	}
+
 	got, err := os.ReadFile(env.localPath(builtinPath))
 	if err != nil {
 		t.Fatalf("read builtin skill: %v", err)
 	}
-	if string(got) != updated {
-		t.Fatalf("builtin skill was not updated in place:\n%s", got)
+	if string(got) != original {
+		t.Fatalf("builtin skill changed despite rejection:\n%s", got)
 	}
 	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "skill-creator"))); !os.IsNotExist(err) {
-		t.Fatalf("builtin edit should not create a flat managed skill, stat err = %v", err)
+		t.Fatalf("builtin edit should not create a managed override, stat err = %v", err)
 	}
 
-	renamed := "---\nname: skill-builder\ndescription: Builder\n---\n\n# Builder\n"
-	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
-		Skills:     []string{renamed},
-		SourcePath: builtinPath,
-	}, env.handler.UpsertSkills)
-	if err != nil {
-		t.Fatalf("UpsertSkills(builtin rename) error = %v", err)
+	flatPath := path.Join(skillset.ManagedDir(), "editable", "SKILL.md")
+	env.writeSkillFile(t, flatPath, managedSkillRaw("editable", "Editable"))
+	items := env.listSkills(t)
+	item := mustFindSkillByPath(t, items, builtinPath)
+	if item.Editable || item.Deletable {
+		t.Fatalf("builtin capabilities = editable:%v deletable:%v, want false/false", item.Editable, item.Deletable)
 	}
-	newPath := path.Join(skillset.IndexDirPath, "skill-builder", "SKILL.md")
-	if _, err := os.Stat(env.localPath(path.Join(skillset.IndexDirPath, "skill-creator"))); !os.IsNotExist(err) {
-		t.Fatalf("old builtin skill directory should be removed after rename, stat err = %v", err)
-	}
-	got, err = os.ReadFile(env.localPath(newPath))
-	if err != nil {
-		t.Fatalf("read renamed builtin skill: %v", err)
-	}
-	if string(got) != renamed {
-		t.Fatalf("renamed builtin skill content = %q", got)
-	}
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "skill-builder"))); !os.IsNotExist(err) {
-		t.Fatalf("builtin rename should stay under .memoh/skills, stat err = %v", err)
-	}
-
-	rec, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
-		SourcePaths: []string{newPath},
-	}, env.handler.DeleteSkills)
-	if err != nil {
-		t.Fatalf("DeleteSkills(builtin) error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("DeleteSkills status = %d, want 200", rec.Code)
-	}
-	if _, err := os.Stat(env.localPath(path.Join(skillset.IndexDirPath, "skill-builder"))); !os.IsNotExist(err) {
-		t.Fatalf("builtin skill should be removed, stat err = %v", err)
+	flat := mustFindSkillByPath(t, items, flatPath)
+	if !flat.Editable || !flat.Deletable {
+		t.Fatalf("managed capabilities = editable:%v deletable:%v, want true/true", flat.Editable, flat.Deletable)
 	}
 }
 
@@ -508,6 +585,7 @@ type skillsTestEnv struct {
 	dataRoot string
 	botID    string
 	userID   string
+	bridge   *skillsTestBridgeServer
 }
 
 type fakePluginInstallationLister struct {
@@ -536,7 +614,7 @@ func newSkillsTestEnvWithMetadata(t *testing.T, metadata map[string]any) *skills
 	t.Cleanup(func() { _ = os.RemoveAll(dataRoot) })
 	userID := "00000000-0000-0000-0000-000000000001"
 	botID := "00000000-0000-0000-0000-000000000010"
-	startSkillsTestBridgeServer(t, dataRoot, botID)
+	bridgeServer := startSkillsTestBridgeServer(t, dataRoot, botID)
 
 	cfg := config.WorkspaceConfig{DataRoot: dataRoot}
 	var metadataJSON []byte
@@ -569,6 +647,7 @@ func newSkillsTestEnvWithMetadata(t *testing.T, metadata map[string]any) *skills
 		dataRoot: dataRoot,
 		botID:    botID,
 		userID:   userID,
+		bridge:   bridgeServer,
 	}
 }
 
@@ -748,10 +827,11 @@ func mustParseUUID(s string) pgtype.UUID {
 
 type skillsTestBridgeServer struct {
 	pb.UnimplementedContainerServiceServer
-	root string
+	root        string
+	writeErrors map[string]error
 }
 
-func startSkillsTestBridgeServer(t *testing.T, dataRoot, botID string) {
+func startSkillsTestBridgeServer(t *testing.T, dataRoot, botID string) *skillsTestBridgeServer {
 	t.Helper()
 
 	socketPath := filepath.Join(dataRoot, "run", botID, "bridge.sock")
@@ -765,7 +845,11 @@ func startSkillsTestBridgeServer(t *testing.T, dataRoot, botID string) {
 	}
 
 	srv := grpc.NewServer()
-	pb.RegisterContainerServiceServer(srv, &skillsTestBridgeServer{root: dataRoot})
+	bridgeServer := &skillsTestBridgeServer{
+		root:        dataRoot,
+		writeErrors: make(map[string]error),
+	}
+	pb.RegisterContainerServiceServer(srv, bridgeServer)
 
 	done := make(chan struct{})
 	go func() {
@@ -778,6 +862,7 @@ func startSkillsTestBridgeServer(t *testing.T, dataRoot, botID string) {
 		_ = lis.Close()
 		<-done
 	})
+	return bridgeServer
 }
 
 func (s *skillsTestBridgeServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
@@ -886,6 +971,9 @@ func (s *skillsTestBridgeServer) WriteRaw(stream pb.ContainerService_WriteRawSer
 }
 
 func (s *skillsTestBridgeServer) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
+	if err := s.writeErrors[path.Clean(req.GetPath())]; err != nil {
+		return nil, status.Errorf(codes.Internal, "write %s: %v", req.GetPath(), err)
+	}
 	_, localPath := s.resolvePath(req.GetPath())
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir parent for %s: %v", req.GetPath(), err)
@@ -918,6 +1006,18 @@ func (s *skillsTestBridgeServer) Mkdir(_ context.Context, req *pb.MkdirRequest) 
 		return nil, status.Errorf(codes.Internal, "mkdir %s: %v", req.GetPath(), err)
 	}
 	return &pb.MkdirResponse{}, nil
+}
+
+func (s *skillsTestBridgeServer) Rename(_ context.Context, req *pb.RenameRequest) (*pb.RenameResponse, error) {
+	_, oldPath := s.resolvePath(req.GetOldPath())
+	_, newPath := s.resolvePath(req.GetNewPath())
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o750); err != nil {
+		return nil, status.Errorf(codes.Internal, "mkdir parent for %s: %v", req.GetNewPath(), err)
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return nil, toStatusError(err, req.GetOldPath())
+	}
+	return &pb.RenameResponse{}, nil
 }
 
 func (s *skillsTestBridgeServer) DeleteFile(_ context.Context, req *pb.DeleteFileRequest) (*pb.DeleteFileResponse, error) {

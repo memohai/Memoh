@@ -127,6 +127,7 @@
 
           <div class="flex items-center gap-1">
             <Button
+              v-if="skill.editable"
               variant="ghost"
               size="icon-sm"
               :aria-label="!skill.managed ? $t('bots.skills.overrideTitle') : $t('common.edit')"
@@ -174,7 +175,7 @@
             </Button>
 
             <ConfirmPopover
-              v-if="skill.managed"
+              v-if="skill.deletable"
               :message="$t('bots.skills.deleteConfirm')"
               :cancel-text="$t('common.cancel')"
               :confirm-text="$t('common.confirm')"
@@ -346,7 +347,7 @@
 
 <script setup lang="ts">
 import { ArrowDownToLine, Eye, EyeOff, Plus, SlidersHorizontal, SquarePen, Trash2 } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { computed, onActivated, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
@@ -368,6 +369,7 @@ import {
   type HandlersSkillItem,
 } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
+import { safeSkillCatalogQueryKey } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 type SkillItem = HandlersSkillItem & {
@@ -386,8 +388,8 @@ const props = defineProps<{
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
-function invalidateSidebarSkills() {
-  queryCache.invalidateQueries({ key: ['bot-skills-catalog', props.botId] })
+function invalidateSafeSkillCatalog() {
+  queryCache.invalidateQueries({ key: safeSkillCatalogQueryKey(props.botId) })
 }
 
 const MANAGED_SKILL_PATH = '/data/skills'
@@ -617,6 +619,8 @@ function sourceKindLabel(kind?: string) {
       return t('bots.skills.compatBadge')
     case 'plugin':
       return t('bots.skills.pluginBadge')
+    case 'registry':
+      return t('bots.skills.registryBadge')
     default:
       return t('bots.skills.managedBadge')
   }
@@ -664,7 +668,7 @@ async function handleSkillAction(action: 'adopt' | 'disable' | 'enable', skill: 
           : t('bots.skills.enableSuccess'),
     )
     await fetchSkills()
-    invalidateSidebarSkills()
+    invalidateSafeSkillCatalog()
   } catch (error) {
     toast.error(resolveApiErrorMessage(
       error,
@@ -699,7 +703,7 @@ async function handleSave() {
     isDialogOpen.value = false
     editingSourcePath.value = ''
     await fetchSkills()
-    invalidateSidebarSkills()
+    invalidateSafeSkillCatalog()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.skills.saveFailed')))
   } finally {
@@ -759,7 +763,7 @@ async function handleDelete(skill: SkillItem) {
     })
     toast.success(t('bots.skills.deleteSuccess'))
     await fetchSkills()
-    invalidateSidebarSkills()
+    invalidateSafeSkillCatalog()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.skills.deleteFailed')))
   } finally {
@@ -775,10 +779,19 @@ watch(() => props.botId, () => {
   void fetchSkills()
 }, { immediate: true })
 
-// Refresh local skills list when chat-sidebar invalidates the shared catalog cache.
+let hasActivated = false
+onActivated(() => {
+  if (!hasActivated) {
+    hasActivated = true
+    return
+  }
+  if (props.botId) void fetchSkills()
+})
+
+// Refresh this editor if another surface invalidates the shared runtime catalog.
 watch(
   () => {
-    const entries = queryCache.getEntries({ key: ['bot-skills-catalog', props.botId] })
+    const entries = queryCache.getEntries({ key: safeSkillCatalogQueryKey(props.botId) })
     return entries[0]?.state.value.data
   },
   (next, prev) => {

@@ -102,3 +102,80 @@ func TestLookupDoesNotExposeMutableCatalogState(t *testing.T) {
 		t.Fatalf("catalog allowed args were mutated: %#v", fresh.AllowedArgs)
 	}
 }
+
+func TestSkillLayoutErrorsUseConflictContract(t *testing.T) {
+	for _, code := range []Code{
+		CodeSkillBuiltinReadOnly,
+		CodeSkillRegistryLayoutConflict,
+		CodeRegistrySkillLayoutConflict,
+	} {
+		definition, ok := Lookup(code)
+		if !ok {
+			t.Fatalf("%s missing from catalog", code)
+		}
+		if definition.HTTPStatus != http.StatusConflict {
+			t.Fatalf("%s status = %d, want 409", code, definition.HTTPStatus)
+		}
+		if strings.TrimSpace(definition.Detail) == "" {
+			t.Fatalf("%s has empty fallback detail", code)
+		}
+	}
+}
+
+func TestSkillSaveErrorsUseStableContracts(t *testing.T) {
+	tests := []struct {
+		code   Code
+		status int
+	}{
+		{code: CodeSkillNameTaken, status: http.StatusConflict},
+		{code: CodeSkillSaveFailed, status: http.StatusInternalServerError},
+	}
+	for _, test := range tests {
+		definition, ok := Lookup(test.code)
+		if !ok {
+			t.Fatalf("%s missing from catalog", test.code)
+		}
+		if definition.HTTPStatus != test.status {
+			t.Fatalf("%s status = %d, want %d", test.code, definition.HTTPStatus, test.status)
+		}
+		if strings.TrimSpace(definition.Detail) == "" {
+			t.Fatalf("%s has empty fallback detail", test.code)
+		}
+	}
+}
+
+func TestRegistryUpstreamErrorsUseStableContracts(t *testing.T) {
+	tests := []struct {
+		code   Code
+		status int
+	}{
+		{code: CodeRegistryUnavailable, status: http.StatusBadGateway},
+		{code: CodeRegistrySkillNotFound, status: http.StatusNotFound},
+		{code: CodeRegistrySkillInvalid, status: http.StatusBadGateway},
+	}
+	for _, test := range tests {
+		definition, ok := Lookup(test.code)
+		if !ok {
+			t.Fatalf("%s missing from catalog", test.code)
+		}
+		if definition.HTTPStatus != test.status {
+			t.Fatalf("%s status = %d, want %d", test.code, definition.HTTPStatus, test.status)
+		}
+		if strings.TrimSpace(definition.Detail) == "" {
+			t.Fatalf("%s has empty fallback detail", test.code)
+		}
+	}
+}
+
+func TestRegistrySkillInstallFailedUsesPrivateServerErrorContract(t *testing.T) {
+	definition, ok := Lookup(CodeRegistrySkillInstallFailed)
+	if !ok {
+		t.Fatal("registry.skill_install_failed missing from catalog")
+	}
+	if definition.HTTPStatus != http.StatusInternalServerError {
+		t.Fatalf("registry.skill_install_failed status = %d, want 500", definition.HTTPStatus)
+	}
+	if strings.TrimSpace(definition.Detail) == "" {
+		t.Fatal("registry.skill_install_failed has empty fallback detail")
+	}
+}
