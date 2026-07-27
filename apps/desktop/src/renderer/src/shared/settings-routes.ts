@@ -139,7 +139,7 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
       },
       {
         name: 'supermarket-skill-detail',
-        path: 'skills/:skillId',
+        path: 'skills/:registryId/:packageId/:skillId',
         loader: () => import('@memohai/web/pages/supermarket/skill-detail.vue'),
         meta: {
           breadcrumb: (route) => String(route.params.skillId ?? ''),

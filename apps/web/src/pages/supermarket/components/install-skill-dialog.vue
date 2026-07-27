@@ -20,7 +20,7 @@
           class="space-y-1 rounded-md border border-border p-3"
         >
           <p class="text-xs font-medium">
-            {{ displayName }}
+            {{ skill.name || skill.skill_id }}
           </p>
           <p class="line-clamp-3 text-xs text-muted-foreground">
             {{ skill.description }}
@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FieldStack, toast } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
@@ -64,12 +64,10 @@ import {
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { safeSkillCatalogQueryKey } from '@/composables/api/useChat'
 import BotSelect from '@/components/bot-select/index.vue'
-import { formatNamespacedSkillName } from '../utils/display'
 
 const props = defineProps<{
   open: boolean
   skill: HandlersSupermarketCatalogSkill | null
-  registryPrefix?: string
 }>()
 
 const emit = defineEmits<{
@@ -82,11 +80,6 @@ const queryCache = useQueryCache()
 
 const selectedBotId = ref('')
 const installing = ref(false)
-
-const displayName = computed(() => {
-  if (!props.skill) return ''
-  return formatNamespacedSkillName(props.skill, props.registryPrefix ?? '')
-})
 
 watch(() => props.open, (open) => {
   if (!open) {

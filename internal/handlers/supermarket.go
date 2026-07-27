@@ -110,11 +110,9 @@ func (h *SupermarketHandler) Register(e *echo.Echo) {
 	g.GET("/plugins", h.ListPlugins)
 	g.GET("/plugins/:id", h.GetPlugin)
 	g.GET("/skills", h.ListSkills)
-	g.GET("/skills/:id", h.GetSkill)
 	g.GET("/tags", h.ListTags)
 	g.GET("/registries", h.ListRegistries)
 	g.GET("/registries/:registry_id/categories", h.ListRegistryCategories)
-	g.GET("/catalog/skills", h.SearchRegistrySkills)
 	g.GET("/registries/:registry_id/packages/:package_id/skills/:skill_id", h.GetRegistrySkill)
 	g.GET("/skill-images/:digest", h.GetRegistrySkillImage)
 
@@ -186,33 +184,6 @@ func (h *SupermarketHandler) ListPlugins(c echo.Context) error {
 func (h *SupermarketHandler) GetPlugin(c echo.Context) error {
 	id := c.Param("id")
 	return h.proxy(c, "/api/plugins/"+id)
-}
-
-// ListSkills godoc
-// @Summary List skills from supermarket
-// @Tags supermarket
-// @Param q query string false "Search query"
-// @Param tag query string false "Filter by tag"
-// @Param page query int false "Page number"
-// @Param limit query int false "Items per page"
-// @Success 200 {object} SupermarketSkillListResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /supermarket/skills [get].
-func (h *SupermarketHandler) ListSkills(c echo.Context) error {
-	return h.proxy(c, "/api/skills")
-}
-
-// GetSkill godoc
-// @Summary Get skill detail from supermarket
-// @Tags supermarket
-// @Param id path string true "Skill ID"
-// @Success 200 {object} SupermarketSkillEntry
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /supermarket/skills/{id} [get].
-func (h *SupermarketHandler) GetSkill(c echo.Context) error {
-	id := c.Param("id")
-	return h.proxy(c, "/api/skills/"+id)
 }
 
 // ListTags godoc
@@ -337,28 +308,6 @@ type SupermarketPluginListResponse struct {
 	Page  int                   `json:"page"`
 	Limit int                   `json:"limit"`
 	Data  []pluginspkg.Manifest `json:"data"`
-}
-
-type SupermarketSkillMetadata struct {
-	Author   SupermarketAuthor `json:"author"`
-	Tags     []string          `json:"tags,omitempty"`
-	Homepage string            `json:"homepage,omitempty"`
-}
-
-type SupermarketSkillEntry struct {
-	ID          string                   `json:"id"`
-	Name        string                   `json:"name"`
-	Description string                   `json:"description"`
-	Metadata    SupermarketSkillMetadata `json:"metadata"`
-	Content     string                   `json:"content"`
-	Files       []string                 `json:"files"`
-}
-
-type SupermarketSkillListResponse struct {
-	Total int                     `json:"total"`
-	Page  int                     `json:"page"`
-	Limit int                     `json:"limit"`
-	Data  []SupermarketSkillEntry `json:"data"`
 }
 
 type SupermarketTagsResponse struct {

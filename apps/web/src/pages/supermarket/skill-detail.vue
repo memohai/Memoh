@@ -116,7 +116,6 @@
     <InstallSkillDialog
       v-model:open="installDialogOpen"
       :skill="skill"
-      :registry-prefix="registryPrefix"
     />
   </div>
 </template>
@@ -140,7 +139,6 @@ import InstallSkillDialog from './components/install-skill-dialog.vue'
 import InfoItem from './components/info-item.vue'
 import MarketDetailHeader from './components/market-detail-header.vue'
 import SkillIcon from './components/skill-icon.vue'
-import { formatNamespacedSkillName, registryDisplayPrefix } from './utils/display'
 
 const route = useRoute()
 const router = useRouter()
@@ -155,9 +153,8 @@ const registryId = computed(() => String(route.params.registryId || ''))
 const packageId = computed(() => String(route.params.packageId || ''))
 const skillId = computed(() => String(route.params.skillId || ''))
 const skillIdentity = computed(() => `${registryId.value}/${packageId.value}/${skillId.value}`)
-const registryPrefix = computed(() => registryDisplayPrefix(registryId.value, registryName.value))
 const displayName = computed(() => skill.value
-  ? formatNamespacedSkillName(skill.value, registryPrefix.value)
+  ? skill.value.name || skill.value.skill_id || ''
   : '')
 
 async function loadSkill() {

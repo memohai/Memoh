@@ -169,8 +169,8 @@ func (h *SupermarketHandler) ListRegistryCategories(c echo.Context) error {
 	return h.proxy(c, "/api/registries/"+url.PathEscape(registryID)+"/categories")
 }
 
-// SearchRegistrySkills godoc
-// @Summary Search Skills across supermarket Registries
+// ListSkills godoc
+// @Summary List Skills across supermarket Registries
 // @Tags supermarket
 // @Param q query string false "Search query"
 // @Param registry query string false "Registry ID"
@@ -184,9 +184,9 @@ func (h *SupermarketHandler) ListRegistryCategories(c echo.Context) error {
 // @Success 200 {object} SupermarketCatalogSkillListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/catalog/skills [get].
-func (h *SupermarketHandler) SearchRegistrySkills(c echo.Context) error {
-	return h.proxy(c, "/api/catalog/skills")
+// @Router /supermarket/skills [get].
+func (h *SupermarketHandler) ListSkills(c echo.Context) error {
+	return h.proxy(c, "/api/skills")
 }
 
 // GetRegistrySkill godoc

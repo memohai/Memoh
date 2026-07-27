@@ -3428,23 +3428,6 @@ definitions:
           $ref: '#/definitions/handlers.SupermarketSkillCategory'
         type: array
     type: object
-  handlers.SupermarketSkillEntry:
-    properties:
-      content:
-        type: string
-      description:
-        type: string
-      files:
-        items:
-          type: string
-        type: array
-      id:
-        type: string
-      metadata:
-        $ref: '#/definitions/handlers.SupermarketSkillMetadata'
-      name:
-        type: string
-    type: object
   handlers.SupermarketSkillIcon:
     properties:
       brand_color:
@@ -3466,30 +3449,6 @@ definitions:
         type: string
       size:
         type: integer
-    type: object
-  handlers.SupermarketSkillListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/handlers.SupermarketSkillEntry'
-        type: array
-      limit:
-        type: integer
-      page:
-        type: integer
-      total:
-        type: integer
-    type: object
-  handlers.SupermarketSkillMetadata:
-    properties:
-      author:
-        $ref: '#/definitions/handlers.SupermarketAuthor'
-      homepage:
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
     type: object
   handlers.SupermarketSkillRuntimeRequirements:
     properties:
@@ -13956,61 +13915,6 @@ paths:
       summary: List speech provider metadata
       tags:
       - speech-providers
-  /supermarket/catalog/skills:
-    get:
-      parameters:
-      - description: Search query
-        in: query
-        name: q
-        type: string
-      - description: Registry ID
-        in: query
-        name: registry
-        type: string
-      - description: Package ID
-        in: query
-        name: package
-        type: string
-      - description: Category ID
-        in: query
-        name: category
-        type: string
-      - description: Exact tag
-        in: query
-        name: tag
-        type: string
-      - description: Target OS
-        in: query
-        name: os
-        type: string
-      - description: Page number
-        in: query
-        name: page
-        type: integer
-      - description: Items per page
-        in: query
-        name: limit
-        type: integer
-      - description: Sort order
-        in: query
-        name: sort
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.SupermarketCatalogSkillListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Search Skills across supermarket Registries
-      tags:
-      - supermarket
   /supermarket/plugins:
     get:
       parameters:
@@ -14181,9 +14085,25 @@ paths:
         in: query
         name: q
         type: string
-      - description: Filter by tag
+      - description: Registry ID
+        in: query
+        name: registry
+        type: string
+      - description: Package ID
+        in: query
+        name: package
+        type: string
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
         in: query
         name: tag
+        type: string
+      - description: Target OS
+        in: query
+        name: os
         type: string
       - description: Page number
         in: query
@@ -14193,40 +14113,24 @@ paths:
         in: query
         name: limit
         type: integer
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.SupermarketSkillListResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List skills from supermarket
-      tags:
-      - supermarket
-  /supermarket/skills/{id}:
-    get:
-      parameters:
-      - description: Skill ID
-        in: path
-        name: id
-        required: true
+      - description: Sort order
+        in: query
+        name: sort
         type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketSkillEntry'
-        "404":
-          description: Not Found
+            $ref: '#/definitions/handlers.SupermarketCatalogSkillListResponse'
+        "400":
+          description: Bad Request
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get skill detail from supermarket
+      summary: List Skills across supermarket Registries
       tags:
       - supermarket
   /supermarket/tags:

@@ -119,7 +119,6 @@
               v-for="skill in skills"
               :key="skill.install_id"
               :skill="skill"
-              :registry-prefix="registryPrefix(skill.registry_id)"
               @install="openSkillInstall"
             />
           </div>
@@ -222,7 +221,6 @@
       <InstallSkillDialog
         v-model:open="skillDialogOpen"
         :skill="selectedSkill"
-        :registry-prefix="registryPrefix(selectedSkill?.registry_id)"
         @installed="refreshAll"
       />
       <ConnectConnectorDialog
@@ -260,9 +258,9 @@ import {
 } from '@felinic/ui'
 import {
   getConnectorsCatalog,
-  getSupermarketCatalogSkills,
   getSupermarketPlugins,
   getSupermarketRegistries,
+  getSupermarketSkills,
   type ConnectitConnector,
   type HandlersSupermarketCatalogSkill,
   type HandlersSupermarketRegistry,
@@ -278,7 +276,6 @@ import MarketItemCard from './components/market-item-card.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useCapabilitiesStore } from '@/store/capabilities'
-import { registryDisplayPrefix } from './utils/display'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -331,7 +328,7 @@ const registryFilterItems = computed<SegmentedItem[]>(() => [
     .filter((registry): registry is HandlersSupermarketRegistry & { id: string } => !!registry.id)
     .map(registry => ({
       value: registry.id,
-      label: registryDisplayPrefix(registry.id, registry.name),
+      label: registry.name || registry.id,
     })),
 ])
 
@@ -394,12 +391,6 @@ watch(searchInput, () => {
   clearTimeout(searchDebounce)
   searchDebounce = setTimeout(applySearch, 300)
 })
-
-function registryPrefix(registryId?: string): string {
-  if (!registryId) return ''
-  const registry = registries.value.find(entry => entry.id === registryId)
-  return registryDisplayPrefix(registryId, registry?.name)
-}
 
 function onRegistryFilterChange(value: string | number) {
   const next = String(value)
@@ -467,7 +458,7 @@ async function loadRegistries() {
 async function loadSkills() {
   skillsLoading.value = true
   try {
-    const { data } = await getSupermarketCatalogSkills({
+    const { data } = await getSupermarketSkills({
       query: {
         q: searchQuery.value || undefined,
         registry: selectedRegistry.value === allRegistriesValue

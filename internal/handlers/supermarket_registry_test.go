@@ -131,6 +131,43 @@ func TestValidateRegistrySkillRequiresNamespacedIdentity(t *testing.T) {
 	}
 }
 
+func TestSupermarketSkillRoutesUseRegistryCatalogOnly(t *testing.T) {
+	var upstreamRequestURI string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamRequestURI = r.URL.RequestURI()
+		w.Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		_, _ = w.Write([]byte(`{"data":[],"total":0,"page":1,"limit":50}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler := &SupermarketHandler{
+		baseURL:    upstream.URL,
+		httpClient: upstream.Client(),
+		logger:     slog.New(slog.DiscardHandler),
+	}
+	e := echo.New()
+	handler.Register(e)
+
+	req := httptest.NewRequest(http.MethodGet, "/supermarket/skills?registry=memoh&limit=50", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /supermarket/skills status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if upstreamRequestURI != "/api/skills?registry=memoh&limit=50" {
+		t.Fatalf("upstream request URI = %q, want canonical Skill collection", upstreamRequestURI)
+	}
+
+	for _, legacyPath := range []string{"/supermarket/catalog/skills", "/supermarket/skills/flat-id"} {
+		req = httptest.NewRequest(http.MethodGet, legacyPath, nil)
+		rec = httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("GET %s status = %d, want 404", legacyPath, rec.Code)
+		}
+	}
+}
+
 func TestDownloadRegistrySkillArtifactVerifiesOriginAndDigest(t *testing.T) {
 	content := []byte("artifact")
 	digest := sha256.Sum256(content)
