@@ -17,20 +17,14 @@
 
         <div
           v-if="skill"
-          class="rounded-md border border-border p-3 space-y-1"
+          class="space-y-1 rounded-md border border-border p-3"
         >
           <p class="text-xs font-medium">
-            {{ skill.name }}
+            {{ displayName }}
           </p>
           <p class="line-clamp-3 text-xs text-muted-foreground">
             {{ skill.description }}
           </p>
-          <Badge
-            variant="outline"
-            size="sm"
-          >
-            {{ registryName || skill.registry_id }}
-          </Badge>
         </div>
       </div>
       <DialogFooter>
@@ -55,12 +49,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FieldStack, toast } from '@felinic/ui'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Badge, Button,
+  Button,
 } from '@felinic/ui'
 import {
   postBotsByBotIdSupermarketInstallSkill,
@@ -68,11 +62,12 @@ import {
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import BotSelect from '@/components/bot-select/index.vue'
+import { formatNamespacedSkillName } from '../utils/display'
 
 const props = defineProps<{
   open: boolean
   skill: HandlersSupermarketCatalogSkill | null
-  registryName?: string
+  registryPrefix?: string
 }>()
 
 const emit = defineEmits<{
@@ -84,6 +79,11 @@ const { t } = useI18n()
 
 const selectedBotId = ref('')
 const installing = ref(false)
+
+const displayName = computed(() => {
+  if (!props.skill) return ''
+  return formatNamespacedSkillName(props.skill, props.registryPrefix ?? '')
+})
 
 watch(() => props.open, (open) => {
   if (!open) {

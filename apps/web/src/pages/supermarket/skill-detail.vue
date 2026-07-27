@@ -92,10 +92,6 @@
             :label="$t('supermarket.developer')"
             :value="skill.author?.name || $t('common.none')"
           />
-          <InfoItem
-            :label="$t('supermarket.supportedSystems')"
-            :value="supportedSystems"
-          />
           <div
             v-if="skill.homepage"
             class="space-y-1"
@@ -120,8 +116,7 @@
     <InstallSkillDialog
       v-model:open="installDialogOpen"
       :skill="skill"
-      :registry-name="registryName"
-      @installed="loadSkill"
+      :registry-prefix="registryPrefix"
     />
   </div>
 </template>
@@ -145,6 +140,7 @@ import InstallSkillDialog from './components/install-skill-dialog.vue'
 import InfoItem from './components/info-item.vue'
 import MarketDetailHeader from './components/market-detail-header.vue'
 import SkillIcon from './components/skill-icon.vue'
+import { registryDisplayPrefix } from './utils/display'
 
 const route = useRoute()
 const router = useRouter()
@@ -159,16 +155,7 @@ const registryId = computed(() => String(route.params.registryId || ''))
 const packageId = computed(() => String(route.params.packageId || ''))
 const skillId = computed(() => String(route.params.skillId || ''))
 const skillIdentity = computed(() => `${registryId.value}/${packageId.value}/${skillId.value}`)
-const supportedSystems = computed(() => {
-  const names: Record<string, string> = {
-    darwin: 'macOS',
-    linux: 'Linux',
-    win32: 'Windows',
-  }
-  return skill.value?.runtime_requirements?.os
-    ?.map(os => names[os] || os)
-    .join(', ') || t('common.none')
-})
+const registryPrefix = computed(() => registryDisplayPrefix(registryId.value, registryName.value))
 
 async function loadSkill() {
   if (!registryId.value || !packageId.value || !skillId.value) return

@@ -177,7 +177,6 @@
     <InstallPluginDialog
       v-model:open="installDialogOpen"
       :plugin="plugin"
-      @installed="loadPlugin"
     />
   </div>
 </template>

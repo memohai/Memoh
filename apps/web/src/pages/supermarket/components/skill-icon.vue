@@ -1,5 +1,8 @@
 <template>
-  <picture v-if="activeImageUrl && !failed">
+  <picture
+    v-if="activeImageUrl && !failed"
+    :class="frameClass"
+  >
     <img
       :src="activeImageUrl"
       alt=""
@@ -44,7 +47,10 @@ const darkImageUrl = computed(() => imageURL(props.icon?.dark))
 const activeImageUrl = computed(() => settings.resolvedColorMode === 'dark' && darkImageUrl.value
   ? darkImageUrl.value
   : imageUrl.value)
-const imageClass = computed(() => props.variant === 'detail' ? 'size-11 object-contain' : 'size-5 object-contain')
+// Card box is size-9; plugin brand glyphs sit at size-5. Skill SVGs look lighter at
+// that size, but filling the whole box is too loud — land between the two.
+const frameClass = computed(() => props.variant === 'detail' ? 'block size-12' : 'block size-7')
+const imageClass = 'size-full object-contain'
 const fallbackClass = computed(() => props.variant === 'detail'
   ? 'size-8 text-muted-foreground'
   : 'size-4 text-muted-foreground')

@@ -1,22 +1,12 @@
 <template>
   <MarketItemCard
-    :name="skill.name"
+    :name="displayName"
     :description="skill.description"
     :homepage="skill.homepage"
     @open="openDetail"
   >
     <template #leading>
       <SkillIcon :icon="skill.icon" />
-    </template>
-
-    <template #meta>
-      <Badge
-        variant="outline"
-        size="sm"
-        class="max-w-full truncate"
-      >
-        {{ registryName || skill.registry_id }}
-      </Badge>
     </template>
 
     <template #actions>
@@ -33,16 +23,18 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Download } from 'lucide-vue-next'
-import { Badge, Button } from '@felinic/ui'
+import { Button } from '@felinic/ui'
 import type { HandlersSupermarketCatalogSkill } from '@memohai/sdk'
+import { formatNamespacedSkillName } from '../utils/display'
 import MarketItemCard from './market-item-card.vue'
 import SkillIcon from './skill-icon.vue'
 
 const props = defineProps<{
   skill: HandlersSupermarketCatalogSkill
-  registryName?: string
+  registryPrefix?: string
 }>()
 
 defineEmits<{
@@ -50,6 +42,8 @@ defineEmits<{
 }>()
 
 const router = useRouter()
+
+const displayName = computed(() => formatNamespacedSkillName(props.skill, props.registryPrefix ?? ''))
 
 function openDetail() {
   if (!props.skill.registry_id || !props.skill.package_id || !props.skill.skill_id) return
