@@ -77,7 +77,7 @@ sslmode = "disable"
 providers_dir = "conf/providers"
 
 [supermarket]
-base_url = "https://memohai-supermarket.fodesu.workers.dev"
+base_url = "https://supermarket.memoh.ai"
 
 [connect_it]
 # The Connect-It dev service is available at http://localhost:18421.

@@ -27,12 +27,11 @@ import (
 	"github.com/memohai/memoh/internal/workspace"
 )
 
-func TestReadRegistrySkillArchivePreservesManifestName(t *testing.T) {
-	installID := "registry+package+skill"
+func TestReadRegistrySkillArchiveReadsContentRoot(t *testing.T) {
 	archive, err := readRegistrySkillArchive(registrySkillTestArchive(t, []registrySkillTestEntry{
-		{name: installID + "/SKILL.md", content: "---\nname: skill\ndescription: Demo\n---\n\n# Demo\n"},
-		{name: installID + "/scripts/run.sh", content: "#!/bin/sh\n", mode: 0o755},
-	}), installID)
+		{name: "SKILL.md", content: "---\nname: skill\ndescription: Demo\n---\n\n# Demo\n"},
+		{name: "scripts/run.sh", content: "#!/bin/sh\n", mode: 0o755},
+	}))
 	if err != nil {
 		t.Fatalf("readRegistrySkillArchive() error = %v", err)
 	}
@@ -43,9 +42,6 @@ func TestReadRegistrySkillArchivePreservesManifestName(t *testing.T) {
 	if !strings.Contains(string(manifest.content), "name: skill") {
 		t.Fatalf("manifest name should stay original:\n%s", manifest.content)
 	}
-	if strings.Contains(string(manifest.content), "name: "+installID) {
-		t.Fatalf("manifest should not be rewritten to install_id:\n%s", manifest.content)
-	}
 	if !strings.Contains(string(manifest.content), "# Demo") {
 		t.Fatalf("manifest body was not preserved:\n%s", manifest.content)
 	}
@@ -55,7 +51,6 @@ func TestReadRegistrySkillArchivePreservesManifestName(t *testing.T) {
 }
 
 func TestReadRegistrySkillArchiveRejectsUnsafeEntries(t *testing.T) {
-	installID := "registry+package+skill"
 	tests := []struct {
 		name    string
 		entries []registrySkillTestEntry
@@ -63,49 +58,49 @@ func TestReadRegistrySkillArchiveRejectsUnsafeEntries(t *testing.T) {
 		{
 			name: "path traversal",
 			entries: []registrySkillTestEntry{
-				{name: installID + "/SKILL.md", content: validRegistrySkillManifest},
-				{name: installID + "/../escape", content: "bad"},
+				{name: "SKILL.md", content: validRegistrySkillManifest},
+				{name: "../escape", content: "bad"},
 			},
 		},
 		{
 			name: "backslash",
 			entries: []registrySkillTestEntry{
-				{name: installID + "/SKILL.md", content: validRegistrySkillManifest},
-				{name: installID + `\escape`, content: "bad"},
+				{name: "SKILL.md", content: validRegistrySkillManifest},
+				{name: `scripts\escape`, content: "bad"},
 			},
 		},
 		{
 			name: "symlink",
 			entries: []registrySkillTestEntry{
-				{name: installID + "/SKILL.md", content: validRegistrySkillManifest},
-				{name: installID + "/link", entryType: tar.TypeSymlink, linkName: "../../escape"},
+				{name: "SKILL.md", content: validRegistrySkillManifest},
+				{name: "link", entryType: tar.TypeSymlink, linkName: "../../escape"},
 			},
 		},
 		{
 			name: "duplicate",
 			entries: []registrySkillTestEntry{
-				{name: installID + "/SKILL.md", content: validRegistrySkillManifest},
-				{name: installID + "/SKILL.md", content: validRegistrySkillManifest},
+				{name: "SKILL.md", content: validRegistrySkillManifest},
+				{name: "SKILL.md", content: validRegistrySkillManifest},
 			},
 		},
 		{
 			name: "directory then file conflict",
 			entries: []registrySkillTestEntry{
-				{name: installID + "/SKILL.md", content: validRegistrySkillManifest},
-				{name: installID + "/scripts/", entryType: tar.TypeDir},
-				{name: installID + "/scripts", content: "file"},
+				{name: "SKILL.md", content: validRegistrySkillManifest},
+				{name: "scripts/", entryType: tar.TypeDir},
+				{name: "scripts", content: "file"},
 			},
 		},
 		{
 			name: "file directory conflict",
 			entries: []registrySkillTestEntry{
-				{name: installID + "/SKILL.md", content: validRegistrySkillManifest},
-				{name: installID + "/scripts", content: "file"},
-				{name: installID + "/scripts/run.sh", content: "bad"},
+				{name: "SKILL.md", content: validRegistrySkillManifest},
+				{name: "scripts", content: "file"},
+				{name: "scripts/run.sh", content: "bad"},
 			},
 		},
 		{
-			name: "wrong root",
+			name: "nested manifest",
 			entries: []registrySkillTestEntry{
 				{name: "other/SKILL.md", content: validRegistrySkillManifest},
 			},
@@ -113,7 +108,7 @@ func TestReadRegistrySkillArchiveRejectsUnsafeEntries(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := readRegistrySkillArchive(registrySkillTestArchive(t, test.entries), installID); err == nil {
+			if _, err := readRegistrySkillArchive(registrySkillTestArchive(t, test.entries)); err == nil {
 				t.Fatal("readRegistrySkillArchive() error = nil, want rejection")
 			}
 		})
@@ -311,7 +306,7 @@ func TestInstallRegistrySkillHidesWorkspaceFailureDetails(t *testing.T) {
 
 	skill := validRegistrySkillDescriptor()
 	artifact := registrySkillTestArchive(t, []registrySkillTestEntry{
-		{name: skill.InstallID + "/SKILL.md", content: validRegistrySkillManifest},
+		{name: "SKILL.md", content: validRegistrySkillManifest},
 	})
 	digest := sha256.Sum256(artifact)
 	skill.Artifact.Digest = hex.EncodeToString(digest[:])
@@ -412,17 +407,16 @@ func TestProxySkillImageVerifiesDigestAndHeaders(t *testing.T) {
 }
 
 func TestReadRegistrySkillArchiveRejectsEntryFlood(t *testing.T) {
-	installID := "registry+package+skill"
 	entries := []registrySkillTestEntry{
-		{name: installID + "/SKILL.md", content: validRegistrySkillManifest},
+		{name: "SKILL.md", content: validRegistrySkillManifest},
 	}
 	// Directory headers carry no body, so neither the file-count nor the
 	// uncompressed-size cap bounds them. Without a total-entry cap a tiny gzip of
 	// directory headers could expand into an unbounded seen map.
 	for i := 0; i <= maxRegistrySkillArtifactEntries; i++ {
-		entries = append(entries, registrySkillTestEntry{name: fmt.Sprintf("%s/dir%d/", installID, i), entryType: tar.TypeDir})
+		entries = append(entries, registrySkillTestEntry{name: fmt.Sprintf("dir%d/", i), entryType: tar.TypeDir})
 	}
-	_, err := readRegistrySkillArchive(registrySkillTestArchive(t, entries), installID)
+	_, err := readRegistrySkillArchive(registrySkillTestArchive(t, entries))
 	if err == nil || !strings.Contains(err.Error(), "too many entries") {
 		t.Fatalf("want too-many-entries rejection, got %v", err)
 	}
@@ -461,7 +455,6 @@ func TestProxySkillImageOverridesUpstreamSecurityHeaders(t *testing.T) {
 }
 
 func TestReadRegistrySkillArchiveRejectsMalformedFrontmatter(t *testing.T) {
-	installID := "registry+package+skill"
 	cases := map[string]string{
 		"missing closing fence": "---\nname: skill\n",
 		"not a mapping":         "---\n- a\n- b\n---\n# Body\n",
@@ -469,8 +462,8 @@ func TestReadRegistrySkillArchiveRejectsMalformedFrontmatter(t *testing.T) {
 	}
 	for name, manifest := range cases {
 		t.Run(name, func(t *testing.T) {
-			entries := []registrySkillTestEntry{{name: installID + "/SKILL.md", content: manifest}}
-			if _, err := readRegistrySkillArchive(registrySkillTestArchive(t, entries), installID); err == nil {
+			entries := []registrySkillTestEntry{{name: "SKILL.md", content: manifest}}
+			if _, err := readRegistrySkillArchive(registrySkillTestArchive(t, entries)); err == nil {
 				t.Fatal("readRegistrySkillArchive() accepted malformed SKILL.md frontmatter")
 			}
 		})
@@ -540,7 +533,7 @@ func validRegistrySkillDescriptor() SupermarketCatalogSkill {
 	return SupermarketCatalogSkill{
 		RegistryID: "registry", PackageID: "package", SkillID: "skill", InstallID: "registry+package+skill",
 		Artifact: SupermarketSkillArtifact{
-			RegistryID: "registry", PackageID: "package", SkillID: "skill", Format: "memoh_skill_v1",
+			Format: "memoh_skill_v1",
 			Digest: strings.Repeat("a", 64), Size: 1, ContentType: "application/gzip", DownloadURL: "/artifact",
 		},
 	}

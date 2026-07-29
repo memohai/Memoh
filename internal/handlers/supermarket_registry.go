@@ -76,17 +76,11 @@ type SupermarketSkillSource struct {
 }
 
 type SupermarketSkillArtifact struct {
-	RegistryID     string `json:"registry_id"`
-	PackageID      string `json:"package_id"`
-	SkillID        string `json:"skill_id"`
-	SourceRevision string `json:"source_revision"`
-	Format         string `json:"format"`
-	Digest         string `json:"digest"`
-	Size           int64  `json:"size"`
-	Filename       string `json:"filename"`
-	ContentType    string `json:"content_type"`
-	CreatedAt      string `json:"created_at"`
-	DownloadURL    string `json:"download_url"`
+	Format      string `json:"format"`
+	Digest      string `json:"digest"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type"`
+	DownloadURL string `json:"download_url"`
 }
 
 type SupermarketSkillImage struct {
@@ -359,7 +353,7 @@ func (h *SupermarketHandler) installRegistrySkill(
 	if err != nil {
 		return InstallRegistrySkillResponse{}, err
 	}
-	archive, err := readRegistrySkillArchive(artifactBytes, skill.InstallID)
+	archive, err := readRegistrySkillArchive(artifactBytes)
 	if err != nil {
 		return InstallRegistrySkillResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 	}
@@ -448,9 +442,6 @@ func validateRegistrySkill(skill SupermarketCatalogSkill, registryID, packageID,
 		return errors.New("registry Skill install_id is invalid")
 	}
 	artifact := skill.Artifact
-	if artifact.RegistryID != registryID || artifact.PackageID != packageID || artifact.SkillID != skillID {
-		return errors.New("registry Skill Artifact identity does not match the request")
-	}
 	if artifact.Format != "memoh_skill_v1" || artifact.ContentType != "application/gzip" {
 		return errors.New("registry Skill Artifact format is unsupported")
 	}
@@ -596,18 +587,17 @@ type registrySkillArchiveFile struct {
 }
 
 type registrySkillArchive struct {
-	installID string
-	files     []registrySkillArchiveFile
+	files []registrySkillArchiveFile
 }
 
-func readRegistrySkillArchive(content []byte, installID string) (registrySkillArchive, error) {
+func readRegistrySkillArchive(content []byte) (registrySkillArchive, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(content))
 	if err != nil {
 		return registrySkillArchive{}, errors.New("registry Skill Artifact is not valid gzip")
 	}
 	defer func() { _ = gz.Close() }()
 
-	archive := registrySkillArchive{installID: installID}
+	archive := registrySkillArchive{}
 	seen := make(map[string]bool)
 	var totalSize int64
 	totalEntries := 0
@@ -633,8 +623,8 @@ func readRegistrySkillArchive(content []byte, installID string) (registrySkillAr
 			return registrySkillArchive{}, fmt.Errorf("registry Skill Artifact contains non-canonical path %q", header.Name)
 		}
 		parts := strings.Split(name, "/")
-		if parts[0] != installID || containsUnsafePathPart(parts) {
-			return registrySkillArchive{}, fmt.Errorf("registry Skill Artifact path %q is outside install_id", header.Name)
+		if containsUnsafePathPart(parts) {
+			return registrySkillArchive{}, fmt.Errorf("registry Skill Artifact contains unsafe path %q", header.Name)
 		}
 		if _, exists := seen[name]; exists {
 			return registrySkillArchive{}, fmt.Errorf("registry Skill Artifact contains duplicate path %q", header.Name)
@@ -653,9 +643,6 @@ func readRegistrySkillArchive(content []byte, installID string) (registrySkillAr
 		default:
 			return registrySkillArchive{}, fmt.Errorf("registry Skill Artifact contains unsupported entry %q", header.Name)
 		}
-		if len(parts) == 1 {
-			return registrySkillArchive{}, fmt.Errorf("registry Skill Artifact root %q must be a directory", header.Name)
-		}
 		if len(archive.files) >= maxRegistrySkillArtifactFiles {
 			return registrySkillArchive{}, errors.New("registry Skill Artifact exceeds the file limit")
 		}
@@ -667,15 +654,14 @@ func readRegistrySkillArchive(content []byte, installID string) (registrySkillAr
 			return registrySkillArchive{}, fmt.Errorf("registry Skill Artifact file %q is truncated", header.Name)
 		}
 		totalSize += int64(len(fileContent))
-		relativePath := strings.Join(parts[1:], "/")
-		if relativePath == "SKILL.md" {
+		if name == "SKILL.md" {
 			if err := validateRegistrySkillManifest(fileContent); err != nil {
 				return registrySkillArchive{}, err
 			}
 			hasManifest = true
 		}
 		archive.files = append(archive.files, registrySkillArchiveFile{
-			path: relativePath, content: fileContent, executable: header.FileInfo().Mode().Perm()&0o111 != 0,
+			path: name, content: fileContent, executable: header.FileInfo().Mode().Perm()&0o111 != 0,
 		})
 	}
 	if len(archive.files) == 0 {
