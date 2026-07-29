@@ -19,7 +19,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Zap } from 'lucide-vue-next'
-import type { HandlersSupermarketSkillIcon, HandlersSupermarketSkillImage } from '@memohai/sdk'
+import type { HandlersSupermarketSkillIcon, HandlersSupermarketSkillIconAsset } from '@memohai/sdk'
 import { sdkApiUrl } from '@/lib/api-client'
 import { useSettingsStore } from '@/store/settings'
 
@@ -36,10 +36,10 @@ const image = computed(() => props.variant === 'detail'
   ? props.icon?.detail || props.icon?.card
   : props.icon?.card || props.icon?.detail)
 
-function imageURL(value?: HandlersSupermarketSkillImage) {
+function imageURL(value?: HandlersSupermarketSkillIconAsset) {
   const digest = value?.digest?.trim()
   if (!digest || !/^[a-f0-9]{64}$/.test(digest)) return ''
-  return sdkApiUrl({ url: '/supermarket/skill-images/{digest}', path: { digest } })
+  return sdkApiUrl({ url: '/supermarket/artifacts/icon/{digest}', path: { digest } })
 }
 
 const imageUrl = computed(() => imageURL(image.value))

@@ -110,7 +110,7 @@ func shouldSkipJWT(path string) bool {
 	if strings.HasPrefix(path, "/assets/") {
 		return true
 	}
-	if isPublicSupermarketSkillImagePath(path) {
+	if isPublicSupermarketSkillIconPath(path) {
 		return true
 	}
 	if strings.HasPrefix(path, "/api/docs") {
@@ -140,8 +140,8 @@ func shouldSkipJWT(path string) bool {
 	return false
 }
 
-func isPublicSupermarketSkillImagePath(path string) bool {
-	digest, found := strings.CutPrefix(path, "/supermarket/skill-images/")
+func isPublicSupermarketSkillIconPath(path string) bool {
+	digest, found := strings.CutPrefix(path, "/supermarket/artifacts/icon/")
 	if !found || len(digest) != 64 || strings.ToLower(digest) != digest {
 		return false
 	}

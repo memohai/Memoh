@@ -3393,26 +3393,14 @@ definitions:
     properties:
       content_type:
         type: string
-      created_at:
-        type: string
       digest:
         type: string
       download_url:
         type: string
-      filename:
-        type: string
       format:
-        type: string
-      package_id:
-        type: string
-      registry_id:
         type: string
       size:
         type: integer
-      skill_id:
-        type: string
-      source_revision:
-        type: string
     type: object
   handlers.SupermarketSkillCategory:
     properties:
@@ -3433,19 +3421,17 @@ definitions:
       brand_color:
         type: string
       card:
-        $ref: '#/definitions/handlers.SupermarketSkillImage'
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
       dark:
-        $ref: '#/definitions/handlers.SupermarketSkillImage'
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
       detail:
-        $ref: '#/definitions/handlers.SupermarketSkillImage'
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
     type: object
-  handlers.SupermarketSkillImage:
+  handlers.SupermarketSkillIconAsset:
     properties:
       content_type:
         type: string
       digest:
-        type: string
-      download_url:
         type: string
       size:
         type: integer
@@ -13915,6 +13901,34 @@ paths:
       summary: List speech provider metadata
       tags:
       - speech-providers
+  /supermarket/artifacts/icon/{digest}:
+    get:
+      parameters:
+      - description: SHA-256 digest
+        in: path
+        name: digest
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a mirrored Skill icon
+      tags:
+      - supermarket
   /supermarket/plugins:
     get:
       parameters:
@@ -14048,34 +14062,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Get a namespaced Registry Skill
-      tags:
-      - supermarket
-  /supermarket/skill-images/{digest}:
-    get:
-      parameters:
-      - description: SHA-256 digest
-        in: path
-        name: digest
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: file
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get a mirrored Skill image
       tags:
       - supermarket
   /supermarket/skills:

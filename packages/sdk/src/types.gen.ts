@@ -2009,16 +2009,10 @@ export type HandlersSupermarketRegistryListResponse = {
 
 export type HandlersSupermarketSkillArtifact = {
     content_type?: string;
-    created_at?: string;
     digest?: string;
     download_url?: string;
-    filename?: string;
     format?: string;
-    package_id?: string;
-    registry_id?: string;
     size?: number;
-    skill_id?: string;
-    source_revision?: string;
 };
 
 export type HandlersSupermarketSkillCategory = {
@@ -2032,15 +2026,14 @@ export type HandlersSupermarketSkillCategoryListResponse = {
 
 export type HandlersSupermarketSkillIcon = {
     brand_color?: string;
-    card?: HandlersSupermarketSkillImage;
-    dark?: HandlersSupermarketSkillImage;
-    detail?: HandlersSupermarketSkillImage;
+    card?: HandlersSupermarketSkillIconAsset;
+    dark?: HandlersSupermarketSkillIconAsset;
+    detail?: HandlersSupermarketSkillIconAsset;
 };
 
-export type HandlersSupermarketSkillImage = {
+export type HandlersSupermarketSkillIconAsset = {
     content_type?: string;
     digest?: string;
-    download_url?: string;
     size?: number;
 };
 
@@ -13495,6 +13488,42 @@ export type GetSpeechProvidersByIdModelsResponses = {
 
 export type GetSpeechProvidersByIdModelsResponse = GetSpeechProvidersByIdModelsResponses[keyof GetSpeechProvidersByIdModelsResponses];
 
+export type GetSupermarketArtifactsIconByDigestData = {
+    body?: never;
+    path: {
+        /**
+         * SHA-256 digest
+         */
+        digest: string;
+    };
+    query?: never;
+    url: '/supermarket/artifacts/icon/{digest}';
+};
+
+export type GetSupermarketArtifactsIconByDigestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketArtifactsIconByDigestError = GetSupermarketArtifactsIconByDigestErrors[keyof GetSupermarketArtifactsIconByDigestErrors];
+
+export type GetSupermarketArtifactsIconByDigestResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetSupermarketPluginsData = {
     body?: never;
     path?: never;
@@ -13679,42 +13708,6 @@ export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkill
 };
 
 export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponses];
-
-export type GetSupermarketSkillImagesByDigestData = {
-    body?: never;
-    path: {
-        /**
-         * SHA-256 digest
-         */
-        digest: string;
-    };
-    query?: never;
-    url: '/supermarket/skill-images/{digest}';
-};
-
-export type GetSupermarketSkillImagesByDigestErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Bad Gateway
-     */
-    502: HandlersErrorResponse;
-};
-
-export type GetSupermarketSkillImagesByDigestError = GetSupermarketSkillImagesByDigestErrors[keyof GetSupermarketSkillImagesByDigestErrors];
-
-export type GetSupermarketSkillImagesByDigestResponses = {
-    /**
-     * OK
-     */
-    200: unknown;
-};
 
 export type GetSupermarketSkillsData = {
     body?: never;

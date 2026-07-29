@@ -187,16 +187,16 @@ func TestShouldSkipJWTOnlyForRuntimeConnectEndpoint(t *testing.T) {
 	}
 }
 
-func TestShouldSkipJWTOnlyForDigestAddressedSupermarketSkillImages(t *testing.T) {
+func TestShouldSkipJWTOnlyForDigestAddressedSupermarketSkillIcons(t *testing.T) {
 	t.Parallel()
 	digest := strings.Repeat("a", 64)
-	if !shouldSkipJWT("/supermarket/skill-images/" + digest) {
-		t.Fatal("digest-addressed Skill image must be readable by img elements")
+	if !shouldSkipJWT("/supermarket/artifacts/icon/" + digest) {
+		t.Fatal("digest-addressed Skill icon must be readable by img elements")
 	}
 	for _, path := range []string{
-		"/supermarket/skill-images/", "/supermarket/skill-images/short",
-		"/supermarket/skill-images/" + strings.ToUpper(digest),
-		"/supermarket/skill-images/" + digest + "/extra",
+		"/supermarket/artifacts/icon/", "/supermarket/artifacts/icon/short",
+		"/supermarket/artifacts/icon/" + strings.ToUpper(digest),
+		"/supermarket/artifacts/icon/" + digest + "/extra",
 	} {
 		if shouldSkipJWT(path) {
 			t.Fatalf("path=%q unexpectedly skips JWT", path)

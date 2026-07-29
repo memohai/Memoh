@@ -114,7 +114,7 @@ func (h *SupermarketHandler) Register(e *echo.Echo) {
 	g.GET("/registries", h.ListRegistries)
 	g.GET("/registries/:registry_id/categories", h.ListRegistryCategories)
 	g.GET("/registries/:registry_id/packages/:package_id/skills/:skill_id", h.GetRegistrySkill)
-	g.GET("/skill-images/:digest", h.GetRegistrySkillImage)
+	g.GET("/artifacts/icon/:digest", h.GetRegistrySkillIcon)
 
 	ig := e.Group("/bots/:bot_id/supermarket")
 	ig.POST("/install-plugin", h.InstallPlugin)

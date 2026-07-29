@@ -12781,6 +12781,49 @@ const docTemplate = `{
                 }
             }
         },
+        "/supermarket/artifacts/icon/{digest}": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Get a mirrored Skill icon",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SHA-256 digest",
+                        "name": "digest",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/supermarket/plugins": {
             "get": {
                 "tags": [
@@ -12965,49 +13008,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.SupermarketCatalogSkill"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/supermarket/skill-images/{digest}": {
-            "get": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "Get a mirrored Skill image",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "SHA-256 digest",
-                        "name": "digest",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "file"
                         }
                     },
                     "400": {
@@ -19563,35 +19563,17 @@ const docTemplate = `{
                 "content_type": {
                     "type": "string"
                 },
-                "created_at": {
-                    "type": "string"
-                },
                 "digest": {
                     "type": "string"
                 },
                 "download_url": {
                     "type": "string"
                 },
-                "filename": {
-                    "type": "string"
-                },
                 "format": {
-                    "type": "string"
-                },
-                "package_id": {
-                    "type": "string"
-                },
-                "registry_id": {
                     "type": "string"
                 },
                 "size": {
                     "type": "integer"
-                },
-                "skill_id": {
-                    "type": "string"
-                },
-                "source_revision": {
-                    "type": "string"
                 }
             }
         },
@@ -19624,26 +19606,23 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "card": {
-                    "$ref": "#/definitions/handlers.SupermarketSkillImage"
+                    "$ref": "#/definitions/handlers.SupermarketSkillIconAsset"
                 },
                 "dark": {
-                    "$ref": "#/definitions/handlers.SupermarketSkillImage"
+                    "$ref": "#/definitions/handlers.SupermarketSkillIconAsset"
                 },
                 "detail": {
-                    "$ref": "#/definitions/handlers.SupermarketSkillImage"
+                    "$ref": "#/definitions/handlers.SupermarketSkillIconAsset"
                 }
             }
         },
-        "handlers.SupermarketSkillImage": {
+        "handlers.SupermarketSkillIconAsset": {
             "type": "object",
             "properties": {
                 "content_type": {
                     "type": "string"
                 },
                 "digest": {
-                    "type": "string"
-                },
-                "download_url": {
                     "type": "string"
                 },
                 "size": {

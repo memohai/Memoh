@@ -365,7 +365,7 @@ func TestInstallRegistrySkillHidesWorkspaceFailureDetails(t *testing.T) {
 	}
 }
 
-func TestProxySkillImageVerifiesDigestAndHeaders(t *testing.T) {
+func TestProxySkillIconVerifiesDigestAndHeaders(t *testing.T) {
 	content := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
 	digest := sha256.Sum256(content)
 	digestText := hex.EncodeToString(digest[:])
@@ -383,10 +383,10 @@ func TestProxySkillImageVerifiesDigestAndHeaders(t *testing.T) {
 		})},
 	}
 	e := echo.New()
-	request := httptest.NewRequest(http.MethodGet, "/supermarket/skill-images/"+digestText, nil)
+	request := httptest.NewRequest(http.MethodGet, "/supermarket/artifacts/icon/"+digestText, nil)
 	recorder := httptest.NewRecorder()
-	if err := handler.proxySkillImage(e.NewContext(request, recorder), digestText); err != nil {
-		t.Fatalf("proxySkillImage() error = %v", err)
+	if err := handler.proxySkillIcon(e.NewContext(request, recorder), digestText); err != nil {
+		t.Fatalf("proxySkillIcon() error = %v", err)
 	}
 	if recorder.Code != http.StatusOK || !bytes.Equal(recorder.Body.Bytes(), content) {
 		t.Fatalf("response = %d %q", recorder.Code, recorder.Body.Bytes())
@@ -401,8 +401,8 @@ func TestProxySkillImageVerifiesDigestAndHeaders(t *testing.T) {
 			ContentLength: 5, Request: req, Header: http.Header{"Content-Type": []string{"image/svg+xml"}},
 		}, nil
 	})}
-	if err := handler.proxySkillImage(e.NewContext(request, httptest.NewRecorder()), digestText); err == nil {
-		t.Fatal("proxySkillImage() accepted content with the wrong digest")
+	if err := handler.proxySkillIcon(e.NewContext(request, httptest.NewRecorder()), digestText); err == nil {
+		t.Fatal("proxySkillIcon() accepted content with the wrong digest")
 	}
 }
 
@@ -422,7 +422,7 @@ func TestReadRegistrySkillArchiveRejectsEntryFlood(t *testing.T) {
 	}
 }
 
-func TestProxySkillImageOverridesUpstreamSecurityHeaders(t *testing.T) {
+func TestProxySkillIconOverridesUpstreamSecurityHeaders(t *testing.T) {
 	content := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
 	digest := sha256.Sum256(content)
 	digestText := hex.EncodeToString(digest[:])
@@ -441,10 +441,10 @@ func TestProxySkillImageOverridesUpstreamSecurityHeaders(t *testing.T) {
 		})},
 	}
 	e := echo.New()
-	request := httptest.NewRequest(http.MethodGet, "/supermarket/skill-images/"+digestText, nil)
+	request := httptest.NewRequest(http.MethodGet, "/supermarket/artifacts/icon/"+digestText, nil)
 	recorder := httptest.NewRecorder()
-	if err := handler.proxySkillImage(e.NewContext(request, recorder), digestText); err != nil {
-		t.Fatalf("proxySkillImage() error = %v", err)
+	if err := handler.proxySkillIcon(e.NewContext(request, recorder), digestText); err != nil {
+		t.Fatalf("proxySkillIcon() error = %v", err)
 	}
 	if got := recorder.Header().Get("Content-Security-Policy"); !strings.Contains(got, "sandbox") || strings.Contains(got, "*") {
 		t.Fatalf("upstream CSP was not overridden: %q", got)

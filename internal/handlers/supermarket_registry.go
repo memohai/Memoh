@@ -83,18 +83,17 @@ type SupermarketSkillArtifact struct {
 	DownloadURL string `json:"download_url"`
 }
 
-type SupermarketSkillImage struct {
+type SupermarketSkillIconAsset struct {
 	Digest      string `json:"digest"`
 	Size        int64  `json:"size"`
 	ContentType string `json:"content_type"`
-	DownloadURL string `json:"download_url"`
 }
 
 type SupermarketSkillIcon struct {
-	Card       *SupermarketSkillImage `json:"card,omitempty"`
-	Detail     *SupermarketSkillImage `json:"detail,omitempty"`
-	Dark       *SupermarketSkillImage `json:"dark,omitempty"`
-	BrandColor string                 `json:"brand_color,omitempty"`
+	Card       *SupermarketSkillIconAsset `json:"card,omitempty"`
+	Detail     *SupermarketSkillIconAsset `json:"detail,omitempty"`
+	Dark       *SupermarketSkillIconAsset `json:"dark,omitempty"`
+	BrandColor string                     `json:"brand_color,omitempty"`
 }
 
 type SupermarketCatalogSkill struct {
@@ -204,16 +203,16 @@ func (h *SupermarketHandler) GetRegistrySkill(c echo.Context) error {
 	return h.proxy(c, registrySkillUpstreamPath(registryID, packageID, skillID))
 }
 
-// GetRegistrySkillImage proxies an immutable Skill image from Supermarket.
-// @Summary Get a mirrored Skill image
+// GetRegistrySkillIcon proxies an immutable Skill icon from Supermarket.
+// @Summary Get a mirrored Skill icon
 // @Tags supermarket
 // @Param digest path string true "SHA-256 digest"
 // @Success 200 {file} binary
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/skill-images/{digest} [get].
-func (h *SupermarketHandler) GetRegistrySkillImage(c echo.Context) error {
+// @Router /supermarket/artifacts/icon/{digest} [get].
+func (h *SupermarketHandler) GetRegistrySkillIcon(c echo.Context) error {
 	digest := strings.TrimSpace(c.Param("digest"))
 	if len(digest) != sha256.Size*2 {
 		return echo.NewHTTPError(http.StatusBadRequest, "digest is invalid")
@@ -221,12 +220,12 @@ func (h *SupermarketHandler) GetRegistrySkillImage(c echo.Context) error {
 	if _, err := hex.DecodeString(digest); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "digest is invalid")
 	}
-	return h.proxySkillImage(c, digest)
+	return h.proxySkillIcon(c, digest)
 }
 
-func (h *SupermarketHandler) proxySkillImage(c echo.Context, digest string) error {
+func (h *SupermarketHandler) proxySkillIcon(c echo.Context, digest string) error {
 	req, err := http.NewRequestWithContext(
-		c.Request().Context(), http.MethodGet, h.baseURL+"/api/skill-images/"+digest, nil,
+		c.Request().Context(), http.MethodGet, h.baseURL+"/api/artifacts/icon/"+digest, nil,
 	)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -241,31 +240,31 @@ func (h *SupermarketHandler) proxySkillImage(c echo.Context, digest string) erro
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotModified {
-		copySkillImageHeaders(c.Response().Header(), resp.Header)
+		copySkillIconHeaders(c.Response().Header(), resp.Header)
 		return c.NoContent(http.StatusNotModified)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return echo.NewHTTPError(resp.StatusCode, "Skill image unavailable")
+		return echo.NewHTTPError(resp.StatusCode, "Skill icon unavailable")
 	}
 	contentType := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
 	if contentType != "image/svg+xml" && contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" {
-		return echo.NewHTTPError(http.StatusBadGateway, "Supermarket returned an unsupported Skill image")
+		return echo.NewHTTPError(http.StatusBadGateway, "Supermarket returned an unsupported Skill icon")
 	}
 	const maxSkillImageBytes = 512 * 1024
 	content, err := io.ReadAll(io.LimitReader(resp.Body, maxSkillImageBytes+1))
 	if err != nil || len(content) == 0 || len(content) > maxSkillImageBytes {
-		return echo.NewHTTPError(http.StatusBadGateway, "Supermarket returned an invalid Skill image")
+		return echo.NewHTTPError(http.StatusBadGateway, "Supermarket returned an invalid Skill icon")
 	}
 	actualDigest := sha256.Sum256(content)
 	if hex.EncodeToString(actualDigest[:]) != digest {
-		return echo.NewHTTPError(http.StatusBadGateway, "Skill image digest mismatch")
+		return echo.NewHTTPError(http.StatusBadGateway, "Skill icon digest mismatch")
 	}
-	copySkillImageHeaders(c.Response().Header(), resp.Header)
+	copySkillIconHeaders(c.Response().Header(), resp.Header)
 	c.Response().Header().Set(echo.HeaderContentType, contentType)
 	return c.Blob(http.StatusOK, contentType, content)
 }
 
-func copySkillImageHeaders(target, source http.Header) {
+func copySkillIconHeaders(target, source http.Header) {
 	for _, name := range []string{"Cache-Control", "ETag", "X-Content-SHA256"} {
 		if value := source.Get(name); value != "" {
 			target.Set(name, value)
