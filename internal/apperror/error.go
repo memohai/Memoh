@@ -35,11 +35,9 @@ const (
 	CodeSkillBuiltinReadOnly             Code = "skill.builtin_read_only"
 	CodeSkillNameTaken                   Code = "skill.name_taken"
 	CodeSkillSaveFailed                  Code = "skill.save_failed"
-	CodeSkillRegistryLayoutConflict      Code = "skill.registry_layout_conflict"
 	CodeRegistryUnavailable              Code = "registry.unavailable"
 	CodeRegistrySkillNotFound            Code = "registry.skill_not_found"
 	CodeRegistrySkillInvalid             Code = "registry.skill_invalid"
-	CodeRegistrySkillLayoutConflict      Code = "registry.skill_layout_conflict"
 	CodeRegistrySkillInstallFailed       Code = "registry.skill_install_failed"
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
@@ -170,10 +168,6 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Skill could not be saved.",
 	},
-	CodeSkillRegistryLayoutConflict: {
-		HTTPStatus: http.StatusConflict,
-		Detail:     "This Skill name conflicts with an installed Registry ID. Choose a different name.",
-	},
 	CodeRegistryUnavailable: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The Supermarket is unavailable.",
@@ -185,10 +179,6 @@ var catalog = map[Code]Definition{
 	CodeRegistrySkillInvalid: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The Registry Skill package is invalid.",
-	},
-	CodeRegistrySkillLayoutConflict: {
-		HTTPStatus: http.StatusConflict,
-		Detail:     "This Registry ID conflicts with an existing Workspace Skill. Rename or delete that Skill before installing.",
 	},
 	CodeRegistrySkillInstallFailed: {
 		HTTPStatus: http.StatusInternalServerError,

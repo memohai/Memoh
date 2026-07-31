@@ -182,11 +182,15 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		if key == "" {
 			continue
 		}
+		dirPath, err := skillset.PluginSkillDirForName(manifest.ID, name)
+		if err != nil {
+			return Installation{}, fmt.Errorf("plugin skill %q has an invalid identity", name)
+		}
 		if _, err := s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
 			InstallationID: row.ID,
 			ResourceType:   "skill",
 			ResourceKey:    key,
-			ResourceID:     path.Join(skillset.ManagedDir(), name, "SKILL.md"),
+			ResourceID:     path.Join(dirPath, "SKILL.md"),
 			Status:         "bundled",
 			Metadata:       mustJSON(map[string]any{"name": name, "skill_id": skill.ID}),
 		}); err != nil {
@@ -476,7 +480,7 @@ func (s *Service) installBundledSkills(ctx context.Context, botID string, row sq
 		}
 		raw := pluginSkillRaw(skill, name, row)
 		parsed := skillset.ParseFile(raw, name)
-		dirPath, err := skillset.ManagedSkillDirForName(parsed.Name)
+		dirPath, err := skillset.PluginSkillDirForName(row.PluginID, parsed.Name)
 		if err != nil {
 			return fmt.Errorf("plugin skill %q has an invalid name", parsed.Name)
 		}
@@ -520,7 +524,7 @@ func (s *Service) uninstallBundledSkills(ctx context.Context, botID string, row 
 		if !skillset.IsValidName(name) {
 			continue
 		}
-		dirPath, err := skillset.ManagedSkillDirForName(name)
+		dirPath, err := skillset.PluginSkillDirForName(row.PluginID, name)
 		if err != nil {
 			continue
 		}

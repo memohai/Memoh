@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"path"
 	"slices"
@@ -112,312 +111,28 @@ func ManagedDir() string {
 	return ManagedDirPath
 }
 
-func ManagedSkillDirForName(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if !IsValidName(name) {
-		return "", bridge.ErrBadRequest
-	}
-
-	dirPath := path.Clean(path.Join(ManagedDirPath, name))
-	if dirPath == ManagedDirPath || !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
-		return "", bridge.ErrBadRequest
-	}
-	return dirPath, nil
-}
-
-// RegistrySkillDirForIDs returns the install path for one Registry Skill:
-// /data/skills/<registry_id>/<package_id>/<skill_id>.
-func RegistrySkillDirForIDs(registryID, packageID, skillID string) (string, error) {
-	registryID = strings.TrimSpace(registryID)
-	packageID = strings.TrimSpace(packageID)
-	skillID = strings.TrimSpace(skillID)
-	if !IsValidName(registryID) || !IsValidName(packageID) || !IsValidName(skillID) {
-		return "", bridge.ErrBadRequest
-	}
-	dirPath := path.Clean(path.Join(ManagedDirPath, registryID, packageID, skillID))
-	if !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
-		return "", bridge.ErrBadRequest
-	}
-	return dirPath, nil
-}
-
-// RegistryPackageSkillsDirForIDs is the discovery root for one registry package
-// (skills are direct children, matching plugin skill roots).
-func RegistryPackageSkillsDirForIDs(registryID, packageID string) (string, error) {
-	registryID = strings.TrimSpace(registryID)
-	packageID = strings.TrimSpace(packageID)
-	if !IsValidName(registryID) || !IsValidName(packageID) {
-		return "", bridge.ErrBadRequest
-	}
-	dirPath := path.Clean(path.Join(ManagedDirPath, registryID, packageID))
-	if !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
-		return "", bridge.ErrBadRequest
-	}
-	return dirPath, nil
-}
-
-func RegistryDirForID(registryID string) (string, error) {
-	registryID = strings.TrimSpace(registryID)
-	if !IsValidName(registryID) {
-		return "", bridge.ErrBadRequest
-	}
-	dirPath := path.Clean(path.Join(ManagedDirPath, registryID))
-	if dirPath == ManagedDirPath || !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
-		return "", bridge.ErrBadRequest
-	}
-	return dirPath, nil
-}
-
-// UpsertPlan is the filesystem plan for creating or updating one skill.
-type UpsertPlan struct {
-	WritePath     string // absolute SKILL.md path to write
-	RenameFromDir string // optional flat managed directory moved to WritePath's parent before writing
-}
-
-// PlanUpsert resolves where to write skill content.
-//
-// sourcePath is the existing SKILL.md being edited (empty for create):
-//   - flat managed /data/skills/<name>/SKILL.md: write by frontmatter name; move old dir on rename
-//   - built-in /data/.memoh/skills/<name>/SKILL.md: reject; reconciliation owns these files
-//   - registry /data/skills/<registry>/<package>/<skill>/SKILL.md: write in place
-//   - anything else (compat/plugin/…): create/overwrite a managed override by name
-func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
-	parsed := ParseFile(raw, "")
-	if !IsValidName(parsed.Name) {
-		return UpsertPlan{}, bridge.ErrBadRequest
-	}
-	managedDir, err := ManagedSkillDirForName(parsed.Name)
-	if err != nil {
-		return UpsertPlan{}, err
-	}
-	managedWrite := path.Join(managedDir, "SKILL.md")
-
-	sourcePath = strings.TrimSpace(sourcePath)
-	if sourcePath == "" {
-		return UpsertPlan{WritePath: managedWrite}, nil
-	}
-	sourcePath = path.Clean(sourcePath)
-	if path.Base(sourcePath) != "SKILL.md" || !path.IsAbs(sourcePath) {
-		return UpsertPlan{}, bridge.ErrBadRequest
-	}
-
-	if oldName, ok := FlatManagedSkillName(sourcePath); ok {
-		plan := UpsertPlan{WritePath: managedWrite}
-		if oldName != parsed.Name {
-			oldDir, dirErr := ManagedSkillDirForName(oldName)
-			if dirErr != nil {
-				return UpsertPlan{}, dirErr
-			}
-			plan.RenameFromDir = oldDir
-		}
-		return plan, nil
-	}
-	if _, ok := BuiltinSkillName(sourcePath); ok {
-		return UpsertPlan{}, ErrBuiltinSkillReadOnly
-	}
-	if IsRegistrySkillPath(sourcePath) {
-		return UpsertPlan{WritePath: sourcePath}, nil
-	}
-	// Discovered sources: managed override by frontmatter name (leave original in place).
-	return UpsertPlan{WritePath: managedWrite}, nil
-}
-
-// DeletableSkillDirForSourcePath resolves the directory to remove when deleting
-// the skill at sourcePath. Only user-managed layouts are deletable: flat
-// /data/skills/<name> and registry /data/skills/<registry>/<package>/<skill>.
-// Built-in, compat, and plugin-owned skills are rejected.
-func DeletableSkillDirForSourcePath(sourcePath string) (string, error) {
-	sourcePath = path.Clean(strings.TrimSpace(sourcePath))
-	if !path.IsAbs(sourcePath) || path.Base(sourcePath) != "SKILL.md" {
-		return "", bridge.ErrBadRequest
-	}
-	if name, ok := FlatManagedSkillName(sourcePath); ok {
-		return ManagedSkillDirForName(name)
-	}
-	if _, ok := BuiltinSkillName(sourcePath); ok {
-		return "", ErrBuiltinSkillReadOnly
-	}
-	if IsRegistrySkillPath(sourcePath) {
-		return path.Dir(sourcePath), nil
-	}
-	return "", bridge.ErrBadRequest
-}
-
-// PrunableRegistryDirs returns the package and registry directories above a
-// deleted registry skill, so callers can drop them once they are empty.
-func PrunableRegistryDirs(skillDir string) []string {
-	skillDir = path.Clean(strings.TrimSpace(skillDir))
-	packageDir := path.Dir(skillDir)
-	registryDir := path.Dir(packageDir)
-	if path.Dir(registryDir) != ManagedDirPath {
-		return nil
-	}
-	if !IsValidName(path.Base(skillDir)) ||
-		!IsValidName(path.Base(packageDir)) ||
-		!IsValidName(path.Base(registryDir)) {
-		return nil
-	}
-	return []string{packageDir, registryDir}
-}
-
-// FlatManagedSkillName reports the skill directory name for
-// /data/skills/<name>/SKILL.md.
-func FlatManagedSkillName(skillMDPath string) (string, bool) {
-	skillMDPath = path.Clean(strings.TrimSpace(skillMDPath))
-	if path.Base(skillMDPath) != "SKILL.md" {
-		return "", false
-	}
-	dir := path.Dir(skillMDPath)
-	if path.Dir(dir) != ManagedDirPath {
-		return "", false
-	}
-	name := path.Base(dir)
-	if !IsValidName(name) {
-		return "", false
-	}
-	return name, true
-}
-
-// BuiltinSkillName reports the skill directory name for
-// /data/.memoh/skills/<name>/SKILL.md.
-func BuiltinSkillName(skillMDPath string) (string, bool) {
-	skillMDPath = path.Clean(strings.TrimSpace(skillMDPath))
-	if path.Base(skillMDPath) != "SKILL.md" {
-		return "", false
-	}
-	dir := path.Dir(skillMDPath)
-	if path.Dir(dir) != IndexDirPath {
-		return "", false
-	}
-	name := path.Base(dir)
-	if !IsValidName(name) {
-		return "", false
-	}
-	return name, true
-}
-
-// IsRegistrySkillPath reports whether path is
-// /data/skills/<registry_id>/<package_id>/<skill_id>/SKILL.md.
-func IsRegistrySkillPath(skillMDPath string) bool {
-	skillMDPath = path.Clean(strings.TrimSpace(skillMDPath))
-	if path.Base(skillMDPath) != "SKILL.md" {
-		return false
-	}
-	skillDir := path.Dir(skillMDPath)
-	packageDir := path.Dir(skillDir)
-	registryDir := path.Dir(packageDir)
-	if path.Dir(registryDir) != ManagedDirPath {
-		return false
-	}
-	return IsValidName(path.Base(skillDir)) &&
-		IsValidName(path.Base(packageDir)) &&
-		IsValidName(path.Base(registryDir))
-}
-
-var (
-	// ErrBuiltinSkillReadOnly is returned when callers try to mutate a skill
-	// refreshed from Memoh's built-in workspace templates.
-	ErrBuiltinSkillReadOnly = errors.New("built-in skills are read-only")
-	// ErrRegistryLayoutConflict is returned when a flat managed skill would be
-	// written into a directory that already hosts registry packages.
-	ErrRegistryLayoutConflict = errors.New("skill directory already contains registry packages")
-	// ErrFlatSkillOccupiesRegistry is returned when a registry install would
-	// use a directory that already has a flat managed SKILL.md at its root.
-	ErrFlatSkillOccupiesRegistry = errors.New("registry root already has a flat managed skill")
-)
-
-// hasRegistryPackageLayout reports whether dir contains at least one
-// <package>/<skill>/SKILL.md tree (resource folders like scripts/ do not count).
-func hasRegistryPackageLayout(ctx context.Context, client fileClient, dir string) (bool, error) {
-	if client == nil {
-		return false, bridge.ErrNotFound
-	}
-	dir = path.Clean(strings.TrimSpace(dir))
-	if dir == "" || dir == ManagedDirPath {
-		return false, nil
-	}
-	packages, err := client.ListDirAll(ctx, dir, false)
-	if err != nil {
-		if isMissingSkillPath(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	for _, packageEntry := range packages {
-		if !packageEntry.GetIsDir() {
-			continue
-		}
-		packageID := path.Base(packageEntry.GetPath())
-		if !IsValidName(packageID) {
-			continue
-		}
-		packagePath := path.Join(dir, packageID)
-		skills, err := client.ListDirAll(ctx, packagePath, false)
-		if err != nil {
-			if isMissingSkillPath(err) {
-				continue
-			}
-			return false, err
-		}
-		for _, skillEntry := range skills {
-			if !skillEntry.GetIsDir() {
-				continue
-			}
-			skillID := path.Base(skillEntry.GetPath())
-			if !IsValidName(skillID) {
-				continue
-			}
-			if _, err := readRawFile(ctx, client, path.Join(packagePath, skillID, "SKILL.md")); err == nil {
-				return true, nil
-			} else if !isMissingSkillPath(err) {
-				return false, err
-			}
-		}
-	}
-	return false, nil
-}
-
-// GuardFlatManagedWrite rejects writing a flat /data/skills/<name>/SKILL.md
-// when that directory already hosts registry packages.
-func GuardFlatManagedWrite(ctx context.Context, client fileClient, skillMDPath string) error {
-	if _, ok := FlatManagedSkillName(skillMDPath); !ok {
-		return nil
-	}
-	hasRegistryPackages, err := hasRegistryPackageLayout(ctx, client, path.Dir(skillMDPath))
-	if err != nil {
-		return err
-	}
-	if hasRegistryPackages {
-		return ErrRegistryLayoutConflict
-	}
-	return nil
-}
-
-// GuardRegistryInstall rejects installing under a registry root that already
-// has a flat managed SKILL.md (same directory name as the registry id).
-func GuardRegistryInstall(ctx context.Context, client fileClient, registryID string) error {
-	registryPath, err := RegistryDirForID(registryID)
-	if err != nil {
-		return err
-	}
-	if _, err := readRawFile(ctx, client, path.Join(registryPath, "SKILL.md")); err == nil {
-		return ErrFlatSkillOccupiesRegistry
-	} else if !isMissingSkillPath(err) {
-		return err
-	}
-	return nil
-}
-
-func isMissingSkillPath(err error) bool {
-	return errors.Is(err, bridge.ErrNotFound) || errors.Is(err, io.EOF)
-}
-
 func PluginSkillsDirForID(pluginID string) (string, error) {
 	pluginRoot, err := PluginDirForID(pluginID)
 	if err != nil {
 		return "", err
 	}
 	return safePluginChildDir(pluginRoot, "skills")
+}
+
+func PluginSkillDirForName(pluginID, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if !IsValidName(name) {
+		return "", bridge.ErrBadRequest
+	}
+	root, err := PluginSkillsDirForID(pluginID)
+	if err != nil {
+		return "", err
+	}
+	dirPath := path.Clean(path.Join(root, name))
+	if !strings.HasPrefix(dirPath, root+"/") {
+		return "", bridge.ErrBadRequest
+	}
+	return dirPath, nil
 }
 
 func PluginDirForID(pluginID string) (string, error) {
@@ -475,7 +190,6 @@ func DiscoveryRoots(rawCompatRoots []string) []Root {
 
 func DiscoveryRootsWithPluginRoots(rawCompatRoots []string, rawPluginRoots []string) []Root {
 	roots := []Root{
-		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
 	}
@@ -488,93 +202,13 @@ func DiscoveryRootsWithPluginRoots(rawCompatRoots []string, rawPluginRoots []str
 	return roots
 }
 
-func appendDiscoveryRoots(roots []Root, extra ...Root) []Root {
-	if len(extra) == 0 {
-		return roots
-	}
-	seen := make(map[string]struct{}, len(roots)+len(extra))
-	for _, root := range roots {
-		seen[root.Path] = struct{}{}
-	}
-	for _, root := range extra {
-		if root.Path == "" {
-			continue
-		}
-		if _, ok := seen[root.Path]; ok {
-			continue
-		}
-		seen[root.Path] = struct{}{}
-		roots = append(roots, root)
-	}
-	return roots
-}
-
-// discoverRegistryPackageRoots walks /data/skills/<registry>/<package> and
-// returns each package directory as a skill discovery root.
-//
-// A top-level SKILL.md (flat managed skill sharing the registry directory name)
-// does not hide nested packages; both can appear in the catalog and resolve via
-// the usual short-name shadow rules.
-func discoverRegistryPackageRoots(ctx context.Context, client fileClient) []Root {
-	if client == nil {
-		return nil
-	}
-	registries, err := client.ListDirAll(ctx, ManagedDirPath, false)
-	if err != nil {
-		return nil
-	}
-	slices.SortFunc(registries, func(a, b *pb.FileEntry) int {
-		return strings.Compare(a.GetPath(), b.GetPath())
-	})
-	roots := make([]Root, 0)
-	for _, registryEntry := range registries {
-		if !registryEntry.GetIsDir() {
-			continue
-		}
-		registryID := path.Base(registryEntry.GetPath())
-		if !IsValidName(registryID) {
-			continue
-		}
-		registryPath, err := RegistryDirForID(registryID)
-		if err != nil {
-			continue
-		}
-		packages, err := client.ListDirAll(ctx, registryPath, false)
-		if err != nil {
-			continue
-		}
-		slices.SortFunc(packages, func(a, b *pb.FileEntry) int {
-			return strings.Compare(a.GetPath(), b.GetPath())
-		})
-		for _, packageEntry := range packages {
-			if !packageEntry.GetIsDir() {
-				continue
-			}
-			packageID := path.Base(packageEntry.GetPath())
-			if !IsValidName(packageID) {
-				continue
-			}
-			packagePath, err := RegistryPackageSkillsDirForIDs(registryID, packageID)
-			if err != nil {
-				continue
-			}
-			roots = append(roots, Root{
-				Path:    packagePath,
-				Kind:    SourceKindRegistry,
-				Managed: true,
-			})
-		}
-	}
-	return roots
-}
-
 func List(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
 	return ListWithPluginRoots(ctx, client, rawCompatRoots, nil)
 }
 
 func ListWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, error) {
 	idx := readIndex(ctx, client)
-	roots := appendDiscoveryRoots(DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots), discoverRegistryPackageRoots(ctx, client)...)
+	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots, rawPluginRoots)
 	items := scan(ctx, client, roots)
 	resolved := resolve(items, idx.Overrides)
 	writeIndex(ctx, client, idx.withItems(resolved))
@@ -684,7 +318,7 @@ func ApplyActionWithPluginRoots(ctx context.Context, client fileClient, rawCompa
 		return bridge.ErrBadRequest
 	}
 
-	roots := appendDiscoveryRoots(DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots), discoverRegistryPackageRoots(ctx, client)...)
+	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots, rawPluginRoots)
 	switch strings.TrimSpace(req.Action) {
 	case ActionDisable:
 		idx := readIndex(ctx, client)
@@ -721,11 +355,8 @@ func ApplyActionWithPluginRoots(ctx context.Context, client fileClient, rawCompa
 				return bridge.ErrBadRequest
 			}
 		}
-		dirPath, err := ManagedSkillDirForName(target.Name)
+		dirPath, err := userSkillDirForName(target.Name)
 		if err != nil {
-			return err
-		}
-		if err := GuardFlatManagedWrite(ctx, client, path.Join(dirPath, "SKILL.md")); err != nil {
 			return err
 		}
 		if err := client.Mkdir(ctx, dirPath); err != nil {

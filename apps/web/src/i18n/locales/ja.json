@@ -129,14 +129,12 @@
     "skill": {
       "builtin_read_only": "Memoh 組み込みの Skill はシステムによって管理されているため、編集または削除できません。",
       "name_taken": "同じ名前の Skill がすでに存在します。別の名前を使用してください。",
-      "save_failed": "Skill を保存できませんでした。もう一度お試しください。",
-      "registry_layout_conflict": "この Skill 名はインストール済みの Registry ID と競合しています。別の名前を使用してください。"
+      "save_failed": "Skill を保存できませんでした。もう一度お試しください。"
     },
     "registry": {
       "unavailable": "Supermarket に接続できません。しばらくしてからもう一度お試しください。",
       "skill_not_found": "この Registry Skill は現在利用できません。",
       "skill_invalid": "この Registry Skill Package は無効なため、インストールできません。",
-      "skill_layout_conflict": "この Registry ID は既存の Workspace Skill と競合しています。インストールする前に、その Skill の名前を変更するか削除してください。",
       "skill_install_failed": "Registry Skill をインストールできませんでした。もう一度お試しください。"
     },
     "workspace": {

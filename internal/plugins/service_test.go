@@ -122,7 +122,10 @@ func TestPluginSkillRawAddsFrontmatterAndOwnership(t *testing.T) {
 }
 
 func TestCanDeletePluginSkillRequiresMatchingOwnerMarker(t *testing.T) {
-	dir := path.Join(skillset.ManagedDir(), "github")
+	dir, err := skillset.PluginSkillDirForName("github", "review")
+	if err != nil {
+		t.Fatalf("plugin Skill directory: %v", err)
+	}
 	client := &pluginSkillFileClient{
 		files: map[string]string{
 			path.Join(dir, ".memoh-plugin-owner.json"): `{"installation_id":"install-1"}`,

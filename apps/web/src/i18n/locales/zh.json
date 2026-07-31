@@ -132,14 +132,12 @@
     "skill": {
       "builtin_read_only": "Memoh 自带 Skill 由系统管理，无法编辑或删除。",
       "name_taken": "已存在同名 Skill，请换一个名称。",
-      "save_failed": "Skill 保存失败，请重试。",
-      "registry_layout_conflict": "该 Skill 名称与已安装的 Registry ID 冲突，请换一个名称。"
+      "save_failed": "Skill 保存失败，请重试。"
     },
     "registry": {
       "unavailable": "暂时无法连接 Supermarket，请稍后重试。",
       "skill_not_found": "该 Registry Skill 已不存在。",
       "skill_invalid": "该 Registry Skill 包无效，无法安装。",
-      "skill_layout_conflict": "该 Registry ID 与现有 Workspace Skill 冲突，请先重命名或删除该 Skill。",
       "skill_install_failed": "Registry Skill 安装失败，请重试。"
     },
     "workspace": {

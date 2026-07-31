@@ -17,11 +17,14 @@ func InstallArchive(ctx context.Context, client *bridge.Client, workspaceOS, reg
 	if client == nil {
 		return errors.New("workspace is not reachable")
 	}
-	targetDir, err := RegistrySkillDirForIDs(registryID, packageID, skillID)
+	if strings.EqualFold(strings.TrimSpace(registryID), UserSkillNamespace) {
+		return errors.New("registry Skill identity is invalid")
+	}
+	targetDir, err := SkillDirForIDs(registryID, packageID, skillID)
 	if err != nil {
 		return errors.New("registry Skill identity is invalid")
 	}
-	packageDir, err := RegistryPackageSkillsDirForIDs(registryID, packageID)
+	packageDir, err := SkillPackageDirForIDs(registryID, packageID)
 	if err != nil {
 		return errors.New("registry Skill identity is invalid")
 	}
@@ -61,12 +64,9 @@ func InstallArchive(ctx context.Context, client *bridge.Client, workspaceOS, reg
 		return err
 	}
 
-	registryDir, err := RegistryDirForID(registryID)
+	registryDir, err := skillNamespaceDirForID(registryID)
 	if err != nil {
 		return errors.New("registry Skill identity is invalid")
-	}
-	if err := GuardRegistryInstall(ctx, client, registryID); err != nil {
-		return err
 	}
 	if err := client.Mkdir(ctx, registryDir); err != nil {
 		return fmt.Errorf("create registry Skill directory: %w", err)

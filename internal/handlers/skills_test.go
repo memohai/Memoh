@@ -42,7 +42,7 @@ import (
 
 func TestListSkillsAPIReportsEffectiveShadowedAndSourceMetadata(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	env.writeSkillFile(t, path.Join(skillset.ManagedDir(), "alpha", "SKILL.md"), managedSkillRaw("alpha", "Managed Alpha"))
+	env.writeSkillFile(t, path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md"), managedSkillRaw("alpha", "Managed Alpha"))
 	env.writeSkillFile(t, path.Join("/data/.agents/skills", "alpha", "SKILL.md"), managedSkillRaw("alpha", "Compat Alpha"))
 	env.writeSkillFile(t, path.Join("/data/.agents/skills", "beta", "SKILL.md"), managedSkillRaw("beta", "Compat Beta"))
 
@@ -62,7 +62,7 @@ func TestListSkillsAPIReportsEffectiveShadowedAndSourceMetadata(t *testing.T) {
 		t.Fatalf("expected 3 skills, got %d", len(resp.Skills))
 	}
 
-	alphaManaged := mustFindSkillByPath(t, resp.Skills, path.Join(skillset.ManagedDir(), "alpha", "SKILL.md"))
+	alphaManaged := mustFindSkillByPath(t, resp.Skills, path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md"))
 	if !alphaManaged.Managed {
 		t.Fatalf("managed alpha should be managed: %+v", alphaManaged)
 	}
@@ -101,7 +101,7 @@ func TestListSkillsAPIReportsEffectiveShadowedAndSourceMetadata(t *testing.T) {
 func TestSkillsActionsAPIAdoptDisableEnableAndDeleteManaged(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	externalPath := path.Join("/data/.agents/skills", "alpha", "SKILL.md")
-	managedPath := path.Join(skillset.ManagedDir(), "alpha", "SKILL.md")
+	managedPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
 	env.writeSkillFile(t, externalPath, managedSkillRaw("alpha", "Compat Alpha"))
 
 	rec, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills/actions", SkillsActionRequest{
@@ -195,7 +195,7 @@ func TestDeleteSkillsAPIReportsMissingManagedSkill(t *testing.T) {
 	env.writeSkillFile(t, path.Join("/data/.agents/skills", "alpha", "SKILL.md"), managedSkillRaw("alpha", "Compat Alpha"))
 
 	_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
-		SourcePaths: []string{path.Join(skillset.ManagedDir(), "alpha", "SKILL.md")},
+		SourcePaths: []string{path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")},
 	}, env.handler.DeleteSkills)
 	if err == nil {
 		t.Fatal("expected deleting a skill that was never adopted to fail")
@@ -214,8 +214,8 @@ func TestDeleteSkillsAPIRemovesRegistrySkillBySourcePath(t *testing.T) {
 	registrySkillDir := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx")
 	registryPath := path.Join(registrySkillDir, "SKILL.md")
 	env.writeSkillFile(t, registryPath, managedSkillRaw("xlsx", "Spreadsheet"))
-	// A flat managed skill shares the short name; deleting the registry copy must not touch it.
-	flatPath := path.Join(skillset.ManagedDir(), "xlsx", "SKILL.md")
+	// A user Skill shares the short name; deleting the registry copy must not touch it.
+	flatPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "xlsx", "SKILL.md")
 	env.writeSkillFile(t, flatPath, managedSkillRaw("xlsx", "Local Spreadsheet"))
 
 	rec, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
@@ -233,7 +233,7 @@ func TestDeleteSkillsAPIRemovesRegistrySkillBySourcePath(t *testing.T) {
 	if _, err := os.Stat(env.localPath(flatPath)); err != nil {
 		t.Fatalf("flat skill with the same name should survive: %v", err)
 	}
-	// The now-empty package and registry directories are pruned, the flat one is not.
+	// The now-empty package and namespace directories are pruned.
 	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "openai-api-curated"))); !os.IsNotExist(err) {
 		t.Fatalf("empty registry directory should be pruned, stat err = %v", err)
 	}
@@ -262,48 +262,6 @@ func TestDeleteSkillsAPIRejectsNonManagedSourcePath(t *testing.T) {
 	}
 }
 
-func TestUpsertSkillsAPIRejectsFlatWriteIntoRegistryTree(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	registrySkillPath := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx", "SKILL.md")
-	env.writeSkillFile(t, registrySkillPath, managedSkillRaw("xlsx", "Spreadsheet"))
-
-	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
-		Skills: []string{managedSkillRaw("openai-api-curated", "Should fail")},
-	}, env.handler.UpsertSkills)
-	if err == nil {
-		t.Fatal("expected upsert into registry tree to fail")
-	}
-	if got := apperror.CodeOf(err); got != apperror.CodeSkillRegistryLayoutConflict {
-		t.Fatalf("upsert conflict code = %q, want %q", got, apperror.CodeSkillRegistryLayoutConflict)
-	}
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "openai-api-curated", "SKILL.md"))); !os.IsNotExist(err) {
-		t.Fatalf("flat SKILL.md should not be written into registry root, stat err = %v", err)
-	}
-}
-
-func TestAdoptSkillAPIRejectsFlatWriteIntoRegistryTree(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	registryID := "openai-api-curated"
-	registrySkillPath := path.Join(skillset.ManagedDir(), registryID, "docs", "xlsx", "SKILL.md")
-	env.writeSkillFile(t, registrySkillPath, managedSkillRaw("xlsx", "Spreadsheet"))
-	externalPath := path.Join("/data/.agents/skills", registryID, "SKILL.md")
-	env.writeSkillFile(t, externalPath, managedSkillRaw(registryID, "Compat"))
-
-	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills/actions", SkillsActionRequest{
-		Action:     skillset.ActionAdopt,
-		TargetPath: externalPath,
-	}, env.handler.ApplySkillAction)
-	if err == nil {
-		t.Fatal("expected adopt into registry tree to fail")
-	}
-	if got := apperror.CodeOf(err); got != apperror.CodeSkillRegistryLayoutConflict {
-		t.Fatalf("adopt conflict code = %q, want %q", got, apperror.CodeSkillRegistryLayoutConflict)
-	}
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), registryID, "SKILL.md"))); !os.IsNotExist(err) {
-		t.Fatalf("adopt should not write a flat SKILL.md into registry root, stat err = %v", err)
-	}
-}
-
 func TestUpsertSkillsAPIRejectsTraversalName(t *testing.T) {
 	env := newSkillsTestEnv(t)
 
@@ -324,7 +282,7 @@ func TestUpsertSkillsAPIRejectsTraversalName(t *testing.T) {
 
 func TestUpsertSkillsAPIRenamesManagedSkillAndEditsRegistryInPlace(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	oldPath := path.Join(skillset.ManagedDir(), "alpha", "SKILL.md")
+	oldPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
 	env.writeSkillFile(t, oldPath, managedSkillRaw("alpha", "Managed Alpha"))
 
 	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
@@ -335,10 +293,10 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndEditsRegistryInPlace(t *testing.T)
 		t.Fatalf("UpsertSkills(rename) error = %v cause = %v", err, apperror.CauseOf(err))
 	}
 
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "alpha"))); !os.IsNotExist(err) {
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha"))); !os.IsNotExist(err) {
 		t.Fatalf("old managed skill directory should be removed after rename, stat err = %v", err)
 	}
-	newRaw, err := os.ReadFile(env.localPath(path.Join(skillset.ManagedDir(), "beta", "SKILL.md")))
+	newRaw, err := os.ReadFile(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "beta", "SKILL.md")))
 	if err != nil {
 		t.Fatalf("read renamed skill: %v", err)
 	}
@@ -363,15 +321,15 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndEditsRegistryInPlace(t *testing.T)
 	if string(got) != updated {
 		t.Fatalf("registry skill was not updated in place:\n%s", got)
 	}
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "xlsx"))); !os.IsNotExist(err) {
-		t.Fatalf("registry edit should not create a flat managed skill, stat err = %v", err)
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "xlsx"))); !os.IsNotExist(err) {
+		t.Fatalf("registry edit should not create a user Skill, stat err = %v", err)
 	}
 }
 
 func TestUpsertSkillsAPIRenameRejectsExistingDestination(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	alphaPath := path.Join(skillset.ManagedDir(), "alpha", "SKILL.md")
-	betaPath := path.Join(skillset.ManagedDir(), "beta", "SKILL.md")
+	alphaPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
+	betaPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "beta", "SKILL.md")
 	alphaRaw := managedSkillRaw("alpha", "Managed Alpha")
 	betaRaw := managedSkillRaw("beta", "Managed Beta")
 	env.writeSkillFile(t, alphaPath, alphaRaw)
@@ -394,9 +352,9 @@ func TestUpsertSkillsAPIRenameRejectsExistingDestination(t *testing.T) {
 
 func TestUpsertSkillsAPIRenameRollsBackWhenWriteFails(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	alphaDir := path.Join(skillset.ManagedDir(), "alpha")
+	alphaDir := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha")
 	alphaPath := path.Join(alphaDir, "SKILL.md")
-	betaDir := path.Join(skillset.ManagedDir(), "beta")
+	betaDir := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "beta")
 	betaPath := path.Join(betaDir, "SKILL.md")
 	alphaRaw := managedSkillRaw("alpha", "Managed Alpha")
 	env.writeSkillFile(t, alphaPath, alphaRaw)
@@ -446,11 +404,11 @@ func TestBuiltinSkillsAreReadOnlyAndNotDeletable(t *testing.T) {
 	if string(got) != original {
 		t.Fatalf("builtin skill changed despite rejection:\n%s", got)
 	}
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "skill-creator"))); !os.IsNotExist(err) {
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "skill-creator"))); !os.IsNotExist(err) {
 		t.Fatalf("builtin edit should not create a managed override, stat err = %v", err)
 	}
 
-	flatPath := path.Join(skillset.ManagedDir(), "editable", "SKILL.md")
+	flatPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "editable", "SKILL.md")
 	env.writeSkillFile(t, flatPath, managedSkillRaw("editable", "Editable"))
 	items := env.listSkills(t)
 	item := mustFindSkillByPath(t, items, builtinPath)
@@ -465,7 +423,7 @@ func TestBuiltinSkillsAreReadOnlyAndNotDeletable(t *testing.T) {
 
 func TestLoadSkillsUsesEffectiveSetAndPromptReflectsOverrideFallback(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	managedPath := path.Join(skillset.ManagedDir(), "alpha", "SKILL.md")
+	managedPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
 	compatPath := path.Join("/data/.agents/skills", "alpha", "SKILL.md")
 	env.writeSkillFile(t, managedPath, managedSkillRaw("alpha", "Managed Alpha"))
 	env.writeSkillFile(t, compatPath, managedSkillRaw("alpha", "Compat Alpha"))

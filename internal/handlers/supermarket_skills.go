@@ -318,17 +318,6 @@ func (h *SupermarketHandler) installRegistrySkill(
 	if err != nil {
 		return InstallRegistrySkillResponse{}, workspaceTargetHTTPError(h.logger, err)
 	}
-	if err := skillset.GuardRegistryInstall(targetContext, target.Client, registryID); err != nil {
-		if errors.Is(err, skillset.ErrFlatSkillOccupiesRegistry) {
-			return InstallRegistrySkillResponse{}, apperror.New(apperror.CodeRegistrySkillLayoutConflict, nil)
-		}
-		return InstallRegistrySkillResponse{}, apperror.Wrap(
-			apperror.CodeWorkspaceUnreachable,
-			fmt.Errorf("inspect registry install directory: %w", err),
-			nil,
-		)
-	}
-
 	skill, err := h.fetchRegistrySkill(ctx, registryID, packageID, skillID)
 	if err != nil {
 		return InstallRegistrySkillResponse{}, err
@@ -346,9 +335,6 @@ func (h *SupermarketHandler) installRegistrySkill(
 		return InstallRegistrySkillResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 	}
 	if err := skillset.InstallArchive(targetContext, target.Client, target.Info.OS, registryID, packageID, skillID, archive); err != nil {
-		if errors.Is(err, skillset.ErrFlatSkillOccupiesRegistry) {
-			return InstallRegistrySkillResponse{}, apperror.New(apperror.CodeRegistrySkillLayoutConflict, nil)
-		}
 		return InstallRegistrySkillResponse{}, apperror.Wrap(
 			apperror.CodeRegistrySkillInstallFailed,
 			fmt.Errorf("install registry Skill: %w", err),

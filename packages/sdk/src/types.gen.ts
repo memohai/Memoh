@@ -1928,7 +1928,7 @@ export type HandlersSkillsUpsertRequest = {
     skills?: Array<string>;
     /**
      * SourcePath is the existing SKILL.md being edited when saving a single skill.
-     * Empty means create (or overwrite by frontmatter name under /data/skills/<name>/).
+     * Empty means create (or overwrite by frontmatter name under /data/skills/user/personal/<name>/).
      */
     source_path?: string;
 };

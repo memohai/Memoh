@@ -106,8 +106,6 @@ func TestLookupDoesNotExposeMutableCatalogState(t *testing.T) {
 func TestSkillLayoutErrorsUseConflictContract(t *testing.T) {
 	for _, code := range []Code{
 		CodeSkillBuiltinReadOnly,
-		CodeSkillRegistryLayoutConflict,
-		CodeRegistrySkillLayoutConflict,
 	} {
 		definition, ok := Lookup(code)
 		if !ok {

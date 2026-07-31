@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path"
 	"strings"
 	"testing"
@@ -168,46 +167,6 @@ func TestFetchRegistrySkillUsesStablePrivateErrors(t *testing.T) {
 				t.Fatalf("public fetch error leaked private detail: %q", public.Detail)
 			}
 		})
-	}
-}
-
-func TestInstallRegistrySkillRejectsLayoutConflictBeforeNetwork(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	registryID := "openai-api-curated"
-	flatSkillPath := path.Join(skillset.ManagedDir(), registryID, "SKILL.md")
-	env.writeSkillFile(t, flatSkillPath, managedSkillRaw(registryID, "Local skill"))
-
-	upstreamCalls := 0
-	manager := workspace.NewManager(
-		slog.Default(),
-		nil,
-		nil,
-		config.WorkspaceConfig{DataRoot: env.dataRoot},
-		"",
-		nil,
-	)
-	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			upstreamCalls++
-			return nil, errors.New("unexpected upstream request")
-		})},
-		workspaces: manager,
-	}
-
-	_, err := handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
-		RegistryID: registryID,
-		PackageID:  "docs",
-		SkillID:    "xlsx",
-	})
-	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillLayoutConflict {
-		t.Fatalf("install conflict code = %q, want %q", got, apperror.CodeRegistrySkillLayoutConflict)
-	}
-	if upstreamCalls != 0 {
-		t.Fatalf("upstream calls = %d, want 0", upstreamCalls)
-	}
-	if _, statErr := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), registryID, "docs"))); !os.IsNotExist(statErr) {
-		t.Fatalf("registry package directory should not be created, stat err = %v", statErr)
 	}
 }
 

@@ -45,7 +45,8 @@ type SafeSkillsResponse struct {
 type SkillsUpsertRequest struct {
 	Skills []string `json:"skills"`
 	// SourcePath is the existing SKILL.md being edited when saving a single skill.
-	// Empty means create (or overwrite by frontmatter name under /data/skills/<name>/).
+	// Empty means create (or overwrite by frontmatter name under
+	// /data/skills/user/personal/<name>/).
 	SourcePath string `json:"source_path,omitempty"`
 }
 
@@ -165,16 +166,6 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 			}
 			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
 		}
-		if guardErr := skillset.GuardFlatManagedWrite(ctx, client, plan.WritePath); guardErr != nil {
-			if errors.Is(guardErr, skillset.ErrRegistryLayoutConflict) {
-				return apperror.New(apperror.CodeSkillRegistryLayoutConflict, nil)
-			}
-			return apperror.Wrap(
-				apperror.CodeWorkspaceUnreachable,
-				fmt.Errorf("inspect skill directory layout: %w", guardErr),
-				nil,
-			)
-		}
 		dirPath := path.Dir(plan.WritePath)
 		if plan.RenameFromDir != "" {
 			if _, statErr := client.Stat(ctx, dirPath); statErr == nil {
@@ -276,17 +267,17 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		if err := client.DeleteFile(ctx, skillDir, true); err != nil {
 			return fsHTTPError(err)
 		}
-		pruneEmptyRegistryDirs(ctx, client, skillDir)
+		pruneEmptySkillNamespaceDirs(ctx, client, skillDir)
 	}
 
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
 }
 
-// pruneEmptyRegistryDirs drops the package and registry directories left behind
-// by the last uninstalled skill. Best effort: a concurrent install may refill
+// pruneEmptySkillNamespaceDirs drops the package and namespace directories left
+// behind by the last deleted Skill. Best effort: a concurrent install may refill
 // them, and a stale empty directory is harmless to discovery.
-func pruneEmptyRegistryDirs(ctx context.Context, client *bridge.Client, skillDir string) {
-	for _, dir := range skillset.PrunableRegistryDirs(skillDir) {
+func pruneEmptySkillNamespaceDirs(ctx context.Context, client *bridge.Client, skillDir string) {
+	for _, dir := range skillset.PrunableSkillNamespaceDirs(skillDir) {
 		entries, err := client.ListDirAll(ctx, dir, false)
 		if err != nil || len(entries) > 0 {
 			return
@@ -334,9 +325,6 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 		Action:     req.Action,
 		TargetPath: req.TargetPath,
 	}); err != nil {
-		if errors.Is(err, skillset.ErrRegistryLayoutConflict) {
-			return apperror.New(apperror.CodeSkillRegistryLayoutConflict, nil)
-		}
 		return fsHTTPError(err)
 	}
 
