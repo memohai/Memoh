@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -26,94 +25,6 @@ import (
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 )
-
-func TestReadRegistrySkillArchiveReadsContentRoot(t *testing.T) {
-	archive, err := readRegistrySkillArchive(registrySkillTestArchive(t, []registrySkillTestEntry{
-		{name: "SKILL.md", content: "---\nname: skill\ndescription: Demo\n---\n\n# Demo\n"},
-		{name: "scripts/run.sh", content: "#!/bin/sh\n", mode: 0o755},
-	}))
-	if err != nil {
-		t.Fatalf("readRegistrySkillArchive() error = %v", err)
-	}
-	if len(archive.files) != 2 {
-		t.Fatalf("files = %d, want 2", len(archive.files))
-	}
-	manifest := registrySkillArchiveFileByPath(t, archive, "SKILL.md")
-	if !strings.Contains(string(manifest.content), "name: skill") {
-		t.Fatalf("manifest name should stay original:\n%s", manifest.content)
-	}
-	if !strings.Contains(string(manifest.content), "# Demo") {
-		t.Fatalf("manifest body was not preserved:\n%s", manifest.content)
-	}
-	if !registrySkillArchiveFileByPath(t, archive, "scripts/run.sh").executable {
-		t.Fatal("executable mode was not retained")
-	}
-}
-
-func TestReadRegistrySkillArchiveRejectsUnsafeEntries(t *testing.T) {
-	tests := []struct {
-		name    string
-		entries []registrySkillTestEntry
-	}{
-		{
-			name: "path traversal",
-			entries: []registrySkillTestEntry{
-				{name: "SKILL.md", content: validRegistrySkillManifest},
-				{name: "../escape", content: "bad"},
-			},
-		},
-		{
-			name: "backslash",
-			entries: []registrySkillTestEntry{
-				{name: "SKILL.md", content: validRegistrySkillManifest},
-				{name: `scripts\escape`, content: "bad"},
-			},
-		},
-		{
-			name: "symlink",
-			entries: []registrySkillTestEntry{
-				{name: "SKILL.md", content: validRegistrySkillManifest},
-				{name: "link", entryType: tar.TypeSymlink, linkName: "../../escape"},
-			},
-		},
-		{
-			name: "duplicate",
-			entries: []registrySkillTestEntry{
-				{name: "SKILL.md", content: validRegistrySkillManifest},
-				{name: "SKILL.md", content: validRegistrySkillManifest},
-			},
-		},
-		{
-			name: "directory then file conflict",
-			entries: []registrySkillTestEntry{
-				{name: "SKILL.md", content: validRegistrySkillManifest},
-				{name: "scripts/", entryType: tar.TypeDir},
-				{name: "scripts", content: "file"},
-			},
-		},
-		{
-			name: "file directory conflict",
-			entries: []registrySkillTestEntry{
-				{name: "SKILL.md", content: validRegistrySkillManifest},
-				{name: "scripts", content: "file"},
-				{name: "scripts/run.sh", content: "bad"},
-			},
-		},
-		{
-			name: "nested manifest",
-			entries: []registrySkillTestEntry{
-				{name: "other/SKILL.md", content: validRegistrySkillManifest},
-			},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if _, err := readRegistrySkillArchive(registrySkillTestArchive(t, test.entries)); err == nil {
-				t.Fatal("readRegistrySkillArchive() error = nil, want rejection")
-			}
-		})
-	}
-}
 
 func TestValidateRegistrySkillRequiresNamespacedIdentity(t *testing.T) {
 	skill := validRegistrySkillDescriptor()
@@ -305,9 +216,7 @@ func TestInstallRegistrySkillHidesWorkspaceFailureDetails(t *testing.T) {
 	env.writeSkillFile(t, path.Join(skillset.ManagedDir(), ".staging"), "not a directory")
 
 	skill := validRegistrySkillDescriptor()
-	artifact := registrySkillTestArchive(t, []registrySkillTestEntry{
-		{name: "SKILL.md", content: validRegistrySkillManifest},
-	})
+	artifact := validSkillArtifact(t)
 	digest := sha256.Sum256(artifact)
 	skill.Artifact.Digest = hex.EncodeToString(digest[:])
 	skill.Artifact.Size = int64(len(artifact))
@@ -406,22 +315,6 @@ func TestProxySkillIconVerifiesDigestAndHeaders(t *testing.T) {
 	}
 }
 
-func TestReadRegistrySkillArchiveRejectsEntryFlood(t *testing.T) {
-	entries := []registrySkillTestEntry{
-		{name: "SKILL.md", content: validRegistrySkillManifest},
-	}
-	// Directory headers carry no body, so neither the file-count nor the
-	// uncompressed-size cap bounds them. Without a total-entry cap a tiny gzip of
-	// directory headers could expand into an unbounded seen map.
-	for i := 0; i <= maxRegistrySkillArtifactEntries; i++ {
-		entries = append(entries, registrySkillTestEntry{name: fmt.Sprintf("dir%d/", i), entryType: tar.TypeDir})
-	}
-	_, err := readRegistrySkillArchive(registrySkillTestArchive(t, entries))
-	if err == nil || !strings.Contains(err.Error(), "too many entries") {
-		t.Fatalf("want too-many-entries rejection, got %v", err)
-	}
-}
-
 func TestProxySkillIconOverridesUpstreamSecurityHeaders(t *testing.T) {
 	content := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
 	digest := sha256.Sum256(content)
@@ -454,60 +347,17 @@ func TestProxySkillIconOverridesUpstreamSecurityHeaders(t *testing.T) {
 	}
 }
 
-func TestReadRegistrySkillArchiveRejectsMalformedFrontmatter(t *testing.T) {
-	cases := map[string]string{
-		"missing closing fence": "---\nname: skill\n",
-		"not a mapping":         "---\n- a\n- b\n---\n# Body\n",
-		"missing frontmatter":   "# Body only\n",
-	}
-	for name, manifest := range cases {
-		t.Run(name, func(t *testing.T) {
-			entries := []registrySkillTestEntry{{name: "SKILL.md", content: manifest}}
-			if _, err := readRegistrySkillArchive(registrySkillTestArchive(t, entries)); err == nil {
-				t.Fatal("readRegistrySkillArchive() accepted malformed SKILL.md frontmatter")
-			}
-		})
-	}
-}
-
-const validRegistrySkillManifest = "---\nname: skill\ndescription: Demo\n---\n\n# Demo\n"
-
-type registrySkillTestEntry struct {
-	name      string
-	content   string
-	mode      int64
-	entryType byte
-	linkName  string
-}
-
-func registrySkillTestArchive(t *testing.T, entries []registrySkillTestEntry) []byte {
+func validSkillArtifact(t *testing.T) []byte {
 	t.Helper()
 	var output bytes.Buffer
 	gz := gzip.NewWriter(&output)
 	tw := tar.NewWriter(gz)
-	for _, entry := range entries {
-		entryType := entry.entryType
-		if entryType == 0 {
-			entryType = tar.TypeReg
-		}
-		mode := entry.mode
-		if mode == 0 {
-			mode = 0o644
-		}
-		header := &tar.Header{
-			Name: entry.name, Mode: mode, Typeflag: entryType, Linkname: entry.linkName,
-		}
-		if entryType == tar.TypeReg {
-			header.Size = int64(len(entry.content))
-		}
-		if err := tw.WriteHeader(header); err != nil {
-			t.Fatalf("WriteHeader(%q): %v", entry.name, err)
-		}
-		if entryType == tar.TypeReg {
-			if _, err := tw.Write([]byte(entry.content)); err != nil {
-				t.Fatalf("Write(%q): %v", entry.name, err)
-			}
-		}
+	content := []byte("---\nname: skill\ndescription: Demo\n---\n\n# Demo\n")
+	if err := tw.WriteHeader(&tar.Header{Name: "SKILL.md", Mode: 0o644, Typeflag: tar.TypeReg, Size: int64(len(content))}); err != nil {
+		t.Fatalf("WriteHeader(SKILL.md): %v", err)
+	}
+	if _, err := tw.Write(content); err != nil {
+		t.Fatalf("Write(SKILL.md): %v", err)
 	}
 	if err := tw.Close(); err != nil {
 		t.Fatalf("tar Close: %v", err)
@@ -516,17 +366,6 @@ func registrySkillTestArchive(t *testing.T, entries []registrySkillTestEntry) []
 		t.Fatalf("gzip Close: %v", err)
 	}
 	return output.Bytes()
-}
-
-func registrySkillArchiveFileByPath(t *testing.T, archive registrySkillArchive, name string) registrySkillArchiveFile {
-	t.Helper()
-	for _, file := range archive.files {
-		if file.path == name {
-			return file
-		}
-	}
-	t.Fatalf("archive does not contain %q", name)
-	return registrySkillArchiveFile{}
 }
 
 func validRegistrySkillDescriptor() SupermarketCatalogSkill {

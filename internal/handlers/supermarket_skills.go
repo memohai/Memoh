@@ -341,11 +341,11 @@ func (h *SupermarketHandler) installRegistrySkill(
 	if err != nil {
 		return InstallRegistrySkillResponse{}, err
 	}
-	archive, err := readRegistrySkillArchive(artifactBytes)
+	archive, err := skillset.ReadArchive(artifactBytes)
 	if err != nil {
 		return InstallRegistrySkillResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 	}
-	if err := installRegistrySkillArchive(targetContext, target.Client, target.Info.OS, registryID, packageID, skillID, archive); err != nil {
+	if err := skillset.InstallArchive(targetContext, target.Client, target.Info.OS, registryID, packageID, skillID, archive); err != nil {
 		if errors.Is(err, skillset.ErrFlatSkillOccupiesRegistry) {
 			return InstallRegistrySkillResponse{}, apperror.New(apperror.CodeRegistrySkillLayoutConflict, nil)
 		}
@@ -364,7 +364,7 @@ func (h *SupermarketHandler) installRegistrySkill(
 		InstallID:         skill.InstallID,
 		WorkspaceTargetID: target.TargetID,
 		ArtifactDigest:    skill.Artifact.Digest,
-		FilesWritten:      len(archive.files),
+		FilesWritten:      archive.FileCount(),
 	}, nil
 }
 
