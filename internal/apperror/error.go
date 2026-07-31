@@ -176,7 +176,7 @@ var catalog = map[Code]Definition{
 	},
 	CodeRegistryUnavailable: {
 		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The Supermarket Registry is unavailable.",
+		Detail:     "The Supermarket is unavailable.",
 	},
 	CodeRegistrySkillNotFound: {
 		HTTPStatus: http.StatusNotFound,

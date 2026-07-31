@@ -125,15 +125,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, ExternalLink, FileText } from 'lucide-vue-next'
-import { Button, toast } from '@felinic/ui'
+import { Button, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import {
   getSupermarketRegistries,
   getSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillId,
   type HandlersSupermarketCatalogSkill,
 } from '@memohai/sdk'
-import SettingsRow from '@/components/settings/row.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallSkillDialog from './components/install-skill-dialog.vue'
 import InfoItem from './components/info-item.vue'

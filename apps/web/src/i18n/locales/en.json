@@ -136,7 +136,7 @@
       "registry_layout_conflict": "This Skill name conflicts with an installed Registry ID. Choose a different name."
     },
     "registry": {
-      "unavailable": "The Supermarket Registry is unavailable. Please try again later.",
+      "unavailable": "The Supermarket is unavailable. Please try again later.",
       "skill_not_found": "This Registry Skill is no longer available.",
       "skill_invalid": "This Registry Skill package is invalid and cannot be installed.",
       "skill_layout_conflict": "This Registry ID conflicts with an existing Workspace Skill. Rename or delete that Skill before installing.",

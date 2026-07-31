@@ -136,7 +136,7 @@
       "registry_layout_conflict": "该 Skill 名称与已安装的 Registry ID 冲突，请换一个名称。"
     },
     "registry": {
-      "unavailable": "暂时无法连接 Supermarket Registry，请稍后重试。",
+      "unavailable": "暂时无法连接 Supermarket，请稍后重试。",
       "skill_not_found": "该 Registry Skill 已不存在。",
       "skill_invalid": "该 Registry Skill 包无效，无法安装。",
       "skill_layout_conflict": "该 Registry ID 与现有 Workspace Skill 冲突，请先重命名或删除该 Skill。",
