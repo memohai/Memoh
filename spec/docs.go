@@ -19518,6 +19518,33 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.SupermarketPluginArtifact": {
+            "type": "object",
+            "required": [
+                "content_type",
+                "digest",
+                "download_url",
+                "format",
+                "size"
+            ],
+            "properties": {
+                "content_type": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "download_url": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.SupermarketPluginEntry": {
             "type": "object",
             "required": [
@@ -19625,7 +19652,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "artifact": {
-                    "$ref": "#/definitions/handlers.SupermarketSkillArtifact"
+                    "$ref": "#/definitions/handlers.SupermarketPluginArtifact"
                 },
                 "published_at": {
                     "type": "string"
@@ -19733,7 +19760,8 @@ const docTemplate = `{
                 "digest",
                 "download_url",
                 "format",
-                "size"
+                "size",
+                "uncompressed_size"
             ],
             "properties": {
                 "content_type": {
@@ -19749,6 +19777,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "size": {
+                    "type": "integer"
+                },
+                "uncompressed_size": {
                     "type": "integer"
                 }
             }

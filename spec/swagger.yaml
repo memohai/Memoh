@@ -3358,6 +3358,25 @@ definitions:
       total:
         type: integer
     type: object
+  handlers.SupermarketPluginArtifact:
+    properties:
+      content_type:
+        type: string
+      digest:
+        type: string
+      download_url:
+        type: string
+      format:
+        type: string
+      size:
+        type: integer
+    required:
+    - content_type
+    - digest
+    - download_url
+    - format
+    - size
+    type: object
   handlers.SupermarketPluginEntry:
     properties:
       auth_requirements:
@@ -3425,7 +3444,7 @@ definitions:
   handlers.SupermarketPluginRelease:
     properties:
       artifact:
-        $ref: '#/definitions/handlers.SupermarketSkillArtifact'
+        $ref: '#/definitions/handlers.SupermarketPluginArtifact'
       published_at:
         type: string
       revision:
@@ -3510,12 +3529,15 @@ definitions:
         type: string
       size:
         type: integer
+      uncompressed_size:
+        type: integer
     required:
     - content_type
     - digest
     - download_url
     - format
     - size
+    - uncompressed_size
     type: object
   handlers.SupermarketSkillCategory:
     properties:

@@ -1987,6 +1987,14 @@ export type HandlersSupermarketCatalogSkillListResponse = {
     total?: number;
 };
 
+export type HandlersSupermarketPluginArtifact = {
+    content_type: string;
+    digest: string;
+    download_url: string;
+    format: string;
+    size: number;
+};
+
 export type HandlersSupermarketPluginEntry = {
     auth_requirements?: Array<PluginsAuthRequirement>;
     author?: PluginsAuthor;
@@ -2014,7 +2022,7 @@ export type HandlersSupermarketPluginListResponse = {
 };
 
 export type HandlersSupermarketPluginRelease = {
-    artifact: HandlersSupermarketSkillArtifact;
+    artifact: HandlersSupermarketPluginArtifact;
     published_at: string;
     revision: string;
     skills: Array<HandlersSupermarketPluginResolvedSkill>;
@@ -2054,6 +2062,7 @@ export type HandlersSupermarketSkillArtifact = {
     download_url: string;
     format: string;
     size: number;
+    uncompressed_size: number;
 };
 
 export type HandlersSupermarketSkillCategory = {

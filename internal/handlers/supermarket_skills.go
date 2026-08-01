@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	maxRegistrySkillArtifactCompressedBytes = 25 * 1024 * 1024
-	maxRegistrySkillMetadataBytes           = 2 * 1024 * 1024
+	maxRegistrySkillArtifactCompressedBytes   = 25 * 1024 * 1024
+	maxRegistrySkillArtifactUncompressedBytes = 5 * 1024 * 1024
+	maxRegistrySkillMetadataBytes             = 2 * 1024 * 1024
 )
 
 type SupermarketRegistryListResponse struct {
@@ -64,11 +65,18 @@ type SupermarketSkillSource struct {
 }
 
 type SupermarketSkillArtifact struct {
-	Format      string `json:"format" validate:"required"`
-	Digest      string `json:"digest" validate:"required"`
-	Size        int64  `json:"size" validate:"required"`
-	ContentType string `json:"content_type" validate:"required"`
-	DownloadURL string `json:"download_url" validate:"required"`
+	Format           string `json:"format" validate:"required"`
+	Digest           string `json:"digest" validate:"required"`
+	Size             int64  `json:"size" validate:"required"`
+	UncompressedSize int64  `json:"uncompressed_size" validate:"required"`
+	ContentType      string `json:"content_type" validate:"required"`
+	DownloadURL      string `json:"download_url" validate:"required"`
+}
+
+type supermarketArtifactDownloadDescriptor struct {
+	Digest      string
+	Size        int64
+	DownloadURL string
 }
 
 type SupermarketSkillIconAsset struct {
@@ -474,13 +482,42 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimit(
 			},
 		)
 	}
+	if skill.Artifact.UncompressedSize < 1 ||
+		skill.Artifact.UncompressedSize > maxRegistrySkillArtifactUncompressedBytes {
+		return preparedRegistrySkillArtifact{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact uncompressed size is invalid"),
+			nil,
+		)
+	}
+	if skill.Artifact.UncompressedSize > maxUncompressedBytes {
+		return preparedRegistrySkillArtifact{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact exceeds the remaining uncompressed size limit"),
+			nil,
+		)
+	}
 	artifactBytes, err := h.downloadRegistrySkillArtifact(ctx, skill.Artifact)
 	if err != nil {
 		return preparedRegistrySkillArtifact{}, err
 	}
-	archive, err := skillset.ReadArchiveWithUncompressedLimit(artifactBytes, maxUncompressedBytes)
+	archive, err := skillset.ReadArchiveWithUncompressedLimit(
+		artifactBytes,
+		min(maxUncompressedBytes, skill.Artifact.UncompressedSize),
+	)
 	if err != nil {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+	}
+	if archive.UncompressedSize() != skill.Artifact.UncompressedSize {
+		return preparedRegistrySkillArtifact{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			fmt.Errorf(
+				"registry skill artifact uncompressed size does not match its descriptor: expected %d, got %d",
+				skill.Artifact.UncompressedSize,
+				archive.UncompressedSize(),
+			),
+			nil,
+		)
 	}
 	return preparedRegistrySkillArtifact{Skill: skill, Archive: archive, WorkspaceOS: workspaceOS}, nil
 }
@@ -604,6 +641,9 @@ func validateRegistrySkill(skill SupermarketCatalogSkill, registryID, packageID,
 	if artifact.Size < 1 || artifact.Size > maxRegistrySkillArtifactCompressedBytes {
 		return errors.New("registry Skill Artifact size is invalid")
 	}
+	if artifact.UncompressedSize < 1 || artifact.UncompressedSize > maxRegistrySkillArtifactUncompressedBytes {
+		return errors.New("registry Skill Artifact uncompressed size is invalid")
+	}
 	if strings.TrimSpace(artifact.DownloadURL) == "" {
 		return errors.New("registry Skill Artifact download URL is missing")
 	}
@@ -666,6 +706,15 @@ func registrySkillSupportsOS(requirements SupermarketSkillRuntimeRequirements, w
 func (h *SupermarketHandler) downloadRegistrySkillArtifact(
 	ctx context.Context,
 	artifact SupermarketSkillArtifact,
+) ([]byte, error) {
+	return h.downloadSupermarketArtifact(ctx, supermarketArtifactDownloadDescriptor{
+		Digest: artifact.Digest, Size: artifact.Size, DownloadURL: artifact.DownloadURL,
+	})
+}
+
+func (h *SupermarketHandler) downloadSupermarketArtifact(
+	ctx context.Context,
+	artifact supermarketArtifactDownloadDescriptor,
 ) ([]byte, error) {
 	base, err := url.Parse(h.baseURL)
 	if err != nil {

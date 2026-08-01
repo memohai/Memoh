@@ -475,6 +475,14 @@ type SupermarketAuthor struct {
 	Email string `json:"email"`
 }
 
+type SupermarketPluginArtifact struct {
+	Format      string `json:"format" validate:"required"`
+	Digest      string `json:"digest" validate:"required"`
+	Size        int64  `json:"size" validate:"required"`
+	ContentType string `json:"content_type" validate:"required"`
+	DownloadURL string `json:"download_url" validate:"required"`
+}
+
 type SupermarketPluginResolvedSkill struct {
 	RegistryID          string                              `json:"registry_id" validate:"required"`
 	PackageID           string                              `json:"package_id" validate:"required"`
@@ -489,14 +497,14 @@ type SupermarketPluginResolvedSkill struct {
 type SupermarketPluginRelease struct {
 	Revision    string                           `json:"revision" validate:"required"`
 	PublishedAt string                           `json:"published_at" validate:"required"`
-	Artifact    SupermarketSkillArtifact         `json:"artifact" validate:"required"`
+	Artifact    SupermarketPluginArtifact        `json:"artifact" validate:"required"`
 	Skills      []SupermarketPluginResolvedSkill `json:"skills" validate:"required"`
 }
 
 type SupermarketImmutablePluginRelease struct {
 	SchemaVersion string                           `json:"schema_version"`
 	Plugin        pluginspkg.Manifest              `json:"plugin"`
-	Artifact      SupermarketSkillArtifact         `json:"artifact"`
+	Artifact      SupermarketPluginArtifact        `json:"artifact"`
 	Skills        []SupermarketPluginResolvedSkill `json:"skills"`
 }
 
@@ -695,6 +703,7 @@ func validateSupermarketPluginEntry(
 		return fmt.Errorf("plugin release exceeds the %d Skill limit", maxPluginReleaseSkills)
 	}
 	resolvedReferences := make([]pluginspkg.SkillReference, 0, len(entry.Release.Skills))
+	var totalUncompressedBytes int64
 	for _, resolved := range entry.Release.Skills {
 		reference := pluginspkg.SkillReference{
 			RegistryID: resolved.RegistryID,
@@ -707,6 +716,14 @@ func validateSupermarketPluginEntry(
 		}
 		skill := resolved.catalogSkill()
 		if err := validateRegistrySkill(skill, reference.RegistryID, reference.PackageID, reference.SkillID); err != nil {
+			return err
+		}
+		var err error
+		totalUncompressedBytes, err = addPluginSkillArchiveBytes(
+			totalUncompressedBytes,
+			resolved.Artifact.UncompressedSize,
+		)
+		if err != nil {
 			return err
 		}
 	}
@@ -764,6 +781,21 @@ func (h *SupermarketHandler) preparePluginSkills(
 	result := pluginSkillsInstallResult{OK: true, Skills: make([]pluginSkillInstallResult, 0, len(resolvedSkills))}
 	if len(resolvedSkills) > maxPluginReleaseSkills {
 		return nil, result, fmt.Errorf("plugin release exceeds the %d Skill limit", maxPluginReleaseSkills)
+	}
+	var declaredUncompressedBytes int64
+	for _, resolved := range resolvedSkills {
+		if resolved.Artifact.UncompressedSize < 1 ||
+			resolved.Artifact.UncompressedSize > maxRegistrySkillArtifactUncompressedBytes {
+			return nil, result, errors.New("plugin release contains an invalid Skill Artifact uncompressed size")
+		}
+		var err error
+		declaredUncompressedBytes, err = addPluginSkillArchiveBytes(
+			declaredUncompressedBytes,
+			resolved.Artifact.UncompressedSize,
+		)
+		if err != nil {
+			return nil, result, err
+		}
 	}
 	prepared := make([]preparedPluginSkill, 0, len(resolvedSkills))
 	var totalUncompressedBytes int64
@@ -922,7 +954,7 @@ func (h *SupermarketHandler) installPluginBundle(
 	client pluginBundleWriter,
 	workspaceOS string,
 	downloadPluginID, targetPluginID string,
-	artifact SupermarketSkillArtifact,
+	artifact SupermarketPluginArtifact,
 	expectedSkills []pluginspkg.SkillReference,
 ) (pluginBundleInstallResult, error) {
 	if client == nil {
@@ -938,10 +970,12 @@ func (h *SupermarketHandler) installPluginBundle(
 func (h *SupermarketHandler) preparePluginBundle(
 	ctx context.Context,
 	downloadPluginID, targetPluginID string,
-	artifact SupermarketSkillArtifact,
+	artifact SupermarketPluginArtifact,
 	expectedSkills []pluginspkg.SkillReference,
 ) (pluginBundleArchive, error) {
-	bundle, err := h.downloadRegistrySkillArtifact(ctx, artifact)
+	bundle, err := h.downloadSupermarketArtifact(ctx, supermarketArtifactDownloadDescriptor{
+		Digest: artifact.Digest, Size: artifact.Size, DownloadURL: artifact.DownloadURL,
+	})
 	if err != nil {
 		return pluginBundleArchive{}, fmt.Errorf("download Plugin Artifact: %w", err)
 	}

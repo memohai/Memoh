@@ -421,17 +421,17 @@ func TestRollbackPluginWorkspacePreservesCauseWhenRollbackSucceeds(t *testing.T)
 func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *testing.T) {
 	for _, test := range []struct {
 		name   string
-		mutate func(*SupermarketSkillArtifact)
+		mutate func(*SupermarketPluginArtifact)
 	}{
 		{
 			name: "size",
-			mutate: func(artifact *SupermarketSkillArtifact) {
+			mutate: func(artifact *SupermarketPluginArtifact) {
 				artifact.Size++
 			},
 		},
 		{
 			name: "digest",
-			mutate: func(artifact *SupermarketSkillArtifact) {
+			mutate: func(artifact *SupermarketPluginArtifact) {
 				artifact.Digest = strings.Repeat("0", 64)
 			},
 		},
@@ -533,6 +533,64 @@ func TestPreparePluginSkillsEnforcesReleaseBudgets(t *testing.T) {
 	}
 	if _, err := addPluginSkillArchiveBytes(maxPluginSkillArtifactsUncompressedBytes-1, 2); err == nil {
 		t.Fatal("addPluginSkillArchiveBytes() accepted an over-budget release")
+	}
+}
+
+func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion"}
+	skills := make([]SupermarketCatalogSkill, 0, 26)
+	for index := 0; index < 26; index++ {
+		skillID := fmt.Sprintf("skill-%02d", index)
+		reference := pluginspkg.SkillReference{
+			RegistryID: "memoh",
+			PackageID:  "notion",
+			SkillID:    skillID,
+		}
+		manifest.Skills = append(manifest.Skills, reference)
+		skill := validRegistrySkillDescriptor()
+		skill.RegistryID = reference.RegistryID
+		skill.PackageID = reference.PackageID
+		skill.SkillID = reference.SkillID
+		skill.InstallID = strings.Join([]string{reference.RegistryID, reference.PackageID, reference.SkillID}, "+")
+		skill.Artifact.UncompressedSize = maxRegistrySkillArtifactUncompressedBytes
+		skills = append(skills, skill)
+	}
+	bundle := gzipTarArchive(t, map[string]string{"notion/plugin.yaml": "id: notion\n"})
+	entry := validSupermarketPluginEntry(manifest, bundle, skills...)
+	releaseJSON := sealSupermarketPluginEntry(t, &entry)
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal Plugin entry: %v", err)
+	}
+	artifactRequested := false
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/api/plugins/notion":
+				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
+			case "/api/plugins/notion/releases/" + entry.Release.Revision:
+				return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
+			default:
+				artifactRequested = true
+				return testHTTPResponse(req, http.StatusOK, bundle), nil
+			}
+		})},
+		pluginService:  &recordingPluginInstaller{},
+		botService:     env.handler.botService,
+		accountService: env.handler.accountService,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
+		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
+	}, handler.InstallPlugin)
+	if err == nil || !strings.Contains(err.Error(), "uncompressed limit") {
+		t.Fatalf("InstallPlugin() error = %v, want declared Skill budget rejection", err)
+	}
+	if artifactRequested {
+		t.Fatal("an Artifact was downloaded before the declared Skill budget was rejected")
 	}
 }
 
@@ -740,7 +798,7 @@ func validSupermarketPluginEntry(
 		Release: SupermarketPluginRelease{
 			Revision:    strings.Repeat("c", 64),
 			PublishedAt: "2026-08-01T00:00:00Z",
-			Artifact: SupermarketSkillArtifact{
+			Artifact: SupermarketPluginArtifact{
 				Format:      "memoh_plugin_v1",
 				Digest:      hex.EncodeToString(digest[:]),
 				Size:        int64(len(bundle)),
@@ -1120,7 +1178,7 @@ func TestInstallPluginBundleRejectsMissingDownload(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler),
 	}
 	writer := &pluginBundleTestWriter{files: map[string]string{}}
-	artifact := SupermarketSkillArtifact{
+	artifact := SupermarketPluginArtifact{
 		Format: "memoh_plugin_v1", Digest: strings.Repeat("a", 64), Size: 1,
 		ContentType: "application/gzip", DownloadURL: "/artifacts/plugin",
 	}
@@ -1143,7 +1201,7 @@ func TestInstallPluginBundleRejectsManifestSkillMismatch(t *testing.T) {
 	writer := &pluginBundleTestWriter{files: map[string]string{}}
 	expected := []pluginspkg.SkillReference{{RegistryID: "memoh", PackageID: "github", SkillID: "issues"}}
 	digest := sha256.Sum256(bundle)
-	artifact := SupermarketSkillArtifact{
+	artifact := SupermarketPluginArtifact{
 		Format: "memoh_plugin_v1", Digest: hex.EncodeToString(digest[:]), Size: int64(len(bundle)),
 		ContentType: "application/gzip", DownloadURL: "/artifacts/plugin",
 	}

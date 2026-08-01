@@ -26,6 +26,10 @@ import (
 	"github.com/memohai/memoh/internal/workspace"
 )
 
+const validSkillArtifactContent = "---\nname: skill\ndescription: Demo\n---\n\n# Demo\n"
+
+const validSkillArtifactUncompressedSize = int64(len(validSkillArtifactContent))
+
 func TestValidateRegistrySkillRequiresNamespacedIdentity(t *testing.T) {
 	skill := validRegistrySkillDescriptor()
 	if err := validateRegistrySkill(skill, "registry", "package", "skill"); err != nil {
@@ -34,6 +38,16 @@ func TestValidateRegistrySkillRequiresNamespacedIdentity(t *testing.T) {
 	skill.InstallID = "skill"
 	if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
 		t.Fatal("validateRegistrySkill(unnamespaced) error = nil")
+	}
+}
+
+func TestValidateRegistrySkillRequiresBoundedUncompressedSize(t *testing.T) {
+	for _, size := range []int64{0, maxRegistrySkillArtifactUncompressedBytes + 1} {
+		skill := validRegistrySkillDescriptor()
+		skill.Artifact.UncompressedSize = size
+		if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
+			t.Fatalf("validateRegistrySkill() accepted uncompressed_size %d", size)
+		}
 	}
 }
 
@@ -100,6 +114,52 @@ func TestInstallRegistrySkillArtifactRejectsIncompatibleOSBeforeDownload(t *test
 	args := apperror.ArgsOf(err)
 	if args["os"] != "darwin" || args["supported_os"] != "linux" {
 		t.Fatalf("incompatible OS args = %#v", args)
+	}
+}
+
+func TestPrepareRegistrySkillArtifactRejectsDeclaredBudgetBeforeDownload(t *testing.T) {
+	skill := validRegistrySkillDescriptor()
+	artifactRequested := false
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			artifactRequested = true
+			return testHTTPResponse(req, http.StatusOK, nil), nil
+		})},
+	}
+
+	_, err := handler.prepareResolvedRegistrySkillArtifactWithLimit(
+		context.Background(), "linux", skill, skill.Artifact.UncompressedSize-1,
+	)
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInvalid {
+		t.Fatalf("prepare code = %q, want %q", got, apperror.CodeRegistrySkillInvalid)
+	}
+	if artifactRequested {
+		t.Fatal("over-budget Skill Artifact was downloaded")
+	}
+}
+
+func TestPrepareRegistrySkillArtifactVerifiesDeclaredUncompressedSize(t *testing.T) {
+	artifact := validSkillArtifact(t)
+	digest := sha256.Sum256(artifact)
+	skill := validRegistrySkillDescriptor()
+	skill.Artifact.Digest = hex.EncodeToString(digest[:])
+	skill.Artifact.Size = int64(len(artifact))
+	skill.Artifact.UncompressedSize = validSkillArtifactUncompressedSize + 1
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return testHTTPResponse(req, http.StatusOK, artifact), nil
+		})},
+	}
+
+	_, err := handler.prepareResolvedRegistrySkillArtifact(context.Background(), "linux", skill)
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInvalid {
+		t.Fatalf("prepare code = %q, want %q", got, apperror.CodeRegistrySkillInvalid)
+	}
+	cause := apperror.CauseOf(err)
+	if cause == nil || !strings.Contains(cause.Error(), "does not match its descriptor") {
+		t.Fatalf("prepare cause = %v, want declared size mismatch", cause)
 	}
 }
 
@@ -490,7 +550,7 @@ func validSkillArtifact(t *testing.T) []byte {
 	var output bytes.Buffer
 	gz := gzip.NewWriter(&output)
 	tw := tar.NewWriter(gz)
-	content := []byte("---\nname: skill\ndescription: Demo\n---\n\n# Demo\n")
+	content := []byte(validSkillArtifactContent)
 	if err := tw.WriteHeader(&tar.Header{Name: "SKILL.md", Mode: 0o644, Typeflag: tar.TypeReg, Size: int64(len(content))}); err != nil {
 		t.Fatalf("WriteHeader(SKILL.md): %v", err)
 	}
@@ -511,7 +571,9 @@ func validRegistrySkillDescriptor() SupermarketCatalogSkill {
 		RegistryID: "registry", PackageID: "package", SkillID: "skill", InstallID: "registry+package+skill",
 		Artifact: SupermarketSkillArtifact{
 			Format: "memoh_skill_v1",
-			Digest: strings.Repeat("a", 64), Size: 1, ContentType: "application/gzip", DownloadURL: "/artifact",
+			Digest: strings.Repeat("a", 64), Size: 1,
+			UncompressedSize: validSkillArtifactUncompressedSize,
+			ContentType:      "application/gzip", DownloadURL: "/artifact",
 		},
 	}
 }
