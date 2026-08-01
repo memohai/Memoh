@@ -13,11 +13,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/config"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
@@ -44,30 +47,34 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	descriptor.Artifact.Size = int64(len(artifact))
 	descriptor.Artifact.DownloadURL = "/artifacts/meeting"
 	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
-	manifestJSON, err := json.Marshal(manifest)
-	if err != nil {
-		t.Fatalf("marshal Plugin manifest: %v", err)
-	}
-	descriptorJSON, err := json.Marshal(descriptor)
-	if err != nil {
-		t.Fatalf("marshal Skill descriptor: %v", err)
-	}
-	installer := &recordingPluginInstaller{}
 	bundle := gzipTarArchive(t, map[string]string{
 		"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
 	})
+	entry := validSupermarketPluginEntry(manifest, bundle, descriptor)
+	releaseJSON := sealSupermarketPluginEntry(t, &entry)
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal Plugin release: %v", err)
+	}
+	installer := &recordingPluginInstaller{}
+	requestedPaths := make([]string, 0, 3)
+	artifactRequestedDuringMutation := false
 	handler := &SupermarketHandler{
 		baseURL: "https://supermarket.example",
 		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requestedPaths = append(requestedPaths, req.URL.Path)
 			status := http.StatusOK
-			content := descriptorJSON
+			var content []byte
 			switch req.URL.Path {
 			case "/api/plugins/notion":
-				content = manifestJSON
-			case "/api/registries/memoh/packages/notion/skills/meeting":
-			case "/artifacts/meeting":
+				content = entryJSON
+			case "/api/plugins/notion/releases/" + entry.Release.Revision:
+				content = releaseJSON
+			case "/api/artifacts/skill/" + digestText:
+				artifactRequestedDuringMutation = installer.mutationCalls > 0
 				content = artifact
-			case "/api/plugins/notion/download":
+			case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
+				artifactRequestedDuringMutation = artifactRequestedDuringMutation || installer.mutationCalls > 0
 				content = bundle
 			default:
 				status = http.StatusNotFound
@@ -84,7 +91,7 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	}
 
 	recorder, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
-		PluginID: "notion",
+		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
 	}, handler.InstallPlugin)
 	if err != nil {
 		t.Fatalf("InstallPlugin() error = %v", err)
@@ -95,6 +102,22 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	metadata, ok := installer.request.SkillArtifacts[pluginspkg.SkillReferenceIdentity(reference)]
 	if !ok || metadata.ArtifactDigest != digestText || metadata.FilesWritten != 1 {
 		t.Fatalf("installed Skill metadata = %+v, %v", metadata, ok)
+	}
+	if metadata.RegistryRevision != entry.Release.Skills[0].RegistryRevision {
+		t.Fatalf("Registry revision = %q, want %q", metadata.RegistryRevision, entry.Release.Skills[0].RegistryRevision)
+	}
+	if installer.request.Release.Revision != entry.Release.Revision ||
+		installer.request.Release.ArtifactDigest != entry.Release.Artifact.Digest {
+		t.Fatalf("installed Plugin release metadata = %+v, want revision and Artifact digest", installer.request.Release)
+	}
+	if installer.request.WorkspaceTargetID != workspace.WorkspaceTargetNative {
+		t.Fatalf("workspace target = %q, want native", installer.request.WorkspaceTargetID)
+	}
+	if artifactRequestedDuringMutation {
+		t.Fatal("Plugin installation downloaded an Artifact while holding the bot mutation lock")
+	}
+	if slices.Contains(requestedPaths, "/api/registries/memoh/packages/notion/skills/meeting") {
+		t.Fatalf("Plugin installation queried the mutable Skill endpoint: %+v", requestedPaths)
 	}
 	sourcePath := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting", "SKILL.md")
 	if _, err := os.ReadFile(env.localPath(sourcePath)); err != nil {
@@ -125,7 +148,53 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	}
 }
 
-func TestInstallPluginGarbageCollectsSkillsWhenBundleInstallFails(t *testing.T) {
+func TestInstallPluginRejectsStaleReleaseBeforeWorkspaceMutation(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	bundle := gzipTarArchive(t, map[string]string{"notion/plugin.yaml": "id: notion\n"})
+	entry := validSupermarketPluginEntry(pluginspkg.Manifest{ID: "notion", Name: "Notion"}, bundle)
+	releaseJSON := sealSupermarketPluginEntry(t, &entry)
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal Plugin entry: %v", err)
+	}
+	artifactRequested := false
+	installer := &recordingPluginInstaller{}
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/api/plugins/notion":
+				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
+			case "/api/plugins/notion/releases/" + entry.Release.Revision:
+				return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
+			case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
+				artifactRequested = true
+				return testHTTPResponse(req, http.StatusOK, bundle), nil
+			default:
+				return testHTTPResponse(req, http.StatusNotFound, nil), nil
+			}
+		})},
+		pluginService: installer, containers: manager, workspaces: manager,
+		botService: env.handler.botService, accountService: env.handler.accountService,
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
+		PluginID: "notion", ReleaseRevision: strings.Repeat("0", 64),
+	}, handler.InstallPlugin)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
+		t.Fatalf("InstallPlugin() error = %v, want HTTP 409", err)
+	}
+	if artifactRequested || installer.mutationCalls != 0 {
+		t.Fatalf("stale release touched installation state: artifact=%v mutations=%d", artifactRequested, installer.mutationCalls)
+	}
+}
+
+func TestInstallPluginRollsBackSkillsWhenBundleInstallFails(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	manager := workspace.NewManager(
 		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
@@ -141,27 +210,34 @@ func TestInstallPluginGarbageCollectsSkillsWhenBundleInstallFails(t *testing.T) 
 	descriptor.Artifact.Digest = hex.EncodeToString(digest[:])
 	descriptor.Artifact.Size = int64(len(artifact))
 	descriptor.Artifact.DownloadURL = "/artifacts/meeting"
-	manifestJSON, err := json.Marshal(pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}})
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+	bundle := gzipTarArchive(t, map[string]string{
+		"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+	})
+	entry := validSupermarketPluginEntry(manifest, bundle, descriptor)
+	releaseJSON := sealSupermarketPluginEntry(t, &entry)
+	entryJSON, err := json.Marshal(entry)
 	if err != nil {
-		t.Fatalf("marshal Plugin manifest: %v", err)
+		t.Fatalf("marshal Plugin release: %v", err)
 	}
-	descriptorJSON, err := json.Marshal(descriptor)
-	if err != nil {
-		t.Fatalf("marshal Skill descriptor: %v", err)
-	}
+	env.writeSkillFile(t, path.Join(skillset.PluginDirPath, ".staging"), "not a directory")
 	installer := &recordingPluginInstaller{}
+	requestedMutableSkill := false
 	handler := &SupermarketHandler{
 		baseURL: "https://supermarket.example",
 		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
 			case "/api/plugins/notion":
-				return testHTTPResponse(req, http.StatusOK, manifestJSON), nil
+				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
+			case "/api/plugins/notion/releases/" + entry.Release.Revision:
+				return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
 			case "/api/registries/memoh/packages/notion/skills/meeting":
-				return testHTTPResponse(req, http.StatusOK, descriptorJSON), nil
-			case "/artifacts/meeting":
-				return testHTTPResponse(req, http.StatusOK, artifact), nil
-			case "/api/plugins/notion/download":
+				requestedMutableSkill = true
 				return testHTTPResponse(req, http.StatusInternalServerError, nil), nil
+			case "/api/artifacts/skill/" + entry.Release.Skills[0].Artifact.Digest:
+				return testHTTPResponse(req, http.StatusOK, artifact), nil
+			case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
+				return testHTTPResponse(req, http.StatusOK, bundle), nil
 			default:
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
@@ -175,20 +251,455 @@ func TestInstallPluginGarbageCollectsSkillsWhenBundleInstallFails(t *testing.T) 
 	}
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
-		PluginID: "notion",
+		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
 	}, handler.InstallPlugin)
 	if err == nil {
 		t.Fatal("InstallPlugin() succeeded after bundle download failure")
 	}
-	if len(installer.gcCalls) != 1 || len(installer.gcCalls[0]) != 1 || installer.gcCalls[0][0] != reference {
-		t.Fatalf("GC calls = %+v, want failed Plugin Skill reference", installer.gcCalls)
-	}
-	if len(installer.gcInMutation) != 1 || !installer.gcInMutation[0] {
-		t.Fatalf("GC mutation scopes = %+v, want cleanup inside the bot mutation scope", installer.gcInMutation)
+	if len(installer.gcCalls) != 0 {
+		t.Fatalf("transactional rollback should not need GC: %+v", installer.gcCalls)
 	}
 	if installer.installCalls != 0 {
 		t.Fatalf("Plugin ownership was recorded after bundle failure: %d calls", installer.installCalls)
 	}
+	if requestedMutableSkill {
+		t.Fatal("Plugin installation queried the mutable Skill endpoint")
+	}
+	sourcePath := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting", "SKILL.md")
+	if _, statErr := os.Stat(env.localPath(sourcePath)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("failed Plugin installation retained a Skill: %v", statErr)
+	}
+}
+
+func TestInstallPluginRestoresPreviousWorkspaceWhenDatabaseInstallFails(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	skillArtifact := validSkillArtifact(t)
+	skillDigest := sha256.Sum256(skillArtifact)
+	descriptor := validRegistrySkillDescriptor()
+	descriptor.RegistryID = reference.RegistryID
+	descriptor.PackageID = reference.PackageID
+	descriptor.SkillID = reference.SkillID
+	descriptor.InstallID = "memoh+notion+meeting"
+	descriptor.Artifact.Digest = hex.EncodeToString(skillDigest[:])
+	descriptor.Artifact.Size = int64(len(skillArtifact))
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+	bundle := gzipTarArchive(t, map[string]string{
+		"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+	})
+	entry := validSupermarketPluginEntry(manifest, bundle, descriptor)
+	releaseJSON := sealSupermarketPluginEntry(t, &entry)
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal Plugin entry: %v", err)
+	}
+	skillPath := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting", "SKILL.md")
+	pluginPath := path.Join(skillset.PluginDirPath, "notion", "plugin.yaml")
+	oldSkill := managedSkillRaw("meeting", "Previous meeting Skill")
+	oldPlugin := "id: notion\nversion: old\n"
+	env.writeSkillFile(t, skillPath, oldSkill)
+	env.writeSkillFile(t, pluginPath, oldPlugin)
+	installer := &recordingPluginInstaller{installErr: errors.New("database write failed")}
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/api/plugins/notion":
+				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
+			case "/api/plugins/notion/releases/" + entry.Release.Revision:
+				return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
+			case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
+				return testHTTPResponse(req, http.StatusOK, bundle), nil
+			case "/api/artifacts/skill/" + descriptor.Artifact.Digest:
+				return testHTTPResponse(req, http.StatusOK, skillArtifact), nil
+			default:
+				return testHTTPResponse(req, http.StatusNotFound, nil), nil
+			}
+		})},
+		pluginService:  installer,
+		containers:     manager,
+		workspaces:     manager,
+		botService:     env.handler.botService,
+		accountService: env.handler.accountService,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	if _, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
+		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
+	}, handler.InstallPlugin); err == nil {
+		t.Fatal("InstallPlugin() succeeded after database failure")
+	}
+	if got, err := os.ReadFile(env.localPath(skillPath)); err != nil || string(got) != oldSkill {
+		t.Fatalf("previous Skill was not restored: content=%q error=%v", got, err)
+	}
+	if got, err := os.ReadFile(env.localPath(pluginPath)); err != nil || string(got) != oldPlugin {
+		t.Fatalf("previous Plugin bundle was not restored: content=%q error=%v", got, err)
+	}
+}
+
+func TestRollbackPluginWorkspacePreservesCauseWhenRollbackSucceeds(t *testing.T) {
+	cause := echo.NewHTTPError(http.StatusBadGateway, "install failed")
+	if got := rollbackPluginWorkspace(context.Background(), cause, nil, nil); !errors.Is(got, cause) {
+		t.Fatalf("rollbackPluginWorkspace() = %T %v, want original HTTP error", got, got)
+	}
+}
+
+func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*SupermarketSkillArtifact)
+	}{
+		{
+			name: "size",
+			mutate: func(artifact *SupermarketSkillArtifact) {
+				artifact.Size++
+			},
+		},
+		{
+			name: "digest",
+			mutate: func(artifact *SupermarketSkillArtifact) {
+				artifact.Digest = strings.Repeat("0", 64)
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env := newSkillsTestEnv(t)
+			manager := workspace.NewManager(
+				slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+			)
+			reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+			skillArtifact := validSkillArtifact(t)
+			skillDigest := sha256.Sum256(skillArtifact)
+			descriptor := validRegistrySkillDescriptor()
+			descriptor.RegistryID = reference.RegistryID
+			descriptor.PackageID = reference.PackageID
+			descriptor.SkillID = reference.SkillID
+			descriptor.InstallID = "memoh+notion+meeting"
+			descriptor.Artifact.Digest = hex.EncodeToString(skillDigest[:])
+			descriptor.Artifact.Size = int64(len(skillArtifact))
+			descriptor.Artifact.DownloadURL = "/artifacts/meeting"
+			manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+			bundle := gzipTarArchive(t, map[string]string{
+				"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+			})
+			entry := validSupermarketPluginEntry(manifest, bundle, descriptor)
+			test.mutate(&entry.Release.Artifact)
+			releaseJSON := sealSupermarketPluginEntry(t, &entry)
+			entryJSON, err := json.Marshal(entry)
+			if err != nil {
+				t.Fatalf("marshal Plugin release: %v", err)
+			}
+			skillArtifactRequested := false
+			handler := &SupermarketHandler{
+				baseURL: "https://supermarket.example",
+				httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					switch req.URL.Path {
+					case "/api/plugins/notion":
+						return testHTTPResponse(req, http.StatusOK, entryJSON), nil
+					case "/api/plugins/notion/releases/" + entry.Release.Revision:
+						return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
+					case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
+						return testHTTPResponse(req, http.StatusOK, bundle), nil
+					case "/api/artifacts/skill/" + entry.Release.Skills[0].Artifact.Digest:
+						skillArtifactRequested = true
+						return testHTTPResponse(req, http.StatusOK, skillArtifact), nil
+					default:
+						return testHTTPResponse(req, http.StatusNotFound, nil), nil
+					}
+				})},
+				pluginService:  &recordingPluginInstaller{},
+				containers:     manager,
+				workspaces:     manager,
+				botService:     env.handler.botService,
+				accountService: env.handler.accountService,
+				logger:         slog.New(slog.DiscardHandler),
+			}
+
+			if _, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
+				PluginID: "notion", ReleaseRevision: entry.Release.Revision,
+			}, handler.InstallPlugin); err == nil {
+				t.Fatal("InstallPlugin() accepted an invalid Plugin Artifact")
+			}
+			if skillArtifactRequested {
+				t.Fatal("Skill Artifact was downloaded before Plugin Artifact preflight completed")
+			}
+			sourcePath := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting", "SKILL.md")
+			if _, err := os.Stat(env.localPath(sourcePath)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("workspace changed before Plugin Artifact validation: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateSupermarketPluginEntryRejectsSkillLockMismatch(t *testing.T) {
+	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+	bundle := gzipTarArchive(t, map[string]string{
+		"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+	})
+	skill := validRegistrySkillDescriptor()
+	skill.RegistryID = reference.RegistryID
+	skill.PackageID = reference.PackageID
+	skill.SkillID = reference.SkillID
+	skill.InstallID = "memoh+notion+meeting"
+	entry := validSupermarketPluginEntry(manifest, bundle, skill)
+	entry.Release.Skills[0].SkillID = "other"
+
+	if err := validateSupermarketPluginEntry(entry, "notion", manifest); err == nil {
+		t.Fatal("validateSupermarketPluginEntry() accepted a Skill lock that differs from plugin.yaml")
+	}
+}
+
+func TestPreparePluginSkillsEnforcesReleaseBudgets(t *testing.T) {
+	handler := &SupermarketHandler{}
+	if _, _, err := handler.preparePluginSkills(
+		context.Background(), "linux", make([]SupermarketPluginResolvedSkill, maxPluginReleaseSkills+1),
+	); err == nil || !strings.Contains(err.Error(), "Skill limit") {
+		t.Fatalf("preparePluginSkills() error = %v, want Skill limit", err)
+	}
+	if _, err := addPluginSkillArchiveBytes(maxPluginSkillArtifactsUncompressedBytes-1, 2); err == nil {
+		t.Fatal("addPluginSkillArchiveBytes() accepted an over-budget release")
+	}
+}
+
+func TestFetchPluginEntryRejectsOversizedAndTrailingJSON(t *testing.T) {
+	entry := validSupermarketPluginEntry(pluginspkg.Manifest{ID: "notion", Name: "Notion"}, gzipTarArchive(t, map[string]string{
+		"notion/plugin.yaml": "id: notion\n",
+	}))
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal Plugin release: %v", err)
+	}
+	tests := map[string][]byte{
+		"oversized":     append(append([]byte(nil), payload...), bytes.Repeat([]byte(" "), maxPluginMetadataBytes-len(payload)+1)...),
+		"trailing JSON": append(append([]byte(nil), payload...), []byte("{}")...),
+	}
+	for name, responseBody := range tests {
+		t.Run(name, func(t *testing.T) {
+			handler := &SupermarketHandler{
+				baseURL: "https://supermarket.example",
+				httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return testHTTPResponse(req, http.StatusOK, responseBody), nil
+				})},
+				logger: slog.New(slog.DiscardHandler),
+			}
+			e := echo.New()
+			ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
+			if _, err := handler.fetchPluginEntry(ctx, "notion"); err == nil {
+				t.Fatal("fetchPluginEntry() accepted malformed Plugin metadata")
+			}
+		})
+	}
+}
+
+func TestFetchPluginEntryRejectsReleaseBytesThatDoNotMatchRevision(t *testing.T) {
+	entry := validSupermarketPluginEntry(
+		pluginspkg.Manifest{ID: "notion", Name: "Notion"},
+		gzipTarArchive(t, map[string]string{"notion/plugin.yaml": "id: notion\n"}),
+	)
+	releaseJSON := sealSupermarketPluginEntry(t, &entry)
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal current Plugin entry: %v", err)
+	}
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/api/plugins/notion":
+				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
+			case "/api/plugins/notion/releases/" + entry.Release.Revision:
+				return testHTTPResponse(req, http.StatusOK, append(releaseJSON, ' ')), nil
+			default:
+				return testHTTPResponse(req, http.StatusNotFound, nil), nil
+			}
+		})},
+		logger: slog.New(slog.DiscardHandler),
+	}
+	e := echo.New()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
+	if _, err := handler.fetchPluginEntry(ctx, "notion"); err == nil || !strings.Contains(err.Error(), "SHA-256") {
+		t.Fatalf("fetchPluginEntry() error = %v, want release SHA-256 rejection", err)
+	}
+}
+
+func TestFetchPluginEntryRejectsCrossOriginMetadataRedirect(t *testing.T) {
+	attackerRequested := false
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Host == "attacker.example" {
+				attackerRequested = true
+				return testHTTPResponse(req, http.StatusOK, []byte(`{}`)), nil
+			}
+			response := testHTTPResponse(req, http.StatusFound, nil)
+			response.Header.Set("Location", "https://attacker.example/release")
+			return response, nil
+		})},
+		logger: slog.New(slog.DiscardHandler),
+	}
+	e := echo.New()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
+	if _, err := handler.fetchPluginEntry(ctx, "notion"); err == nil {
+		t.Fatal("fetchPluginEntry() followed a cross-origin metadata redirect")
+	}
+	if attackerRequested {
+		t.Fatal("cross-origin metadata redirect reached the attacker origin")
+	}
+}
+
+func TestPluginSkillArtifactConflictWithDirectOwner(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	client, err := manager.MCPClient(context.Background(), env.botID)
+	if err != nil {
+		t.Fatalf("get workspace client: %v", err)
+	}
+	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	directDigest := strings.Repeat("a", 64)
+	if err := skillset.MarkDirectOwner(
+		context.Background(), client, reference.RegistryID, reference.PackageID, reference.SkillID, directDigest,
+	); err != nil {
+		t.Fatalf("mark direct Skill owner: %v", err)
+	}
+	resolved := SupermarketPluginResolvedSkill{
+		RegistryID: reference.RegistryID,
+		PackageID:  reference.PackageID,
+		SkillID:    reference.SkillID,
+		Artifact:   SupermarketSkillArtifact{Digest: strings.Repeat("b", 64)},
+	}
+	handler := &SupermarketHandler{pluginService: &recordingPluginInstaller{}}
+	if err := handler.checkPluginSkillArtifactConflicts(
+		context.Background(), client, env.botID, "notion", "native", []SupermarketPluginResolvedSkill{resolved},
+	); err == nil {
+		t.Fatal("Plugin installation accepted a direct owner using a different Artifact")
+	}
+	resolved.Artifact.Digest = directDigest
+	if err := handler.checkPluginSkillArtifactConflicts(
+		context.Background(), client, env.botID, "notion", "native", []SupermarketPluginResolvedSkill{resolved},
+	); err != nil {
+		t.Fatalf("Plugin installation rejected a shared direct owner Artifact: %v", err)
+	}
+	if handler.pluginService.(*recordingPluginInstaller).conflictTarget != workspace.WorkspaceTargetNative {
+		t.Fatal("Plugin conflict check did not retain the workspace target")
+	}
+}
+
+func TestInstallRegistrySkillRejectsPluginArtifactConflictBeforeDownload(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	skill := validRegistrySkillDescriptor()
+	artifact := validSkillArtifact(t)
+	digest := sha256.Sum256(artifact)
+	skill.Artifact.Digest = hex.EncodeToString(digest[:])
+	skill.Artifact.Size = int64(len(artifact))
+	descriptor, err := json.Marshal(skill)
+	if err != nil {
+		t.Fatalf("marshal Registry Skill descriptor: %v", err)
+	}
+	artifactRequested := false
+	installer := &recordingPluginInstaller{conflictErr: errors.New("installed Plugin requires a different Artifact")}
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == skill.Artifact.DownloadURL {
+				artifactRequested = true
+				return testHTTPResponse(req, http.StatusOK, artifact), nil
+			}
+			return testHTTPResponse(req, http.StatusOK, descriptor), nil
+		})},
+		pluginService: installer,
+		workspaces:    manager,
+	}
+
+	_, err = handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
+		RegistryID:     skill.RegistryID,
+		PackageID:      skill.PackageID,
+		SkillID:        skill.SkillID,
+		ArtifactDigest: skill.Artifact.Digest,
+	})
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
+		t.Fatalf("installRegistrySkill() error = %v, want HTTP 409", err)
+	}
+	if artifactRequested {
+		t.Fatal("conflicting direct Skill Artifact was downloaded")
+	}
+	identity := strings.Join([]string{skill.RegistryID, skill.PackageID, skill.SkillID}, "/")
+	if installer.conflictExpected[identity] != skill.Artifact.Digest {
+		t.Fatalf("conflict check = %+v, want %s", installer.conflictExpected, skill.Artifact.Digest)
+	}
+	if installer.conflictTarget != workspace.WorkspaceTargetNative {
+		t.Fatalf("conflict target = %q, want native", installer.conflictTarget)
+	}
+}
+
+func validSupermarketPluginEntry(
+	manifest pluginspkg.Manifest,
+	bundle []byte,
+	skills ...SupermarketCatalogSkill,
+) SupermarketPluginEntry {
+	digest := sha256.Sum256(bundle)
+	resolved := make([]SupermarketPluginResolvedSkill, 0, len(skills))
+	for _, skill := range skills {
+		sourceRevision := skill.Source.Revision
+		if sourceRevision == "" {
+			sourceRevision = "source-revision"
+		}
+		resolved = append(resolved, SupermarketPluginResolvedSkill{
+			RegistryID:          skill.RegistryID,
+			PackageID:           skill.PackageID,
+			SkillID:             skill.SkillID,
+			RegistryRevision:    strings.Repeat("b", 64),
+			SourceRevision:      sourceRevision,
+			InstallID:           skill.InstallID,
+			RuntimeRequirements: skill.RuntimeRequirements,
+			Artifact:            skill.Artifact,
+		})
+	}
+	return SupermarketPluginEntry{
+		Manifest: manifest,
+		Release: SupermarketPluginRelease{
+			Revision:    strings.Repeat("c", 64),
+			PublishedAt: "2026-08-01T00:00:00Z",
+			Artifact: SupermarketSkillArtifact{
+				Format:      "memoh_plugin_v1",
+				Digest:      hex.EncodeToString(digest[:]),
+				Size:        int64(len(bundle)),
+				ContentType: "application/gzip",
+				DownloadURL: "/artifacts/plugin",
+			},
+			Skills: resolved,
+		},
+	}
+}
+
+func sealSupermarketPluginEntry(t *testing.T, entry *SupermarketPluginEntry) []byte {
+	t.Helper()
+	release := SupermarketImmutablePluginRelease{
+		SchemaVersion: "1",
+		Plugin:        entry.Manifest,
+		Artifact:      entry.Release.Artifact,
+		Skills:        append([]SupermarketPluginResolvedSkill(nil), entry.Release.Skills...),
+	}
+	release.Artifact.DownloadURL = ""
+	for index := range release.Skills {
+		release.Skills[index].Artifact.DownloadURL = ""
+	}
+	payload, err := json.Marshal(release)
+	if err != nil {
+		t.Fatalf("marshal immutable Plugin release: %v", err)
+	}
+	digest := sha256.Sum256(payload)
+	entry.Release.Revision = hex.EncodeToString(digest[:])
+	return payload
 }
 
 func TestPluginBundleArchiveEntryAllowsTrustedBundleFiles(t *testing.T) {
@@ -252,7 +763,7 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 		"/data/.memoh/plugins/github2/keep": "keep",
 	}}
 
-	result, err := extractPluginBundleArchive(context.Background(), writer, "github", "github", bytes.NewReader(archive))
+	result, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive))
 	if err != nil {
 		t.Fatalf("extractPluginBundleArchive returned error: %v", err)
 	}
@@ -308,7 +819,7 @@ func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing
 	})
 	writer := &pluginBundleTestWriter{files: map[string]string{}}
 
-	result, err := extractPluginBundleArchive(context.Background(), writer, "GitHub.Plugin", "github_plugin", bytes.NewReader(archive))
+	result, err := extractPluginBundleArchive(context.Background(), writer, "linux", "GitHub.Plugin", "github_plugin", bytes.NewReader(archive))
 	if err != nil {
 		t.Fatalf("extractPluginBundleArchive returned error: %v", err)
 	}
@@ -328,6 +839,60 @@ func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing
 	}
 	if got := writer.files[pluginRoot+"/scripts/hook.py"]; got != "print('ok')" {
 		t.Fatalf("target script file = %q, want script", got)
+	}
+}
+
+func TestExtractPluginBundleArchivePreservesExecutableScriptMode(t *testing.T) {
+	archive := tarArchiveEntries(t, []pluginBundleTarEntry{
+		{name: "github/plugin.yaml", content: "id: github"},
+		{name: "github/scripts/it's.sh", content: "#!/bin/sh\n", mode: 0o755},
+	})
+	writer := &pluginBundleTestWriter{files: map[string]string{}}
+
+	if _, err := extractPluginBundleArchive(
+		context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive),
+	); err != nil {
+		t.Fatalf("extractPluginBundleArchive returned error: %v", err)
+	}
+	if len(writer.execCommands) != 1 {
+		t.Fatalf("chmod commands = %v, want one", writer.execCommands)
+	}
+	if want := "chmod 755 -- '/data/.memoh/plugins/.staging/"; !strings.HasPrefix(writer.execCommands[0], want) {
+		t.Fatalf("chmod command = %q, want quoted staging path", writer.execCommands[0])
+	}
+	if !strings.Contains(writer.execCommands[0], `it'"'"'s.sh'`) {
+		t.Fatalf("chmod command does not safely quote apostrophe: %q", writer.execCommands[0])
+	}
+}
+
+func TestPluginBundlePublicationCommitCanRetryCleanup(t *testing.T) {
+	failures := 0
+	writer := &pluginBundleTestWriter{
+		files: map[string]string{"/backup/plugin.yaml": "old"},
+		deleteError: func(string) error {
+			if failures == 0 {
+				failures++
+				return errors.New("temporary cleanup failure")
+			}
+			return nil
+		},
+	}
+	publication := &pluginBundlePublication{
+		client: writer, backupDir: "/backup", targetExists: true,
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := publication.commit(canceled); err == nil {
+		t.Fatal("first commit error = nil")
+	}
+	if publication.closed {
+		t.Fatal("failed cleanup closed the publication")
+	}
+	if err := publication.commit(canceled); err != nil {
+		t.Fatalf("second commit error = %v", err)
+	}
+	if !publication.closed || len(writer.deleteHasDeadline) != 2 || !writer.deleteHasDeadline[0] || !writer.deleteHasDeadline[1] {
+		t.Fatalf("closed=%v cleanup deadlines=%v", publication.closed, writer.deleteHasDeadline)
 	}
 }
 
@@ -371,18 +936,27 @@ func TestExtractPluginBundleArchiveRejectsInvalidArchiveBeforeWorkspaceMutation(
 			{name: "github/hooks.json", content: "first"},
 			{name: "github/hooks.json", content: "second"},
 		})},
+		{name: "case-insensitive duplicate path", archive: tarArchiveEntries(t, []pluginBundleTarEntry{
+			{name: "github/plugin.yaml", content: "id: github"},
+			{name: "github/hooks.json", content: "first"},
+			{name: "github/HOOKS.JSON", content: "second"},
+		})},
 		{name: "file child conflict", archive: tarArchiveEntries(t, []pluginBundleTarEntry{
 			{name: "github/plugin.yaml", content: "id: github"},
 			{name: "github/scripts/tool", content: "file"},
 			{name: "github/scripts/tool/config", content: "child"},
 		})},
+		{name: "decompressed stream limit", archive: append(
+			tarArchive(t, map[string]string{"github/plugin.yaml": "id: github"}),
+			bytes.Repeat([]byte{0}, maxPluginBundleStreamBytes+1)...,
+		)},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			writer := &pluginBundleTestWriter{files: map[string]string{
 				pluginRoot + "/hooks.json": "stale",
 			}}
-			if _, err := extractPluginBundleArchive(context.Background(), writer, "github", "github", bytes.NewReader(test.archive)); err == nil {
+			if _, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github", "github", bytes.NewReader(test.archive)); err == nil {
 				t.Fatal("extractPluginBundleArchive() accepted invalid archive")
 			}
 			if got := writer.files[pluginRoot+"/hooks.json"]; got != "stale" {
@@ -416,7 +990,7 @@ func TestExtractPluginBundleArchiveRollsBackStagingAndPublishFailures(t *testing
 				return nil
 			},
 		}
-		if _, err := extractPluginBundleArchive(context.Background(), writer, "github", "github", bytes.NewReader(archive)); err == nil {
+		if _, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive)); err == nil {
 			t.Fatal("extractPluginBundleArchive() succeeded after staging write failure")
 		}
 		if got := writer.files[pluginRoot+"/hooks.json"]; got != "stale" {
@@ -437,7 +1011,7 @@ func TestExtractPluginBundleArchiveRollsBackStagingAndPublishFailures(t *testing
 				return nil
 			},
 		}
-		if _, err := extractPluginBundleArchive(context.Background(), writer, "github", "github", bytes.NewReader(archive)); err == nil {
+		if _, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive)); err == nil {
 			t.Fatal("extractPluginBundleArchive() succeeded after publish failure")
 		}
 		if got := writer.files[pluginRoot+"/hooks.json"]; got != "stale" {
@@ -458,7 +1032,11 @@ func TestInstallPluginBundleRejectsMissingDownload(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler),
 	}
 	writer := &pluginBundleTestWriter{files: map[string]string{}}
-	if _, err := handler.installPluginBundle(context.Background(), writer, "github", "github", nil); err == nil {
+	artifact := SupermarketSkillArtifact{
+		Format: "memoh_plugin_v1", Digest: strings.Repeat("a", 64), Size: 1,
+		ContentType: "application/gzip", DownloadURL: "/artifacts/plugin",
+	}
+	if _, err := handler.installPluginBundle(context.Background(), writer, "linux", "github", "github", artifact, nil); err == nil {
 		t.Fatal("installPluginBundle() accepted a missing bundle")
 	}
 }
@@ -476,7 +1054,12 @@ func TestInstallPluginBundleRejectsManifestSkillMismatch(t *testing.T) {
 	}
 	writer := &pluginBundleTestWriter{files: map[string]string{}}
 	expected := []pluginspkg.SkillReference{{RegistryID: "memoh", PackageID: "github", SkillID: "issues"}}
-	if _, err := handler.installPluginBundle(context.Background(), writer, "github", "github", expected); err == nil {
+	digest := sha256.Sum256(bundle)
+	artifact := SupermarketSkillArtifact{
+		Format: "memoh_plugin_v1", Digest: hex.EncodeToString(digest[:]), Size: int64(len(bundle)),
+		ContentType: "application/gzip", DownloadURL: "/artifacts/plugin",
+	}
+	if _, err := handler.installPluginBundle(context.Background(), writer, "linux", "github", "github", artifact, expected); err == nil {
 		t.Fatal("installPluginBundle() accepted mismatched Skill references")
 	}
 	if len(writer.renames) != 0 || len(writer.deletes) != 0 || len(writer.dirs) != 0 {
@@ -586,6 +1169,10 @@ type recordingPluginInstaller struct {
 	gcCalls           [][]pluginspkg.SkillReference
 	gcInMutation      []bool
 	mutationCalls     int
+	conflictExpected  map[string]string
+	conflictTarget    string
+	conflictErr       error
+	installErr        error
 }
 
 type recordingPluginMutationKey struct{}
@@ -603,6 +1190,9 @@ func (i *recordingPluginInstaller) Install(ctx context.Context, botID string, re
 	i.installCalls++
 	i.installInMutation, _ = ctx.Value(recordingPluginMutationKey{}).(bool)
 	i.request = req
+	if i.installErr != nil {
+		return pluginspkg.Installation{}, i.installErr
+	}
 	return pluginspkg.Installation{
 		BotID:      botID,
 		PluginID:   req.Manifest.ID,
@@ -612,6 +1202,21 @@ func (i *recordingPluginInstaller) Install(ctx context.Context, botID string, re
 		Status:     pluginspkg.StatusReady,
 		Enabled:    true,
 	}, nil
+}
+
+func (i *recordingPluginInstaller) CheckSkillArtifactConflicts(
+	_ context.Context,
+	_ string,
+	_ string,
+	workspaceTargetID string,
+	expected map[string]string,
+) error {
+	i.conflictTarget = workspaceTargetID
+	i.conflictExpected = make(map[string]string, len(expected))
+	for identity, digest := range expected {
+		i.conflictExpected[identity] = digest
+	}
+	return i.conflictErr
 }
 
 func (i *recordingPluginInstaller) GarbageCollectRegistrySkills(ctx context.Context, _ string, references []pluginspkg.SkillReference) {
@@ -657,6 +1262,7 @@ type pluginBundleTarEntry struct {
 	content  string
 	typeflag byte
 	linkname string
+	mode     int64
 }
 
 func tarArchiveEntries(t *testing.T, entries []pluginBundleTarEntry) []byte {
@@ -672,8 +1278,12 @@ func tarArchiveEntries(t *testing.T, entries []pluginBundleTarEntry) []byte {
 		if typeflag == tar.TypeReg {
 			size = int64(len(entry.content))
 		}
+		mode := entry.mode
+		if mode == 0 {
+			mode = 0o600
+		}
 		if err := tw.WriteHeader(&tar.Header{
-			Name: entry.name, Mode: 0o600, Size: size, Typeflag: typeflag, Linkname: entry.linkname,
+			Name: entry.name, Mode: mode, Size: size, Typeflag: typeflag, Linkname: entry.linkname,
 		}); err != nil {
 			t.Fatalf("write tar entry %q: %v", entry.name, err)
 		}
@@ -716,12 +1326,15 @@ func truncatedTarArchive(t *testing.T, name string, declaredSize int64, content 
 }
 
 type pluginBundleTestWriter struct {
-	dirs        []string
-	deletes     []pluginBundleTestDelete
-	renames     []pluginBundleTestRename
-	files       map[string]string
-	writeError  func(path string) error
-	renameError func(oldPath, newPath string) error
+	dirs              []string
+	deletes           []pluginBundleTestDelete
+	renames           []pluginBundleTestRename
+	files             map[string]string
+	execCommands      []string
+	deleteHasDeadline []bool
+	deleteError       func(path string) error
+	writeError        func(path string) error
+	renameError       func(oldPath, newPath string) error
 }
 
 type pluginBundleTestDelete struct {
@@ -734,8 +1347,15 @@ type pluginBundleTestRename struct {
 	newPath string
 }
 
-func (w *pluginBundleTestWriter) DeleteFile(_ context.Context, path string, recursive bool) error {
+func (w *pluginBundleTestWriter) DeleteFile(ctx context.Context, path string, recursive bool) error {
 	w.deletes = append(w.deletes, pluginBundleTestDelete{path: path, recursive: recursive})
+	_, hasDeadline := ctx.Deadline()
+	w.deleteHasDeadline = append(w.deleteHasDeadline, hasDeadline)
+	if w.deleteError != nil {
+		if err := w.deleteError(path); err != nil {
+			return err
+		}
+	}
 	if !recursive {
 		delete(w.files, path)
 		return nil
@@ -753,6 +1373,16 @@ func (w *pluginBundleTestWriter) DeleteFile(_ context.Context, path string, recu
 	}
 	w.dirs = remainingDirs
 	return nil
+}
+
+func (w *pluginBundleTestWriter) ExecWithEnv(
+	_ context.Context,
+	command, _ string,
+	_ int32,
+	_ []string,
+) (*bridge.ExecResult, error) {
+	w.execCommands = append(w.execCommands, command)
+	return &bridge.ExecResult{}, nil
 }
 
 func (w *pluginBundleTestWriter) Mkdir(_ context.Context, path string) error {

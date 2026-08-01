@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -130,6 +131,12 @@ type registrySkillArtifactInstallResult struct {
 	FilesWritten int
 }
 
+type preparedRegistrySkillArtifact struct {
+	Skill       SupermarketCatalogSkill
+	Archive     skillset.Archive
+	WorkspaceOS string
+}
+
 // ListRegistries godoc
 // @Summary List Skill Registries from supermarket
 // @Tags supermarket
@@ -229,7 +236,7 @@ func (h *SupermarketHandler) proxySkillIcon(c echo.Context, digest string) error
 	if value := c.Request().Header.Get("If-None-Match"); value != "" {
 		req.Header.Set("If-None-Match", value)
 	}
-	resp, err := h.httpClient.Do(req) //nolint:gosec // URL is based on trusted Supermarket configuration.
+	resp, err := h.doSupermarketRequest(req)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
@@ -318,22 +325,61 @@ func (h *SupermarketHandler) installRegistrySkill(
 			nil,
 		)
 	}
+	expectedArtifactDigest := strings.TrimSpace(req.ArtifactDigest)
+	if !isCanonicalSHA256(expectedArtifactDigest) {
+		return InstallRegistrySkillResponse{}, echo.NewHTTPError(http.StatusBadRequest, "artifact_digest is invalid")
+	}
 
 	targetContext := workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	target, err := h.workspaces.ResolveWorkspaceTarget(targetContext, botID, req.WorkspaceTargetID)
 	if err != nil {
 		return InstallRegistrySkillResponse{}, workspaceTargetHTTPError(h.logger, err)
 	}
-	installed, err := h.installRegistrySkillArtifact(
-		targetContext,
-		target.Client,
-		target.Info.OS,
-		true,
-		registryID,
-		packageID,
-		skillID,
-	)
+	skill, err := h.fetchRegistrySkill(targetContext, registryID, packageID, skillID)
 	if err != nil {
+		return InstallRegistrySkillResponse{}, err
+	}
+	if err := validateRegistrySkill(skill, registryID, packageID, skillID); err != nil {
+		return InstallRegistrySkillResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+	}
+	if skill.Artifact.Digest != expectedArtifactDigest {
+		return InstallRegistrySkillResponse{}, echo.NewHTTPError(
+			http.StatusConflict, "Skill Artifact changed; refresh before installing",
+		)
+	}
+	identity := strings.Join([]string{registryID, packageID, skillID}, "/")
+	if h.pluginService != nil {
+		if err := h.pluginService.CheckSkillArtifactConflicts(
+			targetContext, botID, "", target.TargetID, map[string]string{identity: skill.Artifact.Digest},
+		); err != nil {
+			return InstallRegistrySkillResponse{}, echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
+	}
+	prepared, err := h.prepareResolvedRegistrySkillArtifact(targetContext, target.Info.OS, skill)
+	if err != nil {
+		return InstallRegistrySkillResponse{}, err
+	}
+	var installed registrySkillArtifactInstallResult
+	if err := withBotMutation(targetContext, botID, h.pluginService, func(mutationCtx context.Context) error {
+		if h.pluginService != nil {
+			if conflictErr := h.pluginService.CheckSkillArtifactConflicts(
+				mutationCtx, botID, "", target.TargetID, map[string]string{identity: skill.Artifact.Digest},
+			); conflictErr != nil {
+				return echo.NewHTTPError(http.StatusConflict, conflictErr.Error())
+			}
+		}
+		publication, published, publishErr := publishPreparedRegistrySkillArtifact(
+			mutationCtx, target.Client, true, prepared,
+		)
+		if publishErr != nil {
+			return publishErr
+		}
+		installed = published
+		if commitErr := publication.Commit(mutationCtx); commitErr != nil && h.logger != nil {
+			h.logger.Warn("cleanup Registry Skill backup failed", slog.Any("error", commitErr))
+		}
+		return nil
+	}); err != nil {
 		return InstallRegistrySkillResponse{}, err
 	}
 	return InstallRegistrySkillResponse{
@@ -369,8 +415,53 @@ func (h *SupermarketHandler) installRegistrySkillArtifact(
 	if err := validateRegistrySkill(skill, registryID, packageID, skillID); err != nil {
 		return registrySkillArtifactInstallResult{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 	}
+	return h.installResolvedRegistrySkillArtifact(ctx, client, workspaceOS, directOwner, skill)
+}
+
+func (h *SupermarketHandler) installResolvedRegistrySkillArtifact(
+	ctx context.Context,
+	client *bridge.Client,
+	workspaceOS string,
+	directOwner bool,
+	skill SupermarketCatalogSkill,
+) (registrySkillArtifactInstallResult, error) {
+	if client == nil {
+		return registrySkillArtifactInstallResult{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInstallFailed,
+			errors.New("workspace is not reachable"),
+			nil,
+		)
+	}
+	prepared, err := h.prepareResolvedRegistrySkillArtifact(ctx, workspaceOS, skill)
+	if err != nil {
+		return registrySkillArtifactInstallResult{}, err
+	}
+	publication, installed, err := publishPreparedRegistrySkillArtifact(ctx, client, directOwner, prepared)
+	if err != nil {
+		return registrySkillArtifactInstallResult{}, err
+	}
+	if err := publication.Commit(ctx); err != nil && h.logger != nil {
+		h.logger.Warn("cleanup Registry Skill backup failed", slog.Any("error", err))
+	}
+	return installed, nil
+}
+
+func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifact(
+	ctx context.Context,
+	workspaceOS string,
+	skill SupermarketCatalogSkill,
+) (preparedRegistrySkillArtifact, error) {
+	return h.prepareResolvedRegistrySkillArtifactWithLimit(ctx, workspaceOS, skill, int64(^uint64(0)>>1))
+}
+
+func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimit(
+	ctx context.Context,
+	workspaceOS string,
+	skill SupermarketCatalogSkill,
+	maxUncompressedBytes int64,
+) (preparedRegistrySkillArtifact, error) {
 	if !registrySkillSupportsOS(skill.RuntimeRequirements, workspaceOS) {
-		return registrySkillArtifactInstallResult{}, apperror.New(
+		return preparedRegistrySkillArtifact{}, apperror.New(
 			apperror.CodeRegistrySkillIncompatible,
 			map[string]string{
 				"os":           normalizeRegistrySkillOSLabel(workspaceOS),
@@ -380,28 +471,53 @@ func (h *SupermarketHandler) installRegistrySkillArtifact(
 	}
 	artifactBytes, err := h.downloadRegistrySkillArtifact(ctx, skill.Artifact)
 	if err != nil {
-		return registrySkillArtifactInstallResult{}, err
+		return preparedRegistrySkillArtifact{}, err
 	}
-	archive, err := skillset.ReadArchive(artifactBytes)
+	archive, err := skillset.ReadArchiveWithUncompressedLimit(artifactBytes, maxUncompressedBytes)
 	if err != nil {
-		return registrySkillArtifactInstallResult{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+		return preparedRegistrySkillArtifact{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 	}
-	var installErr error
+	return preparedRegistrySkillArtifact{Skill: skill, Archive: archive, WorkspaceOS: workspaceOS}, nil
+}
+
+func publishPreparedRegistrySkillArtifact(
+	ctx context.Context,
+	client *bridge.Client,
+	directOwner bool,
+	prepared preparedRegistrySkillArtifact,
+) (*skillset.ArchivePublication, registrySkillArtifactInstallResult, error) {
+	if client == nil {
+		return nil, registrySkillArtifactInstallResult{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInstallFailed,
+			errors.New("workspace is not reachable"),
+			nil,
+		)
+	}
+	skill := prepared.Skill
+	var (
+		publication *skillset.ArchivePublication
+		installErr  error
+	)
 	if directOwner {
-		installErr = skillset.InstallArchiveWithDirectOwner(
-			ctx, client, workspaceOS, registryID, packageID, skillID, archive, skill.Artifact.Digest,
+		publication, installErr = skillset.PublishArchiveWithDirectOwner(
+			ctx, client, prepared.WorkspaceOS, skill.RegistryID, skill.PackageID, skill.SkillID,
+			prepared.Archive, skill.Artifact.Digest,
 		)
 	} else {
-		installErr = skillset.InstallArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive)
+		publication, installErr = skillset.PublishArchive(
+			ctx, client, prepared.WorkspaceOS, skill.RegistryID, skill.PackageID, skill.SkillID, prepared.Archive,
+		)
 	}
 	if installErr != nil {
-		return registrySkillArtifactInstallResult{}, apperror.Wrap(
+		return nil, registrySkillArtifactInstallResult{}, apperror.Wrap(
 			apperror.CodeRegistrySkillInstallFailed,
 			fmt.Errorf("install registry Skill: %w", installErr),
 			nil,
 		)
 	}
-	return registrySkillArtifactInstallResult{Skill: skill, FilesWritten: archive.FileCount()}, nil
+	return publication, registrySkillArtifactInstallResult{
+		Skill: skill, FilesWritten: prepared.Archive.FileCount(),
+	}, nil
 }
 
 func (h *SupermarketHandler) fetchRegistrySkill(
@@ -418,7 +534,7 @@ func (h *SupermarketHandler) fetchRegistrySkill(
 		)
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := h.httpClient.Do(req) //nolint:gosec // Endpoint is built from configured Supermarket URL.
+	resp, err := h.doSupermarketRequest(req)
 	if err != nil {
 		return SupermarketCatalogSkill{}, apperror.Wrap(
 			apperror.CodeRegistryUnavailable,
@@ -586,18 +702,10 @@ func (h *SupermarketHandler) downloadRegistrySkillArtifact(
 		)
 	}
 	req.Header.Set("Accept", "application/gzip")
-	client := *h.httpClient
-	errArtifactRedirectOrigin := errors.New("artifact redirect left the configured Supermarket origin")
-	client.CheckRedirect = func(next *http.Request, _ []*http.Request) error {
-		if next.URL.Scheme != base.Scheme || !strings.EqualFold(next.URL.Host, base.Host) || next.URL.User != nil {
-			return errArtifactRedirectOrigin
-		}
-		return nil
-	}
-	resp, err := client.Do(req) //nolint:gosec // URL and every redirect are restricted to the configured origin.
+	resp, err := h.doSupermarketRequest(req)
 	if err != nil {
 		code := apperror.CodeRegistryUnavailable
-		if errors.Is(err, errArtifactRedirectOrigin) {
+		if errors.Is(err, errSupermarketRedirectOrigin) || errors.Is(err, errSupermarketRedirectLimit) {
 			code = apperror.CodeRegistrySkillInvalid
 		}
 		return nil, apperror.Wrap(code, fmt.Errorf("download Registry Skill Artifact: %w", err), nil)

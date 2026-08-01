@@ -117,22 +117,30 @@ func TestDirectRegistrySkillOwnerIsPublishedAtomically(t *testing.T) {
 	manager := workspace.NewManager(
 		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
 	)
+	installer := &recordingPluginInstaller{}
+	artifactRequestedDuringMutation := false
 	handler := &SupermarketHandler{
 		baseURL: "https://supermarket.example",
 		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if req.URL.Path == skill.Artifact.DownloadURL {
+				artifactRequestedDuringMutation = installer.mutationCalls > 0
 				return testHTTPResponse(req, http.StatusOK, artifact), nil
 			}
 			return testHTTPResponse(req, http.StatusOK, descriptor), nil
 		})},
-		workspaces: manager,
+		pluginService: installer,
+		workspaces:    manager,
 	}
 
 	result, err := handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
 		RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
+		ArtifactDigest: skill.Artifact.Digest,
 	})
 	if err != nil || !result.OK {
 		t.Fatalf("installRegistrySkill() result=%+v error=%v", result, err)
+	}
+	if artifactRequestedDuringMutation || installer.mutationCalls != 1 {
+		t.Fatalf("direct Skill preflight lock state: artifact_in_lock=%v mutations=%d", artifactRequestedDuringMutation, installer.mutationCalls)
 	}
 	client, err := manager.MCPClient(context.Background(), env.botID)
 	if err != nil {
@@ -150,6 +158,7 @@ func TestDirectRegistrySkillOwnerIsPublishedAtomically(t *testing.T) {
 	handler.workspaces = secondManager
 	_, err = handler.installRegistrySkill(context.Background(), secondEnv.botID, InstallSkillRequest{
 		RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
+		ArtifactDigest: skill.Artifact.Digest,
 	})
 	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInstallFailed {
 		t.Fatalf("marker failure code = %q, want %q", got, apperror.CodeRegistrySkillInstallFailed)
@@ -160,6 +169,48 @@ func TestDirectRegistrySkillOwnerIsPublishedAtomically(t *testing.T) {
 	}
 	if _, statErr := os.Stat(secondEnv.localPath(targetDir)); !os.IsNotExist(statErr) {
 		t.Fatalf("ownerless Registry Skill should not be published, stat err=%v", statErr)
+	}
+}
+
+func TestInstallRegistrySkillRejectsStaleArtifactBeforeDownload(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	skill := validRegistrySkillDescriptor()
+	artifact := validSkillArtifact(t)
+	digest := sha256.Sum256(artifact)
+	skill.Artifact.Digest = hex.EncodeToString(digest[:])
+	skill.Artifact.Size = int64(len(artifact))
+	descriptor, err := json.Marshal(skill)
+	if err != nil {
+		t.Fatalf("marshal Skill descriptor: %v", err)
+	}
+	artifactRequested := false
+	installer := &recordingPluginInstaller{}
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == skill.Artifact.DownloadURL {
+				artifactRequested = true
+				return testHTTPResponse(req, http.StatusOK, artifact), nil
+			}
+			return testHTTPResponse(req, http.StatusOK, descriptor), nil
+		})},
+		pluginService: installer,
+		workspaces:    manager,
+	}
+
+	_, err = handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
+		RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
+		ArtifactDigest: strings.Repeat("0", 64),
+	})
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
+		t.Fatalf("installRegistrySkill() error = %v, want HTTP 409", err)
+	}
+	if artifactRequested || installer.mutationCalls != 0 {
+		t.Fatalf("stale Skill touched installation state: artifact=%v mutations=%d", artifactRequested, installer.mutationCalls)
 	}
 }
 
@@ -340,9 +391,10 @@ func TestInstallRegistrySkillHidesWorkspaceFailureDetails(t *testing.T) {
 	}
 
 	_, err = handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
-		RegistryID: skill.RegistryID,
-		PackageID:  skill.PackageID,
-		SkillID:    skill.SkillID,
+		RegistryID:     skill.RegistryID,
+		PackageID:      skill.PackageID,
+		SkillID:        skill.SkillID,
+		ArtifactDigest: skill.Artifact.Digest,
 	})
 	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInstallFailed {
 		t.Fatalf("install failure code = %q, want %q", got, apperror.CodeRegistrySkillInstallFailed)

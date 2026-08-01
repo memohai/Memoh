@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,11 +46,16 @@ type SupermarketHandler struct {
 type pluginInstaller interface {
 	botMutationCoordinator
 	Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error)
-	GarbageCollectRegistrySkills(ctx context.Context, botID string, references []pluginspkg.SkillReference)
+	CheckSkillArtifactConflicts(
+		ctx context.Context,
+		botID, targetPluginID, workspaceTargetID string,
+		expected map[string]string,
+	) error
 }
 
 type pluginBundleWriter interface {
 	DeleteFile(ctx context.Context, path string, recursive bool) error
+	ExecWithEnv(ctx context.Context, command, workDir string, timeout int32, env []string) (*bridge.ExecResult, error)
 	Mkdir(ctx context.Context, path string) error
 	Rename(ctx context.Context, oldPath, newPath string) error
 	WriteFile(ctx context.Context, path string, content []byte) error
@@ -100,13 +108,18 @@ type pluginInstallCommandResult struct {
 }
 
 const (
-	pluginInstallScriptTimeoutSeconds int32 = 10 * 60
-	pluginInstallScriptOutputLimit          = 64 * 1024
-	maxPluginBundleCompressedBytes          = 25 * 1024 * 1024
-	maxPluginBundleUncompressedBytes        = 10 * 1024 * 1024
-	maxPluginBundleFileBytes                = 2 * 1024 * 1024
-	maxPluginBundleFiles                    = 1_000
-	maxPluginBundleEntries                  = 2_000
+	pluginInstallScriptTimeoutSeconds        int32 = 10 * 60
+	pluginInstallScriptOutputLimit                 = 64 * 1024
+	maxPluginBundleCompressedBytes                 = 25 * 1024 * 1024
+	maxPluginBundleUncompressedBytes               = 10 * 1024 * 1024
+	maxPluginBundleStreamBytes                     = 16 * 1024 * 1024
+	maxPluginBundleFileBytes                       = 2 * 1024 * 1024
+	maxPluginBundleFiles                           = 1_000
+	maxPluginBundleEntries                         = 2_000
+	maxPluginMetadataBytes                         = 2 * 1024 * 1024
+	maxPluginReleaseSkills                         = 128
+	maxPluginSkillArtifactsUncompressedBytes       = 128 * 1024 * 1024
+	pluginPublicationCleanupTimeout                = 30 * time.Second
 )
 
 func NewSupermarketHandler(
@@ -171,7 +184,7 @@ func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := h.httpClient.Do(req) //nolint:gosec // URL constructed from trusted config
+	resp, err := h.doSupermarketRequest(req)
 	if err != nil {
 		h.logger.Error("supermarket proxy failed", slog.String("url", url), slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
@@ -202,7 +215,7 @@ func (h *SupermarketHandler) ListPlugins(c echo.Context) error {
 // @Summary Get plugin detail from supermarket
 // @Tags supermarket
 // @Param id path string true "Plugin ID"
-// @Success 200 {object} plugins.Manifest
+// @Success 200 {object} SupermarketPluginEntry
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
 // @Router /supermarket/plugins/{id} [get].
@@ -228,8 +241,9 @@ func (h *SupermarketHandler) ListTags(c echo.Context) error {
 
 // InstallPluginRequest is the request body for installing a plugin from supermarket.
 type InstallPluginRequest struct {
-	PluginID  string            `json:"plugin_id"`
-	Variables map[string]string `json:"variables,omitempty"`
+	PluginID        string            `json:"plugin_id"`
+	ReleaseRevision string            `json:"release_revision"`
+	Variables       map[string]string `json:"variables,omitempty"`
 }
 
 // InstallSkillRequest is the request body for installing a skill from supermarket.
@@ -237,6 +251,7 @@ type InstallSkillRequest struct {
 	RegistryID        string `json:"registry_id"`
 	PackageID         string `json:"package_id"`
 	SkillID           string `json:"skill_id"`
+	ArtifactDigest    string `json:"artifact_digest"`
 	WorkspaceTargetID string `json:"workspace_target_id,omitempty"`
 }
 
@@ -266,17 +281,27 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if !skillset.IsValidName(req.PluginID) {
 		return echo.NewHTTPError(http.StatusBadRequest, "plugin_id is invalid")
 	}
+	req.ReleaseRevision = strings.TrimSpace(req.ReleaseRevision)
+	if !isCanonicalSHA256(req.ReleaseRevision) {
+		return echo.NewHTTPError(http.StatusBadRequest, "release_revision is invalid")
+	}
 
-	manifest, err := h.fetchPluginEntry(c, req.PluginID)
+	entry, err := h.fetchPluginEntry(c, req.PluginID)
 	if err != nil {
 		return err
 	}
-	manifest = pluginspkg.NormalizeManifest(manifest)
+	if entry.Release.Revision != req.ReleaseRevision {
+		return echo.NewHTTPError(http.StatusConflict, "Plugin release changed; refresh before installing")
+	}
+	manifest := pluginspkg.NormalizeManifest(entry.Manifest)
 	if manifest.ID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "plugin id is required")
 	}
 	if err := pluginspkg.ValidateSkillReferences(manifest.Skills); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if err := validateSupermarketPluginEntry(entry, req.PluginID, manifest); err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("invalid Plugin release from supermarket: %v", err))
 	}
 
 	ctx := c.Request().Context()
@@ -284,49 +309,77 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	bundleArchive, err := h.preparePluginBundle(
+		ctx, req.PluginID, manifest.ID, entry.Release.Artifact, manifest.Skills,
+	)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+	}
+	preparedSkills, skillsResult, err := h.preparePluginSkills(ctx, target.Info.OS, entry.Release.Skills)
+	if err != nil {
+		return err
+	}
 	var (
 		installation  pluginspkg.Installation
-		skillsResult  pluginSkillsInstallResult
 		bundleResult  pluginBundleInstallResult
 		scriptsResult pluginInstallScriptsResult
 	)
 	if err := withBotMutation(ctx, botID, h.pluginService, func(mutationCtx context.Context) error {
+		if conflictErr := h.checkPluginSkillArtifactConflicts(
+			mutationCtx, target.Client, botID, manifest.ID, target.TargetID, entry.Release.Skills,
+		); conflictErr != nil {
+			return echo.NewHTTPError(http.StatusConflict, conflictErr.Error())
+		}
 		var (
-			skillArtifacts map[string]pluginspkg.SkillArtifactMetadata
-			installErr     error
+			skillArtifacts    map[string]pluginspkg.SkillArtifactMetadata
+			skillPublications []*skillset.ArchivePublication
+			installErr        error
 		)
-		skillsResult, skillArtifacts, installErr = h.installPluginSkills(
-			mutationCtx,
-			target.Client,
-			target.Info.OS,
-			manifest.Skills,
+		skillsResult, skillArtifacts, skillPublications, installErr = publishPreparedPluginSkills(
+			mutationCtx, target.Client, preparedSkills, skillsResult,
 		)
 		if installErr != nil {
-			h.cleanupFailedPluginSkills(mutationCtx, botID, manifest.Skills)
-			return installErr
+			return rollbackPluginWorkspace(mutationCtx, installErr, nil, skillPublications)
 		}
-		bundleResult, installErr = h.installPluginBundle(
-			mutationCtx, target.Client, req.PluginID, manifest.ID, manifest.Skills,
+		bundlePublication, installErr := publishPluginBundleArchiveTransaction(
+			mutationCtx, target.Client, target.Info.OS, manifest.ID, bundleArchive,
 		)
 		if installErr != nil {
-			h.cleanupFailedPluginSkills(mutationCtx, botID, manifest.Skills)
-			return echo.NewHTTPError(http.StatusBadGateway, installErr.Error())
+			return rollbackPluginWorkspace(
+				mutationCtx, echo.NewHTTPError(http.StatusBadGateway, installErr.Error()), nil, skillPublications,
+			)
 		}
+		bundleResult = bundlePublication.result
 		scriptsResult, installErr = runPluginInstallScripts(
 			mutationCtx, target.Client, botID, manifest.ID, manifest.Install,
 		)
 		if installErr != nil {
-			h.cleanupFailedPluginSkills(mutationCtx, botID, manifest.Skills)
-			return echo.NewHTTPError(http.StatusBadGateway, installErr.Error())
+			return rollbackPluginWorkspace(
+				mutationCtx, echo.NewHTTPError(http.StatusBadGateway, installErr.Error()), bundlePublication, skillPublications,
+			)
 		}
 		installation, installErr = h.pluginService.Install(mutationCtx, botID, pluginspkg.InstallRequest{
 			Manifest:       manifest,
 			Variables:      req.Variables,
 			SkillArtifacts: skillArtifacts,
+			Release: pluginspkg.ReleaseMetadata{
+				Revision:       entry.Release.Revision,
+				ArtifactDigest: entry.Release.Artifact.Digest,
+			},
+			WorkspaceTargetID: target.TargetID,
 		})
 		if installErr != nil {
-			h.cleanupFailedPluginSkills(mutationCtx, botID, manifest.Skills)
-			return echo.NewHTTPError(http.StatusBadRequest, installErr.Error())
+			return rollbackPluginWorkspace(
+				mutationCtx, echo.NewHTTPError(http.StatusBadRequest, installErr.Error()), bundlePublication, skillPublications,
+			)
+		}
+		if err := bundlePublication.commit(mutationCtx); err != nil && h.logger != nil {
+			h.logger.Warn("cleanup Plugin bundle backup failed", slog.Any("error", err))
+		}
+		for _, publication := range skillPublications {
+			if err := publication.Commit(mutationCtx); err != nil && h.logger != nil {
+				h.logger.Warn("cleanup Plugin Skill backup failed", slog.Any("error", err))
+			}
 		}
 		return nil
 	}); err != nil {
@@ -360,17 +413,8 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	var result InstallRegistrySkillResponse
-	if err := withBotMutation(
-		c.Request().Context(),
-		botID,
-		h.pluginService,
-		func(mutationCtx context.Context) error {
-			var installErr error
-			result, installErr = h.installRegistrySkill(mutationCtx, botID, req)
-			return installErr
-		},
-	); err != nil {
+	result, err := h.installRegistrySkill(c.Request().Context(), botID, req)
+	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, result)
@@ -383,11 +427,41 @@ type SupermarketAuthor struct {
 	Email string `json:"email"`
 }
 
+type SupermarketPluginResolvedSkill struct {
+	RegistryID          string                              `json:"registry_id"`
+	PackageID           string                              `json:"package_id"`
+	SkillID             string                              `json:"skill_id"`
+	RegistryRevision    string                              `json:"registry_revision"`
+	SourceRevision      string                              `json:"source_revision"`
+	InstallID           string                              `json:"install_id"`
+	RuntimeRequirements SupermarketSkillRuntimeRequirements `json:"runtime_requirements"`
+	Artifact            SupermarketSkillArtifact            `json:"artifact"`
+}
+
+type SupermarketPluginRelease struct {
+	Revision    string                           `json:"revision"`
+	PublishedAt string                           `json:"published_at"`
+	Artifact    SupermarketSkillArtifact         `json:"artifact"`
+	Skills      []SupermarketPluginResolvedSkill `json:"skills"`
+}
+
+type SupermarketImmutablePluginRelease struct {
+	SchemaVersion string                           `json:"schema_version"`
+	Plugin        pluginspkg.Manifest              `json:"plugin"`
+	Artifact      SupermarketSkillArtifact         `json:"artifact"`
+	Skills        []SupermarketPluginResolvedSkill `json:"skills"`
+}
+
+type SupermarketPluginEntry struct {
+	pluginspkg.Manifest
+	Release SupermarketPluginRelease `json:"release"`
+}
+
 type SupermarketPluginListResponse struct {
-	Total int                   `json:"total"`
-	Page  int                   `json:"page"`
-	Limit int                   `json:"limit"`
-	Data  []pluginspkg.Manifest `json:"data"`
+	Total int                      `json:"total"`
+	Page  int                      `json:"page"`
+	Limit int                      `json:"limit"`
+	Data  []SupermarketPluginEntry `json:"data"`
 }
 
 type SupermarketTagsResponse struct {
@@ -396,37 +470,219 @@ type SupermarketTagsResponse struct {
 
 // --- Internal helpers ---
 
-func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (pluginspkg.Manifest, error) {
+func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (SupermarketPluginEntry, error) {
 	pluginID = strings.TrimSpace(pluginID)
 	if !skillset.IsValidName(pluginID) {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadRequest, "plugin id is invalid")
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadRequest, "plugin id is invalid")
 	}
-	endpoint := h.baseURL + "/api/plugins/" + url.PathEscape(pluginID)
+	endpoint := strings.TrimRight(h.baseURL, "/") + "/api/plugins/" + url.PathEscape(pluginID)
 	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, endpoint, nil)
 	if err != nil {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := h.httpClient.Do(req) //nolint:gosec // URL constructed from trusted config
+	resp, err := h.doSupermarketRequest(req)
 	if err != nil {
 		h.logger.Error("supermarket plugin fetch failed", slog.String("url", endpoint), slog.Any("error", err))
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("plugin %q not found in supermarket", pluginID))
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("plugin %q not found in supermarket", pluginID))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
 	}
 
-	var manifest pluginspkg.Manifest
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxPluginMetadataBytes+1))
+	if err != nil {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
 	}
-	return manifest, nil
+	if len(payload) > maxPluginMetadataBytes {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "Plugin response is too large or malformed")
+	}
+	var entry SupermarketPluginEntry
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	if err := decoder.Decode(&entry); err != nil {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "Plugin response is too large or malformed")
+	}
+	if !isCanonicalSHA256(entry.Release.Revision) {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid Plugin release revision from supermarket")
+	}
+	if _, err := time.Parse(time.RFC3339, entry.Release.PublishedAt); err != nil {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid Plugin release publication time from supermarket")
+	}
+	return h.fetchImmutablePluginRelease(
+		c.Request().Context(), pluginID, entry.Release.Revision, entry.Release.PublishedAt,
+	)
+}
+
+func (h *SupermarketHandler) fetchImmutablePluginRelease(
+	ctx context.Context,
+	pluginID, revision, publishedAt string,
+) (SupermarketPluginEntry, error) {
+	endpoint := strings.TrimRight(h.baseURL, "/") + "/api/plugins/" + url.PathEscape(pluginID) +
+		"/releases/" + url.PathEscape(revision)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := h.doSupermarketRequest(req)
+	if err != nil {
+		h.logger.Error("supermarket Plugin release fetch failed", slog.String("url", endpoint), slog.Any("error", err))
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "approved Plugin release is missing")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(
+			http.StatusBadGateway,
+			fmt.Sprintf("supermarket returned status %d for Plugin release", resp.StatusCode),
+		)
+	}
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxPluginMetadataBytes+1))
+	if err != nil || len(payload) > maxPluginMetadataBytes {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "Plugin release is too large or malformed")
+	}
+	digest := sha256.Sum256(payload)
+	if hex.EncodeToString(digest[:]) != revision {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "Plugin release SHA-256 verification failed")
+	}
+	var release SupermarketImmutablePluginRelease
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	if err := decoder.Decode(&release); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid immutable Plugin release from supermarket")
+	}
+	if release.SchemaVersion != "1" {
+		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "unsupported immutable Plugin release schema")
+	}
+	release.Artifact.DownloadURL = "/api/artifacts/plugin/" + release.Artifact.Digest
+	for index := range release.Skills {
+		release.Skills[index].Artifact.DownloadURL = "/api/artifacts/skill/" + release.Skills[index].Artifact.Digest
+	}
+	return SupermarketPluginEntry{
+		Manifest: release.Plugin,
+		Release: SupermarketPluginRelease{
+			Revision:    revision,
+			PublishedAt: publishedAt,
+			Artifact:    release.Artifact,
+			Skills:      release.Skills,
+		},
+	}, nil
+}
+
+var (
+	errSupermarketRedirectOrigin = errors.New("supermarket redirect left the configured origin")
+	errSupermarketRedirectLimit  = errors.New("supermarket redirect limit exceeded")
+)
+
+func (h *SupermarketHandler) doSupermarketRequest(req *http.Request) (*http.Response, error) {
+	base, err := url.Parse(h.baseURL)
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil {
+		return nil, errors.New("configured Supermarket URL is invalid")
+	}
+	client := http.Client{Timeout: 30 * time.Second}
+	if h.httpClient != nil {
+		client = *h.httpClient
+	}
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errSupermarketRedirectLimit
+		}
+		if !sameHTTPOrigin(next.URL, base) {
+			return errSupermarketRedirectOrigin
+		}
+		return nil
+	}
+	resp, err := client.Do(req) //nolint:gosec // Initial URL is derived from trusted config; redirects remain same-origin.
+	if err != nil {
+		return nil, err
+	}
+	if resp.Request == nil || !sameHTTPOrigin(resp.Request.URL, base) {
+		_ = resp.Body.Close()
+		return nil, errSupermarketRedirectOrigin
+	}
+	return resp, nil
+}
+
+func sameHTTPOrigin(candidate, base *url.URL) bool {
+	return candidate != nil && base != nil && candidate.User == nil &&
+		candidate.Scheme == base.Scheme && strings.EqualFold(candidate.Host, base.Host)
+}
+
+func validateSupermarketPluginEntry(
+	entry SupermarketPluginEntry,
+	expectedPluginID string,
+	manifest pluginspkg.Manifest,
+) error {
+	if manifest.ID != expectedPluginID {
+		return errors.New("plugin identity does not match the request")
+	}
+	if !isCanonicalSHA256(entry.Release.Revision) {
+		return errors.New("plugin release revision is invalid")
+	}
+	if _, err := time.Parse(time.RFC3339, entry.Release.PublishedAt); err != nil {
+		return errors.New("plugin release publication time is invalid")
+	}
+	artifact := entry.Release.Artifact
+	if artifact.Format != "memoh_plugin_v1" || artifact.ContentType != "application/gzip" {
+		return errors.New("plugin Artifact format is unsupported")
+	}
+	if !isCanonicalSHA256(artifact.Digest) || artifact.Size < 1 ||
+		artifact.Size > maxPluginBundleCompressedBytes || strings.TrimSpace(artifact.DownloadURL) == "" {
+		return errors.New("plugin Artifact descriptor is invalid")
+	}
+	if len(entry.Release.Skills) != len(manifest.Skills) {
+		return errors.New("plugin release does not lock every Skill reference")
+	}
+	if len(entry.Release.Skills) > maxPluginReleaseSkills {
+		return fmt.Errorf("plugin release exceeds the %d Skill limit", maxPluginReleaseSkills)
+	}
+	resolvedReferences := make([]pluginspkg.SkillReference, 0, len(entry.Release.Skills))
+	for _, resolved := range entry.Release.Skills {
+		reference := pluginspkg.SkillReference{
+			RegistryID: resolved.RegistryID,
+			PackageID:  resolved.PackageID,
+			SkillID:    resolved.SkillID,
+		}
+		resolvedReferences = append(resolvedReferences, reference)
+		if !isCanonicalSHA256(resolved.RegistryRevision) || strings.TrimSpace(resolved.SourceRevision) == "" {
+			return fmt.Errorf("plugin Skill %q release metadata is invalid", pluginspkg.SkillReferenceIdentity(reference))
+		}
+		skill := resolved.catalogSkill()
+		if err := validateRegistrySkill(skill, reference.RegistryID, reference.PackageID, reference.SkillID); err != nil {
+			return err
+		}
+	}
+	if !samePluginSkillReferences(resolvedReferences, manifest.Skills) {
+		return errors.New("plugin release Skill locks do not match plugin.yaml")
+	}
+	return nil
+}
+
+func isCanonicalSHA256(value string) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size && hex.EncodeToString(decoded) == value
+}
+
+func (skill SupermarketPluginResolvedSkill) catalogSkill() SupermarketCatalogSkill {
+	return SupermarketCatalogSkill{
+		RegistryID:          skill.RegistryID,
+		PackageID:           skill.PackageID,
+		SkillID:             skill.SkillID,
+		InstallID:           skill.InstallID,
+		RuntimeRequirements: skill.RuntimeRequirements,
+		Source:              SupermarketSkillSource{Revision: skill.SourceRevision},
+		Artifact:            skill.Artifact,
+	}
 }
 
 func (h *SupermarketHandler) resolvePluginInstallTarget(ctx context.Context, botID string) (workspace.ResolvedWorkspaceTarget, error) {
@@ -447,105 +703,214 @@ func (h *SupermarketHandler) resolvePluginInstallTarget(ctx context.Context, bot
 	return workspace.ResolvedWorkspaceTarget{Client: client}, nil
 }
 
-func (h *SupermarketHandler) installPluginSkills(
+type preparedPluginSkill struct {
+	resolved SupermarketPluginResolvedSkill
+	artifact preparedRegistrySkillArtifact
+}
+
+func (h *SupermarketHandler) preparePluginSkills(
 	ctx context.Context,
-	client *bridge.Client,
 	workspaceOS string,
-	references []pluginspkg.SkillReference,
-) (pluginSkillsInstallResult, map[string]pluginspkg.SkillArtifactMetadata, error) {
-	result := pluginSkillsInstallResult{OK: true, Skills: make([]pluginSkillInstallResult, 0, len(references))}
-	artifacts := make(map[string]pluginspkg.SkillArtifactMetadata, len(references))
-	for _, reference := range references {
+	resolvedSkills []SupermarketPluginResolvedSkill,
+) ([]preparedPluginSkill, pluginSkillsInstallResult, error) {
+	result := pluginSkillsInstallResult{OK: true, Skills: make([]pluginSkillInstallResult, 0, len(resolvedSkills))}
+	if len(resolvedSkills) > maxPluginReleaseSkills {
+		return nil, result, fmt.Errorf("plugin release exceeds the %d Skill limit", maxPluginReleaseSkills)
+	}
+	prepared := make([]preparedPluginSkill, 0, len(resolvedSkills))
+	var totalUncompressedBytes int64
+	for _, resolved := range resolvedSkills {
+		reference := pluginspkg.SkillReference{
+			RegistryID: resolved.RegistryID,
+			PackageID:  resolved.PackageID,
+			SkillID:    resolved.SkillID,
+		}
 		item := pluginSkillInstallResult{
 			RegistryID: reference.RegistryID,
 			PackageID:  reference.PackageID,
 			SkillID:    reference.SkillID,
 		}
-		installed, err := h.installRegistrySkillArtifact(
-			ctx,
-			client,
-			workspaceOS,
-			false,
-			reference.RegistryID,
-			reference.PackageID,
-			reference.SkillID,
+		remainingBytes := int64(maxPluginSkillArtifactsUncompressedBytes) - totalUncompressedBytes
+		artifact, err := h.prepareResolvedRegistrySkillArtifactWithLimit(
+			ctx, workspaceOS, resolved.catalogSkill(), remainingBytes,
 		)
 		if err != nil {
 			item.Error = err.Error()
 			result.OK = false
 			result.Error = err.Error()
 			result.Skills = append(result.Skills, item)
-			return result, nil, err
+			return nil, result, err
 		}
-		item.InstallID = installed.Skill.InstallID
-		item.ArtifactDigest = installed.Skill.Artifact.Digest
-		item.FilesWritten = installed.FilesWritten
-		result.Skills = append(result.Skills, item)
-		artifacts[pluginspkg.SkillReferenceIdentity(reference)] = pluginspkg.SkillArtifactMetadata{
-			InstallID:      item.InstallID,
-			ArtifactDigest: item.ArtifactDigest,
-			FilesWritten:   item.FilesWritten,
+		totalUncompressedBytes, err = addPluginSkillArchiveBytes(
+			totalUncompressedBytes, artifact.Archive.UncompressedSize(),
+		)
+		if err != nil {
+			item.Error = err.Error()
+			result.OK = false
+			result.Error = err.Error()
+			result.Skills = append(result.Skills, item)
+			return nil, result, err
 		}
+		prepared = append(prepared, preparedPluginSkill{resolved: resolved, artifact: artifact})
 	}
-	return result, artifacts, nil
+	return prepared, result, nil
 }
 
-func (h *SupermarketHandler) cleanupFailedPluginSkills(ctx context.Context, botID string, references []pluginspkg.SkillReference) {
-	if h.pluginService == nil || len(references) == 0 {
-		return
+func addPluginSkillArchiveBytes(total, next int64) (int64, error) {
+	if total < 0 || next < 0 || next > int64(maxPluginSkillArtifactsUncompressedBytes)-total {
+		return total, fmt.Errorf(
+			"plugin release Skills exceed the %d byte uncompressed limit",
+			maxPluginSkillArtifactsUncompressedBytes,
+		)
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	h.pluginService.GarbageCollectRegistrySkills(cleanupCtx, botID, references)
+	return total + next, nil
+}
+
+func publishPreparedPluginSkills(
+	ctx context.Context,
+	client *bridge.Client,
+	prepared []preparedPluginSkill,
+	result pluginSkillsInstallResult,
+) (
+	pluginSkillsInstallResult,
+	map[string]pluginspkg.SkillArtifactMetadata,
+	[]*skillset.ArchivePublication,
+	error,
+) {
+	artifacts := make(map[string]pluginspkg.SkillArtifactMetadata, len(prepared))
+	publications := make([]*skillset.ArchivePublication, 0, len(prepared))
+	for _, item := range prepared {
+		resolved := item.resolved
+		reference := pluginspkg.SkillReference{
+			RegistryID: resolved.RegistryID,
+			PackageID:  resolved.PackageID,
+			SkillID:    resolved.SkillID,
+		}
+		installedPublication, installed, err := publishPreparedRegistrySkillArtifact(
+			ctx, client, false, item.artifact,
+		)
+		resultItem := pluginSkillInstallResult{
+			RegistryID: reference.RegistryID,
+			PackageID:  reference.PackageID,
+			SkillID:    reference.SkillID,
+		}
+		if err != nil {
+			resultItem.Error = err.Error()
+			result.OK = false
+			result.Error = err.Error()
+			result.Skills = append(result.Skills, resultItem)
+			return result, nil, publications, err
+		}
+		publications = append(publications, installedPublication)
+		resultItem.InstallID = installed.Skill.InstallID
+		resultItem.ArtifactDigest = installed.Skill.Artifact.Digest
+		resultItem.FilesWritten = installed.FilesWritten
+		result.Skills = append(result.Skills, resultItem)
+		artifacts[pluginspkg.SkillReferenceIdentity(reference)] = pluginspkg.SkillArtifactMetadata{
+			RegistryRevision: resolved.RegistryRevision,
+			InstallID:        resultItem.InstallID,
+			ArtifactDigest:   resultItem.ArtifactDigest,
+			FilesWritten:     resultItem.FilesWritten,
+		}
+	}
+	return result, artifacts, publications, nil
+}
+
+func (h *SupermarketHandler) checkPluginSkillArtifactConflicts(
+	ctx context.Context,
+	client *bridge.Client,
+	botID, targetPluginID, workspaceTargetID string,
+	resolvedSkills []SupermarketPluginResolvedSkill,
+) error {
+	expected := make(map[string]string, len(resolvedSkills))
+	for _, resolved := range resolvedSkills {
+		reference := pluginspkg.SkillReference{
+			RegistryID: resolved.RegistryID,
+			PackageID:  resolved.PackageID,
+			SkillID:    resolved.SkillID,
+		}
+		identity := pluginspkg.SkillReferenceIdentity(reference)
+		expected[identity] = resolved.Artifact.Digest
+		owner, ok, err := skillset.ReadDirectOwner(
+			ctx, client, reference.RegistryID, reference.PackageID, reference.SkillID,
+		)
+		if err != nil {
+			return fmt.Errorf("inspect direct owner for Plugin Skill %q: %w", identity, err)
+		}
+		if ok && owner.ArtifactDigest != resolved.Artifact.Digest {
+			return fmt.Errorf("plugin Skill %q has a direct owner using a different Artifact", identity)
+		}
+	}
+	return h.pluginService.CheckSkillArtifactConflicts(
+		ctx, botID, targetPluginID, workspaceTargetID, expected,
+	)
+}
+
+func rollbackPluginWorkspace(
+	ctx context.Context,
+	cause error,
+	bundle *pluginBundlePublication,
+	skills []*skillset.ArchivePublication,
+) error {
+	errorsToJoin := []error{cause}
+	if bundle != nil {
+		if err := bundle.rollback(ctx); err != nil {
+			errorsToJoin = append(errorsToJoin, fmt.Errorf("roll back Plugin bundle: %w", err))
+		}
+	}
+	for index := len(skills) - 1; index >= 0; index-- {
+		if err := skills[index].Rollback(ctx); err != nil {
+			errorsToJoin = append(errorsToJoin, fmt.Errorf("roll back Plugin Skill: %w", err))
+		}
+	}
+	if len(errorsToJoin) == 1 {
+		return cause
+	}
+	return errors.Join(errorsToJoin...)
 }
 
 func (h *SupermarketHandler) installPluginBundle(
 	ctx context.Context,
 	client pluginBundleWriter,
+	workspaceOS string,
 	downloadPluginID, targetPluginID string,
+	artifact SupermarketSkillArtifact,
 	expectedSkills []pluginspkg.SkillReference,
 ) (pluginBundleInstallResult, error) {
 	if client == nil {
 		return pluginBundleInstallResult{}, errors.New("workspace is not reachable")
 	}
-
-	downloadURL := h.baseURL + "/api/plugins/" + url.PathEscape(strings.TrimSpace(downloadPluginID)) + "/download"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	archive, err := h.preparePluginBundle(ctx, downloadPluginID, targetPluginID, artifact, expectedSkills)
 	if err != nil {
 		return pluginBundleInstallResult{}, err
 	}
+	return publishPluginBundleArchive(ctx, client, workspaceOS, targetPluginID, archive)
+}
 
-	resp, err := h.httpClient.Do(httpReq) //nolint:gosec // URL constructed from trusted config
+func (h *SupermarketHandler) preparePluginBundle(
+	ctx context.Context,
+	downloadPluginID, targetPluginID string,
+	artifact SupermarketSkillArtifact,
+	expectedSkills []pluginspkg.SkillReference,
+) (pluginBundleArchive, error) {
+	bundle, err := h.downloadRegistrySkillArtifact(ctx, artifact)
 	if err != nil {
-		h.logger.Warn("supermarket plugin bundle download failed", slog.String("url", downloadURL), slog.Any("error", err))
-		return pluginBundleInstallResult{}, fmt.Errorf("supermarket unreachable: %w", err)
+		return pluginBundleArchive{}, fmt.Errorf("download Plugin Artifact: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return pluginBundleInstallResult{}, errors.New("plugin bundle was not found in supermarket")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return pluginBundleInstallResult{}, fmt.Errorf("supermarket returned status %d", resp.StatusCode)
-	}
-
-	if resp.ContentLength > maxPluginBundleCompressedBytes {
-		return pluginBundleInstallResult{}, errors.New("plugin bundle exceeds the compressed size limit")
-	}
-	gz, err := gzip.NewReader(io.LimitReader(resp.Body, maxPluginBundleCompressedBytes+1))
+	gz, err := gzip.NewReader(bytes.NewReader(bundle))
 	if err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("invalid gzip response from supermarket: %w", err)
+		return pluginBundleArchive{}, fmt.Errorf("invalid gzip response from supermarket: %w", err)
 	}
 	defer func() { _ = gz.Close() }()
 
 	archive, err := readPluginBundleArchive(downloadPluginID, targetPluginID, gz)
 	if err != nil {
-		return pluginBundleInstallResult{}, err
+		return pluginBundleArchive{}, err
 	}
 	if !samePluginSkillReferences(archive.skillReferences, expectedSkills) {
-		return pluginBundleInstallResult{}, errors.New("plugin bundle Skill references do not match the catalog manifest")
+		return pluginBundleArchive{}, errors.New("plugin bundle Skill references do not match the catalog manifest")
 	}
-	return publishPluginBundleArchive(ctx, client, targetPluginID, archive)
+	return archive, nil
 }
 
 func runPluginInstallScripts(ctx context.Context, client *bridge.Client, botID, pluginID string, commands pluginspkg.InstallCommands) (pluginInstallScriptsResult, error) {
@@ -618,8 +983,9 @@ type pluginArchiveEntry struct {
 }
 
 type pluginBundleArchiveFile struct {
-	entry   pluginArchiveEntry
-	content []byte
+	entry      pluginArchiveEntry
+	content    []byte
+	executable bool
 }
 
 type pluginBundleArchive struct {
@@ -627,12 +993,17 @@ type pluginBundleArchive struct {
 	skillReferences []pluginspkg.SkillReference
 }
 
-func extractPluginBundleArchive(ctx context.Context, client pluginBundleWriter, archivePluginID, targetPluginID string, r io.Reader) (pluginBundleInstallResult, error) {
+func extractPluginBundleArchive(
+	ctx context.Context,
+	client pluginBundleWriter,
+	workspaceOS, archivePluginID, targetPluginID string,
+	r io.Reader,
+) (pluginBundleInstallResult, error) {
 	archive, err := readPluginBundleArchive(archivePluginID, targetPluginID, r)
 	if err != nil {
 		return pluginBundleInstallResult{}, err
 	}
-	return publishPluginBundleArchive(ctx, client, targetPluginID, archive)
+	return publishPluginBundleArchive(ctx, client, workspaceOS, targetPluginID, archive)
 }
 
 func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader) (pluginBundleArchive, error) {
@@ -649,7 +1020,8 @@ func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader
 	totalEntries := 0
 	regularFiles := 0
 	hasManifest := false
-	tr := tar.NewReader(r)
+	stream := &io.LimitedReader{R: r, N: maxPluginBundleStreamBytes + 1}
+	tr := tar.NewReader(stream)
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -718,7 +1090,15 @@ func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader
 			archive.skillReferences = references
 			hasManifest = true
 		}
-		archive.files = append(archive.files, pluginBundleArchiveFile{entry: entry, content: content})
+		archive.files = append(archive.files, pluginBundleArchiveFile{
+			entry: entry, content: content, executable: hdr.FileInfo().Mode().Perm()&0o111 != 0,
+		})
+	}
+	if _, err := io.Copy(io.Discard, stream); err != nil {
+		return pluginBundleArchive{}, fmt.Errorf("plugin bundle decompression failed: %w", err)
+	}
+	if stream.N <= 0 {
+		return pluginBundleArchive{}, errors.New("plugin bundle exceeds the decompressed stream limit")
 	}
 	if !hasManifest {
 		return pluginBundleArchive{}, errors.New("plugin bundle does not contain a root plugin.yaml")
@@ -729,16 +1109,46 @@ func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader
 func publishPluginBundleArchive(
 	ctx context.Context,
 	client pluginBundleWriter,
+	workspaceOS string,
 	targetPluginID string,
 	archive pluginBundleArchive,
 ) (pluginBundleInstallResult, error) {
+	publication, err := publishPluginBundleArchiveTransaction(ctx, client, workspaceOS, targetPluginID, archive)
+	if err != nil {
+		return pluginBundleInstallResult{}, err
+	}
+	_ = publication.commit(ctx)
+	return publication.result, nil
+}
+
+type pluginBundlePublicationClient interface {
+	DeleteFile(ctx context.Context, path string, recursive bool) error
+	Rename(ctx context.Context, oldPath, newPath string) error
+}
+
+type pluginBundlePublication struct {
+	client       pluginBundlePublicationClient
+	pluginRoot   string
+	backupDir    string
+	targetExists bool
+	closed       bool
+	result       pluginBundleInstallResult
+}
+
+func publishPluginBundleArchiveTransaction(
+	ctx context.Context,
+	client pluginBundleWriter,
+	workspaceOS string,
+	targetPluginID string,
+	archive pluginBundleArchive,
+) (*pluginBundlePublication, error) {
 	result := newPluginBundleInstallResult()
 	if client == nil {
-		return pluginBundleInstallResult{}, errors.New("workspace is not reachable")
+		return nil, errors.New("workspace is not reachable")
 	}
 	pluginRoot, err := skillset.PluginDirForID(targetPluginID)
 	if err != nil {
-		return pluginBundleInstallResult{}, err
+		return nil, err
 	}
 	stagingRoot := path.Join(skillset.PluginDirPath, ".staging")
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -746,14 +1156,19 @@ func publishPluginBundleArchive(
 	backupDir := path.Join(stagingRoot, "backup-"+targetPluginID+"-"+suffix)
 	_ = client.DeleteFile(ctx, tempDir, true)
 	_ = client.DeleteFile(ctx, backupDir, true)
-	defer func() { _ = client.DeleteFile(context.WithoutCancel(ctx), tempDir, true) }()
+	defer func() {
+		cleanupCtx, cancel := pluginPublicationCleanupContext(ctx)
+		defer cancel()
+		_ = client.DeleteFile(cleanupCtx, tempDir, true)
+	}()
 	if err := client.Mkdir(ctx, stagingRoot); err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("create plugin staging root: %w", err)
+		return nil, fmt.Errorf("create plugin staging root: %w", err)
 	}
 	if err := client.Mkdir(ctx, tempDir); err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("create temporary plugin directory: %w", err)
+		return nil, fmt.Errorf("create temporary plugin directory: %w", err)
 	}
 
+	executablePaths := make([]string, 0)
 	for _, file := range archive.files {
 		relativePath := file.entry.relativePath
 		if file.entry.kind == pluginArchiveKindScripts {
@@ -761,15 +1176,18 @@ func publishPluginBundleArchive(
 		}
 		filePath := path.Clean(path.Join(tempDir, relativePath))
 		if filePath == tempDir || !strings.HasPrefix(filePath, tempDir+"/") {
-			return pluginBundleInstallResult{}, fmt.Errorf("plugin bundle path escapes staging root: %s", relativePath)
+			return nil, fmt.Errorf("plugin bundle path escapes staging root: %s", relativePath)
 		}
 		if dir := path.Dir(filePath); dir != tempDir {
 			if err := client.Mkdir(ctx, dir); err != nil {
-				return pluginBundleInstallResult{}, fmt.Errorf("create plugin bundle directory %s: %w", dir, err)
+				return nil, fmt.Errorf("create plugin bundle directory %s: %w", dir, err)
 			}
 		}
 		if err := client.WriteFile(ctx, filePath, file.content); err != nil {
-			return pluginBundleInstallResult{}, fmt.Errorf("write plugin bundle file %s: %w", relativePath, err)
+			return nil, fmt.Errorf("write plugin bundle file %s: %w", relativePath, err)
+		}
+		if file.entry.kind == pluginArchiveKindScripts && file.executable {
+			executablePaths = append(executablePaths, filePath)
 		}
 		switch file.entry.kind {
 		case pluginArchiveKindHooks:
@@ -778,30 +1196,105 @@ func publishPluginBundleArchive(
 			result.Scripts.FilesWritten++
 		}
 	}
+	if err := applyPluginExecutableModes(ctx, client, workspaceOS, executablePaths); err != nil {
+		return nil, err
+	}
 
 	targetExists := true
 	if err := client.Rename(ctx, pluginRoot, backupDir); err != nil {
 		if errors.Is(err, bridge.ErrNotFound) {
 			targetExists = false
 		} else {
-			return pluginBundleInstallResult{}, fmt.Errorf("prepare existing plugin bundle for replacement: %w", err)
+			return nil, fmt.Errorf("prepare existing plugin bundle for replacement: %w", err)
 		}
 	}
 	if err := client.Rename(ctx, tempDir, pluginRoot); err != nil {
 		if targetExists {
-			if rollbackErr := client.Rename(context.WithoutCancel(ctx), backupDir, pluginRoot); rollbackErr != nil {
-				return pluginBundleInstallResult{}, fmt.Errorf(
+			rollbackCtx, cancel := pluginPublicationCleanupContext(ctx)
+			defer cancel()
+			if rollbackErr := client.Rename(rollbackCtx, backupDir, pluginRoot); rollbackErr != nil {
+				return nil, fmt.Errorf(
 					"publish plugin bundle: %w; restore previous bundle from %q: %w",
 					err, backupDir, rollbackErr,
 				)
 			}
 		}
-		return pluginBundleInstallResult{}, fmt.Errorf("publish plugin bundle: %w", err)
+		return nil, fmt.Errorf("publish plugin bundle: %w", err)
 	}
-	if targetExists {
-		_ = client.DeleteFile(ctx, backupDir, true)
+	return &pluginBundlePublication{
+		client: client, pluginRoot: pluginRoot, backupDir: backupDir, targetExists: targetExists, result: result,
+	}, nil
+}
+
+func (p *pluginBundlePublication) commit(ctx context.Context) error {
+	if p == nil || p.closed {
+		return nil
 	}
-	return result, nil
+	if !p.targetExists {
+		p.closed = true
+		return nil
+	}
+	cleanupCtx, cancel := pluginPublicationCleanupContext(ctx)
+	defer cancel()
+	if err := p.client.DeleteFile(cleanupCtx, p.backupDir, true); err != nil {
+		return err
+	}
+	p.closed = true
+	return nil
+}
+
+func (p *pluginBundlePublication) rollback(ctx context.Context) error {
+	if p == nil || p.closed {
+		return nil
+	}
+	rollbackCtx, cancel := pluginPublicationCleanupContext(ctx)
+	defer cancel()
+	if err := p.client.DeleteFile(rollbackCtx, p.pluginRoot, true); err != nil && !errors.Is(err, bridge.ErrNotFound) {
+		return fmt.Errorf("remove replacement Plugin bundle: %w", err)
+	}
+	if !p.targetExists {
+		p.closed = true
+		return nil
+	}
+	if err := p.client.Rename(rollbackCtx, p.backupDir, p.pluginRoot); err != nil {
+		return fmt.Errorf("restore previous Plugin bundle from %q: %w", p.backupDir, err)
+	}
+	p.closed = true
+	return nil
+}
+
+func pluginPublicationCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), pluginPublicationCleanupTimeout)
+}
+
+func applyPluginExecutableModes(
+	ctx context.Context,
+	client pluginBundleWriter,
+	workspaceOS string,
+	paths []string,
+) error {
+	if len(paths) == 0 || strings.EqualFold(workspaceOS, "windows") || strings.EqualFold(workspaceOS, "win32") {
+		return nil
+	}
+	for start := 0; start < len(paths); start += 100 {
+		end := min(start+100, len(paths))
+		quoted := make([]string, 0, end-start)
+		for _, filePath := range paths[start:end] {
+			quoted = append(quoted, pluginShellQuote(filePath))
+		}
+		result, err := client.ExecWithEnv(ctx, "chmod 755 -- "+strings.Join(quoted, " "), "/", 30, nil)
+		if err != nil {
+			return fmt.Errorf("preserve executable Plugin scripts: %w", err)
+		}
+		if result != nil && result.ExitCode != 0 {
+			return fmt.Errorf("preserve executable Plugin scripts: chmod exited with code %d", result.ExitCode)
+		}
+	}
+	return nil
+}
+
+func pluginShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (pluginArchiveEntry, bool, error) {
@@ -864,7 +1357,8 @@ func normalizePluginBundleArchivePath(archivePluginID, rawName string) (string, 
 		return "", fmt.Errorf("plugin bundle contains non-canonical path %q", rawName)
 	}
 	for _, segment := range strings.Split(name, "/") {
-		if segment == "" || segment == "." || segment == ".." {
+		if segment == "" || segment == "." || segment == ".." || segment != strings.TrimSpace(segment) ||
+			strings.HasSuffix(segment, ".") || strings.ContainsAny(segment, `<>:"|?*`) {
 			return "", fmt.Errorf("plugin bundle contains unsafe path %q", rawName)
 		}
 	}
@@ -872,22 +1366,23 @@ func normalizePluginBundleArchivePath(archivePluginID, rawName string) (string, 
 }
 
 func recordPluginBundleArchivePath(seen map[string]bool, name string, isFile bool) error {
-	if _, exists := seen[name]; exists {
+	canonicalName := strings.ToLower(name)
+	if _, exists := seen[canonicalName]; exists {
 		return fmt.Errorf("plugin bundle contains duplicate path %q", name)
 	}
-	for parent := path.Dir(name); parent != "." && parent != "/"; parent = path.Dir(parent) {
+	for parent := path.Dir(canonicalName); parent != "." && parent != "/"; parent = path.Dir(parent) {
 		if seen[parent] {
 			return fmt.Errorf("plugin bundle path %q is nested below file %q", name, parent)
 		}
 	}
 	if isFile {
 		for candidate := range seen {
-			if strings.HasPrefix(candidate, name+"/") {
+			if strings.HasPrefix(candidate, canonicalName+"/") {
 				return fmt.Errorf("plugin bundle file %q conflicts with child path %q", name, candidate)
 			}
 		}
 	}
-	seen[name] = isFile
+	seen[canonicalName] = isFile
 	return nil
 }
 
