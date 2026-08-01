@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,8 +17,9 @@ import (
 
 type Queries struct {
 	*dbsqlc.Queries
-	pool *pgxpool.Pool
-	conn *pgxpool.Conn
+	pool     *pgxpool.Pool
+	lockPool *pgxpool.Pool
+	conn     *pgxpool.Conn
 }
 
 func NewQueries(queries *dbsqlc.Queries) *Queries {
@@ -25,7 +27,11 @@ func NewQueries(queries *dbsqlc.Queries) *Queries {
 }
 
 func NewQueriesWithPool(pool *pgxpool.Pool, queries *dbsqlc.Queries) *Queries {
-	return &Queries{Queries: queries, pool: pool}
+	return NewQueriesWithPools(pool, nil, queries)
+}
+
+func NewQueriesWithPools(pool, lockPool *pgxpool.Pool, queries *dbsqlc.Queries) *Queries {
+	return &Queries{Queries: queries, pool: pool, lockPool: lockPool}
 }
 
 func newQueriesWithConn(conn *pgxpool.Conn) *Queries {
@@ -84,14 +90,14 @@ func (q *Queries) WithBotMutationLock(
 	botID pgtype.UUID,
 	fn func(dbstore.Queries) error,
 ) (err error) {
-	if q == nil || q.pool == nil {
+	if q == nil || q.lockPool == nil {
 		return fn(q)
 	}
 	if !botID.Valid {
 		return errors.New("bot id is invalid")
 	}
 
-	conn, err := q.pool.Acquire(ctx)
+	conn, err := q.lockPool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire bot mutation lock connection: %w", err)
 	}
@@ -123,7 +129,11 @@ func (q *Queries) WithBotMutationLock(
 			if unlockErr == nil {
 				unlockErr = errors.New("PostgreSQL did not release the bot mutation lock")
 			}
-			err = errors.Join(err, unlockErr, closeErr)
+			slog.Default().Error(
+				"failed to release bot mutation lock",
+				slog.String("bot_id", botID.String()),
+				slog.Any("error", errors.Join(unlockErr, closeErr)),
+			)
 			return
 		}
 		conn.Release()

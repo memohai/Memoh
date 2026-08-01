@@ -81,6 +81,21 @@ func TestWithBotMutationReusesNestedScope(t *testing.T) {
 	}
 }
 
+func TestWithBotMutationRejectsCrossBotNesting(t *testing.T) {
+	service := NewService(nil, &mutationTestQueries{}, nil, nil, nil, BridgeProvider{})
+	otherBotID := "22222222-2222-4222-8222-222222222222"
+
+	err := service.WithBotMutation(context.Background(), mutationTestBotID, func(scopedCtx context.Context) error {
+		return service.WithBotMutation(scopedCtx, otherBotID, func(context.Context) error {
+			t.Fatal("cross-bot mutation callback ran")
+			return nil
+		})
+	})
+	if !errors.Is(err, errCrossBotMutation) {
+		t.Fatalf("cross-bot mutation error = %v, want %v", err, errCrossBotMutation)
+	}
+}
+
 type mutationLockQueries struct {
 	dbstore.Queries
 	locked    dbstore.Queries

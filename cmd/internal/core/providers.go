@@ -180,11 +180,25 @@ func provideNetworkService(log *slog.Logger, queries dbstore.Queries, registry *
 	return netctl.NewService(log, queries, registry, service, rc.ContainerBackend, cfg.Workspace.CNIBinaryDir, cfg.Workspace.CNIConfigDir, cfg.Workspace.DataRoot)
 }
 
-func provideDBQueries(postgresStore *postgresstore.Store) (dbstore.Queries, error) {
+func provideDBQueries(lc fx.Lifecycle, cfg config.Config, postgresStore *postgresstore.Store) (dbstore.Queries, error) {
 	if postgresStore == nil {
 		return nil, errors.New("postgres store not configured")
 	}
-	return postgresstore.NewQueriesWithPool(postgresStore.Pool(), postgresStore.SQLC()), nil
+	pool := postgresStore.Pool()
+	lockPoolConfig := pool.Config().Copy()
+	lockPoolConfig.MinConns = 0
+	lockPoolConfig.MaxConns = cfg.Postgres.EffectiveMutationLockMaxConnections()
+	lockPool, err := pgxpool.NewWithConfig(context.Background(), lockPoolConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create bot mutation lock pool: %w", err)
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(_ context.Context) error {
+			lockPool.Close()
+			return nil
+		},
+	})
+	return postgresstore.NewQueriesWithPools(pool, lockPool, postgresStore.SQLC()), nil
 }
 
 func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountStore, error) {

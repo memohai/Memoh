@@ -539,12 +539,20 @@ func WorkspaceImagePullCandidates(ref string) []string {
 }
 
 type PostgresConfig struct {
-	Host     string `toml:"host"`
-	Port     int    `toml:"port"`
-	User     string `toml:"user"`
-	Password string `toml:"password" json:"-"`
-	Database string `toml:"database"`
-	SSLMode  string `toml:"sslmode"`
+	Host                       string `toml:"host"`
+	Port                       int    `toml:"port"`
+	User                       string `toml:"user"`
+	Password                   string `toml:"password" json:"-"`
+	Database                   string `toml:"database"`
+	SSLMode                    string `toml:"sslmode"`
+	MutationLockMaxConnections int32  `toml:"mutation_lock_max_connections"`
+}
+
+func (c PostgresConfig) EffectiveMutationLockMaxConnections() int32 {
+	if c.MutationLockMaxConnections > 0 {
+		return c.MutationLockMaxConnections
+	}
+	return 4
 }
 
 type PGVectorConfig struct {

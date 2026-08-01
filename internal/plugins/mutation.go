@@ -27,6 +27,8 @@ type botMutationScope struct {
 	service *Service
 }
 
+var errCrossBotMutation = errors.New("cross-bot mutation nesting is not supported")
+
 type localBotMutationLock struct {
 	token chan struct{}
 	refs  int
@@ -51,7 +53,10 @@ func (s *Service) WithBotMutation(ctx context.Context, botID string, fn func(con
 		return err
 	}
 	canonicalBotID := botUUID.String()
-	if scope := botMutationScopeFromContext(ctx, s, canonicalBotID); scope != nil {
+	if scope := ownedBotMutationScope(ctx, s); scope != nil {
+		if scope.botID != canonicalBotID {
+			return errCrossBotMutation
+		}
 		return fn(ctx)
 	}
 
@@ -99,8 +104,16 @@ func (s *Service) withBotMutation(
 }
 
 func botMutationScopeFromContext(ctx context.Context, service *Service, botID string) *botMutationScope {
-	scope, _ := ctx.Value(botMutationScopeKey{}).(*botMutationScope)
+	scope := ownedBotMutationScope(ctx, service)
 	if scope == nil || scope.botID != botID {
+		return nil
+	}
+	return scope
+}
+
+func ownedBotMutationScope(ctx context.Context, service *Service) *botMutationScope {
+	scope, _ := ctx.Value(botMutationScopeKey{}).(*botMutationScope)
+	if scope == nil {
 		return nil
 	}
 	if scope.owner != service && scope.service != service {
