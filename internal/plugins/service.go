@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"path"
 	"regexp"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"gopkg.in/yaml.v3"
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -91,6 +89,9 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	if manifest.ID == "" {
 		return Installation{}, errors.New("plugin id is required")
 	}
+	if err := validateSkillReferences(manifest.Skills); err != nil {
+		return Installation{}, err
+	}
 	if manifest.Name == "" {
 		manifest.Name = manifest.ID
 	}
@@ -162,43 +163,24 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	}
 
 	for _, resource := range manifest.Skills {
-		if _, err := s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
-			InstallationID: row.ID,
-			ResourceType:   "skill",
-			ResourceKey:    resource.Key,
-			ResourceID:     resource.Path,
-			Status:         "bundled",
-			Metadata:       mustJSON(map[string]any{"name": resource.Name}),
-		}); err != nil {
-			return Installation{}, err
-		}
-	}
-	for _, skill := range manifest.BundledSkills {
-		name := strings.TrimSpace(skill.Name)
-		if name == "" {
-			name = strings.TrimSpace(skill.ID)
-		}
-		key := sanitizeID(name)
-		if key == "" {
-			continue
-		}
-		dirPath, err := skillset.PluginSkillDirForName(manifest.ID, name)
+		dirPath, err := skillset.SkillDirForIDs(resource.RegistryID, resource.PackageID, resource.SkillID)
 		if err != nil {
-			return Installation{}, fmt.Errorf("plugin skill %q has an invalid identity", name)
+			return Installation{}, fmt.Errorf("plugin Skill reference %q is invalid", SkillReferenceIdentity(resource))
 		}
 		if _, err := s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
 			InstallationID: row.ID,
 			ResourceType:   "skill",
-			ResourceKey:    key,
+			ResourceKey:    SkillReferenceIdentity(resource),
 			ResourceID:     path.Join(dirPath, "SKILL.md"),
-			Status:         "bundled",
-			Metadata:       mustJSON(map[string]any{"name": name, "skill_id": skill.ID}),
+			Status:         "installed",
+			Metadata: mustJSON(map[string]any{
+				"registry_id": resource.RegistryID,
+				"package_id":  resource.PackageID,
+				"skill_id":    resource.SkillID,
+			}),
 		}); err != nil {
 			return Installation{}, err
 		}
-	}
-	if err := s.installBundledSkills(ctx, botID, row, manifest); err != nil {
-		return Installation{}, err
 	}
 
 	return s.normalizeInstallation(ctx, row)
@@ -259,9 +241,6 @@ func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (
 	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
 		return Installation{}, err
 	}
-	if err := s.uninstallBundledSkills(ctx, botID, row); err != nil {
-		return Installation{}, err
-	}
 	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
 		return Installation{}, err
 	}
@@ -278,9 +257,6 @@ func (s *Service) Purge(ctx context.Context, botID, installationID string) error
 		return err
 	}
 	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
-		return err
-	}
-	if err := s.uninstallBundledSkills(ctx, botID, row); err != nil {
 		return err
 	}
 	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
@@ -462,145 +438,6 @@ func (s *Service) normalizeInstallation(ctx context.Context, row sqlc.BotPluginI
 	}, nil
 }
 
-func (s *Service) installBundledSkills(ctx context.Context, botID string, row sqlc.BotPluginInstallation, manifest Manifest) error {
-	if s.bridges == nil || len(manifest.BundledSkills) == 0 {
-		return nil
-	}
-	client, err := s.bridges.MCPClient(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("install plugin skills: workspace is not reachable: %w", err)
-	}
-	for _, skill := range manifest.BundledSkills {
-		name := strings.TrimSpace(skill.Name)
-		if name == "" {
-			name = strings.TrimSpace(skill.ID)
-		}
-		if !skillset.IsValidName(name) {
-			return fmt.Errorf("plugin skill %q has an invalid name", name)
-		}
-		raw := pluginSkillRaw(skill, name, row)
-		parsed := skillset.ParseFile(raw, name)
-		dirPath, err := skillset.PluginSkillDirForName(row.PluginID, parsed.Name)
-		if err != nil {
-			return fmt.Errorf("plugin skill %q has an invalid name", parsed.Name)
-		}
-		if err := client.Mkdir(ctx, dirPath); err != nil {
-			return fmt.Errorf("create plugin skill %q directory: %w", parsed.Name, err)
-		}
-		if err := client.WriteFile(ctx, path.Join(dirPath, "SKILL.md"), []byte(raw)); err != nil {
-			return fmt.Errorf("write plugin skill %q: %w", parsed.Name, err)
-		}
-		owner, err := encodeJSON(pluginSkillOwner(row, manifest, skill, parsed.Name))
-		if err != nil {
-			return err
-		}
-		if err := client.WriteFile(ctx, path.Join(dirPath, ".memoh-plugin-owner.json"), owner); err != nil {
-			return fmt.Errorf("write plugin skill %q owner marker: %w", parsed.Name, err)
-		}
-	}
-	return nil
-}
-
-func (s *Service) uninstallBundledSkills(ctx context.Context, botID string, row sqlc.BotPluginInstallation) error {
-	if s.bridges == nil {
-		return nil
-	}
-	manifest, err := decodeManifest(row.Manifest)
-	if err != nil {
-		return err
-	}
-	if len(manifest.BundledSkills) == 0 {
-		return nil
-	}
-	client, err := s.bridges.MCPClient(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("uninstall plugin skills: workspace is not reachable: %w", err)
-	}
-	for _, skill := range manifest.BundledSkills {
-		name := strings.TrimSpace(skill.Name)
-		if name == "" {
-			name = strings.TrimSpace(skill.ID)
-		}
-		if !skillset.IsValidName(name) {
-			continue
-		}
-		dirPath, err := skillset.PluginSkillDirForName(row.PluginID, name)
-		if err != nil {
-			continue
-		}
-		if !canDeletePluginSkill(ctx, client, dirPath, row.ID.String()) {
-			continue
-		}
-		if err := client.DeleteFile(ctx, dirPath, true); err != nil {
-			return fmt.Errorf("delete plugin skill %q: %w", name, err)
-		}
-	}
-	return nil
-}
-
-type skillFileClient interface {
-	ReadRaw(ctx context.Context, path string) (io.ReadCloser, error)
-}
-
-func canDeletePluginSkill(ctx context.Context, client skillFileClient, dirPath, installationID string) bool {
-	rc, err := client.ReadRaw(ctx, path.Join(dirPath, ".memoh-plugin-owner.json"))
-	if err != nil {
-		return false
-	}
-	defer func() { _ = rc.Close() }()
-	var owner struct {
-		InstallationID string `json:"installation_id"`
-	}
-	if err := json.NewDecoder(rc).Decode(&owner); err != nil {
-		return false
-	}
-	return strings.TrimSpace(owner.InstallationID) == installationID
-}
-
-func pluginSkillRaw(skill SkillEntry, name string, row sqlc.BotPluginInstallation) string {
-	metadata := normalizeMetadataMap(skill.Metadata)
-	metadata["managed_by_plugin"] = map[string]any{
-		"installation_id": row.ID.String(),
-		"plugin_id":       row.PluginID,
-		"plugin_name":     row.PluginName,
-	}
-	frontmatter := map[string]any{
-		"name":        name,
-		"description": strings.TrimSpace(skill.Description),
-		"metadata":    metadata,
-	}
-	payload, _ := encodeYAML(frontmatter)
-	body := strings.TrimSpace(skill.Content)
-	if body == "" {
-		body = "# " + name
-	}
-	return "---\n" + strings.TrimSpace(string(payload)) + "\n---\n\n" + body + "\n"
-}
-
-func pluginSkillOwner(row sqlc.BotPluginInstallation, manifest Manifest, skill SkillEntry, name string) map[string]any {
-	return map[string]any{
-		"installation_id": row.ID.String(),
-		"plugin_id":       manifest.ID,
-		"skill_id":        skill.ID,
-		"skill_name":      name,
-	}
-}
-
-func normalizeMetadataMap(value map[string]any) map[string]any {
-	if value == nil {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(value))
-	for key, item := range value {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out[key] = item
-	}
-	return out
-}
-
 func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]string) string {
 	status := StatusReady
 	for _, resource := range manifest.MCPs {
@@ -701,10 +538,9 @@ func normalizeManifest(manifest Manifest) Manifest {
 		}
 	}
 	for i := range manifest.Skills {
-		manifest.Skills[i].Key = sanitizeID(manifest.Skills[i].Key)
-		if manifest.Skills[i].Key == "" {
-			manifest.Skills[i].Key = sanitizeID(manifest.Skills[i].Name)
-		}
+		manifest.Skills[i].RegistryID = strings.TrimSpace(manifest.Skills[i].RegistryID)
+		manifest.Skills[i].PackageID = strings.TrimSpace(manifest.Skills[i].PackageID)
+		manifest.Skills[i].SkillID = strings.TrimSpace(manifest.Skills[i].SkillID)
 	}
 	return manifest
 }
@@ -947,13 +783,6 @@ func encodeJSON(value any) ([]byte, error) {
 	return json.Marshal(value)
 }
 
-func encodeYAML(value any) ([]byte, error) {
-	if value == nil {
-		value = map[string]any{}
-	}
-	return yaml.Marshal(value)
-}
-
 func mustJSON(value any) []byte {
 	payload, _ := encodeJSON(value)
 	return payload
@@ -1038,5 +867,27 @@ func authorizationServerFromEndpoint(endpoint string) string {
 
 var (
 	idPattern          = regexp.MustCompile(`[^a-z0-9_-]+`)
+	registryIDPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	templateVarPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 )
+
+func SkillReferenceIdentity(reference SkillReference) string {
+	return reference.RegistryID + "/" + reference.PackageID + "/" + reference.SkillID
+}
+
+func validateSkillReferences(references []SkillReference) error {
+	seen := make(map[string]struct{}, len(references))
+	for _, reference := range references {
+		identity := SkillReferenceIdentity(reference)
+		if !registryIDPattern.MatchString(reference.RegistryID) ||
+			!registryIDPattern.MatchString(reference.PackageID) ||
+			!registryIDPattern.MatchString(reference.SkillID) {
+			return fmt.Errorf("plugin Skill reference %q is invalid", identity)
+		}
+		if _, ok := seen[identity]; ok {
+			return fmt.Errorf("plugin Skill reference %q is duplicated", identity)
+		}
+		seen[identity] = struct{}{}
+	}
+	return nil
+}

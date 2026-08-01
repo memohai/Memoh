@@ -60,19 +60,10 @@ type MCPResource struct {
 	Capabilities []string    `json:"capabilities,omitempty"`
 }
 
-type SkillResource struct {
-	Key  string `json:"key"`
-	Name string `json:"name,omitempty"`
-	Path string `json:"path,omitempty"`
-}
-
-type SkillEntry struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Content     string         `json:"content,omitempty"`
-	Files       []string       `json:"files,omitempty"`
+type SkillReference struct {
+	RegistryID string `json:"registry_id"`
+	PackageID  string `json:"package_id"`
+	SkillID    string `json:"skill_id"`
 }
 
 type InstallCommands []string
@@ -121,8 +112,7 @@ type Manifest struct {
 	Variables        []ConfigVar       `json:"variables,omitempty"`
 	AuthRequirements []AuthRequirement `json:"auth_requirements,omitempty"`
 	MCPs             []MCPResource     `json:"mcps,omitempty"`
-	Skills           []SkillResource   `json:"skills,omitempty"`
-	BundledSkills    []SkillEntry      `json:"bundled_skills,omitempty"`
+	Skills           []SkillReference  `json:"skills,omitempty"`
 }
 
 type InstallRequest struct {

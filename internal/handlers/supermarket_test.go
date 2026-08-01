@@ -18,7 +18,6 @@ func TestPluginBundleArchiveEntryAllowsTrustedBundleFiles(t *testing.T) {
 		wantKind     string
 		wantRelative string
 	}{
-		{name: "github/skills/review/SKILL.md", wantKind: pluginArchiveKindSkills, wantRelative: "review/SKILL.md"},
 		{name: "github/hooks.json", wantKind: pluginArchiveKindHooks, wantRelative: "hooks.json"},
 		{name: "github/scripts/hook.py", wantKind: pluginArchiveKindScripts, wantRelative: "hook.py"},
 	}
@@ -34,12 +33,16 @@ func TestPluginBundleArchiveEntryAllowsTrustedBundleFiles(t *testing.T) {
 	}
 }
 
+func TestPluginBundleArchiveEntryRejectsEmbeddedSkillContent(t *testing.T) {
+	if _, ok, err := pluginBundleArchiveEntry("github", "github", "github/skills/review/SKILL.md"); err == nil || ok {
+		t.Fatalf("embedded Skill entry = ok:%v err:%v, want explicit rejection", ok, err)
+	}
+}
+
 func TestPluginBundleArchiveEntryRejectsUnsafeNames(t *testing.T) {
 	for _, name := range []string{
 		"",
 		"github/plugin.yaml",
-		"github/skills",
-		"github/skills/",
 		"github/../escape",
 		"github/skills/../escape",
 		"github/scripts/../escape",
@@ -58,25 +61,17 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plugin root: %v", err)
 	}
-	skillsRoot, err := skillset.PluginSkillsDirForID("github")
-	if err != nil {
-		t.Fatalf("plugin skills root: %v", err)
-	}
 	archive := tarArchive(t, map[string]string{
-		"github/plugin.yaml":                  "id: github",
-		"github/hooks.json":                   `{"version":1,"hooks":[]}`,
-		"github/scripts/hook.py":              "print('ok')",
-		"github/skills/review/SKILL.md":       "# Review",
-		"github/skills/review/assets/info.md": "asset",
-		"github/skills/../escape":             "escape",
-		"github/scripts/../escape":            "escape",
-		"github/../outside":                   "outside",
-		"/data/outside":                       "absolute",
+		"github/plugin.yaml":       "id: github",
+		"github/hooks.json":        `{"version":1,"hooks":[]}`,
+		"github/scripts/hook.py":   "print('ok')",
+		"github/scripts/../escape": "escape",
+		"github/../outside":        "outside",
+		"/data/outside":            "absolute",
 	})
 	writer := &pluginBundleTestWriter{files: map[string]string{
 		pluginRoot + "/hooks.json":          `{"version":1,"hooks":[{"name":"stale"}]}`,
 		pluginRoot + "/scripts/stale.py":    "print('stale')",
-		skillsRoot + "/stale/SKILL.md":      "# Stale",
 		"/data/.memoh/plugins/other/keep":   "keep",
 		"/data/.memoh/plugins/github2/keep": "keep",
 	}}
@@ -85,8 +80,8 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("extractPluginBundleArchive returned error: %v", err)
 	}
-	if result.Skills.FilesWritten != 2 || result.Hooks.FilesWritten != 1 || result.Scripts.FilesWritten != 1 {
-		t.Fatalf("install result = %+v, want 2 skills, 1 hook, 1 script", result)
+	if result.Hooks.FilesWritten != 1 || result.Scripts.FilesWritten != 1 {
+		t.Fatalf("install result = %+v, want 1 hook and 1 script", result)
 	}
 	if len(writer.deletes) != 1 {
 		t.Fatalf("deletes = %+v, want one plugin root delete", writer.deletes)
@@ -95,10 +90,8 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 		t.Fatalf("delete = %+v, want recursive delete of %s", writer.deletes[0], pluginRoot)
 	}
 	wantFiles := map[string]string{
-		pluginRoot + "/hooks.json":            `{"version":1,"hooks":[]}`,
-		pluginRoot + "/scripts/hook.py":       "print('ok')",
-		skillsRoot + "/review/SKILL.md":       "# Review",
-		skillsRoot + "/review/assets/info.md": "asset",
+		pluginRoot + "/hooks.json":      `{"version":1,"hooks":[]}`,
+		pluginRoot + "/scripts/hook.py": "print('ok')",
 	}
 	for path, want := range wantFiles {
 		if got := writer.files[path]; got != want {
@@ -107,7 +100,6 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 	}
 	for _, stalePath := range []string{
 		pluginRoot + "/scripts/stale.py",
-		skillsRoot + "/stale/SKILL.md",
 	} {
 		if _, ok := writer.files[stalePath]; ok {
 			t.Fatalf("stale file was not cleared before extraction: %s", stalePath)
@@ -130,9 +122,8 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 
 func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing.T) {
 	archive := tarArchive(t, map[string]string{
-		"GitHub.Plugin/skills/review/SKILL.md": "# Review",
-		"GitHub.Plugin/hooks.json":             `{"version":1,"hooks":[]}`,
-		"GitHub.Plugin/scripts/hook.py":        "print('ok')",
+		"GitHub.Plugin/hooks.json":      `{"version":1,"hooks":[]}`,
+		"GitHub.Plugin/scripts/hook.py": "print('ok')",
 	})
 	writer := &pluginBundleTestWriter{files: map[string]string{}}
 
@@ -140,20 +131,13 @@ func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing
 	if err != nil {
 		t.Fatalf("extractPluginBundleArchive returned error: %v", err)
 	}
-	if result.Skills.FilesWritten != 1 || result.Hooks.FilesWritten != 1 || result.Scripts.FilesWritten != 1 {
-		t.Fatalf("install result = %+v, want 1 file for each bundle kind", result)
+	if result.Hooks.FilesWritten != 1 || result.Scripts.FilesWritten != 1 {
+		t.Fatalf("install result = %+v, want one hook and one script", result)
 	}
 
 	pluginRoot, err := skillset.PluginDirForID("github_plugin")
 	if err != nil {
 		t.Fatalf("plugin root: %v", err)
-	}
-	skillsRoot, err := skillset.PluginSkillsDirForID("github_plugin")
-	if err != nil {
-		t.Fatalf("plugin skills root: %v", err)
-	}
-	if got := writer.files[skillsRoot+"/review/SKILL.md"]; got != "# Review" {
-		t.Fatalf("target plugin file = %q, want # Review", got)
 	}
 	if got := writer.files[pluginRoot+"/hooks.json"]; got != `{"version":1,"hooks":[]}` {
 		t.Fatalf("target hooks file = %q, want hooks config", got)

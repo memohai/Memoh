@@ -59,7 +59,6 @@ type pluginAssetInstallResult struct {
 }
 
 type pluginBundleInstallResult struct {
-	Skills  pluginAssetInstallResult
 	Hooks   pluginAssetInstallResult
 	Scripts pluginAssetInstallResult
 }
@@ -450,7 +449,6 @@ func runPluginInstallCommands(ctx context.Context, executor pluginInstallScriptE
 }
 
 const (
-	pluginArchiveKindSkills  = "skills"
 	pluginArchiveKindHooks   = "hooks"
 	pluginArchiveKindScripts = "scripts"
 )
@@ -515,8 +513,6 @@ func extractPluginBundleArchive(ctx context.Context, client pluginBundleWriter, 
 			return result, fmt.Errorf("write file %s failed: %w", entry.relativePath, err)
 		}
 		switch entry.kind {
-		case pluginArchiveKindSkills:
-			result.Skills.FilesWritten++
 		case pluginArchiveKindHooks:
 			result.Hooks.FilesWritten++
 		case pluginArchiveKindScripts:
@@ -561,14 +557,7 @@ func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (
 		}
 		return pluginArchiveEntry{kind: pluginArchiveKindHooks, root: root, relativePath: "hooks.json"}, true, nil
 	case "skills":
-		if len(segments) < 2 {
-			return pluginArchiveEntry{}, false, nil
-		}
-		root, err := skillset.PluginSkillsDirForID(targetPluginID)
-		if err != nil {
-			return pluginArchiveEntry{}, false, err
-		}
-		return pluginArchiveEntry{kind: pluginArchiveKindSkills, root: root, relativePath: strings.Join(segments[1:], "/")}, true, nil
+		return pluginArchiveEntry{}, false, errors.New("plugin bundle must reference Registry Skills instead of embedding skills/**")
 	case "scripts":
 		if len(segments) < 2 {
 			return pluginArchiveEntry{}, false, nil
@@ -584,7 +573,6 @@ func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (
 
 func newPluginBundleInstallResult() pluginBundleInstallResult {
 	return pluginBundleInstallResult{
-		Skills:  pluginAssetInstallResult{OK: true},
 		Hooks:   pluginAssetInstallResult{OK: true},
 		Scripts: pluginAssetInstallResult{OK: true},
 	}
@@ -601,9 +589,8 @@ func withPluginBundleInstallMetadata(installation pluginspkg.Installation, resul
 	}
 	if err != nil {
 		failed := pluginAssetInstallResult{OK: false, Error: err.Error()}
-		result = pluginBundleInstallResult{Skills: failed, Hooks: failed, Scripts: failed}
+		result = pluginBundleInstallResult{Hooks: failed, Scripts: failed}
 	}
-	metadata["skills_install"] = result.Skills
 	metadata["hooks_install"] = result.Hooks
 	metadata["scripts_install"] = result.Scripts
 	installation.Metadata = metadata
