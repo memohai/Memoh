@@ -3251,7 +3251,8 @@ definitions:
       source_path:
         description: |-
           SourcePath is the existing SKILL.md being edited when saving a single skill.
-          Empty means create (or overwrite by frontmatter name under /data/skills/user/personal/<name>/).
+          Empty means create (or overwrite by frontmatter name under
+          /data/skills/user/personal/<name>/).
         type: string
     type: object
   handlers.SnapshotInfo:
@@ -4377,10 +4378,6 @@ definitions:
         type: array
       author:
         $ref: '#/definitions/plugins.Author'
-      bundled_skills:
-        items:
-          $ref: '#/definitions/plugins.SkillEntry'
-        type: array
       capabilities:
         items:
           type: string
@@ -4407,7 +4404,7 @@ definitions:
         type: string
       skills:
         items:
-          $ref: '#/definitions/plugins.SkillResource'
+          $ref: '#/definitions/plugins.SkillReference'
         type: array
       tags:
         items:
@@ -4445,31 +4442,13 @@ definitions:
       updated_at:
         type: string
     type: object
-  plugins.SkillEntry:
+  plugins.SkillReference:
     properties:
-      content:
+      package_id:
         type: string
-      description:
+      registry_id:
         type: string
-      files:
-        items:
-          type: string
-        type: array
-      id:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-    type: object
-  plugins.SkillResource:
-    properties:
-      key:
-        type: string
-      name:
-        type: string
-      path:
+      skill_id:
         type: string
     type: object
   providers.CountResponse:

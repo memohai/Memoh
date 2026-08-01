@@ -33,13 +33,6 @@
             >
               {{ plugin.mcps.length }} MCPs
             </Badge>
-            <Badge
-              v-if="pluginSkills.length"
-              variant="outline"
-              size="sm"
-            >
-              {{ pluginSkills.length }} Skills
-            </Badge>
           </div>
           <p class="text-caption text-muted-foreground line-clamp-3">
             {{ plugin.description }}
@@ -63,9 +56,9 @@
                 </p>
                 <p
                   class="truncate text-[10px] text-muted-foreground"
-                  :title="skillDescription(skill)"
+                  :title="skillSource(skill)"
                 >
-                  {{ skillDescription(skill) }}
+                  {{ skillSource(skill) }}
                 </p>
               </div>
             </div>
@@ -135,8 +128,7 @@ import {
   type PluginsConfigVar,
   type PluginsInstallation,
   type PluginsManifest,
-  type PluginsSkillEntry,
-  type PluginsSkillResource,
+  type PluginsSkillReference,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import { FieldStack } from '@felinic/ui'
@@ -162,12 +154,7 @@ const installing = ref(false)
 const variableValues = reactive<Record<string, string>>({})
 
 const variables = computed<PluginsConfigVar[]>(() => props.plugin?.variables ?? [])
-type PluginSkill = PluginsSkillEntry | PluginsSkillResource
-
-const pluginSkills = computed<PluginSkill[]>(() => [
-  ...(props.plugin?.bundled_skills ?? []),
-  ...(props.plugin?.skills ?? []),
-])
+const pluginSkills = computed<PluginsSkillReference[]>(() => props.plugin?.skills ?? [])
 
 const requiresManagedOAuth = computed(() => {
   return (props.plugin?.auth_requirements ?? []).some(item => item.type === 'managed_oauth')
@@ -177,23 +164,17 @@ const canInstall = computed(() => {
   return variables.value.every(item => !item.required || !!variableValues[item.key || '']?.trim())
 })
 
-function skillKey(skill: PluginSkill): string {
-  if ('id' in skill && skill.id) return skill.id
-  if ('key' in skill && skill.key) return skill.key
-  return skillName(skill)
+function skillKey(skill: PluginsSkillReference): string {
+  return `${skill.registry_id || ''}/${skill.package_id || ''}/${skill.skill_id || ''}`
 }
 
-function skillName(skill: PluginSkill): string {
-  if ('name' in skill && skill.name) return skill.name
-  if ('id' in skill && skill.id) return skill.id
-  if ('key' in skill && skill.key) return skill.key
-  return t('supermarket.unnamedSkill')
+function skillName(skill: PluginsSkillReference): string {
+  return skill.skill_id || t('supermarket.unnamedSkill')
 }
 
-function skillDescription(skill: PluginSkill): string {
-  if ('description' in skill && skill.description) return skill.description
-  if ('path' in skill && skill.path) return skill.path
-  return t('supermarket.noDescription')
+function skillSource(skill: PluginsSkillReference): string {
+  const source = [skill.registry_id, skill.package_id].filter(Boolean).join(' / ')
+  return source || t('supermarket.noDescription')
 }
 
 watch(() => props.open, (open) => {

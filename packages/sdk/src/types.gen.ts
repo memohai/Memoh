@@ -1928,7 +1928,8 @@ export type HandlersSkillsUpsertRequest = {
     skills?: Array<string>;
     /**
      * SourcePath is the existing SKILL.md being edited when saving a single skill.
-     * Empty means create (or overwrite by frontmatter name under /data/skills/user/personal/<name>/).
+     * Empty means create (or overwrite by frontmatter name under
+     * /data/skills/user/personal/<name>/).
      */
     source_path?: string;
 };
@@ -2594,7 +2595,6 @@ export type PluginsMcpResource = {
 export type PluginsManifest = {
     auth_requirements?: Array<PluginsAuthRequirement>;
     author?: PluginsAuthor;
-    bundled_skills?: Array<PluginsSkillEntry>;
     capabilities?: Array<string>;
     description?: string;
     homepage?: string;
@@ -2604,7 +2604,7 @@ export type PluginsManifest = {
     mcps?: Array<PluginsMcpResource>;
     name?: string;
     schema_version?: string;
-    skills?: Array<PluginsSkillResource>;
+    skills?: Array<PluginsSkillReference>;
     tags?: Array<string>;
     variables?: Array<PluginsConfigVar>;
     version?: string;
@@ -2627,21 +2627,10 @@ export type PluginsResource = {
     updated_at?: string;
 };
 
-export type PluginsSkillEntry = {
-    content?: string;
-    description?: string;
-    files?: Array<string>;
-    id?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-};
-
-export type PluginsSkillResource = {
-    key?: string;
-    name?: string;
-    path?: string;
+export type PluginsSkillReference = {
+    package_id?: string;
+    registry_id?: string;
+    skill_id?: string;
 };
 
 export type ProvidersCountResponse = {
