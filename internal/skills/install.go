@@ -55,7 +55,10 @@ func installArchive(
 		}
 		includeDirectOwner = true
 	} else {
-		directOwner, includeDirectOwner = directOwnerBytes(ctx, client, registryID, packageID, skillID)
+		directOwner, includeDirectOwner, err = directOwnerBytes(ctx, client, registryID, packageID, skillID)
+		if err != nil {
+			return fmt.Errorf("preserve direct Skill owner: %w", err)
+		}
 	}
 	packageDir, err := SkillPackageDirForIDs(registryID, packageID)
 	if err != nil {

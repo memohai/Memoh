@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -21,6 +22,29 @@ func TestDirectOwnerLifecycle(t *testing.T) {
 	}
 	if HasDirectOwner(ctx, client, "openai", "documents", "pdf") {
 		t.Fatal("direct owner marker remained after removal")
+	}
+}
+
+func TestReadDirectOwnerFailsClosedOnReadAndValidationErrors(t *testing.T) {
+	client := newFakeClient()
+	ctx := context.Background()
+	markerPath, err := DirectOwnerPathForIDs("openai", "documents", "pdf")
+	if err != nil {
+		t.Fatalf("DirectOwnerPathForIDs() error = %v", err)
+	}
+
+	client.readErrors[markerPath] = errors.New("injected read failure")
+	if _, ok, err := ReadDirectOwner(ctx, client, "openai", "documents", "pdf"); err == nil || ok {
+		t.Fatalf("ReadDirectOwner(read failure) = ok:%v err:%v", ok, err)
+	}
+	delete(client.readErrors, markerPath)
+	client.files[markerPath] = "not json"
+	if _, ok, err := ReadDirectOwner(ctx, client, "openai", "documents", "pdf"); err == nil || ok {
+		t.Fatalf("ReadDirectOwner(corrupt marker) = ok:%v err:%v", ok, err)
+	}
+	delete(client.files, markerPath)
+	if _, ok, err := ReadDirectOwner(ctx, client, "openai", "documents", "pdf"); err != nil || ok {
+		t.Fatalf("ReadDirectOwner(missing marker) = ok:%v err:%v", ok, err)
 	}
 }
 

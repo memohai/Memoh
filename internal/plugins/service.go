@@ -611,7 +611,16 @@ func (s *Service) garbageCollectRegistrySkills(ctx context.Context, botID string
 		return
 	}
 	for _, sourcePath := range sourcePaths {
-		if skillset.HasDirectOwnerForSourcePath(ctx, client, sourcePath) {
+		_, hasDirectOwner, ownerErr := skillset.DirectOwnerForSourcePath(ctx, client, sourcePath)
+		if ownerErr != nil {
+			s.logger.Warn(
+				"skip Registry Skill garbage collection because ownership could not be read",
+				slog.String("source_path", sourcePath),
+				slog.Any("error", ownerErr),
+			)
+			continue
+		}
+		if hasDirectOwner {
 			continue
 		}
 		if OwnsRegistrySkill(installations, sourcePath) {

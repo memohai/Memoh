@@ -717,7 +717,6 @@ func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader
 			}
 			archive.skillReferences = references
 			hasManifest = true
-			continue
 		}
 		archive.files = append(archive.files, pluginBundleArchiveFile{entry: entry, content: content})
 	}

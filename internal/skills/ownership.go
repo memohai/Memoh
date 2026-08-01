@@ -78,13 +78,13 @@ func HasDirectOwner(
 	client directOwnerReader,
 	registryID, packageID, skillID string,
 ) bool {
-	_, ok := readDirectOwner(ctx, client, registryID, packageID, skillID)
+	_, ok, _ := ReadDirectOwner(ctx, client, registryID, packageID, skillID)
 	return ok
 }
 
 func HasDirectOwnerForSourcePath(ctx context.Context, client directOwnerReader, sourcePath string) bool {
-	registryID, packageID, skillID, ok := RegistrySkillIDs(sourcePath)
-	return ok && HasDirectOwner(ctx, client, registryID, packageID, skillID)
+	_, ok, _ := DirectOwnerForSourcePath(ctx, client, sourcePath)
+	return ok
 }
 
 func RemoveDirectOwner(
@@ -105,59 +105,87 @@ func RemoveDirectOwner(
 	return nil
 }
 
-func readDirectOwner(
+// ReadDirectOwner returns a validated direct-install owner marker. Missing
+// markers are not errors; unreadable or malformed markers fail closed.
+func ReadDirectOwner(
 	ctx context.Context,
 	client directOwnerReader,
 	registryID, packageID, skillID string,
-) (DirectOwner, bool) {
+) (DirectOwner, bool, error) {
 	if client == nil {
-		return DirectOwner{}, false
+		return DirectOwner{}, false, errors.New("workspace is not reachable")
 	}
 	registryID, packageID, skillID, err := normalizeRegistrySkillIdentity(registryID, packageID, skillID)
 	if err != nil {
-		return DirectOwner{}, false
+		return DirectOwner{}, false, errors.New("registry Skill identity is invalid")
 	}
 	markerPath, err := DirectOwnerPathForIDs(registryID, packageID, skillID)
 	if err != nil {
-		return DirectOwner{}, false
+		return DirectOwner{}, false, errors.New("registry Skill identity is invalid")
 	}
 	rc, err := client.ReadRaw(ctx, markerPath)
 	if err != nil {
-		return DirectOwner{}, false
+		if errors.Is(err, bridge.ErrNotFound) || errors.Is(err, io.EOF) {
+			return DirectOwner{}, false, nil
+		}
+		return DirectOwner{}, false, fmt.Errorf("read direct Skill owner: %w", err)
 	}
 	defer func() { _ = rc.Close() }()
 	payload, err := io.ReadAll(io.LimitReader(rc, maxDirectOwnerFileBytes+1))
-	if err != nil || len(payload) > maxDirectOwnerFileBytes {
-		return DirectOwner{}, false
+	if err != nil {
+		return DirectOwner{}, false, fmt.Errorf("read direct Skill owner: %w", err)
+	}
+	if len(payload) > maxDirectOwnerFileBytes {
+		return DirectOwner{}, false, errors.New("direct Skill owner exceeds the size limit")
 	}
 	var owner DirectOwner
 	if err := json.Unmarshal(payload, &owner); err != nil {
-		return DirectOwner{}, false
+		return DirectOwner{}, false, fmt.Errorf("decode direct Skill owner: %w", err)
 	}
 	if owner.Version != directOwnerSchemaVersion ||
 		owner.RegistryID != registryID ||
 		owner.PackageID != packageID ||
 		owner.SkillID != skillID {
-		return DirectOwner{}, false
+		return DirectOwner{}, false, errors.New("direct Skill owner identity is invalid")
 	}
 	digest, err := hex.DecodeString(owner.ArtifactDigest)
 	if err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != owner.ArtifactDigest {
-		return DirectOwner{}, false
+		return DirectOwner{}, false, errors.New("direct Skill owner Artifact digest is invalid")
 	}
-	return owner, true
+	return owner, true, nil
+}
+
+// DirectOwnerForSourcePath reads direct ownership for a canonical Registry
+// Skill source path.
+func DirectOwnerForSourcePath(
+	ctx context.Context,
+	client directOwnerReader,
+	sourcePath string,
+) (DirectOwner, bool, error) {
+	registryID, packageID, skillID, ok := RegistrySkillIDs(sourcePath)
+	if !ok {
+		return DirectOwner{}, false, nil
+	}
+	return ReadDirectOwner(ctx, client, registryID, packageID, skillID)
 }
 
 func directOwnerBytes(
 	ctx context.Context,
 	client directOwnerReader,
 	registryID, packageID, skillID string,
-) ([]byte, bool) {
-	owner, ok := readDirectOwner(ctx, client, registryID, packageID, skillID)
+) ([]byte, bool, error) {
+	owner, ok, err := ReadDirectOwner(ctx, client, registryID, packageID, skillID)
+	if err != nil {
+		return nil, false, err
+	}
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
 	payload, err := directOwnerPayload(owner.RegistryID, owner.PackageID, owner.SkillID, owner.ArtifactDigest)
-	return payload, err == nil
+	if err != nil {
+		return nil, false, err
+	}
+	return payload, true, nil
 }
 
 func directOwnerPayload(registryID, packageID, skillID, artifactDigest string) ([]byte, error) {

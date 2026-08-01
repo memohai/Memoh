@@ -269,6 +269,7 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 		t.Fatalf("second rename = %+v, want staged bundle publication", writer.renames[1])
 	}
 	wantFiles := map[string]string{
+		pluginRoot + "/plugin.yaml":     "id: github",
 		pluginRoot + "/hooks.json":      `{"version":1,"hooks":[]}`,
 		pluginRoot + "/scripts/hook.py": "print('ok')",
 	}
@@ -293,7 +294,7 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 		}
 	}
 	for filePath := range writer.files {
-		if strings.Contains(filePath, "plugin.yaml") || strings.Contains(filePath, "outside") || strings.Contains(filePath, "escape") {
+		if strings.Contains(filePath, "outside") || strings.Contains(filePath, "escape") {
 			t.Fatalf("non-runtime bundle file was written: %s", filePath)
 		}
 	}
@@ -321,6 +322,9 @@ func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing
 	}
 	if got := writer.files[pluginRoot+"/hooks.json"]; got != `{"version":1,"hooks":[]}` {
 		t.Fatalf("target hooks file = %q, want hooks config", got)
+	}
+	if got := writer.files[pluginRoot+"/plugin.yaml"]; got != "id: github_plugin" {
+		t.Fatalf("target plugin manifest = %q, want normalized target manifest", got)
 	}
 	if got := writer.files[pluginRoot+"/scripts/hook.py"]; got != "print('ok')" {
 		t.Fatalf("target script file = %q, want script", got)
