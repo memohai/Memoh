@@ -38,6 +38,7 @@ func TestReadArchiveRejectsUnsafeEntries(t *testing.T) {
 		"duplicate":       {{name: "SKILL.md", content: validArchiveManifest}, {name: "SKILL.md", content: validArchiveManifest}},
 		"file conflict":   {{name: "SKILL.md", content: validArchiveManifest}, {name: "scripts", content: "file"}, {name: "scripts/run.sh", content: "bad"}},
 		"nested manifest": {{name: "other/SKILL.md", content: validArchiveManifest}},
+		"owner marker":    {{name: "SKILL.md", content: validArchiveManifest}, {name: DirectOwnerFileName, content: `{}`}},
 	}
 	for name, entries := range tests {
 		t.Run(name, func(t *testing.T) {

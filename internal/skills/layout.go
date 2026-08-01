@@ -45,6 +45,23 @@ func SkillPackageDirForIDs(namespaceID, packageID string) (string, error) {
 	return dirPath, nil
 }
 
+// RegistrySkillIDs returns the Registry identity encoded by one canonical
+// /data/skills/<registry>/<package>/<skill>/SKILL.md path.
+func RegistrySkillIDs(skillMDPath string) (registryID, packageID, skillID string, ok bool) {
+	registryID, packageID, skillID, ok = skillPathIDs(skillMDPath)
+	if !ok || registryID == UserSkillNamespace {
+		return "", "", "", false
+	}
+	return registryID, packageID, skillID, true
+}
+
+// RegistrySkillDirIDs returns the Registry identity encoded by one canonical
+// /data/skills/<registry>/<package>/<skill> directory.
+func RegistrySkillDirIDs(skillDir string) (registryID, packageID, skillID string, ok bool) {
+	skillDir = path.Clean(strings.TrimSpace(skillDir))
+	return RegistrySkillIDs(path.Join(skillDir, "SKILL.md"))
+}
+
 func skillNamespaceDirForID(namespaceID string) (string, error) {
 	namespaceID = strings.TrimSpace(namespaceID)
 	if !IsValidName(namespaceID) {

@@ -100,3 +100,30 @@ func TestValidateSkillReferencesRequiresNamespacedUniqueIdentity(t *testing.T) {
 		t.Fatal("validateSkillReferences() accepted an invalid Registry ID")
 	}
 }
+
+func TestOwnsRegistrySkillKeepsSharedAndDisabledPluginReferences(t *testing.T) {
+	sourcePath := "/data/skills/memoh/notion/meeting/SKILL.md"
+	resource := Resource{Type: "skill", ResourceID: sourcePath, Status: "installed"}
+
+	for name, installation := range map[string]Installation{
+		"ready":      {Status: StatusReady, Enabled: true, Resources: []Resource{resource}},
+		"disabled":   {Status: StatusDisabled, Enabled: false, Resources: []Resource{resource}},
+		"needs auth": {Status: StatusNeedsAuth, Enabled: false, Resources: []Resource{resource}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !OwnsRegistrySkill([]Installation{installation}, sourcePath) {
+				t.Fatal("active installation did not retain Registry Skill ownership")
+			}
+		})
+	}
+
+	if OwnsRegistrySkill([]Installation{{Status: StatusUninstalled, Resources: []Resource{resource}}}, sourcePath) {
+		t.Fatal("uninstalled Plugin retained Registry Skill ownership")
+	}
+	if OwnsRegistrySkill([]Installation{{Status: StatusReady, Resources: []Resource{resource}}}, "/data/skills/memoh/notion/other/SKILL.md") {
+		t.Fatal("Plugin owned an unrelated Registry Skill")
+	}
+	if OwnsRegistrySkill([]Installation{{Status: StatusReady, Resources: []Resource{resource}}}, "/data/skills/user/personal/meeting/SKILL.md") {
+		t.Fatal("Plugin owned a user-authored Skill")
+	}
+}

@@ -69,6 +69,9 @@ func ReadArchive(content []byte) (Archive, error) {
 		if name == "" || path.Clean(name) != name {
 			return Archive{}, fmt.Errorf("skill artifact contains non-canonical path %q", header.Name)
 		}
+		if name == DirectOwnerFileName {
+			return Archive{}, fmt.Errorf("skill artifact contains reserved path %q", header.Name)
+		}
 		if containsUnsafePathPart(strings.Split(name, "/")) {
 			return Archive{}, fmt.Errorf("skill artifact contains unsafe path %q", header.Name)
 		}

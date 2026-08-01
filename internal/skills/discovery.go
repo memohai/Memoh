@@ -31,17 +31,25 @@ func appendDiscoveryRoots(roots []Root, extra ...Root) []Root {
 }
 
 // orderedDiscoveryRoots defines the source precedence consumed by resolve():
-// user > built-in > legacy > Plugin > compat > Registry.
-func orderedDiscoveryRoots(ctx context.Context, client fileClient, rawCompatRoots, rawPluginRoots []string) []Root {
-	userRoots, registryRoots := discoverSkillPackageRoots(ctx, client)
-	roots := appendDiscoveryRoots(userRoots, DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots)...)
-	return appendDiscoveryRoots(roots, registryRoots...)
+// user > built-in > legacy > compat > Registry.
+func orderedDiscoveryRoots(ctx context.Context, client fileClient, rawCompatRoots, rawRegistrySkillRoots []string) []Root {
+	userRoots, directRegistryRoots := discoverOwnedSkillRoots(ctx, client)
+	roots := appendDiscoveryRoots(userRoots, DiscoveryRoots(rawCompatRoots)...)
+	roots = appendDiscoveryRoots(roots, directRegistryRoots...)
+	for _, registryRoot := range normalizeRegistrySkillRoots(rawRegistrySkillRoots) {
+		roots = appendDiscoveryRoots(roots, Root{
+			Path:    registryRoot,
+			Kind:    SourceKindRegistry,
+			Managed: true,
+		})
+	}
+	return roots
 }
 
-// discoverSkillPackageRoots walks the canonical namespace/package layout and
-// separates user-authored roots from Registry roots so callers can preserve
-// the source-precedence policy around built-in and Plugin Skills.
-func discoverSkillPackageRoots(ctx context.Context, client fileClient) (userRoots, registryRoots []Root) {
+// discoverOwnedSkillRoots walks the canonical namespace/package/Skill layout.
+// User packages are always owned; Registry Skills require a valid direct-owner
+// marker unless an enabled Plugin supplies their exact path separately.
+func discoverOwnedSkillRoots(ctx context.Context, client fileClient) (userRoots, directRegistryRoots []Root) {
 	if client == nil {
 		return nil, nil
 	}
@@ -53,7 +61,7 @@ func discoverSkillPackageRoots(ctx context.Context, client fileClient) (userRoot
 		return strings.Compare(a.GetPath(), b.GetPath())
 	})
 	userRoots = make([]Root, 0)
-	registryRoots = make([]Root, 0)
+	directRegistryRoots = make([]Root, 0)
 	for _, namespaceEntry := range namespaces {
 		if !namespaceEntry.GetIsDir() {
 			continue
@@ -89,8 +97,33 @@ func discoverSkillPackageRoots(ctx context.Context, client fileClient) (userRoot
 				userRoots = append(userRoots, Root{Path: packagePath, Kind: SourceKindManaged, Managed: true})
 				continue
 			}
-			registryRoots = append(registryRoots, Root{Path: packagePath, Kind: SourceKindRegistry, Managed: true})
+			skills, err := client.ListDirAll(ctx, packagePath, false)
+			if err != nil {
+				continue
+			}
+			slices.SortFunc(skills, func(a, b *pb.FileEntry) int {
+				return strings.Compare(a.GetPath(), b.GetPath())
+			})
+			for _, skillEntry := range skills {
+				if !skillEntry.GetIsDir() {
+					continue
+				}
+				skillID := path.Base(skillEntry.GetPath())
+				if !IsValidName(skillID) || !HasDirectOwner(ctx, client, namespaceID, packageID, skillID) {
+					continue
+				}
+				skillPath, err := SkillDirForIDs(namespaceID, packageID, skillID)
+				if err != nil {
+					continue
+				}
+				directRegistryRoots = append(directRegistryRoots, Root{
+					Path:        skillPath,
+					Kind:        SourceKindRegistry,
+					Managed:     true,
+					DirectOwned: true,
+				})
+			}
 		}
 	}
-	return userRoots, registryRoots
+	return userRoots, directRegistryRoots
 }

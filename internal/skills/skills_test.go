@@ -324,7 +324,6 @@ func TestPluginPathsForIDRejectEscapingIDs(t *testing.T) {
 	for _, id := range []string{".", "..", ".plugin", "alpha..beta", "alpha/beta"} {
 		for name, fn := range map[string]func(string) (string, error){
 			"PluginDirForID":        PluginDirForID,
-			"PluginSkillsDirForID":  PluginSkillsDirForID,
 			"PluginHooksPathForID":  PluginHooksPathForID,
 			"PluginScriptsDirForID": PluginScriptsDirForID,
 		} {
@@ -340,23 +339,6 @@ func TestPluginPathsForIDRejectEscapingIDs(t *testing.T) {
 	}
 	if gotRoot != pathJoin(PluginDirPath, "github") {
 		t.Fatalf("PluginDirForID(valid) = %q, want %q", gotRoot, pathJoin(PluginDirPath, "github"))
-	}
-	gotSkills, err := PluginSkillsDirForID("github")
-	if err != nil {
-		t.Fatalf("PluginSkillsDirForID(valid) returned error: %v", err)
-	}
-	if gotSkills != pathJoin(PluginDirPath, "github", "skills") {
-		t.Fatalf("PluginSkillsDirForID(valid) = %q, want %q", gotSkills, pathJoin(PluginDirPath, "github", "skills"))
-	}
-	gotSkill, err := PluginSkillDirForName("github", "review")
-	if err != nil {
-		t.Fatalf("PluginSkillDirForName(valid) returned error: %v", err)
-	}
-	if gotSkill != pathJoin(PluginDirPath, "github", "skills", "review") {
-		t.Fatalf("PluginSkillDirForName(valid) = %q", gotSkill)
-	}
-	if _, err := PluginSkillDirForName("github", "../review"); !errors.Is(err, bridge.ErrBadRequest) {
-		t.Fatalf("PluginSkillDirForName(traversal) err = %v, want ErrBadRequest", err)
 	}
 	gotHooks, err := PluginHooksPathForID("github")
 	if err != nil {
@@ -405,6 +387,13 @@ func TestNamespacedSkillPaths(t *testing.T) {
 	if packagePath != wantPackage {
 		t.Fatalf("SkillPackageDirForIDs(valid) = %q, want %q", packagePath, wantPackage)
 	}
+	registryID, packageID, skillID, ok := RegistrySkillIDs(pathJoin(dirPath, "SKILL.md"))
+	if !ok || registryID != "openai-api-curated" || packageID != "docs" || skillID != "xlsx" {
+		t.Fatalf("RegistrySkillIDs() = %q/%q/%q, %v", registryID, packageID, skillID, ok)
+	}
+	if _, _, _, ok := RegistrySkillIDs(pathJoin(ManagedDirPath, UserSkillNamespace, UserSkillPackage, "xlsx", "SKILL.md")); ok {
+		t.Fatal("RegistrySkillIDs() accepted a user-authored Skill")
+	}
 }
 
 func TestListDiscoversRegistrySkillsWithoutRenaming(t *testing.T) {
@@ -414,11 +403,13 @@ func TestListDiscoversRegistrySkillsWithoutRenaming(t *testing.T) {
 	client.listings[ManagedDirPath] = []*pb.FileEntry{{Path: "openai-api-curated", IsDir: true}}
 	client.listings[pathJoin(ManagedDirPath, "openai-api-curated")] = []*pb.FileEntry{{Path: "docs", IsDir: true}}
 	client.listings[packagePath] = []*pb.FileEntry{{Path: "xlsx", IsDir: true}}
+	client.listings[skillPath] = []*pb.FileEntry{{Path: "SKILL.md"}}
 	client.files[pathJoin(skillPath, "SKILL.md")] = "---\nname: xlsx\ndescription: Spreadsheet helper\n---\n\n# XLSX\n"
+	markDirectOwnerForTest(t, client, "openai-api-curated", "docs", "xlsx")
 
-	items, err := ListWithPluginRoots(context.Background(), client, []string{}, nil)
+	items, err := ListWithRegistrySkillRoots(context.Background(), client, []string{}, nil)
 	if err != nil {
-		t.Fatalf("ListWithPluginRoots() error = %v", err)
+		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
 	}
 	got, ok := findBySourcePath(items, pathJoin(skillPath, "SKILL.md"))
 	if !ok {
@@ -433,8 +424,40 @@ func TestListDiscoversRegistrySkillsWithoutRenaming(t *testing.T) {
 	if !got.Managed {
 		t.Fatal("registry skill should be managed")
 	}
+	if !got.DirectOwned {
+		t.Fatal("direct Registry Skill should retain direct ownership")
+	}
 	if got.State != StateEffective {
 		t.Fatalf("state = %q, want %q", got.State, StateEffective)
+	}
+}
+
+func TestListHidesUnownedRegistrySkillDirectory(t *testing.T) {
+	client := newFakeClient()
+	packagePath := pathJoin(ManagedDirPath, "openai", "documents")
+	skillDir := pathJoin(packagePath, "pdf")
+	skillPath := pathJoin(skillDir, "SKILL.md")
+	client.listings[ManagedDirPath] = []*pb.FileEntry{{Path: "openai", IsDir: true}}
+	client.listings[pathJoin(ManagedDirPath, "openai")] = []*pb.FileEntry{{Path: "documents", IsDir: true}}
+	client.listings[packagePath] = []*pb.FileEntry{{Path: "pdf", IsDir: true}}
+	client.listings[skillDir] = []*pb.FileEntry{{Path: "SKILL.md"}}
+	client.files[skillPath] = "---\nname: pdf\ndescription: PDF helper\n---\n\n# PDF\n"
+
+	items, err := List(context.Background(), client, nil)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if _, ok := findBySourcePath(items, skillPath); ok {
+		t.Fatal("unowned Registry Skill was discovered")
+	}
+
+	items, err = ListWithRegistrySkillRoots(context.Background(), client, nil, []string{skillDir})
+	if err != nil {
+		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
+	}
+	got, ok := findBySourcePath(items, skillPath)
+	if !ok || got.SourceKind != SourceKindRegistry || got.DirectOwned {
+		t.Fatalf("Plugin-owned Registry Skill = %+v, %v", got, ok)
 	}
 }
 
@@ -449,12 +472,14 @@ func TestListDiscoversUserAndRegistryNamespaces(t *testing.T) {
 	client.listings[userPackage] = []*pb.FileEntry{{Path: "openai-api-curated", IsDir: true}}
 	client.listings[registryPath] = []*pb.FileEntry{{Path: "docs", IsDir: true}}
 	client.listings[packagePath] = []*pb.FileEntry{{Path: "xlsx", IsDir: true}}
+	client.listings[skillPath] = []*pb.FileEntry{{Path: "SKILL.md"}}
 	client.files[pathJoin(userPackage, "openai-api-curated", "SKILL.md")] = "---\nname: openai-api-curated\ndescription: User\n---\n\n# User\n"
 	client.files[pathJoin(skillPath, "SKILL.md")] = "---\nname: xlsx\ndescription: Spreadsheet\n---\n\n# XLSX\n"
+	markDirectOwnerForTest(t, client, "openai-api-curated", "docs", "xlsx")
 
-	items, err := ListWithPluginRoots(context.Background(), client, []string{}, nil)
+	items, err := ListWithRegistrySkillRoots(context.Background(), client, []string{}, nil)
 	if err != nil {
-		t.Fatalf("ListWithPluginRoots() error = %v", err)
+		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
 	}
 	if _, ok := findBySourcePath(items, pathJoin(userPackage, "openai-api-curated", "SKILL.md")); !ok {
 		t.Fatalf("user skill not discovered: %+v", items)
@@ -477,10 +502,12 @@ func TestListPrefersUserNamespaceOverSameNamedRegistrySkill(t *testing.T) {
 	client.listings[ManagedDirPath] = []*pb.FileEntry{{Path: "openai", IsDir: true}, {Path: UserSkillNamespace, IsDir: true}}
 	client.listings[pathJoin(ManagedDirPath, "openai")] = []*pb.FileEntry{{Path: "documents", IsDir: true}}
 	client.listings[registryPackage] = []*pb.FileEntry{{Path: "pdf", IsDir: true}}
+	client.listings[pathJoin(registryPackage, "pdf")] = []*pb.FileEntry{{Path: "SKILL.md"}}
 	client.listings[pathJoin(ManagedDirPath, UserSkillNamespace)] = []*pb.FileEntry{{Path: UserSkillPackage, IsDir: true}}
 	client.listings[userPackage] = []*pb.FileEntry{{Path: "pdf", IsDir: true}}
 	client.files[registryPath] = "---\nname: pdf\ndescription: Registry PDF\n---\n\n# Registry\n"
 	client.files[userPath] = "---\nname: pdf\ndescription: User PDF\n---\n\n# User\n"
+	markDirectOwnerForTest(t, client, "openai", "documents", "pdf")
 
 	items, err := List(context.Background(), client, []string{})
 	if err != nil {
@@ -496,36 +523,41 @@ func TestListPrefersUserNamespaceOverSameNamedRegistrySkill(t *testing.T) {
 	}
 }
 
-func TestListKeepsBuiltinAndPluginAheadOfRegistrySkills(t *testing.T) {
+func TestListKeepsBuiltinAndCompatAheadOfRegistrySkills(t *testing.T) {
 	client := newFakeClient()
 	registryNamespace := pathJoin(ManagedDirPath, "openai")
 	registryPackage := pathJoin(registryNamespace, "tools")
 	builtinPath := pathJoin(IndexDirPath, "shared-builtin", "SKILL.md")
-	pluginRoot := pathJoin(PluginDirPath, "github", "skills")
-	pluginPath := pathJoin(pluginRoot, "shared-plugin", "SKILL.md")
+	compatRoot := "/data/.agents/skills"
+	compatPath := pathJoin(compatRoot, "shared-compat", "SKILL.md")
 	registryBuiltinPath := pathJoin(registryPackage, "registry-builtin", "SKILL.md")
-	registryPluginPath := pathJoin(registryPackage, "registry-plugin", "SKILL.md")
+	registryCompatPath := pathJoin(registryPackage, "registry-compat", "SKILL.md")
 
 	client.listings[ManagedDirPath] = []*pb.FileEntry{{Path: "openai", IsDir: true}}
 	client.listings[registryNamespace] = []*pb.FileEntry{{Path: "tools", IsDir: true}}
 	client.listings[registryPackage] = []*pb.FileEntry{
 		{Path: "registry-builtin", IsDir: true},
-		{Path: "registry-plugin", IsDir: true},
+		{Path: "registry-compat", IsDir: true},
 	}
+	client.listings[pathJoin(registryPackage, "registry-builtin")] = []*pb.FileEntry{{Path: "SKILL.md"}}
+	client.listings[pathJoin(registryPackage, "registry-compat")] = []*pb.FileEntry{{Path: "SKILL.md"}}
 	client.listings[IndexDirPath] = []*pb.FileEntry{{Path: "shared-builtin", IsDir: true}}
-	client.listings[pluginRoot] = []*pb.FileEntry{{Path: "shared-plugin", IsDir: true}}
+	client.listings[compatRoot] = []*pb.FileEntry{{Path: "shared-compat", IsDir: true}}
 	client.files[builtinPath] = "---\nname: shared-builtin\ndescription: Built-in\n---\n\n# Built-in\n"
-	client.files[pluginPath] = "---\nname: shared-plugin\ndescription: Plugin\n---\n\n# Plugin\n"
+	client.files[compatPath] = "---\nname: shared-compat\ndescription: Compat\n---\n\n# Compat\n"
 	client.files[registryBuiltinPath] = "---\nname: shared-builtin\ndescription: Registry\n---\n\n# Registry\n"
-	client.files[registryPluginPath] = "---\nname: shared-plugin\ndescription: Registry\n---\n\n# Registry\n"
+	client.files[registryCompatPath] = "---\nname: shared-compat\ndescription: Registry\n---\n\n# Registry\n"
 
-	items, err := ListWithPluginRoots(context.Background(), client, []string{}, []string{pluginRoot})
+	items, err := ListWithRegistrySkillRoots(context.Background(), client, []string{compatRoot}, []string{
+		pathJoin(registryPackage, "registry-builtin"),
+		pathJoin(registryPackage, "registry-compat"),
+	})
 	if err != nil {
-		t.Fatalf("ListWithPluginRoots() error = %v", err)
+		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
 	}
 	for effectivePath, registryPath := range map[string]string{
 		builtinPath: registryBuiltinPath,
-		pluginPath:  registryPluginPath,
+		compatPath:  registryCompatPath,
 	} {
 		effective, ok := findBySourcePath(items, effectivePath)
 		if !ok || effective.State != StateEffective {
@@ -582,21 +614,17 @@ func TestDiscoveryRootsAllowExplicitEmptyCompatRoots(t *testing.T) {
 	}
 }
 
-func TestDiscoveryRootsIncludePluginRootsAsServerManagedSource(t *testing.T) {
-	roots := DiscoveryRootsWithPluginRoots([]string{"/custom/skills"}, []string{
-		" /data/.memoh/plugins/github/skills ",
-		"/data/.memoh/plugins/github/skills",
-		"/data/.memoh/plugins/bad",
-		"relative/plugin/skills",
+func TestNormalizeRegistrySkillRootsRequiresExactNamespacedSkillPaths(t *testing.T) {
+	roots := normalizeRegistrySkillRoots([]string{
+		" /data/skills/memoh/github/review ",
+		"/data/skills/memoh/github/review",
+		"/data/skills/user/personal/review",
+		"/data/skills/memoh/github",
+		"relative/skills/memoh/github/review",
 	})
-	want := []Root{
-		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
-		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
-		{Path: "/data/.memoh/plugins/github/skills", Kind: SourceKindPlugin, Managed: false},
-		{Path: "/custom/skills", Kind: SourceKindCompat, Managed: false},
-	}
+	want := []string{"/data/skills/memoh/github/review"}
 	if !slices.Equal(roots, want) {
-		t.Fatalf("DiscoveryRootsWithPluginRoots() = %+v, want %+v", roots, want)
+		t.Fatalf("normalizeRegistrySkillRoots() = %+v, want %+v", roots, want)
 	}
 }
 
@@ -701,10 +729,40 @@ func (f *fakeClient) WriteRaw(_ context.Context, p string, r io.Reader) (int64, 
 	return int64(len(data)), nil
 }
 
+func (f *fakeClient) DeleteFile(_ context.Context, p string, recursive bool) error {
+	if recursive {
+		for filePath := range f.files {
+			if filePath == p || strings.HasPrefix(filePath, p+"/") {
+				delete(f.files, filePath)
+			}
+		}
+		return nil
+	}
+	delete(f.files, p)
+	return nil
+}
+
 func (*fakeClient) Mkdir(_ context.Context, _ string) error {
 	return nil
 }
 
 func pathJoin(parts ...string) string {
 	return strings.Join(parts, "/")
+}
+
+func markDirectOwnerForTest(t *testing.T, client *fakeClient, registryID, packageID, skillID string) {
+	t.Helper()
+	if err := MarkDirectOwner(
+		context.Background(),
+		client,
+		registryID,
+		packageID,
+		skillID,
+		strings.Repeat("0", 64),
+	); err != nil {
+		t.Fatalf("MarkDirectOwner() error = %v", err)
+	}
+	if !HasDirectOwner(context.Background(), client, registryID, packageID, skillID) {
+		t.Fatal("direct owner marker did not round-trip")
+	}
 }

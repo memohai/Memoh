@@ -29,7 +29,6 @@ const (
 	SourceKindManaged  = "managed"
 	SourceKindLegacy   = "legacy"
 	SourceKindCompat   = "compat"
-	SourceKindPlugin   = "plugin"
 	SourceKindRegistry = "registry"
 
 	StateEffective = "effective"
@@ -56,6 +55,7 @@ type Entry struct {
 	RuntimeUsable            bool           `json:"runtime_usable,omitempty"`
 	RuntimeUnusableReason    string         `json:"runtime_unusable_reason,omitempty"`
 	RuntimeUsabilityChecked  bool           `json:"runtime_usability_checked,omitempty"`
+	DirectOwned              bool           `json:"-"`
 	runtimeMetadataMalformed bool
 }
 
@@ -73,9 +73,10 @@ type Parsed struct {
 }
 
 type Root struct {
-	Path    string
-	Kind    string
-	Managed bool
+	Path        string
+	Kind        string
+	Managed     bool
+	DirectOwned bool
 }
 
 type fileClient interface {
@@ -109,30 +110,6 @@ type indexedItem struct {
 
 func ManagedDir() string {
 	return ManagedDirPath
-}
-
-func PluginSkillsDirForID(pluginID string) (string, error) {
-	pluginRoot, err := PluginDirForID(pluginID)
-	if err != nil {
-		return "", err
-	}
-	return safePluginChildDir(pluginRoot, "skills")
-}
-
-func PluginSkillDirForName(pluginID, name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if !IsValidName(name) {
-		return "", bridge.ErrBadRequest
-	}
-	root, err := PluginSkillsDirForID(pluginID)
-	if err != nil {
-		return "", err
-	}
-	dirPath := path.Clean(path.Join(root, name))
-	if !strings.HasPrefix(dirPath, root+"/") {
-		return "", bridge.ErrBadRequest
-	}
-	return dirPath, nil
 }
 
 func PluginDirForID(pluginID string) (string, error) {
@@ -185,16 +162,9 @@ func ContainerEnv(rawCompatRoots []string) []string {
 }
 
 func DiscoveryRoots(rawCompatRoots []string) []Root {
-	return DiscoveryRootsWithPluginRoots(rawCompatRoots, nil)
-}
-
-func DiscoveryRootsWithPluginRoots(rawCompatRoots []string, rawPluginRoots []string) []Root {
 	roots := []Root{
 		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
-	}
-	for _, pluginRoot := range normalizePluginDiscoveryRoots(rawPluginRoots) {
-		roots = append(roots, Root{Path: pluginRoot, Kind: SourceKindPlugin, Managed: false})
 	}
 	for _, compatRoot := range compatDiscoveryRoots(rawCompatRoots) {
 		roots = append(roots, Root{Path: compatRoot, Kind: SourceKindCompat, Managed: false})
@@ -203,12 +173,12 @@ func DiscoveryRootsWithPluginRoots(rawCompatRoots []string, rawPluginRoots []str
 }
 
 func List(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
-	return ListWithPluginRoots(ctx, client, rawCompatRoots, nil)
+	return ListWithRegistrySkillRoots(ctx, client, rawCompatRoots, nil)
 }
 
-func ListWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, error) {
+func ListWithRegistrySkillRoots(ctx context.Context, client fileClient, rawCompatRoots, rawRegistrySkillRoots []string) ([]Entry, error) {
 	idx := readIndex(ctx, client)
-	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots, rawPluginRoots)
+	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots, rawRegistrySkillRoots)
 	items := scan(ctx, client, roots)
 	resolved := resolve(items, idx.Overrides)
 	writeIndex(ctx, client, idx.withItems(resolved))
@@ -216,11 +186,11 @@ func ListWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots 
 }
 
 func LoadEffective(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
-	return LoadEffectiveWithPluginRoots(ctx, client, rawCompatRoots, nil)
+	return LoadEffectiveWithRegistrySkillRoots(ctx, client, rawCompatRoots, nil)
 }
 
-func LoadEffectiveWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, error) {
-	items, err := ListWithPluginRoots(ctx, client, rawCompatRoots, rawPluginRoots)
+func LoadEffectiveWithRegistrySkillRoots(ctx context.Context, client fileClient, rawCompatRoots, rawRegistrySkillRoots []string) ([]Entry, error) {
+	items, err := ListWithRegistrySkillRoots(ctx, client, rawCompatRoots, rawRegistrySkillRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +235,7 @@ func computeRuntimeUsability(entry Entry) (bool, string) {
 		return false, "content"
 	}
 	switch entry.SourceKind {
-	case SourceKindManaged, SourceKindLegacy, SourceKindCompat, SourceKindPlugin, SourceKindRegistry:
+	case SourceKindManaged, SourceKindLegacy, SourceKindCompat, SourceKindRegistry:
 	default:
 		return false, "source_kind"
 	}
@@ -309,16 +279,16 @@ func metadataBool(metadata map[string]any, key string) (bool, bool) {
 }
 
 func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string, req ActionRequest) error {
-	return ApplyActionWithPluginRoots(ctx, client, rawCompatRoots, nil, req)
+	return ApplyActionWithRegistrySkillRoots(ctx, client, rawCompatRoots, nil, req)
 }
 
-func ApplyActionWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string, req ActionRequest) error {
+func ApplyActionWithRegistrySkillRoots(ctx context.Context, client fileClient, rawCompatRoots, rawRegistrySkillRoots []string, req ActionRequest) error {
 	targetPath := strings.TrimSpace(req.TargetPath)
 	if targetPath == "" {
 		return bridge.ErrBadRequest
 	}
 
-	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots, rawPluginRoots)
+	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots, rawRegistrySkillRoots)
 	switch strings.TrimSpace(req.Action) {
 	case ActionDisable:
 		idx := readIndex(ctx, client)
@@ -411,7 +381,7 @@ func normalizeCompatDiscoveryRoots(paths []string) []string {
 	return out
 }
 
-func normalizePluginDiscoveryRoots(paths []string) []string {
+func normalizeRegistrySkillRoots(paths []string) []string {
 	out := make([]string, 0, len(paths))
 	seen := make(map[string]struct{}, len(paths))
 	for _, p := range paths {
@@ -420,7 +390,7 @@ func normalizePluginDiscoveryRoots(paths []string) []string {
 			continue
 		}
 		p = path.Clean(p)
-		if !strings.HasPrefix(p, PluginDirPath+"/") || !strings.HasSuffix(p, "/skills") {
+		if _, _, _, ok := RegistrySkillDirIDs(p); !ok {
 			continue
 		}
 		if _, ok := seen[p]; ok {
@@ -640,6 +610,7 @@ func entryFromParsed(parsed Parsed, raw string, root Root, sourcePath string) En
 		SourceRoot:               root.Path,
 		SourceKind:               root.Kind,
 		Managed:                  root.Managed,
+		DirectOwned:              root.DirectOwned,
 		runtimeMetadataMalformed: parsed.runtimeMetadataMalformed,
 	}
 }

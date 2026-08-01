@@ -129,6 +129,10 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	}
 
 	installationID := row.ID.String()
+	previousResources, err := s.queries.ListBotPluginResources(ctx, row.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return Installation{}, err
+	}
 	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
 		return Installation{}, err
 	}
@@ -182,6 +186,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 			return Installation{}, err
 		}
 	}
+	s.garbageCollectRegistrySkills(ctx, botID, skillResourcePaths(previousResources))
 
 	return s.normalizeInstallation(ctx, row)
 }
@@ -238,6 +243,10 @@ func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (
 	if err != nil {
 		return Installation{}, err
 	}
+	resources, err := s.queries.ListBotPluginResources(ctx, row.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return Installation{}, err
+	}
 	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
 		return Installation{}, err
 	}
@@ -248,12 +257,17 @@ func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (
 	if err != nil {
 		return Installation{}, err
 	}
+	s.garbageCollectRegistrySkills(ctx, botID, skillResourcePaths(resources))
 	return s.normalizeInstallation(ctx, updated)
 }
 
 func (s *Service) Purge(ctx context.Context, botID, installationID string) error {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
+		return err
+	}
+	resources, err := s.queries.ListBotPluginResources(ctx, row.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
 	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
@@ -270,10 +284,14 @@ func (s *Service) Purge(ctx context.Context, botID, installationID string) error
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteBotPluginInstallation(ctx, sqlc.DeleteBotPluginInstallationParams{
+	if err := s.queries.DeleteBotPluginInstallation(ctx, sqlc.DeleteBotPluginInstallationParams{
 		BotID: botUUID,
 		ID:    installationUUID,
-	})
+	}); err != nil {
+		return err
+	}
+	s.garbageCollectRegistrySkills(ctx, botID, skillResourcePaths(resources))
+	return nil
 }
 
 func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbackURL string) (*mcp.AuthorizeResult, error) {
@@ -436,6 +454,85 @@ func (s *Service) normalizeInstallation(ctx context.Context, row sqlc.BotPluginI
 		InstalledAt: timeFromPg(row.InstalledAt),
 		UpdatedAt:   timeFromPg(row.UpdatedAt),
 	}, nil
+}
+
+func skillResourcePaths(resources []sqlc.BotPluginResource) []string {
+	paths := make([]string, 0, len(resources))
+	seen := make(map[string]struct{}, len(resources))
+	for _, resource := range resources {
+		if strings.TrimSpace(resource.ResourceType) != "skill" {
+			continue
+		}
+		sourcePath := path.Clean(strings.TrimSpace(resource.ResourceID))
+		if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); !ok {
+			continue
+		}
+		if _, ok := seen[sourcePath]; ok {
+			continue
+		}
+		seen[sourcePath] = struct{}{}
+		paths = append(paths, sourcePath)
+	}
+	return paths
+}
+
+func (s *Service) garbageCollectRegistrySkills(ctx context.Context, botID string, sourcePaths []string) {
+	if s.bridges == nil || len(sourcePaths) == 0 {
+		return
+	}
+	client, err := s.bridges.MCPClient(ctx, botID)
+	if err != nil {
+		s.logger.Warn("skip Registry Skill garbage collection", slog.String("bot_id", botID), slog.Any("error", err))
+		return
+	}
+	installations, err := s.List(ctx, botID)
+	if err != nil {
+		s.logger.Warn("skip Registry Skill garbage collection", slog.String("bot_id", botID), slog.Any("error", err))
+		return
+	}
+	for _, sourcePath := range sourcePaths {
+		if skillset.HasDirectOwnerForSourcePath(ctx, client, sourcePath) {
+			continue
+		}
+		if OwnsRegistrySkill(installations, sourcePath) {
+			continue
+		}
+		skillDir := path.Dir(sourcePath)
+		if err := client.DeleteFile(ctx, skillDir, true); err != nil && !errors.Is(err, bridge.ErrNotFound) {
+			s.logger.Warn("Registry Skill garbage collection failed", slog.String("source_path", sourcePath), slog.Any("error", err))
+			continue
+		}
+		for _, dir := range skillset.PrunableSkillNamespaceDirs(skillDir) {
+			entries, err := client.ListDirAll(ctx, dir, false)
+			if err != nil || len(entries) != 0 {
+				break
+			}
+			if err := client.DeleteFile(ctx, dir, false); err != nil {
+				break
+			}
+		}
+	}
+}
+
+// OwnsRegistrySkill reports whether an installed Plugin still references one
+// canonical Registry Skill path. Disabled and not-yet-ready Plugins retain
+// ownership even though discovery hides their Skills.
+func OwnsRegistrySkill(installations []Installation, sourcePath string) bool {
+	sourcePath = path.Clean(strings.TrimSpace(sourcePath))
+	if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); !ok {
+		return false
+	}
+	for _, installation := range installations {
+		if installation.Status == StatusUninstalled {
+			continue
+		}
+		for _, resource := range installation.Resources {
+			if resource.Type == "skill" && path.Clean(strings.TrimSpace(resource.ResourceID)) == sourcePath {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]string) string {

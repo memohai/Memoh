@@ -248,7 +248,14 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		return workspaceUnavailableError(err)
 	}
 
-	targets := make([]string, 0, len(req.SourcePaths))
+	type deleteTarget struct {
+		sourcePath string
+		skillDir   string
+		registryID string
+		packageID  string
+		skillID    string
+	}
+	targets := make([]deleteTarget, 0, len(req.SourcePaths))
 	for _, sourcePath := range req.SourcePaths {
 		skillDir, dirErr := skillset.DeletableSkillDirForSourcePath(sourcePath)
 		if dirErr != nil {
@@ -257,20 +264,58 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 			}
 			return echo.NewHTTPError(http.StatusBadRequest, "only Memoh-managed skills can be deleted")
 		}
-		targets = append(targets, skillDir)
+		target := deleteTarget{sourcePath: path.Clean(strings.TrimSpace(sourcePath)), skillDir: skillDir}
+		if registryID, packageID, skillID, ok := skillset.RegistrySkillIDs(target.sourcePath); ok {
+			target.registryID = registryID
+			target.packageID = packageID
+			target.skillID = skillID
+			if !skillset.HasDirectOwner(ctx, client, registryID, packageID, skillID) {
+				return echo.NewHTTPError(http.StatusBadRequest, "plugin-owned Registry Skills cannot be deleted directly")
+			}
+		}
+		targets = append(targets, target)
 	}
 
-	for _, skillDir := range targets {
-		if _, statErr := client.Stat(ctx, skillDir); statErr != nil {
+	for _, target := range targets {
+		if _, statErr := client.Stat(ctx, target.skillDir); statErr != nil {
 			return fsHTTPError(statErr)
 		}
-		if err := client.DeleteFile(ctx, skillDir, true); err != nil {
+		if target.registryID != "" {
+			pluginOwned, ownerErr := h.pluginOwnsRegistrySkill(ctx, botID, target.sourcePath)
+			if ownerErr != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, ownerErr.Error())
+			}
+			if err := skillset.RemoveDirectOwner(
+				ctx,
+				client,
+				target.registryID,
+				target.packageID,
+				target.skillID,
+			); err != nil {
+				return fsHTTPError(err)
+			}
+			if pluginOwned {
+				continue
+			}
+		}
+		if err := client.DeleteFile(ctx, target.skillDir, true); err != nil {
 			return fsHTTPError(err)
 		}
-		pruneEmptySkillNamespaceDirs(ctx, client, skillDir)
+		pruneEmptySkillNamespaceDirs(ctx, client, target.skillDir)
 	}
 
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
+}
+
+func (h *ContainerdHandler) pluginOwnsRegistrySkill(ctx context.Context, botID, sourcePath string) (bool, error) {
+	if h.pluginService == nil {
+		return false, nil
+	}
+	installations, err := h.pluginService.List(ctx, botID)
+	if err != nil {
+		return false, err
+	}
+	return pluginspkg.OwnsRegistrySkill(installations, sourcePath), nil
 }
 
 // pruneEmptySkillNamespaceDirs drops the package and namespace directories left
@@ -316,12 +361,12 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 	if err != nil {
 		return workspaceUnavailableError(err)
 	}
-	roots, pluginRoots, err := h.skillDiscoveryRoots(ctx, botID)
+	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	if err := skillset.ApplyActionWithPluginRoots(ctx, client, roots, pluginRoots, skillset.ActionRequest{
+	if err := skillset.ApplyActionWithRegistrySkillRoots(ctx, client, roots, registrySkillRoots, skillset.ActionRequest{
 		Action:     req.Action,
 		TargetPath: req.TargetPath,
 	}); err != nil {
@@ -337,11 +382,11 @@ func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]Ski
 	if err != nil {
 		return nil, err
 	}
-	roots, pluginRoots, err := h.skillDiscoveryRoots(ctx, botID)
+	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	items, err := skillset.LoadEffectiveWithPluginRoots(ctx, client, roots, pluginRoots)
+	items, err := skillset.LoadEffectiveWithRegistrySkillRoots(ctx, client, roots, registrySkillRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -381,11 +426,11 @@ func (h *ContainerdHandler) listSkillEntriesFromContainer(ctx context.Context, b
 	if err != nil {
 		return nil, err
 	}
-	roots, pluginRoots, err := h.skillDiscoveryRoots(ctx, botID)
+	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	items, err := skillset.ListWithPluginRoots(ctx, client, roots, pluginRoots)
+	items, err := skillset.ListWithRegistrySkillRoots(ctx, client, roots, registrySkillRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -398,8 +443,8 @@ func (h *ContainerdHandler) skillDiscoveryRoots(ctx context.Context, botID strin
 		bot, err := h.botService.Get(ctx, botID)
 		if err == nil {
 			roots = workspace.SkillDiscoveryRootsFromMetadata(bot.Metadata)
-			pluginRoots, err := h.pluginSkillRoots(ctx, botID)
-			return roots, pluginRoots, err
+			registrySkillRoots, err := h.pluginRegistrySkillRoots(ctx, botID)
+			return roots, registrySkillRoots, err
 		}
 	}
 	if h.manager == nil {
@@ -410,11 +455,11 @@ func (h *ContainerdHandler) skillDiscoveryRoots(ctx context.Context, botID strin
 	if err != nil {
 		return nil, nil, err
 	}
-	pluginRoots, err := h.pluginSkillRoots(ctx, botID)
-	return roots, pluginRoots, err
+	registrySkillRoots, err := h.pluginRegistrySkillRoots(ctx, botID)
+	return roots, registrySkillRoots, err
 }
 
-func (h *ContainerdHandler) pluginSkillRoots(ctx context.Context, botID string) ([]string, error) {
+func (h *ContainerdHandler) pluginRegistrySkillRoots(ctx context.Context, botID string) ([]string, error) {
 	if h.pluginService == nil {
 		return nil, nil
 	}
@@ -422,21 +467,30 @@ func (h *ContainerdHandler) pluginSkillRoots(ctx context.Context, botID string) 
 	if err != nil {
 		return nil, err
 	}
-	roots := make([]string, 0, len(installations))
-	seen := make(map[string]struct{}, len(installations))
+	roots := make([]string, 0)
+	seen := make(map[string]struct{})
 	for _, installation := range installations {
-		if !installation.Enabled || installation.Status == pluginspkg.StatusUninstalled {
+		if !installation.Enabled || installation.Status != pluginspkg.StatusReady {
 			continue
 		}
-		root, err := skillset.PluginSkillsDirForID(installation.PluginID)
-		if err != nil {
-			continue
+		for _, resource := range installation.Resources {
+			if resource.Type != "skill" || resource.Status != "installed" {
+				continue
+			}
+			registryID, packageID, skillID, ok := skillset.RegistrySkillIDs(resource.ResourceID)
+			if !ok {
+				continue
+			}
+			root, err := skillset.SkillDirForIDs(registryID, packageID, skillID)
+			if err != nil {
+				continue
+			}
+			if _, ok := seen[root]; ok {
+				continue
+			}
+			seen[root] = struct{}{}
+			roots = append(roots, root)
 		}
-		if _, ok := seen[root]; ok {
-			continue
-		}
-		seen[root] = struct{}{}
-		roots = append(roots, root)
 	}
 	return roots, nil
 }
@@ -445,6 +499,7 @@ func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 	items := make([]SkillItem, len(entries))
 	for i, entry := range entries {
 		_, builtin := skillset.BuiltinSkillName(entry.SourcePath)
+		registryOwned := entry.SourceKind == skillset.SourceKindRegistry
 		items[i] = SkillItem{
 			Name:        entry.Name,
 			Description: entry.Description,
@@ -455,8 +510,8 @@ func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 			SourceRoot:  entry.SourceRoot,
 			SourceKind:  entry.SourceKind,
 			Managed:     entry.Managed,
-			Editable:    !builtin,
-			Deletable:   entry.Managed && !builtin,
+			Editable:    !builtin && (!registryOwned || entry.DirectOwned),
+			Deletable:   entry.Managed && !builtin && (!registryOwned || entry.DirectOwned),
 			State:       entry.State,
 			ShadowedBy:  entry.ShadowedBy,
 		}

@@ -341,6 +341,20 @@ func (h *SupermarketHandler) installRegistrySkill(
 			nil,
 		)
 	}
+	if err := skillset.MarkDirectOwner(
+		targetContext,
+		target.Client,
+		registryID,
+		packageID,
+		skillID,
+		skill.Artifact.Digest,
+	); err != nil {
+		return InstallRegistrySkillResponse{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInstallFailed,
+			fmt.Errorf("record direct Registry Skill ownership: %w", err),
+			nil,
+		)
+	}
 
 	return InstallRegistrySkillResponse{
 		OK:                true,

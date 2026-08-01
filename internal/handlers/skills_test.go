@@ -214,6 +214,7 @@ func TestDeleteSkillsAPIRemovesRegistrySkillBySourcePath(t *testing.T) {
 	registrySkillDir := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx")
 	registryPath := path.Join(registrySkillDir, "SKILL.md")
 	env.writeSkillFile(t, registryPath, managedSkillRaw("xlsx", "Spreadsheet"))
+	env.markDirectOwner(t, "openai-api-curated", "docs", "xlsx")
 	// A user Skill shares the short name; deleting the registry copy must not touch it.
 	flatPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "xlsx", "SKILL.md")
 	env.writeSkillFile(t, flatPath, managedSkillRaw("xlsx", "Local Spreadsheet"))
@@ -236,6 +237,58 @@ func TestDeleteSkillsAPIRemovesRegistrySkillBySourcePath(t *testing.T) {
 	// The now-empty package and namespace directories are pruned.
 	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "openai-api-curated"))); !os.IsNotExist(err) {
 		t.Fatalf("empty registry directory should be pruned, stat err = %v", err)
+	}
+}
+
+func TestDeleteSkillsAPIRejectsPluginOnlyRegistrySkill(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	skillDir := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting")
+	sourcePath := path.Join(skillDir, "SKILL.md")
+	env.writeSkillFile(t, sourcePath, managedSkillRaw("meeting", "Meeting notes"))
+	env.handler.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{{
+		PluginID: "notion", Status: pluginspkg.StatusReady, Enabled: true,
+		Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: sourcePath}},
+	}}})
+
+	_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
+		SourcePaths: []string{sourcePath},
+	}, env.handler.DeleteSkills)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("DeleteSkills(plugin-only) error = %v, want 400", err)
+	}
+	if _, err := os.Stat(env.localPath(sourcePath)); err != nil {
+		t.Fatalf("Plugin-owned Registry Skill should remain: %v", err)
+	}
+}
+
+func TestDeleteSkillsAPIRemovesDirectOwnerButKeepsPluginArtifact(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	skillDir := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting")
+	sourcePath := path.Join(skillDir, "SKILL.md")
+	env.writeSkillFile(t, sourcePath, managedSkillRaw("meeting", "Meeting notes"))
+	env.markDirectOwner(t, "memoh", "notion", "meeting")
+	env.handler.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{{
+		PluginID: "notion", Status: pluginspkg.StatusReady, Enabled: true,
+		Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: sourcePath}},
+	}}})
+
+	rec, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
+		SourcePaths: []string{sourcePath},
+	}, env.handler.DeleteSkills)
+	if err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("DeleteSkills(shared) response = %d, error = %v", rec.Code, err)
+	}
+	if _, err := os.Stat(env.localPath(sourcePath)); err != nil {
+		t.Fatalf("shared Registry Skill Artifact should remain: %v", err)
+	}
+	markerPath := path.Join(skillDir, skillset.DirectOwnerFileName)
+	if _, err := os.Stat(env.localPath(markerPath)); !os.IsNotExist(err) {
+		t.Fatalf("direct owner marker should be removed, stat err = %v", err)
+	}
+	got := mustFindSkillByPath(t, env.listSkills(t), sourcePath)
+	if got.Editable || got.Deletable {
+		t.Fatalf("Plugin-only Skill remained editable after direct uninstall: %+v", got)
 	}
 }
 
@@ -451,11 +504,11 @@ func TestLoadSkillsUsesEffectiveSetAndPromptReflectsOverrideFallback(t *testing.
 	if err != nil {
 		t.Fatalf("get bridge client: %v", err)
 	}
-	roots, pluginRoots, err := env.handler.skillDiscoveryRoots(context.Background(), env.botID)
+	roots, registrySkillRoots, err := env.handler.skillDiscoveryRoots(context.Background(), env.botID)
 	if err != nil {
 		t.Fatalf("resolve skill discovery roots: %v", err)
 	}
-	if err := skillset.ApplyActionWithPluginRoots(context.Background(), client, roots, pluginRoots, skillset.ActionRequest{
+	if err := skillset.ApplyActionWithRegistrySkillRoots(context.Background(), client, roots, registrySkillRoots, skillset.ActionRequest{
 		Action:     skillset.ActionDisable,
 		TargetPath: managedPath,
 	}); err != nil {
@@ -503,23 +556,33 @@ func TestListSkillsAPIUsesConfiguredDiscoveryRoots(t *testing.T) {
 	}
 }
 
-func TestListSkillsAPIIncludesEnabledPluginSkillRoots(t *testing.T) {
+func TestListSkillsAPIIncludesOnlyEnabledPluginRegistrySkillReferences(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	pluginRoot, err := skillset.PluginSkillsDirForID("github")
+	pluginRoot, err := skillset.SkillDirForIDs("memoh", "github", "review")
 	if err != nil {
-		t.Fatalf("plugin skills root: %v", err)
+		t.Fatalf("plugin Registry Skill root: %v", err)
 	}
-	disabledRoot, err := skillset.PluginSkillsDirForID("disabled")
+	disabledRoot, err := skillset.SkillDirForIDs("memoh", "disabled", "hidden")
 	if err != nil {
-		t.Fatalf("disabled plugin skills root: %v", err)
+		t.Fatalf("disabled Plugin Registry Skill root: %v", err)
 	}
-	pluginPath := path.Join(pluginRoot, "review", "SKILL.md")
+	pluginPath := path.Join(pluginRoot, "SKILL.md")
+	disabledPath := path.Join(disabledRoot, "SKILL.md")
 	env.writeSkillFile(t, pluginPath, managedSkillRaw("review", "Plugin Review"))
-	env.writeSkillFile(t, path.Join(disabledRoot, "hidden", "SKILL.md"), managedSkillRaw("hidden", "Hidden Plugin"))
+	env.writeSkillFile(t, disabledPath, managedSkillRaw("hidden", "Hidden Plugin"))
 	env.handler.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{
-		{PluginID: "github", Status: pluginspkg.StatusReady, Enabled: true},
-		{PluginID: "disabled", Status: pluginspkg.StatusReady, Enabled: false},
-		{PluginID: "removed", Status: pluginspkg.StatusUninstalled, Enabled: true},
+		{
+			PluginID: "github", Status: pluginspkg.StatusReady, Enabled: true,
+			Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: pluginPath}},
+		},
+		{
+			PluginID: "disabled", Status: pluginspkg.StatusReady, Enabled: false,
+			Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: disabledPath}},
+		},
+		{
+			PluginID: "removed", Status: pluginspkg.StatusUninstalled, Enabled: true,
+			Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: disabledPath}},
+		},
 	}})
 
 	skills := env.listSkills(t)
@@ -530,8 +593,8 @@ func TestListSkillsAPIIncludesEnabledPluginSkillRoots(t *testing.T) {
 	if got.SourceRoot != pluginRoot {
 		t.Fatalf("source_root = %q, want %q", got.SourceRoot, pluginRoot)
 	}
-	if got.SourceKind != skillset.SourceKindPlugin {
-		t.Fatalf("source_kind = %q, want %q", got.SourceKind, skillset.SourceKindPlugin)
+	if got.SourceKind != skillset.SourceKindRegistry {
+		t.Fatalf("source_kind = %q, want %q", got.SourceKind, skillset.SourceKindRegistry)
 	}
 	if got.State != skillset.StateEffective {
 		t.Fatalf("state = %q, want effective", got.State)
@@ -544,6 +607,24 @@ type skillsTestEnv struct {
 	botID    string
 	userID   string
 	bridge   *skillsTestBridgeServer
+}
+
+func (env *skillsTestEnv) markDirectOwner(t *testing.T, registryID, packageID, skillID string) {
+	t.Helper()
+	client, err := env.handler.manager.MCPClient(context.Background(), env.botID)
+	if err != nil {
+		t.Fatalf("get bridge client: %v", err)
+	}
+	if err := skillset.MarkDirectOwner(
+		context.Background(),
+		client,
+		registryID,
+		packageID,
+		skillID,
+		strings.Repeat("0", 64),
+	); err != nil {
+		t.Fatalf("MarkDirectOwner() error = %v", err)
+	}
 }
 
 type fakePluginInstallationLister struct {
