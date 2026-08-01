@@ -16,6 +16,7 @@ import (
 
 const (
 	maxArchiveUncompressedBytes = 100 * 1024 * 1024
+	maxArchiveStreamBytes       = 128 * 1024 * 1024
 	maxArchiveFiles             = 10_000
 	maxArchiveEntries           = 20_000
 )
@@ -49,7 +50,8 @@ func ReadArchive(content []byte) (Archive, error) {
 	var totalSize int64
 	totalEntries := 0
 	hasManifest := false
-	tr := tar.NewReader(gz)
+	stream := &io.LimitedReader{R: gz, N: maxArchiveStreamBytes + 1}
+	tr := tar.NewReader(stream)
 	for {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -69,17 +71,18 @@ func ReadArchive(content []byte) (Archive, error) {
 		if name == "" || path.Clean(name) != name {
 			return Archive{}, fmt.Errorf("skill artifact contains non-canonical path %q", header.Name)
 		}
-		if name == DirectOwnerFileName {
+		if strings.EqualFold(name, DirectOwnerFileName) {
 			return Archive{}, fmt.Errorf("skill artifact contains reserved path %q", header.Name)
 		}
 		if containsUnsafePathPart(strings.Split(name, "/")) {
 			return Archive{}, fmt.Errorf("skill artifact contains unsafe path %q", header.Name)
 		}
-		if _, exists := seen[name]; exists {
+		canonicalName := strings.ToLower(name)
+		if _, exists := seen[canonicalName]; exists {
 			return Archive{}, fmt.Errorf("skill artifact contains duplicate path %q", header.Name)
 		}
-		seen[name] = header.Typeflag == tar.TypeReg
-		if err := rejectArchivePathConflict(seen, name); err != nil {
+		seen[canonicalName] = header.Typeflag == tar.TypeReg
+		if err := rejectArchivePathConflict(seen, canonicalName); err != nil {
 			return Archive{}, err
 		}
 
@@ -112,6 +115,12 @@ func ReadArchive(content []byte) (Archive, error) {
 		archive.files = append(archive.files, archiveFile{
 			path: name, content: fileContent, executable: header.FileInfo().Mode().Perm()&0o111 != 0,
 		})
+	}
+	if _, err := io.Copy(io.Discard, stream); err != nil {
+		return Archive{}, fmt.Errorf("skill artifact decompression failed: %w", err)
+	}
+	if stream.N <= 0 {
+		return Archive{}, errors.New("skill artifact exceeds the decompressed stream limit")
 	}
 	if len(archive.files) == 0 {
 		return Archive{}, errors.New("skill artifact is empty")

@@ -14,7 +14,12 @@ import (
 
 // InstallArchive atomically replaces a registry Skill with a validated archive.
 func InstallArchive(ctx context.Context, client *bridge.Client, workspaceOS, registryID, packageID, skillID string, archive Archive) error {
-	return installArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive, "")
+	publication, err := PublishArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive)
+	if err != nil {
+		return err
+	}
+	_ = publication.Commit(ctx)
+	return nil
 }
 
 // InstallArchiveWithDirectOwner publishes the Artifact and direct-install
@@ -26,47 +31,83 @@ func InstallArchiveWithDirectOwner(
 	archive Archive,
 	artifactDigest string,
 ) error {
-	return installArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive, artifactDigest)
+	publication, err := PublishArchiveWithDirectOwner(
+		ctx, client, workspaceOS, registryID, packageID, skillID, archive, artifactDigest,
+	)
+	if err != nil {
+		return err
+	}
+	_ = publication.Commit(ctx)
+	return nil
 }
 
-func installArchive(
+// ArchivePublication retains the previous Skill directory until the caller
+// commits, allowing a larger Plugin installation to roll back atomically.
+type ArchivePublication struct {
+	client       *bridge.Client
+	targetDir    string
+	backupDir    string
+	targetExists bool
+	closed       bool
+}
+
+func PublishArchive(
+	ctx context.Context,
+	client *bridge.Client,
+	workspaceOS, registryID, packageID, skillID string,
+	archive Archive,
+) (*ArchivePublication, error) {
+	return publishArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive, "")
+}
+
+func PublishArchiveWithDirectOwner(
+	ctx context.Context,
+	client *bridge.Client,
+	workspaceOS, registryID, packageID, skillID string,
+	archive Archive,
+	artifactDigest string,
+) (*ArchivePublication, error) {
+	return publishArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive, artifactDigest)
+}
+
+func publishArchive(
 	ctx context.Context,
 	client *bridge.Client,
 	workspaceOS, registryID, packageID, skillID string,
 	archive Archive,
 	directArtifactDigest string,
-) error {
+) (*ArchivePublication, error) {
 	if client == nil {
-		return errors.New("workspace is not reachable")
+		return nil, errors.New("workspace is not reachable")
 	}
 	if strings.EqualFold(strings.TrimSpace(registryID), UserSkillNamespace) {
-		return errors.New("registry Skill identity is invalid")
+		return nil, errors.New("registry Skill identity is invalid")
 	}
 	targetDir, err := SkillDirForIDs(registryID, packageID, skillID)
 	if err != nil {
-		return errors.New("registry Skill identity is invalid")
+		return nil, errors.New("registry Skill identity is invalid")
 	}
 	var directOwner []byte
 	var includeDirectOwner bool
 	if strings.TrimSpace(directArtifactDigest) != "" {
 		directOwner, err = directOwnerPayload(registryID, packageID, skillID, directArtifactDigest)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		includeDirectOwner = true
 	} else {
 		directOwner, includeDirectOwner, err = directOwnerBytes(ctx, client, registryID, packageID, skillID)
 		if err != nil {
-			return fmt.Errorf("preserve direct Skill owner: %w", err)
+			return nil, fmt.Errorf("preserve direct Skill owner: %w", err)
 		}
 	}
 	packageDir, err := SkillPackageDirForIDs(registryID, packageID)
 	if err != nil {
-		return errors.New("registry Skill identity is invalid")
+		return nil, errors.New("registry Skill identity is invalid")
 	}
 	suffix, err := randomInstallSuffix()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	stagingRoot := path.Join(ManagedDir(), ".staging")
 	tempDir := path.Join(stagingRoot, "install-"+suffix)
@@ -75,10 +116,10 @@ func installArchive(
 	_ = client.DeleteFile(ctx, backupDir, true)
 	defer func() { _ = client.DeleteFile(context.WithoutCancel(ctx), tempDir, true) }()
 	if err := client.Mkdir(ctx, stagingRoot); err != nil {
-		return fmt.Errorf("create Skill staging directory: %w", err)
+		return nil, fmt.Errorf("create Skill staging directory: %w", err)
 	}
 	if err := client.Mkdir(ctx, tempDir); err != nil {
-		return fmt.Errorf("create temporary Skill directory: %w", err)
+		return nil, fmt.Errorf("create temporary Skill directory: %w", err)
 	}
 
 	executablePaths := make([]string, 0)
@@ -86,57 +127,85 @@ func installArchive(
 		filePath := path.Join(tempDir, file.path)
 		if dir := path.Dir(filePath); dir != tempDir {
 			if err := client.Mkdir(ctx, dir); err != nil {
-				return fmt.Errorf("create Skill directory %q: %w", dir, err)
+				return nil, fmt.Errorf("create Skill directory %q: %w", dir, err)
 			}
 		}
 		if err := client.WriteFile(ctx, filePath, file.content); err != nil {
-			return fmt.Errorf("write Skill file %q: %w", file.path, err)
+			return nil, fmt.Errorf("write Skill file %q: %w", file.path, err)
 		}
 		if file.executable {
 			executablePaths = append(executablePaths, filePath)
 		}
 	}
 	if err := applyExecutableModes(ctx, client, workspaceOS, executablePaths); err != nil {
-		return err
+		return nil, err
 	}
 	if includeDirectOwner {
 		if err := client.WriteFile(ctx, path.Join(tempDir, DirectOwnerFileName), directOwner); err != nil {
-			return fmt.Errorf("stage direct Skill owner: %w", err)
+			return nil, fmt.Errorf("stage direct Skill owner: %w", err)
 		}
 	}
 
 	registryDir, err := skillNamespaceDirForID(registryID)
 	if err != nil {
-		return errors.New("registry Skill identity is invalid")
+		return nil, errors.New("registry Skill identity is invalid")
 	}
 	if err := client.Mkdir(ctx, registryDir); err != nil {
-		return fmt.Errorf("create registry Skill directory: %w", err)
+		return nil, fmt.Errorf("create registry Skill directory: %w", err)
 	}
 	if err := client.Mkdir(ctx, packageDir); err != nil {
-		return fmt.Errorf("create registry package directory: %w", err)
+		return nil, fmt.Errorf("create registry package directory: %w", err)
 	}
 
 	targetExists := false
 	if _, err := client.Stat(ctx, targetDir); err == nil {
 		targetExists = true
 	} else if !errors.Is(err, bridge.ErrNotFound) {
-		return fmt.Errorf("inspect existing Skill: %w", err)
+		return nil, fmt.Errorf("inspect existing Skill: %w", err)
 	}
 	if targetExists {
 		if err := client.Rename(ctx, targetDir, backupDir); err != nil {
-			return fmt.Errorf("prepare existing Skill for replacement: %w", err)
+			return nil, fmt.Errorf("prepare existing Skill for replacement: %w", err)
 		}
 	}
 	if err := client.Rename(ctx, tempDir, targetDir); err != nil {
 		if targetExists {
 			if rollbackErr := client.Rename(context.WithoutCancel(ctx), backupDir, targetDir); rollbackErr != nil {
-				return fmt.Errorf("publish installed Skill: %w; restore previous Skill from %q: %w", err, backupDir, rollbackErr)
+				return nil, fmt.Errorf("publish installed Skill: %w; restore previous Skill from %q: %w", err, backupDir, rollbackErr)
 			}
 		}
-		return fmt.Errorf("publish installed Skill: %w", err)
+		return nil, fmt.Errorf("publish installed Skill: %w", err)
 	}
-	if targetExists {
-		_ = client.DeleteFile(ctx, backupDir, true)
+	return &ArchivePublication{
+		client: client, targetDir: targetDir, backupDir: backupDir, targetExists: targetExists,
+	}, nil
+}
+
+func (p *ArchivePublication) Commit(ctx context.Context) error {
+	if p == nil || p.closed {
+		return nil
+	}
+	p.closed = true
+	if !p.targetExists {
+		return nil
+	}
+	return p.client.DeleteFile(context.WithoutCancel(ctx), p.backupDir, true)
+}
+
+func (p *ArchivePublication) Rollback(ctx context.Context) error {
+	if p == nil || p.closed {
+		return nil
+	}
+	p.closed = true
+	rollbackCtx := context.WithoutCancel(ctx)
+	if err := p.client.DeleteFile(rollbackCtx, p.targetDir, true); err != nil && !errors.Is(err, bridge.ErrNotFound) {
+		return fmt.Errorf("remove replacement Skill: %w", err)
+	}
+	if !p.targetExists {
+		return nil
+	}
+	if err := p.client.Rename(rollbackCtx, p.backupDir, p.targetDir); err != nil {
+		return fmt.Errorf("restore previous Skill from %q: %w", p.backupDir, err)
 	}
 	return nil
 }

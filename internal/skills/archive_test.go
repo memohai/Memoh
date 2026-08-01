@@ -32,13 +32,15 @@ func TestReadArchiveReadsContentRoot(t *testing.T) {
 
 func TestReadArchiveRejectsUnsafeEntries(t *testing.T) {
 	tests := map[string][]archiveTestEntry{
-		"path traversal":  {{name: "SKILL.md", content: validArchiveManifest}, {name: "../escape", content: "bad"}},
-		"backslash":       {{name: "SKILL.md", content: validArchiveManifest}, {name: `scripts\escape`, content: "bad"}},
-		"symlink":         {{name: "SKILL.md", content: validArchiveManifest}, {name: "link", entryType: tar.TypeSymlink, linkName: "../../escape"}},
-		"duplicate":       {{name: "SKILL.md", content: validArchiveManifest}, {name: "SKILL.md", content: validArchiveManifest}},
-		"file conflict":   {{name: "SKILL.md", content: validArchiveManifest}, {name: "scripts", content: "file"}, {name: "scripts/run.sh", content: "bad"}},
-		"nested manifest": {{name: "other/SKILL.md", content: validArchiveManifest}},
-		"owner marker":    {{name: "SKILL.md", content: validArchiveManifest}, {name: DirectOwnerFileName, content: `{}`}},
+		"path traversal":   {{name: "SKILL.md", content: validArchiveManifest}, {name: "../escape", content: "bad"}},
+		"backslash":        {{name: "SKILL.md", content: validArchiveManifest}, {name: `scripts\escape`, content: "bad"}},
+		"symlink":          {{name: "SKILL.md", content: validArchiveManifest}, {name: "link", entryType: tar.TypeSymlink, linkName: "../../escape"}},
+		"duplicate":        {{name: "SKILL.md", content: validArchiveManifest}, {name: "SKILL.md", content: validArchiveManifest}},
+		"case alias":       {{name: "SKILL.md", content: validArchiveManifest}, {name: "skill.md", content: validArchiveManifest}},
+		"file conflict":    {{name: "SKILL.md", content: validArchiveManifest}, {name: "scripts", content: "file"}, {name: "scripts/run.sh", content: "bad"}},
+		"nested manifest":  {{name: "other/SKILL.md", content: validArchiveManifest}},
+		"owner marker":     {{name: "SKILL.md", content: validArchiveManifest}, {name: DirectOwnerFileName, content: `{}`}},
+		"owner case alias": {{name: "SKILL.md", content: validArchiveManifest}, {name: ".MEMOH-DIRECT-OWNER.JSON", content: `{}`}},
 	}
 	for name, entries := range tests {
 		t.Run(name, func(t *testing.T) {
