@@ -89,7 +89,10 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	if manifest.ID == "" {
 		return Installation{}, errors.New("plugin id is required")
 	}
-	if err := validateSkillReferences(manifest.Skills); err != nil {
+	if err := ValidateSkillReferences(manifest.Skills); err != nil {
+		return Installation{}, err
+	}
+	if err := validateSkillArtifacts(manifest.Skills, req.SkillArtifacts); err != nil {
 		return Installation{}, err
 	}
 	if manifest.Name == "" {
@@ -171,17 +174,24 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		if err != nil {
 			return Installation{}, fmt.Errorf("plugin Skill reference %q is invalid", SkillReferenceIdentity(resource))
 		}
+		identity := SkillReferenceIdentity(resource)
+		metadata := map[string]any{
+			"registry_id": resource.RegistryID,
+			"package_id":  resource.PackageID,
+			"skill_id":    resource.SkillID,
+		}
+		if artifact, ok := req.SkillArtifacts[identity]; ok {
+			metadata["install_id"] = artifact.InstallID
+			metadata["artifact_digest"] = artifact.ArtifactDigest
+			metadata["files_written"] = artifact.FilesWritten
+		}
 		if _, err := s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
 			InstallationID: row.ID,
 			ResourceType:   "skill",
-			ResourceKey:    SkillReferenceIdentity(resource),
+			ResourceKey:    identity,
 			ResourceID:     path.Join(dirPath, "SKILL.md"),
 			Status:         "installed",
-			Metadata: mustJSON(map[string]any{
-				"registry_id": resource.RegistryID,
-				"package_id":  resource.PackageID,
-				"skill_id":    resource.SkillID,
-			}),
+			Metadata:       mustJSON(metadata),
 		}); err != nil {
 			return Installation{}, err
 		}
@@ -189,6 +199,21 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	s.garbageCollectRegistrySkills(ctx, botID, skillResourcePaths(previousResources))
 
 	return s.normalizeInstallation(ctx, row)
+}
+
+// GarbageCollectRegistrySkills removes referenced Skill Artifacts that no
+// direct install or installed Plugin owns. It is safe to call after a failed
+// Plugin installation because existing owners are re-read before deletion.
+func (s *Service) GarbageCollectRegistrySkills(ctx context.Context, botID string, references []SkillReference) {
+	paths := make([]string, 0, len(references))
+	for _, reference := range references {
+		dirPath, err := skillset.SkillDirForIDs(reference.RegistryID, reference.PackageID, reference.SkillID)
+		if err != nil {
+			continue
+		}
+		paths = append(paths, path.Join(dirPath, "SKILL.md"))
+	}
+	s.garbageCollectRegistrySkills(ctx, botID, paths)
 }
 
 func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, enabled bool) (Installation, error) {
@@ -963,16 +988,17 @@ func authorizationServerFromEndpoint(endpoint string) string {
 }
 
 var (
-	idPattern          = regexp.MustCompile(`[^a-z0-9_-]+`)
-	registryIDPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-	templateVarPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+	idPattern             = regexp.MustCompile(`[^a-z0-9_-]+`)
+	registryIDPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+	artifactDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	templateVarPattern    = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 )
 
 func SkillReferenceIdentity(reference SkillReference) string {
 	return reference.RegistryID + "/" + reference.PackageID + "/" + reference.SkillID
 }
 
-func validateSkillReferences(references []SkillReference) error {
+func ValidateSkillReferences(references []SkillReference) error {
 	seen := make(map[string]struct{}, len(references))
 	for _, reference := range references {
 		identity := SkillReferenceIdentity(reference)
@@ -985,6 +1011,23 @@ func validateSkillReferences(references []SkillReference) error {
 			return fmt.Errorf("plugin Skill reference %q is duplicated", identity)
 		}
 		seen[identity] = struct{}{}
+	}
+	return nil
+}
+
+func validateSkillArtifacts(references []SkillReference, artifacts map[string]SkillArtifactMetadata) error {
+	for _, reference := range references {
+		identity := SkillReferenceIdentity(reference)
+		artifact, ok := artifacts[identity]
+		if !ok {
+			return fmt.Errorf("plugin Skill %q was not installed", identity)
+		}
+		expectedInstallID := strings.Join([]string{reference.RegistryID, reference.PackageID, reference.SkillID}, "+")
+		if artifact.InstallID != expectedInstallID ||
+			!artifactDigestPattern.MatchString(artifact.ArtifactDigest) ||
+			artifact.FilesWritten < 1 {
+			return fmt.Errorf("plugin Skill %q installation metadata is invalid", identity)
+		}
 	}
 	return nil
 }

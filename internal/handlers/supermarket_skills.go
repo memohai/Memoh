@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/apperror"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -122,6 +123,11 @@ type InstallRegistrySkillResponse struct {
 	WorkspaceTargetID string `json:"workspace_target_id"`
 	ArtifactDigest    string `json:"artifact_digest"`
 	FilesWritten      int    `json:"files_written"`
+}
+
+type registrySkillArtifactInstallResult struct {
+	Skill        SupermarketCatalogSkill
+	FilesWritten int
 }
 
 // ListRegistries godoc
@@ -318,28 +324,16 @@ func (h *SupermarketHandler) installRegistrySkill(
 	if err != nil {
 		return InstallRegistrySkillResponse{}, workspaceTargetHTTPError(h.logger, err)
 	}
-	skill, err := h.fetchRegistrySkill(ctx, registryID, packageID, skillID)
+	installed, err := h.installRegistrySkillArtifact(
+		targetContext,
+		target.Client,
+		target.Info.OS,
+		registryID,
+		packageID,
+		skillID,
+	)
 	if err != nil {
 		return InstallRegistrySkillResponse{}, err
-	}
-	if err := validateRegistrySkill(skill, registryID, packageID, skillID); err != nil {
-		return InstallRegistrySkillResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
-	}
-
-	artifactBytes, err := h.downloadRegistrySkillArtifact(ctx, skill.Artifact)
-	if err != nil {
-		return InstallRegistrySkillResponse{}, err
-	}
-	archive, err := skillset.ReadArchive(artifactBytes)
-	if err != nil {
-		return InstallRegistrySkillResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
-	}
-	if err := skillset.InstallArchive(targetContext, target.Client, target.Info.OS, registryID, packageID, skillID, archive); err != nil {
-		return InstallRegistrySkillResponse{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInstallFailed,
-			fmt.Errorf("install registry Skill: %w", err),
-			nil,
-		)
 	}
 	if err := skillset.MarkDirectOwner(
 		targetContext,
@@ -347,7 +341,7 @@ func (h *SupermarketHandler) installRegistrySkill(
 		registryID,
 		packageID,
 		skillID,
-		skill.Artifact.Digest,
+		installed.Skill.Artifact.Digest,
 	); err != nil {
 		return InstallRegistrySkillResponse{}, apperror.Wrap(
 			apperror.CodeRegistrySkillInstallFailed,
@@ -361,11 +355,48 @@ func (h *SupermarketHandler) installRegistrySkill(
 		RegistryID:        registryID,
 		PackageID:         packageID,
 		SkillID:           skillID,
-		InstallID:         skill.InstallID,
+		InstallID:         installed.Skill.InstallID,
 		WorkspaceTargetID: target.TargetID,
-		ArtifactDigest:    skill.Artifact.Digest,
-		FilesWritten:      archive.FileCount(),
+		ArtifactDigest:    installed.Skill.Artifact.Digest,
+		FilesWritten:      installed.FilesWritten,
 	}, nil
+}
+
+func (h *SupermarketHandler) installRegistrySkillArtifact(
+	ctx context.Context,
+	client *bridge.Client,
+	workspaceOS, registryID, packageID, skillID string,
+) (registrySkillArtifactInstallResult, error) {
+	if client == nil {
+		return registrySkillArtifactInstallResult{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInstallFailed,
+			errors.New("workspace is not reachable"),
+			nil,
+		)
+	}
+	skill, err := h.fetchRegistrySkill(ctx, registryID, packageID, skillID)
+	if err != nil {
+		return registrySkillArtifactInstallResult{}, err
+	}
+	if err := validateRegistrySkill(skill, registryID, packageID, skillID); err != nil {
+		return registrySkillArtifactInstallResult{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+	}
+	artifactBytes, err := h.downloadRegistrySkillArtifact(ctx, skill.Artifact)
+	if err != nil {
+		return registrySkillArtifactInstallResult{}, err
+	}
+	archive, err := skillset.ReadArchive(artifactBytes)
+	if err != nil {
+		return registrySkillArtifactInstallResult{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+	}
+	if err := skillset.InstallArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive); err != nil {
+		return registrySkillArtifactInstallResult{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInstallFailed,
+			fmt.Errorf("install registry Skill: %w", err),
+			nil,
+		)
+	}
+	return registrySkillArtifactInstallResult{Skill: skill, FilesWritten: archive.FileCount()}, nil
 }
 
 func (h *SupermarketHandler) fetchRegistrySkill(

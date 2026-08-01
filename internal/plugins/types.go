@@ -66,6 +66,12 @@ type SkillReference struct {
 	SkillID    string `json:"skill_id"`
 }
 
+type SkillArtifactMetadata struct {
+	InstallID      string `json:"install_id,omitempty"`
+	ArtifactDigest string `json:"artifact_digest,omitempty"`
+	FilesWritten   int    `json:"files_written,omitempty"`
+}
+
 type InstallCommands []string
 
 func (c *InstallCommands) UnmarshalJSON(data []byte) error {
@@ -116,8 +122,9 @@ type Manifest struct {
 }
 
 type InstallRequest struct {
-	Manifest  Manifest          `json:"manifest"`
-	Variables map[string]string `json:"variables,omitempty"`
+	Manifest       Manifest                         `json:"manifest"`
+	Variables      map[string]string                `json:"variables,omitempty"`
+	SkillArtifacts map[string]SkillArtifactMetadata `json:"-"`
 }
 
 type OAuthAuthorizeRequest struct {

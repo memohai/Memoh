@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/mcp"
@@ -86,18 +87,18 @@ func TestManifestScopesOverrideDiscoveredScopes(t *testing.T) {
 
 func TestValidateSkillReferencesRequiresNamespacedUniqueIdentity(t *testing.T) {
 	reference := SkillReference{RegistryID: "memoh", PackageID: "github", SkillID: "github"}
-	if err := validateSkillReferences([]SkillReference{reference}); err != nil {
-		t.Fatalf("validateSkillReferences(valid) error = %v", err)
+	if err := ValidateSkillReferences([]SkillReference{reference}); err != nil {
+		t.Fatalf("ValidateSkillReferences(valid) error = %v", err)
 	}
 	if got := SkillReferenceIdentity(reference); got != "memoh/github/github" {
 		t.Fatalf("SkillReferenceIdentity() = %q", got)
 	}
-	if err := validateSkillReferences([]SkillReference{reference, reference}); err == nil {
-		t.Fatal("validateSkillReferences() accepted a duplicate reference")
+	if err := ValidateSkillReferences([]SkillReference{reference, reference}); err == nil {
+		t.Fatal("ValidateSkillReferences() accepted a duplicate reference")
 	}
 	reference.RegistryID = "Not Valid"
-	if err := validateSkillReferences([]SkillReference{reference}); err == nil {
-		t.Fatal("validateSkillReferences() accepted an invalid Registry ID")
+	if err := ValidateSkillReferences([]SkillReference{reference}); err == nil {
+		t.Fatal("ValidateSkillReferences() accepted an invalid Registry ID")
 	}
 }
 
@@ -125,5 +126,26 @@ func TestOwnsRegistrySkillKeepsSharedAndDisabledPluginReferences(t *testing.T) {
 	}
 	if OwnsRegistrySkill([]Installation{{Status: StatusReady, Resources: []Resource{resource}}}, "/data/skills/user/personal/meeting/SKILL.md") {
 		t.Fatal("Plugin owned a user-authored Skill")
+	}
+}
+
+func TestValidateSkillArtifactsRequiresVerifiedInstallResult(t *testing.T) {
+	reference := SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	identity := SkillReferenceIdentity(reference)
+	valid := SkillArtifactMetadata{
+		InstallID:      "memoh+notion+meeting",
+		ArtifactDigest: strings.Repeat("a", 64),
+		FilesWritten:   2,
+	}
+	if err := validateSkillArtifacts([]SkillReference{reference}, map[string]SkillArtifactMetadata{identity: valid}); err != nil {
+		t.Fatalf("validateSkillArtifacts(valid) error = %v", err)
+	}
+	if err := validateSkillArtifacts([]SkillReference{reference}, nil); err == nil {
+		t.Fatal("validateSkillArtifacts() accepted missing Artifact metadata")
+	}
+	invalid := valid
+	invalid.ArtifactDigest = "not-a-digest"
+	if err := validateSkillArtifacts([]SkillReference{reference}, map[string]SkillArtifactMetadata{identity: invalid}); err == nil {
+		t.Fatal("validateSkillArtifacts() accepted an invalid digest")
 	}
 }

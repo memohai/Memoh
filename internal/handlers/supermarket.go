@@ -40,6 +40,7 @@ type SupermarketHandler struct {
 
 type pluginInstaller interface {
 	Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error)
+	GarbageCollectRegistrySkills(ctx context.Context, botID string, references []pluginspkg.SkillReference)
 }
 
 type pluginBundleWriter interface {
@@ -68,6 +69,22 @@ type pluginInstallScriptsResult struct {
 	CommandsRun int                          `json:"commands_run"`
 	Results     []pluginInstallCommandResult `json:"results,omitempty"`
 	Error       string                       `json:"error,omitempty"`
+}
+
+type pluginSkillsInstallResult struct {
+	OK     bool                       `json:"ok"`
+	Skills []pluginSkillInstallResult `json:"skills,omitempty"`
+	Error  string                     `json:"error,omitempty"`
+}
+
+type pluginSkillInstallResult struct {
+	RegistryID     string `json:"registry_id"`
+	PackageID      string `json:"package_id"`
+	SkillID        string `json:"skill_id"`
+	InstallID      string `json:"install_id,omitempty"`
+	ArtifactDigest string `json:"artifact_digest,omitempty"`
+	FilesWritten   int    `json:"files_written,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 type pluginInstallCommandResult struct {
@@ -243,26 +260,48 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if manifest.ID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "plugin id is required")
 	}
+	if err := pluginspkg.ValidateSkillReferences(manifest.Skills); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 
 	ctx := c.Request().Context()
-	bundleResult, err := h.installPluginBundle(ctx, botID, req.PluginID, manifest.ID)
+	target, err := h.resolvePluginInstallTarget(ctx, botID)
 	if err != nil {
+		return err
+	}
+	skillsResult, skillArtifacts, err := h.installPluginSkills(
+		ctx,
+		target.Client,
+		target.Info.OS,
+		manifest.Skills,
+	)
+	if err != nil {
+		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
+		return err
+	}
+	bundleResult, err := h.installPluginBundle(ctx, target.Client, req.PluginID, manifest.ID)
+	if err != nil {
+		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
 	}
-	scriptsResult, err := h.runPluginInstallScripts(ctx, botID, manifest.ID, manifest.Install)
+	scriptsResult, err := runPluginInstallScripts(ctx, target.Client, botID, manifest.ID, manifest.Install)
 	if err != nil {
+		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
 	}
 
 	installation, err := h.pluginService.Install(ctx, botID, pluginspkg.InstallRequest{
-		Manifest:  manifest,
-		Variables: req.Variables,
+		Manifest:       manifest,
+		Variables:      req.Variables,
+		SkillArtifacts: skillArtifacts,
 	})
 	if err != nil {
+		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	installation = withPluginBundleInstallMetadata(installation, bundleResult, nil)
 	installation = withPluginInstallScriptsMetadata(installation, scriptsResult, nil)
+	installation = withPluginSkillsInstallMetadata(installation, skillsResult, nil)
 	return c.JSON(http.StatusOK, installation)
 }
 
@@ -344,14 +383,79 @@ func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (
 	return manifest, nil
 }
 
-func (h *SupermarketHandler) installPluginBundle(ctx context.Context, botID, downloadPluginID, targetPluginID string) (pluginBundleInstallResult, error) {
-	result := newPluginBundleInstallResult()
+func (h *SupermarketHandler) resolvePluginInstallTarget(ctx context.Context, botID string) (workspace.ResolvedWorkspaceTarget, error) {
+	if h.workspaces != nil {
+		target, err := h.workspaces.ResolveWorkspaceTarget(ctx, botID, "")
+		if err != nil {
+			return workspace.ResolvedWorkspaceTarget{}, workspaceTargetHTTPError(h.logger, err)
+		}
+		return target, nil
+	}
 	if h.containers == nil {
-		return pluginBundleInstallResult{}, errors.New("workspace runtime provider is not configured")
+		return workspace.ResolvedWorkspaceTarget{}, errors.New("workspace runtime provider is not configured")
 	}
 	client, err := h.containers.MCPClient(ctx, botID)
 	if err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("workspace is not reachable: %w", err)
+		return workspace.ResolvedWorkspaceTarget{}, fmt.Errorf("workspace is not reachable: %w", err)
+	}
+	return workspace.ResolvedWorkspaceTarget{Client: client}, nil
+}
+
+func (h *SupermarketHandler) installPluginSkills(
+	ctx context.Context,
+	client *bridge.Client,
+	workspaceOS string,
+	references []pluginspkg.SkillReference,
+) (pluginSkillsInstallResult, map[string]pluginspkg.SkillArtifactMetadata, error) {
+	result := pluginSkillsInstallResult{OK: true, Skills: make([]pluginSkillInstallResult, 0, len(references))}
+	artifacts := make(map[string]pluginspkg.SkillArtifactMetadata, len(references))
+	for _, reference := range references {
+		item := pluginSkillInstallResult{
+			RegistryID: reference.RegistryID,
+			PackageID:  reference.PackageID,
+			SkillID:    reference.SkillID,
+		}
+		installed, err := h.installRegistrySkillArtifact(
+			ctx,
+			client,
+			workspaceOS,
+			reference.RegistryID,
+			reference.PackageID,
+			reference.SkillID,
+		)
+		if err != nil {
+			item.Error = err.Error()
+			result.OK = false
+			result.Error = err.Error()
+			result.Skills = append(result.Skills, item)
+			return result, nil, err
+		}
+		item.InstallID = installed.Skill.InstallID
+		item.ArtifactDigest = installed.Skill.Artifact.Digest
+		item.FilesWritten = installed.FilesWritten
+		result.Skills = append(result.Skills, item)
+		artifacts[pluginspkg.SkillReferenceIdentity(reference)] = pluginspkg.SkillArtifactMetadata{
+			InstallID:      item.InstallID,
+			ArtifactDigest: item.ArtifactDigest,
+			FilesWritten:   item.FilesWritten,
+		}
+	}
+	return result, artifacts, nil
+}
+
+func (h *SupermarketHandler) cleanupFailedPluginSkills(ctx context.Context, botID string, references []pluginspkg.SkillReference) {
+	if h.pluginService == nil || len(references) == 0 {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	h.pluginService.GarbageCollectRegistrySkills(cleanupCtx, botID, references)
+}
+
+func (h *SupermarketHandler) installPluginBundle(ctx context.Context, client pluginBundleWriter, downloadPluginID, targetPluginID string) (pluginBundleInstallResult, error) {
+	result := newPluginBundleInstallResult()
+	if client == nil {
+		return pluginBundleInstallResult{}, errors.New("workspace is not reachable")
 	}
 
 	downloadURL := h.baseURL + "/api/plugins/" + url.PathEscape(strings.TrimSpace(downloadPluginID)) + "/download"
@@ -387,17 +491,13 @@ func (h *SupermarketHandler) installPluginBundle(ctx context.Context, botID, dow
 	return result, nil
 }
 
-func (h *SupermarketHandler) runPluginInstallScripts(ctx context.Context, botID, pluginID string, commands pluginspkg.InstallCommands) (pluginInstallScriptsResult, error) {
+func runPluginInstallScripts(ctx context.Context, client *bridge.Client, botID, pluginID string, commands pluginspkg.InstallCommands) (pluginInstallScriptsResult, error) {
 	result := newPluginInstallScriptsResult()
 	if len(commands) == 0 {
 		return result, nil
 	}
-	if h.containers == nil {
-		return result, errors.New("workspace runtime provider is not configured")
-	}
-	client, err := h.containers.MCPClient(ctx, botID)
-	if err != nil {
-		return result, fmt.Errorf("workspace is not reachable: %w", err)
+	if client == nil {
+		return result, errors.New("workspace is not reachable")
 	}
 	return runPluginInstallCommands(ctx, client, botID, pluginID, []string(commands))
 }
@@ -607,6 +707,20 @@ func withPluginInstallScriptsMetadata(installation pluginspkg.Installation, resu
 		result.Error = err.Error()
 	}
 	metadata["install_scripts"] = result
+	installation.Metadata = metadata
+	return installation
+}
+
+func withPluginSkillsInstallMetadata(installation pluginspkg.Installation, result pluginSkillsInstallResult, err error) pluginspkg.Installation {
+	metadata := maps.Clone(installation.Metadata)
+	if metadata == nil {
+		metadata = make(map[string]any)
+	}
+	if err != nil {
+		result.OK = false
+		result.Error = err.Error()
+	}
+	metadata["skills_install"] = result
 	installation.Metadata = metadata
 	return installation
 }

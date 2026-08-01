@@ -4,13 +4,178 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"path"
 	"strings"
 	"testing"
 
+	"github.com/memohai/memoh/internal/config"
+	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
+	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
+
+func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	artifact := validSkillArtifact(t)
+	digest := sha256.Sum256(artifact)
+	digestText := hex.EncodeToString(digest[:])
+	descriptor := validRegistrySkillDescriptor()
+	descriptor.RegistryID = reference.RegistryID
+	descriptor.PackageID = reference.PackageID
+	descriptor.SkillID = reference.SkillID
+	descriptor.InstallID = "memoh+notion+meeting"
+	descriptor.Artifact.Digest = digestText
+	descriptor.Artifact.Size = int64(len(artifact))
+	descriptor.Artifact.DownloadURL = "/artifacts/meeting"
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+	manifestJSON, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal Plugin manifest: %v", err)
+	}
+	descriptorJSON, err := json.Marshal(descriptor)
+	if err != nil {
+		t.Fatalf("marshal Skill descriptor: %v", err)
+	}
+	installer := &recordingPluginInstaller{}
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			status := http.StatusOK
+			content := descriptorJSON
+			switch req.URL.Path {
+			case "/api/plugins/notion":
+				content = manifestJSON
+			case "/api/registries/memoh/packages/notion/skills/meeting":
+			case "/artifacts/meeting":
+				content = artifact
+			case "/api/plugins/notion/download":
+				status = http.StatusNotFound
+				content = nil
+			default:
+				status = http.StatusNotFound
+				content = nil
+			}
+			return testHTTPResponse(req, status, content), nil
+		})},
+		pluginService:  installer,
+		containers:     manager,
+		workspaces:     manager,
+		botService:     env.handler.botService,
+		accountService: env.handler.accountService,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	recorder, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
+		PluginID: "notion",
+	}, handler.InstallPlugin)
+	if err != nil {
+		t.Fatalf("InstallPlugin() error = %v", err)
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("InstallPlugin() status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	metadata, ok := installer.request.SkillArtifacts[pluginspkg.SkillReferenceIdentity(reference)]
+	if !ok || metadata.ArtifactDigest != digestText || metadata.FilesWritten != 1 {
+		t.Fatalf("installed Skill metadata = %+v, %v", metadata, ok)
+	}
+	sourcePath := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting", "SKILL.md")
+	if _, err := os.ReadFile(env.localPath(sourcePath)); err != nil {
+		t.Fatalf("read installed Plugin Skill: %v", err)
+	}
+	client, err := manager.MCPClient(context.Background(), env.botID)
+	if err != nil {
+		t.Fatalf("get workspace client: %v", err)
+	}
+	if skillset.HasDirectOwner(context.Background(), client, "memoh", "notion", "meeting") {
+		t.Fatal("Plugin installation wrote a direct owner marker")
+	}
+	if len(installer.gcCalls) != 0 {
+		t.Fatalf("successful install triggered GC: %+v", installer.gcCalls)
+	}
+	var installation pluginspkg.Installation
+	if err := json.Unmarshal(recorder.Body.Bytes(), &installation); err != nil {
+		t.Fatalf("decode installation: %v", err)
+	}
+	if _, ok := installation.Metadata["skills_install"]; !ok {
+		t.Fatalf("installation metadata omitted skills_install: %+v", installation.Metadata)
+	}
+}
+
+func TestInstallPluginGarbageCollectsSkillsWhenBundleInstallFails(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	artifact := validSkillArtifact(t)
+	digest := sha256.Sum256(artifact)
+	descriptor := validRegistrySkillDescriptor()
+	descriptor.RegistryID = reference.RegistryID
+	descriptor.PackageID = reference.PackageID
+	descriptor.SkillID = reference.SkillID
+	descriptor.InstallID = "memoh+notion+meeting"
+	descriptor.Artifact.Digest = hex.EncodeToString(digest[:])
+	descriptor.Artifact.Size = int64(len(artifact))
+	descriptor.Artifact.DownloadURL = "/artifacts/meeting"
+	manifestJSON, err := json.Marshal(pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}})
+	if err != nil {
+		t.Fatalf("marshal Plugin manifest: %v", err)
+	}
+	descriptorJSON, err := json.Marshal(descriptor)
+	if err != nil {
+		t.Fatalf("marshal Skill descriptor: %v", err)
+	}
+	installer := &recordingPluginInstaller{}
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/api/plugins/notion":
+				return testHTTPResponse(req, http.StatusOK, manifestJSON), nil
+			case "/api/registries/memoh/packages/notion/skills/meeting":
+				return testHTTPResponse(req, http.StatusOK, descriptorJSON), nil
+			case "/artifacts/meeting":
+				return testHTTPResponse(req, http.StatusOK, artifact), nil
+			case "/api/plugins/notion/download":
+				return testHTTPResponse(req, http.StatusInternalServerError, nil), nil
+			default:
+				return testHTTPResponse(req, http.StatusNotFound, nil), nil
+			}
+		})},
+		pluginService:  installer,
+		containers:     manager,
+		workspaces:     manager,
+		botService:     env.handler.botService,
+		accountService: env.handler.accountService,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
+		PluginID: "notion",
+	}, handler.InstallPlugin)
+	if err == nil {
+		t.Fatal("InstallPlugin() succeeded after bundle download failure")
+	}
+	if len(installer.gcCalls) != 1 || len(installer.gcCalls[0]) != 1 || installer.gcCalls[0][0] != reference {
+		t.Fatalf("GC calls = %+v, want failed Plugin Skill reference", installer.gcCalls)
+	}
+	if installer.installCalls != 0 {
+		t.Fatalf("Plugin ownership was recorded after bundle failure: %d calls", installer.installCalls)
+	}
+}
 
 func TestPluginBundleArchiveEntryAllowsTrustedBundleFiles(t *testing.T) {
 	tests := []struct {
@@ -239,6 +404,40 @@ func TestRunPluginInstallCommandsReportsExecError(t *testing.T) {
 	}
 	if result.OK || result.CommandsRun != 1 || len(result.Results) != 1 || result.Results[0].Error != "bridge unavailable" {
 		t.Fatalf("result = %+v, want exec error metadata", result)
+	}
+}
+
+type recordingPluginInstaller struct {
+	request      pluginspkg.InstallRequest
+	installCalls int
+	gcCalls      [][]pluginspkg.SkillReference
+}
+
+func (i *recordingPluginInstaller) Install(_ context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error) {
+	i.installCalls++
+	i.request = req
+	return pluginspkg.Installation{
+		BotID:      botID,
+		PluginID:   req.Manifest.ID,
+		PluginName: req.Manifest.Name,
+		Manifest:   req.Manifest,
+		Metadata:   map[string]any{},
+		Status:     pluginspkg.StatusReady,
+		Enabled:    true,
+	}, nil
+}
+
+func (i *recordingPluginInstaller) GarbageCollectRegistrySkills(_ context.Context, _ string, references []pluginspkg.SkillReference) {
+	i.gcCalls = append(i.gcCalls, append([]pluginspkg.SkillReference(nil), references...))
+}
+
+func testHTTPResponse(req *http.Request, status int, content []byte) *http.Response {
+	return &http.Response{
+		StatusCode:    status,
+		Body:          io.NopCloser(bytes.NewReader(content)),
+		ContentLength: int64(len(content)),
+		Request:       req,
+		Header:        make(http.Header),
 	}
 }
 
