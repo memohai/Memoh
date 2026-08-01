@@ -1765,8 +1765,9 @@ export type HandlersHooksEventsResponse = {
 };
 
 export type HandlersInstallPluginRequest = {
-    plugin_id?: string;
-    release_revision?: string;
+    expected_installed_revision: string | null;
+    plugin_id: string;
+    release_revision: string;
     variables?: {
         [key: string]: string;
     };
@@ -1997,7 +1998,7 @@ export type HandlersSupermarketPluginEntry = {
     install?: Array<string>;
     mcps?: Array<PluginsMcpResource>;
     name?: string;
-    release?: HandlersSupermarketPluginRelease;
+    release: HandlersSupermarketPluginRelease;
     schema_version?: string;
     skills?: Array<PluginsSkillReference>;
     tags?: Array<string>;
@@ -2013,21 +2014,21 @@ export type HandlersSupermarketPluginListResponse = {
 };
 
 export type HandlersSupermarketPluginRelease = {
-    artifact?: HandlersSupermarketSkillArtifact;
-    published_at?: string;
-    revision?: string;
-    skills?: Array<HandlersSupermarketPluginResolvedSkill>;
+    artifact: HandlersSupermarketSkillArtifact;
+    published_at: string;
+    revision: string;
+    skills: Array<HandlersSupermarketPluginResolvedSkill>;
 };
 
 export type HandlersSupermarketPluginResolvedSkill = {
-    artifact?: HandlersSupermarketSkillArtifact;
-    install_id?: string;
-    package_id?: string;
-    registry_id?: string;
-    registry_revision?: string;
-    runtime_requirements?: HandlersSupermarketSkillRuntimeRequirements;
-    skill_id?: string;
-    source_revision?: string;
+    artifact: HandlersSupermarketSkillArtifact;
+    install_id: string;
+    package_id: string;
+    registry_id: string;
+    registry_revision: string;
+    runtime_requirements: HandlersSupermarketSkillRuntimeRequirements;
+    skill_id: string;
+    source_revision: string;
 };
 
 export type HandlersSupermarketRegistry = {
@@ -2048,11 +2049,11 @@ export type HandlersSupermarketRegistryListResponse = {
 };
 
 export type HandlersSupermarketSkillArtifact = {
-    content_type?: string;
-    digest?: string;
-    download_url?: string;
-    format?: string;
-    size?: number;
+    content_type: string;
+    digest: string;
+    download_url: string;
+    format: string;
+    size: number;
 };
 
 export type HandlersSupermarketSkillCategory = {
@@ -9649,6 +9650,14 @@ export type PostBotsByBotIdSupermarketInstallPluginErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
     /**
      * Bad Gateway
      */

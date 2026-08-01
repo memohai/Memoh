@@ -64,11 +64,11 @@ type SupermarketSkillSource struct {
 }
 
 type SupermarketSkillArtifact struct {
-	Format      string `json:"format"`
-	Digest      string `json:"digest"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"content_type"`
-	DownloadURL string `json:"download_url"`
+	Format      string `json:"format" validate:"required"`
+	Digest      string `json:"digest" validate:"required"`
+	Size        int64  `json:"size" validate:"required"`
+	ContentType string `json:"content_type" validate:"required"`
+	DownloadURL string `json:"download_url" validate:"required"`
 }
 
 type SupermarketSkillIconAsset struct {

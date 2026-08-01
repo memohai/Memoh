@@ -7953,6 +7953,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -18942,7 +18954,16 @@ const docTemplate = `{
         },
         "handlers.InstallPluginRequest": {
             "type": "object",
+            "required": [
+                "expected_installed_revision",
+                "plugin_id",
+                "release_revision"
+            ],
             "properties": {
+                "expected_installed_revision": {
+                    "type": "string",
+                    "x-nullable": true
+                },
                 "plugin_id": {
                     "type": "string"
                 },
@@ -19499,6 +19520,9 @@ const docTemplate = `{
         },
         "handlers.SupermarketPluginEntry": {
             "type": "object",
+            "required": [
+                "release"
+            ],
             "properties": {
                 "auth_requirements": {
                     "type": "array",
@@ -19593,6 +19617,12 @@ const docTemplate = `{
         },
         "handlers.SupermarketPluginRelease": {
             "type": "object",
+            "required": [
+                "artifact",
+                "published_at",
+                "revision",
+                "skills"
+            ],
             "properties": {
                 "artifact": {
                     "$ref": "#/definitions/handlers.SupermarketSkillArtifact"
@@ -19613,6 +19643,16 @@ const docTemplate = `{
         },
         "handlers.SupermarketPluginResolvedSkill": {
             "type": "object",
+            "required": [
+                "artifact",
+                "install_id",
+                "package_id",
+                "registry_id",
+                "registry_revision",
+                "runtime_requirements",
+                "skill_id",
+                "source_revision"
+            ],
             "properties": {
                 "artifact": {
                     "$ref": "#/definitions/handlers.SupermarketSkillArtifact"
@@ -19688,6 +19728,13 @@ const docTemplate = `{
         },
         "handlers.SupermarketSkillArtifact": {
             "type": "object",
+            "required": [
+                "content_type",
+                "digest",
+                "download_url",
+                "format",
+                "size"
+            ],
             "properties": {
                 "content_type": {
                     "type": "string"

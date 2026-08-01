@@ -194,6 +194,77 @@ func TestInstallPluginRejectsStaleReleaseBeforeWorkspaceMutation(t *testing.T) {
 	}
 }
 
+func TestInstallPluginRequiresExpectedInstalledRevision(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	handler := &SupermarketHandler{
+		pluginService:  &recordingPluginInstaller{},
+		botService:     env.handler.botService,
+		accountService: env.handler.accountService,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", map[string]any{
+		"plugin_id":        "notion",
+		"release_revision": strings.Repeat("a", 64),
+	}, handler.InstallPlugin)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("InstallPlugin() error = %v, want HTTP 400", err)
+	}
+}
+
+func TestInstallPluginRejectsInstalledRevisionChangedWhilePreparing(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	bundle := gzipTarArchive(t, map[string]string{"notion/plugin.yaml": "id: notion\n"})
+	entry := validSupermarketPluginEntry(pluginspkg.Manifest{ID: "notion", Name: "Notion"}, bundle)
+	releaseJSON := sealSupermarketPluginEntry(t, &entry)
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal Plugin entry: %v", err)
+	}
+	oldRevision := strings.Repeat("a", 64)
+	installer := &recordingPluginInstaller{installed: true, installedRevision: oldRevision}
+	installer.beforeMutation = func() {
+		installer.installedRevision = strings.Repeat("b", 64)
+	}
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/api/plugins/notion":
+				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
+			case "/api/plugins/notion/releases/" + entry.Release.Revision:
+				return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
+			case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
+				return testHTTPResponse(req, http.StatusOK, bundle), nil
+			default:
+				return testHTTPResponse(req, http.StatusNotFound, nil), nil
+			}
+		})},
+		pluginService: installer, containers: manager, workspaces: manager,
+		botService: env.handler.botService, accountService: env.handler.accountService,
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
+		PluginID: "notion", ReleaseRevision: entry.Release.Revision, ExpectedInstalledRevision: &oldRevision,
+	}, handler.InstallPlugin)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
+		t.Fatalf("InstallPlugin() error = %v, want HTTP 409", err)
+	}
+	if installer.installCalls != 0 || !installer.releaseReadInMutation {
+		t.Fatalf("stale install state: calls=%d release_read_in_mutation=%v", installer.installCalls, installer.releaseReadInMutation)
+	}
+	pluginPath := path.Join(skillset.PluginDirPath, "notion", "plugin.yaml")
+	if _, statErr := os.Stat(env.localPath(pluginPath)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("stale install changed the Plugin workspace: %v", statErr)
+	}
+}
+
 func TestInstallPluginRollsBackSkillsWhenBundleInstallFails(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	manager := workspace.NewManager(
@@ -1180,16 +1251,20 @@ func TestRunPluginInstallCommandsReportsExecError(t *testing.T) {
 }
 
 type recordingPluginInstaller struct {
-	request           pluginspkg.InstallRequest
-	installCalls      int
-	installInMutation bool
-	gcCalls           [][]pluginspkg.SkillReference
-	gcInMutation      []bool
-	mutationCalls     int
-	conflictExpected  map[string]string
-	conflictTarget    string
-	conflictErr       error
-	installErr        error
+	request               pluginspkg.InstallRequest
+	installCalls          int
+	installInMutation     bool
+	gcCalls               [][]pluginspkg.SkillReference
+	gcInMutation          []bool
+	mutationCalls         int
+	conflictExpected      map[string]string
+	conflictTarget        string
+	conflictErr           error
+	installErr            error
+	installed             bool
+	installedRevision     string
+	releaseReadInMutation bool
+	beforeMutation        func()
 }
 
 type recordingPluginMutationKey struct{}
@@ -1200,7 +1275,15 @@ func (i *recordingPluginInstaller) WithBotMutation(
 	fn func(context.Context) error,
 ) error {
 	i.mutationCalls++
+	if i.beforeMutation != nil {
+		i.beforeMutation()
+	}
 	return fn(context.WithValue(ctx, recordingPluginMutationKey{}, true))
+}
+
+func (i *recordingPluginInstaller) InstalledPluginRelease(ctx context.Context, _, _ string) (string, bool, error) {
+	i.releaseReadInMutation, _ = ctx.Value(recordingPluginMutationKey{}).(bool)
+	return i.installedRevision, i.installed, nil
 }
 
 func (i *recordingPluginInstaller) Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error) {

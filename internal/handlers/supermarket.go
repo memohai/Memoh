@@ -46,6 +46,7 @@ type SupermarketHandler struct {
 type pluginInstaller interface {
 	botMutationCoordinator
 	Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error)
+	InstalledPluginRelease(ctx context.Context, botID, pluginID string) (revision string, installed bool, err error)
 	CheckSkillArtifactConflicts(
 		ctx context.Context,
 		botID, targetPluginID, workspaceTargetID string,
@@ -241,9 +242,27 @@ func (h *SupermarketHandler) ListTags(c echo.Context) error {
 
 // InstallPluginRequest is the request body for installing a plugin from supermarket.
 type InstallPluginRequest struct {
-	PluginID        string            `json:"plugin_id"`
-	ReleaseRevision string            `json:"release_revision"`
-	Variables       map[string]string `json:"variables,omitempty"`
+	PluginID                  string            `json:"plugin_id" validate:"required"`
+	ReleaseRevision           string            `json:"release_revision" validate:"required"`
+	ExpectedInstalledRevision *string           `json:"expected_installed_revision" validate:"required" extensions:"x-nullable"`
+	Variables                 map[string]string `json:"variables,omitempty"`
+
+	expectedInstalledRevisionSet bool
+}
+
+func (r *InstallPluginRequest) UnmarshalJSON(data []byte) error {
+	type request InstallPluginRequest
+	var decoded request
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = InstallPluginRequest(decoded)
+	_, r.expectedInstalledRevisionSet = fields["expected_installed_revision"]
+	return nil
 }
 
 // InstallSkillRequest is the request body for installing a skill from supermarket.
@@ -263,6 +282,8 @@ type InstallSkillRequest struct {
 // @Success 200 {object} plugins.Installation
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
 // @Router /bots/{bot_id}/supermarket/install-plugin [post].
 func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
@@ -285,6 +306,16 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	req.ReleaseRevision = strings.TrimSpace(req.ReleaseRevision)
 	if !isCanonicalSHA256(req.ReleaseRevision) {
 		return echo.NewHTTPError(http.StatusBadRequest, "release_revision is invalid")
+	}
+	if !req.expectedInstalledRevisionSet {
+		return echo.NewHTTPError(http.StatusBadRequest, "expected_installed_revision is required")
+	}
+	if req.ExpectedInstalledRevision != nil {
+		expectedRevision := strings.TrimSpace(*req.ExpectedInstalledRevision)
+		if !isCanonicalSHA256(expectedRevision) {
+			return echo.NewHTTPError(http.StatusBadRequest, "expected_installed_revision is invalid")
+		}
+		req.ExpectedInstalledRevision = &expectedRevision
 	}
 
 	entry, err := h.fetchPluginEntry(c, req.PluginID)
@@ -326,6 +357,15 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 		scriptsResult pluginInstallScriptsResult
 	)
 	if err := withBotMutation(ctx, botID, h.pluginService, func(mutationCtx context.Context) error {
+		installedRevision, installed, currentErr := h.pluginService.InstalledPluginRelease(
+			mutationCtx, botID, manifest.ID,
+		)
+		if currentErr != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, currentErr.Error())
+		}
+		if !matchesExpectedPluginRelease(req.ExpectedInstalledRevision, installedRevision, installed) {
+			return echo.NewHTTPError(http.StatusConflict, "installed Plugin changed; refresh before installing")
+		}
 		if conflictErr := h.checkPluginSkillArtifactConflicts(
 			mutationCtx, target.Client, botID, manifest.ID, target.TargetID, entry.Release.Skills,
 		); conflictErr != nil {
@@ -392,6 +432,13 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	return c.JSON(http.StatusOK, installation)
 }
 
+func matchesExpectedPluginRelease(expected *string, actual string, installed bool) bool {
+	if expected == nil {
+		return !installed
+	}
+	return installed && actual == *expected
+}
+
 // InstallSkill godoc
 // @Summary Install skill from supermarket to bot workspace
 // @Tags supermarket
@@ -429,21 +476,21 @@ type SupermarketAuthor struct {
 }
 
 type SupermarketPluginResolvedSkill struct {
-	RegistryID          string                              `json:"registry_id"`
-	PackageID           string                              `json:"package_id"`
-	SkillID             string                              `json:"skill_id"`
-	RegistryRevision    string                              `json:"registry_revision"`
-	SourceRevision      string                              `json:"source_revision"`
-	InstallID           string                              `json:"install_id"`
-	RuntimeRequirements SupermarketSkillRuntimeRequirements `json:"runtime_requirements"`
-	Artifact            SupermarketSkillArtifact            `json:"artifact"`
+	RegistryID          string                              `json:"registry_id" validate:"required"`
+	PackageID           string                              `json:"package_id" validate:"required"`
+	SkillID             string                              `json:"skill_id" validate:"required"`
+	RegistryRevision    string                              `json:"registry_revision" validate:"required"`
+	SourceRevision      string                              `json:"source_revision" validate:"required"`
+	InstallID           string                              `json:"install_id" validate:"required"`
+	RuntimeRequirements SupermarketSkillRuntimeRequirements `json:"runtime_requirements" validate:"required"`
+	Artifact            SupermarketSkillArtifact            `json:"artifact" validate:"required"`
 }
 
 type SupermarketPluginRelease struct {
-	Revision    string                           `json:"revision"`
-	PublishedAt string                           `json:"published_at"`
-	Artifact    SupermarketSkillArtifact         `json:"artifact"`
-	Skills      []SupermarketPluginResolvedSkill `json:"skills"`
+	Revision    string                           `json:"revision" validate:"required"`
+	PublishedAt string                           `json:"published_at" validate:"required"`
+	Artifact    SupermarketSkillArtifact         `json:"artifact" validate:"required"`
+	Skills      []SupermarketPluginResolvedSkill `json:"skills" validate:"required"`
 }
 
 type SupermarketImmutablePluginRelease struct {
@@ -455,7 +502,7 @@ type SupermarketImmutablePluginRelease struct {
 
 type SupermarketPluginEntry struct {
 	pluginspkg.Manifest
-	Release SupermarketPluginRelease `json:"release"`
+	Release SupermarketPluginRelease `json:"release" validate:"required"`
 }
 
 type SupermarketPluginListResponse struct {

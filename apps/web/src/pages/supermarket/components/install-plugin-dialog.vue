@@ -122,6 +122,7 @@ import {
   Button, Badge, Input, Label, toast,
 } from '@felinic/ui'
 import {
+  getBotsByBotIdPlugins,
   getBotsByBotIdPluginsByIdOauthStatus,
   postBotsByBotIdPluginsByIdOauthAuthorize,
   postBotsByBotIdSupermarketInstallPlugin,
@@ -197,11 +198,21 @@ async function handleInstall() {
     : null
   installing.value = true
   try {
+    const { data: installedPlugins } = await getBotsByBotIdPlugins({
+      path: { bot_id: botId },
+      throwOnError: true,
+    })
+    const installedPlugin = (installedPlugins.items ?? []).find(item => item.plugin_id === props.plugin?.id)
+    const installedRevision = installedPlugin?.metadata?.release_revision
+    const expectedInstalledRevision = typeof installedRevision === 'string' && installedRevision
+      ? installedRevision
+      : null
     const { data } = await postBotsByBotIdSupermarketInstallPlugin({
       path: { bot_id: botId },
       body: {
         plugin_id: props.plugin.id,
         release_revision: props.plugin.release.revision,
+        expected_installed_revision: expectedInstalledRevision,
         variables: Object.fromEntries(
           Object.entries(variableValues).filter(([, value]) => value.trim() !== ''),
         ),

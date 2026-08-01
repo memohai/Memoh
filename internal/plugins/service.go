@@ -83,6 +83,35 @@ func (s *Service) Get(ctx context.Context, botID, installationID string) (Instal
 	return s.normalizeInstallation(ctx, row)
 }
 
+// InstalledPluginRelease returns the immutable release currently owned by a
+// bot/plugin identity. An installed Plugin without release metadata is still
+// reported as installed so callers cannot mistake it for a new installation.
+func (s *Service) InstalledPluginRelease(ctx context.Context, botID, pluginID string) (string, bool, error) {
+	if scoped := s.scopedService(ctx, botID); scoped != nil && scoped != s {
+		return scoped.InstalledPluginRelease(ctx, botID, pluginID)
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return "", false, err
+	}
+	rows, err := s.queries.ListBotPluginInstallations(ctx, botUUID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, row := range rows {
+		if row.PluginID != pluginID {
+			continue
+		}
+		metadata, err := decodeJSONMap(row.Metadata)
+		if err != nil {
+			return "", false, err
+		}
+		revision, _ := metadata["release_revision"].(string)
+		return strings.TrimSpace(revision), true, nil
+	}
+	return "", false, nil
+}
+
 func (s *Service) Install(ctx context.Context, botID string, req InstallRequest) (Installation, error) {
 	var result Installation
 	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
