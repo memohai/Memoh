@@ -247,6 +247,7 @@ func TestDeleteSkillsAPIRejectsPluginOnlyRegistrySkill(t *testing.T) {
 	env.writeSkillFile(t, sourcePath, managedSkillRaw("meeting", "Meeting notes"))
 	env.handler.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{{
 		PluginID: "notion", Status: pluginspkg.StatusReady, Enabled: true,
+		Metadata:  map[string]any{"workspace_target_id": workspace.WorkspaceTargetNative},
 		Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: sourcePath}},
 	}}})
 
@@ -271,6 +272,7 @@ func TestDeleteSkillsAPIRemovesDirectOwnerButKeepsPluginArtifact(t *testing.T) {
 	mutationCalls := 0
 	env.handler.SetPluginService(fakePluginInstallationLister{mutationCalls: &mutationCalls, items: []pluginspkg.Installation{{
 		PluginID: "notion", Status: pluginspkg.StatusReady, Enabled: true,
+		Metadata:  map[string]any{"workspace_target_id": workspace.WorkspaceTargetNative},
 		Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: sourcePath}},
 	}}})
 
@@ -357,7 +359,7 @@ func TestUpsertSkillsAPIRejectsTraversalName(t *testing.T) {
 	}
 }
 
-func TestUpsertSkillsAPIRenamesManagedSkillAndEditsDirectRegistrySkillInPlace(t *testing.T) {
+func TestUpsertSkillsAPIRenamesManagedSkillAndRejectsDirectRegistryEdit(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	oldPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
 	env.writeSkillFile(t, oldPath, managedSkillRaw("alpha", "Managed Alpha"))
@@ -382,22 +384,24 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndEditsDirectRegistrySkillInPlace(t 
 	}
 
 	registryPath := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx", "SKILL.md")
-	env.writeSkillFile(t, registryPath, managedSkillRaw("xlsx", "Spreadsheet"))
+	original := managedSkillRaw("xlsx", "Spreadsheet")
+	env.writeSkillFile(t, registryPath, original)
 	env.markDirectOwner(t, "openai-api-curated", "docs", "xlsx")
 	updated := "---\nname: xlsx\ndescription: Updated sheet\n---\n\n# Updated\n"
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
 		Skills:     []string{updated},
 		SourcePath: registryPath,
 	}, env.handler.UpsertSkills)
-	if err != nil {
-		t.Fatalf("UpsertSkills(registry) error = %v", err)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("UpsertSkills(registry) error = %v, want HTTP 400", err)
 	}
 	got, err := os.ReadFile(env.localPath(registryPath))
 	if err != nil {
 		t.Fatalf("read registry skill: %v", err)
 	}
-	if string(got) != updated {
-		t.Fatalf("registry skill was not updated in place:\n%s", got)
+	if string(got) != original {
+		t.Fatalf("registry skill changed despite immutable ownership:\n%s", got)
 	}
 	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "xlsx"))); !os.IsNotExist(err) {
 		t.Fatalf("registry edit should not create a user Skill, stat err = %v", err)
@@ -549,7 +553,9 @@ func TestLoadSkillsUsesEffectiveSetAndPromptReflectsOverrideFallback(t *testing.
 	if err != nil {
 		t.Fatalf("get bridge client: %v", err)
 	}
-	roots, registrySkillRoots, err := env.handler.skillDiscoveryRoots(context.Background(), env.botID)
+	roots, registrySkillRoots, err := env.handler.skillDiscoveryRoots(
+		context.Background(), env.botID, workspace.WorkspaceTargetNative,
+	)
 	if err != nil {
 		t.Fatalf("resolve skill discovery roots: %v", err)
 	}
@@ -611,18 +617,31 @@ func TestListSkillsAPIIncludesOnlyEnabledPluginRegistrySkillReferences(t *testin
 	if err != nil {
 		t.Fatalf("disabled Plugin Registry Skill root: %v", err)
 	}
+	remoteRoot, err := skillset.SkillDirForIDs("memoh", "remote", "hidden")
+	if err != nil {
+		t.Fatalf("remote Plugin Registry Skill root: %v", err)
+	}
 	pluginPath := path.Join(pluginRoot, "SKILL.md")
 	disabledPath := path.Join(disabledRoot, "SKILL.md")
+	remotePath := path.Join(remoteRoot, "SKILL.md")
 	env.writeSkillFile(t, pluginPath, managedSkillRaw("review", "Plugin Review"))
 	env.writeSkillFile(t, disabledPath, managedSkillRaw("hidden", "Hidden Plugin"))
+	env.writeSkillFile(t, remotePath, managedSkillRaw("hidden", "Remote Plugin"))
 	env.handler.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{
 		{
 			PluginID: "github", Status: pluginspkg.StatusReady, Enabled: true,
+			Metadata:  map[string]any{"workspace_target_id": workspace.WorkspaceTargetNative},
 			Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: pluginPath}},
 		},
 		{
 			PluginID: "disabled", Status: pluginspkg.StatusReady, Enabled: false,
+			Metadata:  map[string]any{"workspace_target_id": workspace.WorkspaceTargetNative},
 			Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: disabledPath}},
+		},
+		{
+			PluginID: "remote", Status: pluginspkg.StatusReady, Enabled: true,
+			Metadata:  map[string]any{"workspace_target_id": "remote-target"},
+			Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: remotePath}},
 		},
 		{
 			PluginID: "removed", Status: pluginspkg.StatusUninstalled, Enabled: true,

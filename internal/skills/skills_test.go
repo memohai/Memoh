@@ -269,7 +269,7 @@ func TestPrunableSkillNamespaceDirs(t *testing.T) {
 	}
 }
 
-func TestPlanUpsertCreateAndRenameAndRegistryInPlace(t *testing.T) {
+func TestPlanUpsertCreateRenameAndRejectRegistryEdit(t *testing.T) {
 	create, err := PlanUpsert("---\nname: alpha\ndescription: A\n---\n\n# A\n", "")
 	if err != nil {
 		t.Fatalf("PlanUpsert(create) error = %v", err)
@@ -298,12 +298,8 @@ func TestPlanUpsertCreateAndRenameAndRegistryInPlace(t *testing.T) {
 	}
 
 	registryPath := pathJoin(ManagedDirPath, "openai-api-curated", "docs", "xlsx", "SKILL.md")
-	registry, err := PlanUpsert("---\nname: xlsx\ndescription: Sheet\n---\n\n# Sheet\n", registryPath)
-	if err != nil {
-		t.Fatalf("PlanUpsert(registry) error = %v", err)
-	}
-	if registry.WritePath != registryPath || registry.RenameFromDir != "" {
-		t.Fatalf("PlanUpsert(registry) = %+v", registry)
+	if _, err := PlanUpsert("---\nname: xlsx\ndescription: Sheet\n---\n\n# Sheet\n", registryPath); !errors.Is(err, ErrRegistrySkillReadOnly) {
+		t.Fatalf("PlanUpsert(registry) error = %v, want ErrRegistrySkillReadOnly", err)
 	}
 
 	builtinPath := pathJoin(IndexDirPath, "skill-creator", "SKILL.md")

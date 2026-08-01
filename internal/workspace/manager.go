@@ -266,6 +266,9 @@ func (m *Manager) NativeMCPClient(ctx context.Context, botID string) (*bridge.Cl
 // override before falling back to the Bot's persisted Primary target.
 func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
+		if targetID == WorkspaceTargetNative {
+			return m.nativeMCPClient(ctx, botID)
+		}
 		target, err := m.ResolveWorkspaceTarget(ctx, botID, targetID)
 		return target.Client, err
 	}

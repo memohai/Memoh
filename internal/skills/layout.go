@@ -86,7 +86,8 @@ type UpsertPlan struct {
 
 // PlanUpsert resolves the target for a user edit. User Skills retain their
 // canonical namespace and rename by moving their containing directory. A
-// locally installed Registry Skill is edited in place.
+// Registry Skills are immutable and can only be replaced through their
+// Registry installation flow.
 func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
 	parsed := ParseFile(raw, "")
 	if !IsValidName(parsed.Name) {
@@ -121,7 +122,7 @@ func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
 		return UpsertPlan{}, ErrBuiltinSkillReadOnly
 	}
 	if IsNamespacedSkillPath(sourcePath) {
-		return UpsertPlan{WritePath: sourcePath}, nil
+		return UpsertPlan{}, ErrRegistrySkillReadOnly
 	}
 	return UpsertPlan{WritePath: userWrite}, nil
 }
@@ -213,4 +214,7 @@ func skillPathIDs(skillMDPath string) (namespaceID, packageID, skillID string, o
 	return namespaceID, packageID, skillID, true
 }
 
-var ErrBuiltinSkillReadOnly = errors.New("built-in skills are read-only")
+var (
+	ErrBuiltinSkillReadOnly  = errors.New("built-in skills are read-only")
+	ErrRegistrySkillReadOnly = errors.New("registry skills are read-only")
+)

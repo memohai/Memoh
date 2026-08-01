@@ -67,9 +67,15 @@ type SkillReference struct {
 }
 
 type SkillArtifactMetadata struct {
-	InstallID      string `json:"install_id,omitempty"`
+	RegistryRevision string `json:"registry_revision,omitempty"`
+	InstallID        string `json:"install_id,omitempty"`
+	ArtifactDigest   string `json:"artifact_digest,omitempty"`
+	FilesWritten     int    `json:"files_written,omitempty"`
+}
+
+type ReleaseMetadata struct {
+	Revision       string `json:"revision,omitempty"`
 	ArtifactDigest string `json:"artifact_digest,omitempty"`
-	FilesWritten   int    `json:"files_written,omitempty"`
 }
 
 type InstallCommands []string
@@ -122,9 +128,11 @@ type Manifest struct {
 }
 
 type InstallRequest struct {
-	Manifest       Manifest                         `json:"manifest"`
-	Variables      map[string]string                `json:"variables,omitempty"`
-	SkillArtifacts map[string]SkillArtifactMetadata `json:"-"`
+	Manifest          Manifest                         `json:"manifest"`
+	Variables         map[string]string                `json:"variables,omitempty"`
+	SkillArtifacts    map[string]SkillArtifactMetadata `json:"-"`
+	Release           ReleaseMetadata                  `json:"-"`
+	WorkspaceTargetID string                           `json:"-"`
 }
 
 type OAuthAuthorizeRequest struct {

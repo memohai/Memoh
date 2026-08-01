@@ -86,15 +86,15 @@ func (s *Service) Get(ctx context.Context, botID, installationID string) (Instal
 func (s *Service) Install(ctx context.Context, botID string, req InstallRequest) (Installation, error) {
 	var result Installation
 	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		var staleSkillPaths []string
+		var staleSkills []registrySkillGCReference
 		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
 			var installErr error
-			result, installErr = txService.install(scopedCtx, botID, req, &staleSkillPaths)
+			result, installErr = txService.install(scopedCtx, botID, req, &staleSkills)
 			return installErr
 		}); err != nil {
 			return err
 		}
-		scoped.garbageCollectRegistrySkills(scopedCtx, botID, staleSkillPaths)
+		scoped.garbageCollectRegistrySkills(scopedCtx, botID, staleSkills)
 		return nil
 	})
 	return result, err
@@ -104,7 +104,7 @@ func (s *Service) install(
 	ctx context.Context,
 	botID string,
 	req InstallRequest,
-	staleSkillPaths *[]string,
+	staleSkills *[]registrySkillGCReference,
 ) (Installation, error) {
 	if s.queries == nil || s.mcpService == nil {
 		return Installation{}, errors.New("plugin service is not configured")
@@ -118,6 +118,9 @@ func (s *Service) install(
 		return Installation{}, errors.New("plugin id is required")
 	}
 	if err := ValidateSkillReferences(manifest.Skills); err != nil {
+		return Installation{}, err
+	}
+	if err := validateReleaseMetadata(req.Release); err != nil {
 		return Installation{}, err
 	}
 	if err := validateSkillArtifacts(manifest.Skills, req.SkillArtifacts); err != nil {
@@ -135,7 +138,15 @@ func (s *Service) install(
 	if err != nil {
 		return Installation{}, err
 	}
-	metadataPayload, err := encodeJSON(manifestMetadata(manifest))
+	metadata := manifestMetadata(manifest)
+	if req.Release.Revision != "" {
+		metadata["release_revision"] = req.Release.Revision
+		metadata["plugin_artifact_digest"] = req.Release.ArtifactDigest
+	}
+	if workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID); workspaceTargetID != "" {
+		metadata["workspace_target_id"] = workspaceTargetID
+	}
+	metadataPayload, err := encodeJSON(metadata)
 	if err != nil {
 		return Installation{}, err
 	}
@@ -208,7 +219,11 @@ func (s *Service) install(
 			"package_id":  resource.PackageID,
 			"skill_id":    resource.SkillID,
 		}
+		if workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID); workspaceTargetID != "" {
+			metadata["workspace_target_id"] = workspaceTargetID
+		}
 		if artifact, ok := req.SkillArtifacts[identity]; ok {
+			metadata["registry_revision"] = artifact.RegistryRevision
 			metadata["install_id"] = artifact.InstallID
 			metadata["artifact_digest"] = artifact.ArtifactDigest
 			metadata["files_written"] = artifact.FilesWritten
@@ -224,29 +239,9 @@ func (s *Service) install(
 			return Installation{}, err
 		}
 	}
-	*staleSkillPaths = skillResourcePaths(previousResources)
+	*staleSkills = skillResourceGCReferences(previousResources)
 
 	return s.normalizeInstallation(ctx, row)
-}
-
-// GarbageCollectRegistrySkills removes referenced Skill Artifacts that no
-// direct install or installed Plugin owns. It is safe to call after a failed
-// Plugin installation because existing owners are re-read before deletion.
-func (s *Service) GarbageCollectRegistrySkills(ctx context.Context, botID string, references []SkillReference) {
-	paths := make([]string, 0, len(references))
-	for _, reference := range references {
-		dirPath, err := skillset.SkillDirForIDs(reference.RegistryID, reference.PackageID, reference.SkillID)
-		if err != nil {
-			continue
-		}
-		paths = append(paths, path.Join(dirPath, "SKILL.md"))
-	}
-	if err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		scoped.garbageCollectRegistrySkills(scopedCtx, botID, paths)
-		return nil
-	}); err != nil {
-		s.logger.Warn("skip Registry Skill garbage collection", slog.String("bot_id", botID), slog.Any("error", err))
-	}
 }
 
 func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, enabled bool) (Installation, error) {
@@ -311,15 +306,37 @@ func (s *Service) setEnabled(ctx context.Context, botID, installationID string, 
 func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (Installation, error) {
 	var result Installation
 	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		var staleSkillPaths []string
-		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
-			var uninstallErr error
-			result, uninstallErr = txService.uninstall(scopedCtx, botID, installationID, &staleSkillPaths)
-			return uninstallErr
-		}); err != nil {
+		row, err := scoped.getRow(scopedCtx, botID, installationID)
+		if err != nil {
 			return err
 		}
-		scoped.garbageCollectRegistrySkills(scopedCtx, botID, staleSkillPaths)
+		var bundleRemoval *pluginBundleRemoval
+		if row.Status != StatusUninstalled {
+			bundleRemoval, err = scoped.preparePluginBundleRemoval(scopedCtx, botID, row)
+			if err != nil {
+				return err
+			}
+		}
+		var staleSkills []registrySkillGCReference
+		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
+			var uninstallErr error
+			result, uninstallErr = txService.uninstall(scopedCtx, botID, installationID, &staleSkills)
+			return uninstallErr
+		}); err != nil {
+			if rollbackErr := bundleRemoval.rollback(scopedCtx); rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("roll back Plugin bundle removal: %w", rollbackErr))
+			}
+			return err
+		}
+		if err := bundleRemoval.commit(scopedCtx); err != nil {
+			scoped.logger.Warn(
+				"cleanup removed Plugin bundle failed",
+				slog.String("bot_id", botID),
+				slog.String("plugin_id", row.PluginID),
+				slog.Any("error", err),
+			)
+		}
+		scoped.garbageCollectRegistrySkills(scopedCtx, botID, staleSkills)
 		return nil
 	})
 	return result, err
@@ -328,7 +345,7 @@ func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (
 func (s *Service) uninstall(
 	ctx context.Context,
 	botID, installationID string,
-	staleSkillPaths *[]string,
+	staleSkills *[]registrySkillGCReference,
 ) (Installation, error) {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
@@ -348,19 +365,41 @@ func (s *Service) uninstall(
 	if err != nil {
 		return Installation{}, err
 	}
-	*staleSkillPaths = skillResourcePaths(resources)
+	*staleSkills = skillResourceGCReferences(resources)
 	return s.normalizeInstallation(ctx, updated)
 }
 
 func (s *Service) Purge(ctx context.Context, botID, installationID string) error {
 	return s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		var staleSkillPaths []string
-		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
-			return txService.purge(scopedCtx, botID, installationID, &staleSkillPaths)
-		}); err != nil {
+		row, err := scoped.getRow(scopedCtx, botID, installationID)
+		if err != nil {
 			return err
 		}
-		scoped.garbageCollectRegistrySkills(scopedCtx, botID, staleSkillPaths)
+		var bundleRemoval *pluginBundleRemoval
+		if row.Status != StatusUninstalled {
+			bundleRemoval, err = scoped.preparePluginBundleRemoval(scopedCtx, botID, row)
+			if err != nil {
+				return err
+			}
+		}
+		var staleSkills []registrySkillGCReference
+		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
+			return txService.purge(scopedCtx, botID, installationID, &staleSkills)
+		}); err != nil {
+			if rollbackErr := bundleRemoval.rollback(scopedCtx); rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("roll back Plugin bundle removal: %w", rollbackErr))
+			}
+			return err
+		}
+		if err := bundleRemoval.commit(scopedCtx); err != nil {
+			scoped.logger.Warn(
+				"cleanup purged Plugin bundle failed",
+				slog.String("bot_id", botID),
+				slog.String("plugin_id", row.PluginID),
+				slog.Any("error", err),
+			)
+		}
+		scoped.garbageCollectRegistrySkills(scopedCtx, botID, staleSkills)
 		return nil
 	})
 }
@@ -368,7 +407,7 @@ func (s *Service) Purge(ctx context.Context, botID, installationID string) error
 func (s *Service) purge(
 	ctx context.Context,
 	botID, installationID string,
-	staleSkillPaths *[]string,
+	staleSkills *[]registrySkillGCReference,
 ) error {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
@@ -398,7 +437,7 @@ func (s *Service) purge(
 	}); err != nil {
 		return err
 	}
-	*staleSkillPaths = skillResourcePaths(resources)
+	*staleSkills = skillResourceGCReferences(resources)
 	return nil
 }
 
@@ -576,8 +615,13 @@ func (s *Service) normalizeInstallation(ctx context.Context, row sqlc.BotPluginI
 	}, nil
 }
 
-func skillResourcePaths(resources []sqlc.BotPluginResource) []string {
-	paths := make([]string, 0, len(resources))
+type registrySkillGCReference struct {
+	SourcePath        string
+	WorkspaceTargetID string
+}
+
+func skillResourceGCReferences(resources []sqlc.BotPluginResource) []registrySkillGCReference {
+	references := make([]registrySkillGCReference, 0, len(resources))
 	seen := make(map[string]struct{}, len(resources))
 	for _, resource := range resources {
 		if strings.TrimSpace(resource.ResourceType) != "skill" {
@@ -587,22 +631,29 @@ func skillResourcePaths(resources []sqlc.BotPluginResource) []string {
 		if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); !ok {
 			continue
 		}
-		if _, ok := seen[sourcePath]; ok {
+		metadata, err := decodeJSONMap(resource.Metadata)
+		if err != nil {
 			continue
 		}
-		seen[sourcePath] = struct{}{}
-		paths = append(paths, sourcePath)
+		workspaceTargetID, _ := metadata["workspace_target_id"].(string)
+		workspaceTargetID = strings.TrimSpace(workspaceTargetID)
+		if workspaceTargetID == "" {
+			continue
+		}
+		key := workspaceTargetID + "\x00" + sourcePath
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		references = append(references, registrySkillGCReference{
+			SourcePath: sourcePath, WorkspaceTargetID: workspaceTargetID,
+		})
 	}
-	return paths
+	return references
 }
 
-func (s *Service) garbageCollectRegistrySkills(ctx context.Context, botID string, sourcePaths []string) {
-	if s.bridges == nil || len(sourcePaths) == 0 {
-		return
-	}
-	client, err := s.bridges.MCPClient(ctx, botID)
-	if err != nil {
-		s.logger.Warn("skip Registry Skill garbage collection", slog.String("bot_id", botID), slog.Any("error", err))
+func (s *Service) garbageCollectRegistrySkills(ctx context.Context, botID string, references []registrySkillGCReference) {
+	if s.bridges == nil || len(references) == 0 {
 		return
 	}
 	installations, err := s.List(ctx, botID)
@@ -610,7 +661,29 @@ func (s *Service) garbageCollectRegistrySkills(ctx context.Context, botID string
 		s.logger.Warn("skip Registry Skill garbage collection", slog.String("bot_id", botID), slog.Any("error", err))
 		return
 	}
-	for _, sourcePath := range sourcePaths {
+	clients := make(map[string]*bridge.Client)
+	failedTargets := make(map[string]struct{})
+	for _, reference := range references {
+		sourcePath := reference.SourcePath
+		client := clients[reference.WorkspaceTargetID]
+		if client == nil {
+			if _, failed := failedTargets[reference.WorkspaceTargetID]; failed {
+				continue
+			}
+			targetContext := bridge.WithWorkspaceTarget(ctx, reference.WorkspaceTargetID)
+			client, err = s.bridges.MCPClient(targetContext, botID)
+			if err != nil {
+				failedTargets[reference.WorkspaceTargetID] = struct{}{}
+				s.logger.Warn(
+					"skip Registry Skill garbage collection",
+					slog.String("bot_id", botID),
+					slog.String("workspace_target_id", reference.WorkspaceTargetID),
+					slog.Any("error", err),
+				)
+				continue
+			}
+			clients[reference.WorkspaceTargetID] = client
+		}
 		_, hasDirectOwner, ownerErr := skillset.DirectOwnerForSourcePath(ctx, client, sourcePath)
 		if ownerErr != nil {
 			s.logger.Warn(
@@ -623,7 +696,7 @@ func (s *Service) garbageCollectRegistrySkills(ctx context.Context, botID string
 		if hasDirectOwner {
 			continue
 		}
-		if OwnsRegistrySkill(installations, sourcePath) {
+		if OwnsRegistrySkillAtTarget(installations, sourcePath, reference.WorkspaceTargetID) {
 			continue
 		}
 		skillDir := path.Dir(sourcePath)
@@ -647,6 +720,21 @@ func (s *Service) garbageCollectRegistrySkills(ctx context.Context, botID string
 // canonical Registry Skill path. Disabled and not-yet-ready Plugins retain
 // ownership even though discovery hides their Skills.
 func OwnsRegistrySkill(installations []Installation, sourcePath string) bool {
+	return ownsRegistrySkill(installations, sourcePath, "", false)
+}
+
+func OwnsRegistrySkillAtTarget(
+	installations []Installation,
+	sourcePath, workspaceTargetID string,
+) bool {
+	return ownsRegistrySkill(installations, sourcePath, strings.TrimSpace(workspaceTargetID), true)
+}
+
+func ownsRegistrySkill(
+	installations []Installation,
+	sourcePath, workspaceTargetID string,
+	matchTarget bool,
+) bool {
 	sourcePath = path.Clean(strings.TrimSpace(sourcePath))
 	if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); !ok {
 		return false
@@ -655,6 +743,12 @@ func OwnsRegistrySkill(installations []Installation, sourcePath string) bool {
 		if installation.Status == StatusUninstalled {
 			continue
 		}
+		if matchTarget {
+			installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
+			if strings.TrimSpace(installedTarget) != workspaceTargetID {
+				continue
+			}
+		}
 		for _, resource := range installation.Resources {
 			if resource.Type == "skill" && path.Clean(strings.TrimSpace(resource.ResourceID)) == sourcePath {
 				return true
@@ -662,6 +756,72 @@ func OwnsRegistrySkill(installations []Installation, sourcePath string) bool {
 		}
 	}
 	return false
+}
+
+// CheckSkillArtifactConflicts rejects an update when another installed Plugin
+// owns the same Registry Skill identity at a different immutable Artifact.
+func (s *Service) CheckSkillArtifactConflicts(
+	ctx context.Context,
+	botID, targetPluginID, workspaceTargetID string,
+	expected map[string]string,
+) error {
+	if len(expected) == 0 && strings.TrimSpace(targetPluginID) == "" {
+		return nil
+	}
+	installations, err := s.List(ctx, botID)
+	if err != nil {
+		return fmt.Errorf("list Plugin Skill owners: %w", err)
+	}
+	return checkSkillArtifactConflicts(installations, targetPluginID, workspaceTargetID, expected)
+}
+
+func checkSkillArtifactConflicts(
+	installations []Installation,
+	targetPluginID, workspaceTargetID string,
+	expected map[string]string,
+) error {
+	for identity, digest := range expected {
+		if !artifactDigestPattern.MatchString(digest) {
+			return fmt.Errorf("plugin Skill %q expected Artifact digest is invalid", identity)
+		}
+	}
+	for _, installation := range installations {
+		if installation.Status == StatusUninstalled {
+			continue
+		}
+		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
+		installedTarget = strings.TrimSpace(installedTarget)
+		expectedTarget := strings.TrimSpace(workspaceTargetID)
+		if targetPluginID != "" && installation.PluginID == targetPluginID {
+			if installedTarget != expectedTarget {
+				return fmt.Errorf(
+					"plugin %q is installed on workspace target %q; uninstall it before installing on %q",
+					targetPluginID, installedTarget, expectedTarget,
+				)
+			}
+			continue
+		}
+		if installedTarget != expectedTarget {
+			continue
+		}
+		for _, resource := range installation.Resources {
+			if resource.Type != "skill" {
+				continue
+			}
+			expectedDigest, shared := expected[resource.Key]
+			if !shared {
+				continue
+			}
+			actualDigest, ok := resource.Metadata["artifact_digest"].(string)
+			if !ok || !artifactDigestPattern.MatchString(actualDigest) {
+				return fmt.Errorf("plugin Skill %q owner %q has unverifiable Artifact metadata", resource.Key, installation.PluginID)
+			}
+			if actualDigest != expectedDigest {
+				return fmt.Errorf("plugin Skill %q owner %q requires a different Artifact", resource.Key, installation.PluginID)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]string) string {
@@ -1119,6 +1279,17 @@ func ValidateSkillReferences(references []SkillReference) error {
 	return nil
 }
 
+func validateReleaseMetadata(release ReleaseMetadata) error {
+	if release.Revision == "" && release.ArtifactDigest == "" {
+		return nil
+	}
+	if !artifactDigestPattern.MatchString(release.Revision) ||
+		!artifactDigestPattern.MatchString(release.ArtifactDigest) {
+		return errors.New("plugin release metadata is invalid")
+	}
+	return nil
+}
+
 func validateSkillArtifacts(references []SkillReference, artifacts map[string]SkillArtifactMetadata) error {
 	for _, reference := range references {
 		identity := SkillReferenceIdentity(reference)
@@ -1127,7 +1298,8 @@ func validateSkillArtifacts(references []SkillReference, artifacts map[string]Sk
 			return fmt.Errorf("plugin Skill %q was not installed", identity)
 		}
 		expectedInstallID := strings.Join([]string{reference.RegistryID, reference.PackageID, reference.SkillID}, "+")
-		if artifact.InstallID != expectedInstallID ||
+		if !artifactDigestPattern.MatchString(artifact.RegistryRevision) ||
+			artifact.InstallID != expectedInstallID ||
 			!artifactDigestPattern.MatchString(artifact.ArtifactDigest) ||
 			artifact.FilesWritten < 1 {
 			return fmt.Errorf("plugin Skill %q installation metadata is invalid", identity)

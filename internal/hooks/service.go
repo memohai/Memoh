@@ -25,6 +25,10 @@ type PluginInstallationLister interface {
 	List(ctx context.Context, botID string) ([]pluginspkg.Installation, error)
 }
 
+type workspaceTargetIDResolver interface {
+	CurrentWorkspaceTargetID(ctx context.Context, botID string) (string, error)
+}
+
 type Service struct {
 	logger        *slog.Logger
 	provider      bridge.Provider
@@ -90,6 +94,11 @@ func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) 
 }
 
 func (s *Service) LoadEffective(ctx context.Context, botID string) (Config, bool, error) {
+	targetID, err := s.currentWorkspaceTargetID(ctx, botID)
+	if err != nil {
+		return Config{}, false, err
+	}
+	ctx = bridge.WithWorkspaceTarget(ctx, targetID)
 	userCfg, exists, err := s.Load(ctx, botID)
 	if err != nil {
 		return Config{}, exists, err
@@ -108,7 +117,7 @@ func (s *Service) LoadEffective(ctx context.Context, botID string) (Config, bool
 			effective.Hooks = append(effective.Hooks, hook)
 		}
 	}
-	pluginHooks, err := s.loadPluginHooks(ctx, botID)
+	pluginHooks, err := s.loadPluginHooks(ctx, botID, targetID)
 	if err != nil {
 		return Config{}, exists, err
 	}
@@ -116,7 +125,20 @@ func (s *Service) LoadEffective(ctx context.Context, botID string) (Config, bool
 	return effective, exists, nil
 }
 
-func (s *Service) loadPluginHooks(ctx context.Context, botID string) ([]Hook, error) {
+func (s *Service) currentWorkspaceTargetID(ctx context.Context, botID string) (string, error) {
+	if targetID := bridge.WorkspaceTargetFromContext(ctx); targetID != "" {
+		return targetID, nil
+	}
+	if s == nil {
+		return "native", nil
+	}
+	if resolver, ok := s.provider.(workspaceTargetIDResolver); ok {
+		return resolver.CurrentWorkspaceTargetID(ctx, botID)
+	}
+	return "native", nil
+}
+
+func (s *Service) loadPluginHooks(ctx context.Context, botID, targetID string) ([]Hook, error) {
 	if s == nil || s.provider == nil || s.pluginService == nil {
 		return nil, nil
 	}
@@ -137,6 +159,10 @@ func (s *Service) loadPluginHooks(ctx context.Context, botID string) ([]Hook, er
 	seen := make(map[string]struct{}, len(installations))
 	for _, installation := range installations {
 		if !installation.Enabled || installation.Status != pluginspkg.StatusReady {
+			continue
+		}
+		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
+		if strings.TrimSpace(installedTarget) != targetID {
 			continue
 		}
 		pluginID := strings.TrimSpace(installation.PluginID)
@@ -207,6 +233,11 @@ func (s *Service) Run(ctx context.Context, req Request, runner ToolRunner) (Resu
 	if strings.TrimSpace(req.Event) == "" {
 		return Result{}, errors.New("hook event is required")
 	}
+	targetID, err := s.currentWorkspaceTargetID(ctx, req.BotID)
+	if err != nil {
+		return Result{}, err
+	}
+	ctx = bridge.WithWorkspaceTarget(ctx, targetID)
 	cfg, _, err := s.LoadEffective(ctx, req.BotID)
 	if err != nil {
 		return Result{}, err

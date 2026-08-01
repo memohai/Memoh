@@ -725,6 +725,51 @@ func TestRunCommandHookDoesNotUseTargetWorkspaceAsExecutionDirectory(t *testing.
 	}
 }
 
+func TestRunPinsWorkspaceTargetAcrossLoadAndExecution(t *testing.T) {
+	cfg := `{
+		"version": 1,
+		"enabled": true,
+		"hooks": [{
+			"name": "pinned",
+			"event": "PostToolUse",
+			"actions": [{"type": "command", "command": "true"}]
+		}]
+	}`
+	nativeServer := &hookBridgeTestServer{
+		files:  map[string][]byte{DefaultConfigPath: []byte(cfg)},
+		stdout: `{"decision":"allow"}`,
+	}
+	remoteServer := &hookBridgeTestServer{files: map[string][]byte{}}
+	provider := &switchingHookBridgeProvider{clients: map[string]*bridge.Client{
+		"native":        newHookBridgeTestClient(t, nativeServer),
+		"remote-target": newHookBridgeTestClient(t, remoteServer),
+	}}
+	service := NewService(nil, provider)
+
+	if _, err := service.Run(context.Background(), Request{
+		Event: EventPostToolUse,
+		BotID: "bot-1",
+		Tool:  &ToolPayload{Name: "exec", Result: "ok"},
+	}, nil); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if provider.resolveCalls != 1 {
+		t.Fatalf("target resolver calls = %d, want 1", provider.resolveCalls)
+	}
+	if got := strings.Join(provider.clientTargets, ","); got != "native,native" {
+		t.Fatalf("MCP client targets = %q, want native,native", got)
+	}
+	nativeServer.mu.Lock()
+	nativeExecs := len(nativeServer.execs)
+	nativeServer.mu.Unlock()
+	remoteServer.mu.Lock()
+	remoteExecs := len(remoteServer.execs)
+	remoteServer.mu.Unlock()
+	if nativeExecs != 1 || remoteExecs != 0 {
+		t.Fatalf("execs native=%d remote=%d, want 1/0", nativeExecs, remoteExecs)
+	}
+}
+
 func TestRunLoadsReadyPluginHooksWithPluginRuntimeDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -804,9 +849,10 @@ func TestRunLoadsReadyPluginHooksWithPluginRuntimeDefaults(t *testing.T) {
 	client := newHookBridgeTestClient(t, server)
 	service := NewService(nil, hookBridgeProvider{client: client})
 	service.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{
-		{PluginID: "github", Enabled: true, Status: pluginspkg.StatusReady},
-		{PluginID: "disabled", Enabled: false, Status: pluginspkg.StatusReady},
-		{PluginID: "needsauth", Enabled: true, Status: pluginspkg.StatusNeedsAuth},
+		{PluginID: "github", Enabled: true, Status: pluginspkg.StatusReady, Metadata: map[string]any{"workspace_target_id": "native"}},
+		{PluginID: "disabled", Enabled: false, Status: pluginspkg.StatusReady, Metadata: map[string]any{"workspace_target_id": "native"}},
+		{PluginID: "needsauth", Enabled: true, Status: pluginspkg.StatusNeedsAuth, Metadata: map[string]any{"workspace_target_id": "native"}},
+		{PluginID: "forged", Enabled: true, Status: pluginspkg.StatusReady, Metadata: map[string]any{"workspace_target_id": "remote-target"}},
 	}})
 	runner := &fakeToolRunner{}
 
@@ -931,6 +977,30 @@ func TestLoadCreatesEmptyConfigWhenMissing(t *testing.T) {
 
 type hookBridgeProvider struct {
 	client *bridge.Client
+}
+
+type switchingHookBridgeProvider struct {
+	clients       map[string]*bridge.Client
+	resolveCalls  int
+	clientTargets []string
+}
+
+func (p *switchingHookBridgeProvider) CurrentWorkspaceTargetID(context.Context, string) (string, error) {
+	p.resolveCalls++
+	if p.resolveCalls == 1 {
+		return "native", nil
+	}
+	return "remote-target", nil
+}
+
+func (p *switchingHookBridgeProvider) MCPClient(ctx context.Context, _ string) (*bridge.Client, error) {
+	targetID := bridge.WorkspaceTargetFromContext(ctx)
+	p.clientTargets = append(p.clientTargets, targetID)
+	client := p.clients[targetID]
+	if client == nil {
+		return nil, errors.New("unexpected workspace target: " + targetID)
+	}
+	return client, nil
 }
 
 func (p hookBridgeProvider) MCPClient(context.Context, string) (*bridge.Client, error) {

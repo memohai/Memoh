@@ -171,9 +171,8 @@ func (h *ContainerdHandler) upsertSkills(
 	if err != nil {
 		return workspaceUnavailableError(err)
 	}
-	if registryID, packageID, skillID, ok := skillset.RegistrySkillIDs(sourcePath); ok &&
-		!skillset.HasDirectOwner(ctx, client, registryID, packageID, skillID) {
-		return echo.NewHTTPError(http.StatusBadRequest, "plugin-owned Registry Skills cannot be edited directly")
+	if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); ok {
+		return echo.NewHTTPError(http.StatusBadRequest, "Registry Skills cannot be edited directly")
 	}
 
 	for i, raw := range rawSkills {
@@ -185,6 +184,9 @@ func (h *ContainerdHandler) upsertSkills(
 		if planErr != nil {
 			if errors.Is(planErr, skillset.ErrBuiltinSkillReadOnly) {
 				return apperror.New(apperror.CodeSkillBuiltinReadOnly, nil)
+			}
+			if errors.Is(planErr, skillset.ErrRegistrySkillReadOnly) {
+				return echo.NewHTTPError(http.StatusBadRequest, "Registry Skills cannot be edited directly")
 			}
 			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
 		}
@@ -278,6 +280,10 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 }
 
 func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sourcePaths []string) error {
+	ctx, targetID, err := h.pinCurrentWorkspaceTarget(ctx, botID)
+	if err != nil {
+		return workspaceUnavailableError(err)
+	}
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return workspaceUnavailableError(err)
@@ -316,7 +322,7 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 			return fsHTTPError(statErr)
 		}
 		if target.registryID != "" {
-			pluginOwned, ownerErr := h.pluginOwnsRegistrySkill(ctx, botID, target.sourcePath)
+			pluginOwned, ownerErr := h.pluginOwnsRegistrySkill(ctx, botID, target.sourcePath, targetID)
 			if ownerErr != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, ownerErr.Error())
 			}
@@ -342,7 +348,10 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 	return nil
 }
 
-func (h *ContainerdHandler) pluginOwnsRegistrySkill(ctx context.Context, botID, sourcePath string) (bool, error) {
+func (h *ContainerdHandler) pluginOwnsRegistrySkill(
+	ctx context.Context,
+	botID, sourcePath, targetID string,
+) (bool, error) {
 	if h.pluginService == nil {
 		return false, nil
 	}
@@ -350,7 +359,33 @@ func (h *ContainerdHandler) pluginOwnsRegistrySkill(ctx context.Context, botID, 
 	if err != nil {
 		return false, err
 	}
-	return pluginspkg.OwnsRegistrySkill(installations, sourcePath), nil
+	return pluginspkg.OwnsRegistrySkillAtTarget(installations, sourcePath, targetID), nil
+}
+
+type currentWorkspaceTargetResolver interface {
+	CurrentWorkspaceTargetID(ctx context.Context, botID string) (string, error)
+}
+
+func (h *ContainerdHandler) currentWorkspaceTargetID(ctx context.Context, botID string) (string, error) {
+	resolver, ok := h.manager.(currentWorkspaceTargetResolver)
+	if !ok {
+		if targetID := bridge.WorkspaceTargetFromContext(ctx); targetID != "" {
+			return targetID, nil
+		}
+		return workspace.WorkspaceTargetNative, nil
+	}
+	return resolver.CurrentWorkspaceTargetID(ctx, botID)
+}
+
+func (h *ContainerdHandler) pinCurrentWorkspaceTarget(
+	ctx context.Context,
+	botID string,
+) (context.Context, string, error) {
+	targetID, err := h.currentWorkspaceTargetID(ctx, botID)
+	if err != nil {
+		return ctx, "", err
+	}
+	return bridge.WithWorkspaceTarget(ctx, targetID), targetID, nil
 }
 
 // pruneEmptySkillNamespaceDirs drops the package and namespace directories left
@@ -405,11 +440,15 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 }
 
 func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, req SkillsActionRequest) error {
+	ctx, targetID, err := h.pinCurrentWorkspaceTarget(ctx, botID)
+	if err != nil {
+		return workspaceUnavailableError(err)
+	}
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return workspaceUnavailableError(err)
 	}
-	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID)
+	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID, targetID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -426,11 +465,15 @@ func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, 
 
 // LoadSkills loads the effective skills from the container for the given bot.
 func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]SkillItem, error) {
+	ctx, targetID, err := h.pinCurrentWorkspaceTarget(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID)
+	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID, targetID)
 	if err != nil {
 		return nil, err
 	}
@@ -470,11 +513,15 @@ func (h *ContainerdHandler) listSkillsFromContainer(ctx context.Context, botID s
 }
 
 func (h *ContainerdHandler) listSkillEntriesFromContainer(ctx context.Context, botID string) ([]skillset.Entry, error) {
+	ctx, targetID, err := h.pinCurrentWorkspaceTarget(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID)
+	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID, targetID)
 	if err != nil {
 		return nil, err
 	}
@@ -485,13 +532,16 @@ func (h *ContainerdHandler) listSkillEntriesFromContainer(ctx context.Context, b
 	return items, nil
 }
 
-func (h *ContainerdHandler) skillDiscoveryRoots(ctx context.Context, botID string) ([]string, []string, error) {
+func (h *ContainerdHandler) skillDiscoveryRoots(
+	ctx context.Context,
+	botID, targetID string,
+) ([]string, []string, error) {
 	var roots []string
 	if h.botService != nil {
 		bot, err := h.botService.Get(ctx, botID)
 		if err == nil {
 			roots = workspace.SkillDiscoveryRootsFromMetadata(bot.Metadata)
-			registrySkillRoots, err := h.pluginRegistrySkillRoots(ctx, botID)
+			registrySkillRoots, err := h.pluginRegistrySkillRoots(ctx, botID, targetID)
 			return roots, registrySkillRoots, err
 		}
 	}
@@ -503,11 +553,14 @@ func (h *ContainerdHandler) skillDiscoveryRoots(ctx context.Context, botID strin
 	if err != nil {
 		return nil, nil, err
 	}
-	registrySkillRoots, err := h.pluginRegistrySkillRoots(ctx, botID)
+	registrySkillRoots, err := h.pluginRegistrySkillRoots(ctx, botID, targetID)
 	return roots, registrySkillRoots, err
 }
 
-func (h *ContainerdHandler) pluginRegistrySkillRoots(ctx context.Context, botID string) ([]string, error) {
+func (h *ContainerdHandler) pluginRegistrySkillRoots(
+	ctx context.Context,
+	botID, targetID string,
+) ([]string, error) {
 	if h.pluginService == nil {
 		return nil, nil
 	}
@@ -519,6 +572,10 @@ func (h *ContainerdHandler) pluginRegistrySkillRoots(ctx context.Context, botID 
 	seen := make(map[string]struct{})
 	for _, installation := range installations {
 		if !installation.Enabled || installation.Status != pluginspkg.StatusReady {
+			continue
+		}
+		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
+		if strings.TrimSpace(installedTarget) != targetID {
 			continue
 		}
 		for _, resource := range installation.Resources {
@@ -558,7 +615,7 @@ func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 			SourceRoot:  entry.SourceRoot,
 			SourceKind:  entry.SourceKind,
 			Managed:     entry.Managed,
-			Editable:    !builtin && (!registryOwned || entry.DirectOwned),
+			Editable:    !builtin && !registryOwned,
 			Deletable:   entry.Managed && !builtin && (!registryOwned || entry.DirectOwned),
 			State:       entry.State,
 			ShadowedBy:  entry.ShadowedBy,
