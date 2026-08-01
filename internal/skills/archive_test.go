@@ -22,6 +22,9 @@ func TestReadArchiveReadsContentRoot(t *testing.T) {
 	if archive.FileCount() != 2 {
 		t.Fatalf("files = %d, want 2", archive.FileCount())
 	}
+	if archive.UncompressedSize() != int64(len(validArchiveManifest)+len("#!/bin/sh\n")) {
+		t.Fatalf("uncompressed bytes = %d", archive.UncompressedSize())
+	}
 	if !strings.Contains(string(archiveFileByPath(t, archive, "SKILL.md").content), "# Demo") {
 		t.Fatal("manifest body was not preserved")
 	}
@@ -41,6 +44,12 @@ func TestReadArchiveRejectsUnsafeEntries(t *testing.T) {
 		"nested manifest":  {{name: "other/SKILL.md", content: validArchiveManifest}},
 		"owner marker":     {{name: "SKILL.md", content: validArchiveManifest}, {name: DirectOwnerFileName, content: `{}`}},
 		"owner case alias": {{name: "SKILL.md", content: validArchiveManifest}, {name: ".MEMOH-DIRECT-OWNER.JSON", content: `{}`}},
+		"owner subtree":    {{name: "SKILL.md", content: validArchiveManifest}, {name: DirectOwnerFileName + "/child", content: `{}`}},
+		"trailing space":   {{name: "SKILL.md", content: validArchiveManifest}, {name: "SKILL.md ", content: "alias"}},
+		"nested whitespace": {{name: "SKILL.md", content: validArchiveManifest}, {
+			name: "scripts /run.sh", content: "bad",
+		}},
+		"windows alias": {{name: "SKILL.md", content: validArchiveManifest}, {name: "scripts/run.sh.", content: "bad"}},
 	}
 	for name, entries := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -48,6 +57,14 @@ func TestReadArchiveRejectsUnsafeEntries(t *testing.T) {
 				t.Fatal("ReadArchive() error = nil, want rejection")
 			}
 		})
+	}
+}
+
+func TestReadArchiveHonorsCallerUncompressedLimit(t *testing.T) {
+	content := testArchive(t, []archiveTestEntry{{name: "SKILL.md", content: validArchiveManifest}})
+	if _, err := ReadArchiveWithUncompressedLimit(content, int64(len(validArchiveManifest)-1)); err == nil ||
+		!strings.Contains(err.Error(), "uncompressed size limit") {
+		t.Fatalf("ReadArchiveWithUncompressedLimit() error = %v", err)
 	}
 }
 

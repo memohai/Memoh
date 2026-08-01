@@ -29,7 +29,8 @@ type archiveFile struct {
 
 // Archive is a validated Skill archive, ready to be installed.
 type Archive struct {
-	files []archiveFile
+	files             []archiveFile
+	uncompressedBytes int64
 }
 
 // FileCount returns the number of regular files in the archive.
@@ -37,8 +38,23 @@ func (a Archive) FileCount() int {
 	return len(a.files)
 }
 
+// UncompressedSize returns the aggregate size of regular files in the archive.
+func (a Archive) UncompressedSize() int64 {
+	return a.uncompressedBytes
+}
+
 // ReadArchive validates and reads a Skill archive rooted at SKILL.md.
 func ReadArchive(content []byte) (Archive, error) {
+	return ReadArchiveWithUncompressedLimit(content, maxArchiveUncompressedBytes)
+}
+
+// ReadArchiveWithUncompressedLimit applies a caller-specific aggregate budget
+// without weakening the package-wide archive limit.
+func ReadArchiveWithUncompressedLimit(content []byte, maximum int64) (Archive, error) {
+	if maximum <= 0 {
+		return Archive{}, errors.New("skill artifact exceeds the uncompressed size limit")
+	}
+	maximum = min(maximum, int64(maxArchiveUncompressedBytes))
 	gz, err := gzip.NewReader(bytes.NewReader(content))
 	if err != nil {
 		return Archive{}, errors.New("skill artifact is not valid gzip")
@@ -71,13 +87,14 @@ func ReadArchive(content []byte) (Archive, error) {
 		if name == "" || path.Clean(name) != name {
 			return Archive{}, fmt.Errorf("skill artifact contains non-canonical path %q", header.Name)
 		}
-		if strings.EqualFold(name, DirectOwnerFileName) {
+		canonicalName := strings.ToLower(name)
+		canonicalOwnerPath := strings.ToLower(DirectOwnerFileName)
+		if canonicalName == canonicalOwnerPath || strings.HasPrefix(canonicalName, canonicalOwnerPath+"/") {
 			return Archive{}, fmt.Errorf("skill artifact contains reserved path %q", header.Name)
 		}
 		if containsUnsafePathPart(strings.Split(name, "/")) {
 			return Archive{}, fmt.Errorf("skill artifact contains unsafe path %q", header.Name)
 		}
-		canonicalName := strings.ToLower(name)
 		if _, exists := seen[canonicalName]; exists {
 			return Archive{}, fmt.Errorf("skill artifact contains duplicate path %q", header.Name)
 		}
@@ -98,7 +115,7 @@ func ReadArchive(content []byte) (Archive, error) {
 		if len(archive.files) >= maxArchiveFiles {
 			return Archive{}, errors.New("skill artifact exceeds the file limit")
 		}
-		if header.Size < 0 || header.Size > maxArchiveUncompressedBytes-totalSize {
+		if header.Size < 0 || header.Size > maximum-totalSize {
 			return Archive{}, errors.New("skill artifact exceeds the uncompressed size limit")
 		}
 		fileContent, err := io.ReadAll(io.LimitReader(tr, header.Size+1))
@@ -129,13 +146,20 @@ func ReadArchive(content []byte) (Archive, error) {
 		return Archive{}, errors.New("skill artifact does not contain a root SKILL.md")
 	}
 	sort.Slice(archive.files, func(i, j int) bool { return archive.files[i].path < archive.files[j].path })
+	archive.uncompressedBytes = totalSize
 	return archive, nil
 }
 
 func containsUnsafePathPart(parts []string) bool {
 	for _, part := range parts {
-		if part == "" || part == "." || part == ".." {
+		if part == "" || part == "." || part == ".." || part != strings.TrimSpace(part) ||
+			strings.HasSuffix(part, ".") || strings.ContainsAny(part, `<>:"|?*`) {
 			return true
+		}
+		for _, character := range part {
+			if character < 0x20 || character == 0x7f {
+				return true
+			}
 		}
 	}
 	return false

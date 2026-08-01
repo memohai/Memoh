@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
+
+const archivePublicationCleanupTimeout = 30 * time.Second
 
 // InstallArchive atomically replaces a registry Skill with a validated archive.
 func InstallArchive(ctx context.Context, client *bridge.Client, workspaceOS, registryID, packageID, skillID string, archive Archive) error {
@@ -43,8 +46,13 @@ func InstallArchiveWithDirectOwner(
 
 // ArchivePublication retains the previous Skill directory until the caller
 // commits, allowing a larger Plugin installation to roll back atomically.
+type archivePublicationClient interface {
+	DeleteFile(ctx context.Context, path string, recursive bool) error
+	Rename(ctx context.Context, oldPath, newPath string) error
+}
+
 type ArchivePublication struct {
-	client       *bridge.Client
+	client       archivePublicationClient
 	targetDir    string
 	backupDir    string
 	targetExists bool
@@ -114,7 +122,11 @@ func publishArchive(
 	backupDir := path.Join(stagingRoot, "backup-"+suffix)
 	_ = client.DeleteFile(ctx, tempDir, true)
 	_ = client.DeleteFile(ctx, backupDir, true)
-	defer func() { _ = client.DeleteFile(context.WithoutCancel(ctx), tempDir, true) }()
+	defer func() {
+		cleanupCtx, cancel := archivePublicationCleanupContext(ctx)
+		defer cancel()
+		_ = client.DeleteFile(cleanupCtx, tempDir, true)
+	}()
 	if err := client.Mkdir(ctx, stagingRoot); err != nil {
 		return nil, fmt.Errorf("create Skill staging directory: %w", err)
 	}
@@ -170,7 +182,9 @@ func publishArchive(
 	}
 	if err := client.Rename(ctx, tempDir, targetDir); err != nil {
 		if targetExists {
-			if rollbackErr := client.Rename(context.WithoutCancel(ctx), backupDir, targetDir); rollbackErr != nil {
+			rollbackCtx, cancel := archivePublicationCleanupContext(ctx)
+			defer cancel()
+			if rollbackErr := client.Rename(rollbackCtx, backupDir, targetDir); rollbackErr != nil {
 				return nil, fmt.Errorf("publish installed Skill: %w; restore previous Skill from %q: %w", err, backupDir, rollbackErr)
 			}
 		}
@@ -185,29 +199,41 @@ func (p *ArchivePublication) Commit(ctx context.Context) error {
 	if p == nil || p.closed {
 		return nil
 	}
-	p.closed = true
 	if !p.targetExists {
+		p.closed = true
 		return nil
 	}
-	return p.client.DeleteFile(context.WithoutCancel(ctx), p.backupDir, true)
+	cleanupCtx, cancel := archivePublicationCleanupContext(ctx)
+	defer cancel()
+	if err := p.client.DeleteFile(cleanupCtx, p.backupDir, true); err != nil {
+		return err
+	}
+	p.closed = true
+	return nil
 }
 
 func (p *ArchivePublication) Rollback(ctx context.Context) error {
 	if p == nil || p.closed {
 		return nil
 	}
-	p.closed = true
-	rollbackCtx := context.WithoutCancel(ctx)
+	rollbackCtx, cancel := archivePublicationCleanupContext(ctx)
+	defer cancel()
 	if err := p.client.DeleteFile(rollbackCtx, p.targetDir, true); err != nil && !errors.Is(err, bridge.ErrNotFound) {
 		return fmt.Errorf("remove replacement Skill: %w", err)
 	}
 	if !p.targetExists {
+		p.closed = true
 		return nil
 	}
 	if err := p.client.Rename(rollbackCtx, p.backupDir, p.targetDir); err != nil {
 		return fmt.Errorf("restore previous Skill from %q: %w", p.backupDir, err)
 	}
+	p.closed = true
 	return nil
+}
+
+func archivePublicationCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), archivePublicationCleanupTimeout)
 }
 
 func randomInstallSuffix() (string, error) {
@@ -240,5 +266,5 @@ func applyExecutableModes(ctx context.Context, client *bridge.Client, workspaceO
 }
 
 func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", `"'"'`) + "'"
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
