@@ -3018,6 +3018,15 @@ definitions:
         type: string
       workspace_target_id:
         type: string
+    required:
+    - artifact_digest
+    - files_written
+    - install_id
+    - ok
+    - package_id
+    - registry_id
+    - skill_id
+    - workspace_target_id
     type: object
   handlers.InstallSkillRequest:
     properties:
@@ -3031,6 +3040,11 @@ definitions:
         type: string
       workspace_target_id:
         type: string
+    required:
+    - artifact_digest
+    - package_id
+    - registry_id
+    - skill_id
     type: object
   handlers.ListSnapshotsResponse:
     properties:
@@ -3301,6 +3315,9 @@ definitions:
         type: string
       name:
         type: string
+    required:
+    - email
+    - name
     type: object
   handlers.SupermarketCatalogSkill:
     properties:
@@ -3344,6 +3361,21 @@ definitions:
         items:
           type: string
         type: array
+    required:
+    - artifact
+    - author
+    - category
+    - category_name
+    - description
+    - files
+    - install_id
+    - name
+    - package_id
+    - registry_id
+    - schema_version
+    - skill_id
+    - source
+    - tags
     type: object
   handlers.SupermarketCatalogSkillListResponse:
     properties:
@@ -3357,6 +3389,11 @@ definitions:
         type: integer
       total:
         type: integer
+    required:
+    - data
+    - limit
+    - page
+    - total
     type: object
   handlers.SupermarketPluginArtifact:
     properties:
@@ -3483,32 +3520,43 @@ definitions:
     - package_id
     - registry_id
     - registry_revision
-    - runtime_requirements
     - skill_id
     - source_revision
     type: object
   handlers.SupermarketRegistry:
     properties:
+      adapter:
+        type: string
+      category_count:
+        type: integer
       enabled:
         type: boolean
       id:
         type: string
-      last_error:
-        type: string
       name:
         type: string
-      next_refresh_at:
-        type: string
+      package_count:
+        type: integer
       priority:
         type: integer
-      refresh_interval_seconds:
-        type: integer
+      published_at:
+        type: string
       revision:
         type: string
-      status:
-        type: string
-      synced_at:
-        type: string
+      skill_count:
+        type: integer
+      skipped_package_count:
+        type: integer
+    required:
+    - adapter
+    - category_count
+    - enabled
+    - id
+    - name
+    - package_count
+    - priority
+    - skill_count
+    - skipped_package_count
     type: object
   handlers.SupermarketRegistryListResponse:
     properties:
@@ -3516,6 +3564,8 @@ definitions:
         items:
           $ref: '#/definitions/handlers.SupermarketRegistry'
         type: array
+    required:
+    - data
     type: object
   handlers.SupermarketSkillArtifact:
     properties:
@@ -3541,10 +3591,21 @@ definitions:
     type: object
   handlers.SupermarketSkillCategory:
     properties:
+      count:
+        type: integer
       id:
         type: string
       name:
         type: string
+      registries:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillCategoryRegistry'
+        type: array
+    required:
+    - count
+    - id
+    - name
+    - registries
     type: object
   handlers.SupermarketSkillCategoryListResponse:
     properties:
@@ -3552,6 +3613,18 @@ definitions:
         items:
           $ref: '#/definitions/handlers.SupermarketSkillCategory'
         type: array
+    required:
+    - data
+    type: object
+  handlers.SupermarketSkillCategoryRegistry:
+    properties:
+      count:
+        type: integer
+      id:
+        type: string
+    required:
+    - count
+    - id
     type: object
   handlers.SupermarketSkillIcon:
     properties:
@@ -3572,6 +3645,10 @@ definitions:
         type: string
       size:
         type: integer
+    required:
+    - content_type
+    - digest
+    - size
     type: object
   handlers.SupermarketSkillRuntimeRequirements:
     properties:
@@ -3579,6 +3656,8 @@ definitions:
         items:
           type: string
         type: array
+    required:
+    - os
     type: object
   handlers.SupermarketSkillSource:
     properties:
@@ -3590,6 +3669,10 @@ definitions:
         type: string
       type:
         type: string
+    required:
+    - path
+    - revision
+    - type
     type: object
   handlers.SupermarketTagsResponse:
     properties:

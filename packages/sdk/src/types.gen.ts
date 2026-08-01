@@ -1774,21 +1774,21 @@ export type HandlersInstallPluginRequest = {
 };
 
 export type HandlersInstallRegistrySkillResponse = {
-    artifact_digest?: string;
-    files_written?: number;
-    install_id?: string;
-    ok?: boolean;
-    package_id?: string;
-    registry_id?: string;
-    skill_id?: string;
-    workspace_target_id?: string;
+    artifact_digest: string;
+    files_written: number;
+    install_id: string;
+    ok: boolean;
+    package_id: string;
+    registry_id: string;
+    skill_id: string;
+    workspace_target_id: string;
 };
 
 export type HandlersInstallSkillRequest = {
-    artifact_digest?: string;
-    package_id?: string;
-    registry_id?: string;
-    skill_id?: string;
+    artifact_digest: string;
+    package_id: string;
+    registry_id: string;
+    skill_id: string;
     workspace_target_id?: string;
 };
 
@@ -1955,36 +1955,36 @@ export type HandlersSnapshotInfo = {
 };
 
 export type HandlersSupermarketAuthor = {
-    email?: string;
-    name?: string;
+    email: string;
+    name: string;
 };
 
 export type HandlersSupermarketCatalogSkill = {
-    artifact?: HandlersSupermarketSkillArtifact;
-    author?: HandlersSupermarketAuthor;
-    category?: string;
-    category_name?: string;
-    description?: string;
-    files?: Array<string>;
+    artifact: HandlersSupermarketSkillArtifact;
+    author: HandlersSupermarketAuthor;
+    category: string;
+    category_name: string;
+    description: string;
+    files: Array<string>;
     homepage?: string;
     icon?: HandlersSupermarketSkillIcon;
-    install_id?: string;
-    name?: string;
-    package_id?: string;
-    registry_id?: string;
+    install_id: string;
+    name: string;
+    package_id: string;
+    registry_id: string;
     runtime_requirements?: HandlersSupermarketSkillRuntimeRequirements;
-    schema_version?: string;
-    skill_id?: string;
-    source?: HandlersSupermarketSkillSource;
+    schema_version: string;
+    skill_id: string;
+    source: HandlersSupermarketSkillSource;
     source_category?: string;
-    tags?: Array<string>;
+    tags: Array<string>;
 };
 
 export type HandlersSupermarketCatalogSkillListResponse = {
-    data?: Array<HandlersSupermarketCatalogSkill>;
-    limit?: number;
-    page?: number;
-    total?: number;
+    data: Array<HandlersSupermarketCatalogSkill>;
+    limit: number;
+    page: number;
+    total: number;
 };
 
 export type HandlersSupermarketPluginArtifact = {
@@ -2034,26 +2034,27 @@ export type HandlersSupermarketPluginResolvedSkill = {
     package_id: string;
     registry_id: string;
     registry_revision: string;
-    runtime_requirements: HandlersSupermarketSkillRuntimeRequirements;
+    runtime_requirements?: HandlersSupermarketSkillRuntimeRequirements;
     skill_id: string;
     source_revision: string;
 };
 
 export type HandlersSupermarketRegistry = {
-    enabled?: boolean;
-    id?: string;
-    last_error?: string;
-    name?: string;
-    next_refresh_at?: string;
-    priority?: number;
-    refresh_interval_seconds?: number;
+    adapter: string;
+    category_count: number;
+    enabled: boolean;
+    id: string;
+    name: string;
+    package_count: number;
+    priority: number;
+    published_at?: string;
     revision?: string;
-    status?: string;
-    synced_at?: string;
+    skill_count: number;
+    skipped_package_count: number;
 };
 
 export type HandlersSupermarketRegistryListResponse = {
-    data?: Array<HandlersSupermarketRegistry>;
+    data: Array<HandlersSupermarketRegistry>;
 };
 
 export type HandlersSupermarketSkillArtifact = {
@@ -2066,12 +2067,19 @@ export type HandlersSupermarketSkillArtifact = {
 };
 
 export type HandlersSupermarketSkillCategory = {
-    id?: string;
-    name?: string;
+    count: number;
+    id: string;
+    name: string;
+    registries: Array<HandlersSupermarketSkillCategoryRegistry>;
 };
 
 export type HandlersSupermarketSkillCategoryListResponse = {
-    data?: Array<HandlersSupermarketSkillCategory>;
+    data: Array<HandlersSupermarketSkillCategory>;
+};
+
+export type HandlersSupermarketSkillCategoryRegistry = {
+    count: number;
+    id: string;
 };
 
 export type HandlersSupermarketSkillIcon = {
@@ -2082,20 +2090,20 @@ export type HandlersSupermarketSkillIcon = {
 };
 
 export type HandlersSupermarketSkillIconAsset = {
-    content_type?: string;
-    digest?: string;
-    size?: number;
+    content_type: string;
+    digest: string;
+    size: number;
 };
 
 export type HandlersSupermarketSkillRuntimeRequirements = {
-    os?: Array<string>;
+    os: Array<string>;
 };
 
 export type HandlersSupermarketSkillSource = {
-    path?: string;
+    path: string;
     repository?: string;
-    revision?: string;
-    type?: string;
+    revision: string;
+    type: string;
 };
 
 export type HandlersSupermarketTagsResponse = {

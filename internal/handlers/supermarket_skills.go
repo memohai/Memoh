@@ -28,39 +28,47 @@ const (
 )
 
 type SupermarketRegistryListResponse struct {
-	Data []SupermarketRegistry `json:"data"`
+	Data []SupermarketRegistry `json:"data" validate:"required"`
 }
 
 type SupermarketRegistry struct {
-	ID                     string `json:"id"`
-	Name                   string `json:"name"`
-	Enabled                bool   `json:"enabled"`
-	Priority               int    `json:"priority"`
-	Revision               string `json:"revision,omitempty"`
-	SyncedAt               string `json:"synced_at,omitempty"`
-	RefreshIntervalSeconds int    `json:"refresh_interval_seconds"`
-	NextRefreshAt          string `json:"next_refresh_at,omitempty"`
-	Status                 string `json:"status"`
-	LastError              string `json:"last_error,omitempty"`
+	ID                  string `json:"id" validate:"required"`
+	Name                string `json:"name" validate:"required"`
+	Enabled             bool   `json:"enabled" validate:"required"`
+	Priority            int    `json:"priority" validate:"required"`
+	Adapter             string `json:"adapter" validate:"required"`
+	Revision            string `json:"revision,omitempty"`
+	PublishedAt         string `json:"published_at,omitempty"`
+	SkillCount          int    `json:"skill_count" validate:"required"`
+	PackageCount        int    `json:"package_count" validate:"required"`
+	CategoryCount       int    `json:"category_count" validate:"required"`
+	SkippedPackageCount int    `json:"skipped_package_count" validate:"required"`
 }
 
 type SupermarketSkillCategoryListResponse struct {
-	Data []SupermarketSkillCategory `json:"data"`
+	Data []SupermarketSkillCategory `json:"data" validate:"required"`
+}
+
+type SupermarketSkillCategoryRegistry struct {
+	ID    string `json:"id" validate:"required"`
+	Count int    `json:"count" validate:"required"`
 }
 
 type SupermarketSkillCategory struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID         string                             `json:"id" validate:"required"`
+	Name       string                             `json:"name" validate:"required"`
+	Count      int                                `json:"count" validate:"required"`
+	Registries []SupermarketSkillCategoryRegistry `json:"registries" validate:"required"`
 }
 
 type SupermarketSkillRuntimeRequirements struct {
-	OS []string `json:"os"`
+	OS []string `json:"os" validate:"required"`
 }
 
 type SupermarketSkillSource struct {
-	Type       string `json:"type"`
-	Revision   string `json:"revision"`
-	Path       string `json:"path"`
+	Type       string `json:"type" validate:"required"`
+	Revision   string `json:"revision" validate:"required"`
+	Path       string `json:"path" validate:"required"`
 	Repository string `json:"repository,omitempty"`
 }
 
@@ -80,9 +88,9 @@ type supermarketArtifactDownloadDescriptor struct {
 }
 
 type SupermarketSkillIconAsset struct {
-	Digest      string `json:"digest"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"content_type"`
+	Digest      string `json:"digest" validate:"required"`
+	Size        int64  `json:"size" validate:"required"`
+	ContentType string `json:"content_type" validate:"required"`
 }
 
 type SupermarketSkillIcon struct {
@@ -93,42 +101,42 @@ type SupermarketSkillIcon struct {
 }
 
 type SupermarketCatalogSkill struct {
-	SchemaVersion       string                              `json:"schema_version"`
-	RegistryID          string                              `json:"registry_id"`
-	PackageID           string                              `json:"package_id"`
-	SkillID             string                              `json:"skill_id"`
-	InstallID           string                              `json:"install_id"`
-	Name                string                              `json:"name"`
-	Description         string                              `json:"description"`
-	Author              SupermarketAuthor                   `json:"author"`
+	SchemaVersion       string                              `json:"schema_version" validate:"required"`
+	RegistryID          string                              `json:"registry_id" validate:"required"`
+	PackageID           string                              `json:"package_id" validate:"required"`
+	SkillID             string                              `json:"skill_id" validate:"required"`
+	InstallID           string                              `json:"install_id" validate:"required"`
+	Name                string                              `json:"name" validate:"required"`
+	Description         string                              `json:"description" validate:"required"`
+	Author              SupermarketAuthor                   `json:"author" validate:"required"`
 	Homepage            string                              `json:"homepage,omitempty"`
-	Tags                []string                            `json:"tags"`
-	Category            string                              `json:"category"`
-	CategoryName        string                              `json:"category_name"`
+	Tags                []string                            `json:"tags" validate:"required"`
+	Category            string                              `json:"category" validate:"required"`
+	CategoryName        string                              `json:"category_name" validate:"required"`
 	SourceCategory      string                              `json:"source_category,omitempty"`
 	RuntimeRequirements SupermarketSkillRuntimeRequirements `json:"runtime_requirements"`
-	Source              SupermarketSkillSource              `json:"source"`
-	Files               []string                            `json:"files"`
+	Source              SupermarketSkillSource              `json:"source" validate:"required"`
+	Files               []string                            `json:"files" validate:"required"`
 	Icon                *SupermarketSkillIcon               `json:"icon,omitempty"`
-	Artifact            SupermarketSkillArtifact            `json:"artifact"`
+	Artifact            SupermarketSkillArtifact            `json:"artifact" validate:"required"`
 }
 
 type SupermarketCatalogSkillListResponse struct {
-	Total int                       `json:"total"`
-	Page  int                       `json:"page"`
-	Limit int                       `json:"limit"`
-	Data  []SupermarketCatalogSkill `json:"data"`
+	Total int                       `json:"total" validate:"required"`
+	Page  int                       `json:"page" validate:"required"`
+	Limit int                       `json:"limit" validate:"required"`
+	Data  []SupermarketCatalogSkill `json:"data" validate:"required"`
 }
 
 type InstallRegistrySkillResponse struct {
-	OK                bool   `json:"ok"`
-	RegistryID        string `json:"registry_id"`
-	PackageID         string `json:"package_id"`
-	SkillID           string `json:"skill_id"`
-	InstallID         string `json:"install_id"`
-	WorkspaceTargetID string `json:"workspace_target_id"`
-	ArtifactDigest    string `json:"artifact_digest"`
-	FilesWritten      int    `json:"files_written"`
+	OK                bool   `json:"ok" validate:"required"`
+	RegistryID        string `json:"registry_id" validate:"required"`
+	PackageID         string `json:"package_id" validate:"required"`
+	SkillID           string `json:"skill_id" validate:"required"`
+	InstallID         string `json:"install_id" validate:"required"`
+	WorkspaceTargetID string `json:"workspace_target_id" validate:"required"`
+	ArtifactDigest    string `json:"artifact_digest" validate:"required"`
+	FilesWritten      int    `json:"files_written" validate:"required"`
 }
 
 type registrySkillArtifactInstallResult struct {

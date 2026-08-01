@@ -267,10 +267,10 @@ func (r *InstallPluginRequest) UnmarshalJSON(data []byte) error {
 
 // InstallSkillRequest is the request body for installing a skill from supermarket.
 type InstallSkillRequest struct {
-	RegistryID        string `json:"registry_id"`
-	PackageID         string `json:"package_id"`
-	SkillID           string `json:"skill_id"`
-	ArtifactDigest    string `json:"artifact_digest"`
+	RegistryID        string `json:"registry_id" validate:"required"`
+	PackageID         string `json:"package_id" validate:"required"`
+	SkillID           string `json:"skill_id" validate:"required"`
+	ArtifactDigest    string `json:"artifact_digest" validate:"required"`
 	WorkspaceTargetID string `json:"workspace_target_id,omitempty"`
 }
 
@@ -471,8 +471,8 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 // --- Supermarket upstream types (for swagger) ---
 
 type SupermarketAuthor struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	Name  string `json:"name" validate:"required"`
+	Email string `json:"email" validate:"required"`
 }
 
 type SupermarketPluginArtifact struct {
@@ -490,7 +490,7 @@ type SupermarketPluginResolvedSkill struct {
 	RegistryRevision    string                              `json:"registry_revision" validate:"required"`
 	SourceRevision      string                              `json:"source_revision" validate:"required"`
 	InstallID           string                              `json:"install_id" validate:"required"`
-	RuntimeRequirements SupermarketSkillRuntimeRequirements `json:"runtime_requirements" validate:"required"`
+	RuntimeRequirements SupermarketSkillRuntimeRequirements `json:"runtime_requirements"`
 	Artifact            SupermarketSkillArtifact            `json:"artifact" validate:"required"`
 }
 
