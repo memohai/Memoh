@@ -125,9 +125,9 @@ import {
   getBotsByBotIdPluginsByIdOauthStatus,
   postBotsByBotIdPluginsByIdOauthAuthorize,
   postBotsByBotIdSupermarketInstallPlugin,
+  type HandlersSupermarketPluginEntry,
   type PluginsConfigVar,
   type PluginsInstallation,
-  type PluginsManifest,
   type PluginsSkillReference,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
@@ -138,7 +138,7 @@ import BotSelect from '@/components/bot-select/index.vue'
 
 const props = defineProps<{
   open: boolean
-  plugin: PluginsManifest | null
+  plugin: HandlersSupermarketPluginEntry | null
 }>()
 
 const emit = defineEmits<{
@@ -160,7 +160,7 @@ const requiresManagedOAuth = computed(() => {
   return (props.plugin?.auth_requirements ?? []).some(item => item.type === 'managed_oauth')
 })
 const canInstall = computed(() => {
-  if (!selectedBotId.value || !props.plugin?.id) return false
+  if (!selectedBotId.value || !props.plugin?.id || !props.plugin.release?.revision) return false
   return variables.value.every(item => !item.required || !!variableValues[item.key || '']?.trim())
 })
 
@@ -190,7 +190,7 @@ watch(() => props.open, (open) => {
 })
 
 async function handleInstall() {
-  if (!selectedBotId.value || !props.plugin?.id) return
+  if (!selectedBotId.value || !props.plugin?.id || !props.plugin.release?.revision) return
   const botId = selectedBotId.value
   const oauthPopup = requiresManagedOAuth.value && !canOpenOAuthExternally()
     ? window.open('', 'mcp-oauth', 'width=600,height=700')
@@ -201,6 +201,7 @@ async function handleInstall() {
       path: { bot_id: botId },
       body: {
         plugin_id: props.plugin.id,
+        release_revision: props.plugin.release.revision,
         variables: Object.fromEntries(
           Object.entries(variableValues).filter(([, value]) => value.trim() !== ''),
         ),

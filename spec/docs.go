@@ -12891,7 +12891,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/plugins.Manifest"
+                            "$ref": "#/definitions/handlers.SupermarketPluginEntry"
                         }
                     },
                     "404": {
@@ -18946,6 +18946,9 @@ const docTemplate = `{
                 "plugin_id": {
                     "type": "string"
                 },
+                "release_revision": {
+                    "type": "string"
+                },
                 "variables": {
                     "type": "object",
                     "additionalProperties": {
@@ -18986,6 +18989,9 @@ const docTemplate = `{
         "handlers.InstallSkillRequest": {
             "type": "object",
             "properties": {
+                "artifact_digest": {
+                    "type": "string"
+                },
                 "package_id": {
                     "type": "string"
                 },
@@ -19491,13 +19497,87 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.SupermarketPluginEntry": {
+            "type": "object",
+            "properties": {
+                "auth_requirements": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.AuthRequirement"
+                    }
+                },
+                "author": {
+                    "$ref": "#/definitions/plugins.Author"
+                },
+                "capabilities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "homepage": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/plugins.Icon"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "install": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mcps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.MCPResource"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "release": {
+                    "$ref": "#/definitions/handlers.SupermarketPluginRelease"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.SkillReference"
+                    }
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "variables": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.ConfigVar"
+                    }
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.SupermarketPluginListResponse": {
             "type": "object",
             "properties": {
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/plugins.Manifest"
+                        "$ref": "#/definitions/handlers.SupermarketPluginEntry"
                     }
                 },
                 "limit": {
@@ -19508,6 +19588,55 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketPluginRelease": {
+            "type": "object",
+            "properties": {
+                "artifact": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillArtifact"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketPluginResolvedSkill"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketPluginResolvedSkill": {
+            "type": "object",
+            "properties": {
+                "artifact": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillArtifact"
+                },
+                "install_id": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "registry_revision": {
+                    "type": "string"
+                },
+                "runtime_requirements": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillRuntimeRequirements"
+                },
+                "skill_id": {
+                    "type": "string"
+                },
+                "source_revision": {
+                    "type": "string"
                 }
             }
         },

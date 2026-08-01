@@ -37,7 +37,7 @@
           </Button>
         </DialogClose>
         <Button
-          :disabled="!selectedBotId"
+          :disabled="!selectedBotId || !skill?.artifact?.digest"
           :loading="installing"
           @click="handleInstall"
         >
@@ -89,7 +89,7 @@ watch(() => props.open, (open) => {
 })
 
 async function handleInstall() {
-  if (!selectedBotId.value || !props.skill?.registry_id || !props.skill.package_id || !props.skill.skill_id) return
+  if (!selectedBotId.value || !props.skill?.registry_id || !props.skill.package_id || !props.skill.skill_id || !props.skill.artifact?.digest) return
   installing.value = true
   try {
     await postBotsByBotIdSupermarketInstallSkill({
@@ -98,6 +98,7 @@ async function handleInstall() {
         registry_id: props.skill.registry_id,
         package_id: props.skill.package_id,
         skill_id: props.skill.skill_id,
+        artifact_digest: props.skill.artifact.digest,
       },
       throwOnError: true,
     })

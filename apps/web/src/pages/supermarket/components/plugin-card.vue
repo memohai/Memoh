@@ -44,19 +44,19 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Download, PackageOpen } from 'lucide-vue-next'
 import { Button } from '@felinic/ui'
-import type { PluginsManifest } from '@memohai/sdk'
+import type { HandlersSupermarketPluginEntry } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import MarketItemCard from './market-item-card.vue'
 
 const props = withDefaults(defineProps<{
-  plugin: PluginsManifest
+  plugin: HandlersSupermarketPluginEntry
   showInstall?: boolean
 }>(), {
   showInstall: true,
 })
 
 defineEmits<{
-  'install': [plugin: PluginsManifest]
+  'install': [plugin: HandlersSupermarketPluginEntry]
 }>()
 
 const router = useRouter()

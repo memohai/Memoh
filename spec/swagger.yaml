@@ -2986,6 +2986,8 @@ definitions:
     properties:
       plugin_id:
         type: string
+      release_revision:
+        type: string
       variables:
         additionalProperties:
           type: string
@@ -3012,6 +3014,8 @@ definitions:
     type: object
   handlers.InstallSkillRequest:
     properties:
+      artifact_digest:
+        type: string
       package_id:
         type: string
       registry_id:
@@ -3347,11 +3351,60 @@ definitions:
       total:
         type: integer
     type: object
+  handlers.SupermarketPluginEntry:
+    properties:
+      auth_requirements:
+        items:
+          $ref: '#/definitions/plugins.AuthRequirement'
+        type: array
+      author:
+        $ref: '#/definitions/plugins.Author'
+      capabilities:
+        items:
+          type: string
+        type: array
+      description:
+        type: string
+      homepage:
+        type: string
+      icon:
+        $ref: '#/definitions/plugins.Icon'
+      id:
+        type: string
+      install:
+        items:
+          type: string
+        type: array
+      mcps:
+        items:
+          $ref: '#/definitions/plugins.MCPResource'
+        type: array
+      name:
+        type: string
+      release:
+        $ref: '#/definitions/handlers.SupermarketPluginRelease'
+      schema_version:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/plugins.SkillReference'
+        type: array
+      tags:
+        items:
+          type: string
+        type: array
+      variables:
+        items:
+          $ref: '#/definitions/plugins.ConfigVar'
+        type: array
+      version:
+        type: string
+    type: object
   handlers.SupermarketPluginListResponse:
     properties:
       data:
         items:
-          $ref: '#/definitions/plugins.Manifest'
+          $ref: '#/definitions/handlers.SupermarketPluginEntry'
         type: array
       limit:
         type: integer
@@ -3359,6 +3412,38 @@ definitions:
         type: integer
       total:
         type: integer
+    type: object
+  handlers.SupermarketPluginRelease:
+    properties:
+      artifact:
+        $ref: '#/definitions/handlers.SupermarketSkillArtifact'
+      published_at:
+        type: string
+      revision:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/handlers.SupermarketPluginResolvedSkill'
+        type: array
+    type: object
+  handlers.SupermarketPluginResolvedSkill:
+    properties:
+      artifact:
+        $ref: '#/definitions/handlers.SupermarketSkillArtifact'
+      install_id:
+        type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      registry_revision:
+        type: string
+      runtime_requirements:
+        $ref: '#/definitions/handlers.SupermarketSkillRuntimeRequirements'
+      skill_id:
+        type: string
+      source_revision:
+        type: string
     type: object
   handlers.SupermarketRegistry:
     properties:
@@ -13951,7 +14036,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/plugins.Manifest'
+            $ref: '#/definitions/handlers.SupermarketPluginEntry'
         "404":
           description: Not Found
           schema:

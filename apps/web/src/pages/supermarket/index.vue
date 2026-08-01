@@ -253,8 +253,6 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
-  InlineLoadingRow,
-  PageShell,
   toast,
   type SegmentedItem,
 } from '@felinic/ui'
@@ -265,8 +263,8 @@ import {
   getSupermarketSkills,
   type ConnectitConnector,
   type HandlersSupermarketCatalogSkill,
+  type HandlersSupermarketPluginEntry,
   type HandlersSupermarketRegistry,
-  type PluginsManifest,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import PluginCard from './components/plugin-card.vue'
@@ -308,8 +306,7 @@ const searchQuery = ref('')
 const page = ref(1)
 const total = ref(0)
 const selectedRegistry = ref(allRegistriesValue)
-
-const plugins = ref<PluginsManifest[]>([])
+const plugins = ref<HandlersSupermarketPluginEntry[]>([])
 const skills = ref<HandlersSupermarketCatalogSkill[]>([])
 const registries = ref<HandlersSupermarketRegistry[]>([])
 const pluginsLoading = ref(false)
@@ -317,7 +314,7 @@ const skillsLoading = ref(false)
 
 const pluginDialogOpen = ref(false)
 const skillDialogOpen = ref(false)
-const selectedPlugin = ref<PluginsManifest | null>(null)
+const selectedPlugin = ref<HandlersSupermarketPluginEntry | null>(null)
 const selectedSkill = ref<HandlersSupermarketCatalogSkill | null>(null)
 const connectorDialogOpen = ref(false)
 const selectedConnector = ref<ConnectitConnector | null>(null)
@@ -405,7 +402,7 @@ function onRegistryFilterChange(value: string | number) {
   void loadSkills()
 }
 
-function openPluginInstall(plugin: PluginsManifest) {
+function openPluginInstall(plugin: HandlersSupermarketPluginEntry) {
   selectedPlugin.value = plugin
   pluginDialogOpen.value = true
 }

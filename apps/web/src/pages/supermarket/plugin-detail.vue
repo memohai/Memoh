@@ -198,7 +198,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, Boxes, ExternalLink, PackageOpen, Plug } from 'lucide-vue-next'
 import { Badge, Button, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
-import { getSupermarketPluginsById, type PluginsManifest, type PluginsSkillReference } from '@memohai/sdk'
+import {
+  getSupermarketPluginsById,
+  type HandlersSupermarketPluginEntry,
+  type PluginsSkillReference,
+} from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
@@ -211,7 +215,7 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 
-const plugin = ref<PluginsManifest | null>(null)
+const plugin = ref<HandlersSupermarketPluginEntry | null>(null)
 const loading = ref(false)
 const installDialogOpen = ref(false)
 
