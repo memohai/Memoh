@@ -50,6 +50,9 @@ func NewService(log *slog.Logger, queries dbstore.Queries, mcpService *mcp.Conne
 }
 
 func (s *Service) List(ctx context.Context, botID string) ([]Installation, error) {
+	if scoped := s.scopedService(ctx, botID); scoped != nil && scoped != s {
+		return scoped.List(ctx, botID)
+	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return nil, err
@@ -70,6 +73,9 @@ func (s *Service) List(ctx context.Context, botID string) ([]Installation, error
 }
 
 func (s *Service) Get(ctx context.Context, botID, installationID string) (Installation, error) {
+	if scoped := s.scopedService(ctx, botID); scoped != nil && scoped != s {
+		return scoped.Get(ctx, botID, installationID)
+	}
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
 		return Installation{}, err
@@ -78,6 +84,28 @@ func (s *Service) Get(ctx context.Context, botID, installationID string) (Instal
 }
 
 func (s *Service) Install(ctx context.Context, botID string, req InstallRequest) (Installation, error) {
+	var result Installation
+	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
+		var staleSkillPaths []string
+		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
+			var installErr error
+			result, installErr = txService.install(scopedCtx, botID, req, &staleSkillPaths)
+			return installErr
+		}); err != nil {
+			return err
+		}
+		scoped.garbageCollectRegistrySkills(scopedCtx, botID, staleSkillPaths)
+		return nil
+	})
+	return result, err
+}
+
+func (s *Service) install(
+	ctx context.Context,
+	botID string,
+	req InstallRequest,
+	staleSkillPaths *[]string,
+) (Installation, error) {
 	if s.queries == nil || s.mcpService == nil {
 		return Installation{}, errors.New("plugin service is not configured")
 	}
@@ -196,7 +224,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 			return Installation{}, err
 		}
 	}
-	s.garbageCollectRegistrySkills(ctx, botID, skillResourcePaths(previousResources))
+	*staleSkillPaths = skillResourcePaths(previousResources)
 
 	return s.normalizeInstallation(ctx, row)
 }
@@ -213,10 +241,27 @@ func (s *Service) GarbageCollectRegistrySkills(ctx context.Context, botID string
 		}
 		paths = append(paths, path.Join(dirPath, "SKILL.md"))
 	}
-	s.garbageCollectRegistrySkills(ctx, botID, paths)
+	if err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
+		scoped.garbageCollectRegistrySkills(scopedCtx, botID, paths)
+		return nil
+	}); err != nil {
+		s.logger.Warn("skip Registry Skill garbage collection", slog.String("bot_id", botID), slog.Any("error", err))
+	}
 }
 
 func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, enabled bool) (Installation, error) {
+	var result Installation
+	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
+		return scoped.inTransaction(scopedCtx, func(txService *Service) error {
+			var updateErr error
+			result, updateErr = txService.setEnabled(scopedCtx, botID, installationID, enabled)
+			return updateErr
+		})
+	})
+	return result, err
+}
+
+func (s *Service) setEnabled(ctx context.Context, botID, installationID string, enabled bool) (Installation, error) {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
 		return Installation{}, err
@@ -264,6 +309,27 @@ func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, 
 }
 
 func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (Installation, error) {
+	var result Installation
+	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
+		var staleSkillPaths []string
+		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
+			var uninstallErr error
+			result, uninstallErr = txService.uninstall(scopedCtx, botID, installationID, &staleSkillPaths)
+			return uninstallErr
+		}); err != nil {
+			return err
+		}
+		scoped.garbageCollectRegistrySkills(scopedCtx, botID, staleSkillPaths)
+		return nil
+	})
+	return result, err
+}
+
+func (s *Service) uninstall(
+	ctx context.Context,
+	botID, installationID string,
+	staleSkillPaths *[]string,
+) (Installation, error) {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
 		return Installation{}, err
@@ -282,11 +348,28 @@ func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (
 	if err != nil {
 		return Installation{}, err
 	}
-	s.garbageCollectRegistrySkills(ctx, botID, skillResourcePaths(resources))
+	*staleSkillPaths = skillResourcePaths(resources)
 	return s.normalizeInstallation(ctx, updated)
 }
 
 func (s *Service) Purge(ctx context.Context, botID, installationID string) error {
+	return s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
+		var staleSkillPaths []string
+		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
+			return txService.purge(scopedCtx, botID, installationID, &staleSkillPaths)
+		}); err != nil {
+			return err
+		}
+		scoped.garbageCollectRegistrySkills(scopedCtx, botID, staleSkillPaths)
+		return nil
+	})
+}
+
+func (s *Service) purge(
+	ctx context.Context,
+	botID, installationID string,
+	staleSkillPaths *[]string,
+) error {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
 		return err
@@ -315,7 +398,7 @@ func (s *Service) Purge(ctx context.Context, botID, installationID string) error
 	}); err != nil {
 		return err
 	}
-	s.garbageCollectRegistrySkills(ctx, botID, skillResourcePaths(resources))
+	*staleSkillPaths = skillResourcePaths(resources)
 	return nil
 }
 
@@ -384,6 +467,18 @@ func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbac
 }
 
 func (s *Service) RefreshOAuthStatus(ctx context.Context, botID, installationID string) (Installation, error) {
+	var result Installation
+	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
+		return scoped.inTransaction(scopedCtx, func(txService *Service) error {
+			var refreshErr error
+			result, refreshErr = txService.refreshOAuthStatusAndInstallation(scopedCtx, botID, installationID)
+			return refreshErr
+		})
+	})
+	return result, err
+}
+
+func (s *Service) refreshOAuthStatusAndInstallation(ctx context.Context, botID, installationID string) (Installation, error) {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
 		return Installation{}, err

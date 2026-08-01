@@ -100,6 +100,17 @@ func NewConnectionService(log *slog.Logger, queries dbstore.Queries) *Connection
 	}
 }
 
+// WithQueries returns a shallow service copy bound to the supplied queries.
+// It lets callers keep MCP writes in the same transaction as their own data.
+func (s *ConnectionService) WithQueries(queries dbstore.Queries) *ConnectionService {
+	if s == nil {
+		return nil
+	}
+	clone := *s
+	clone.queries = queries
+	return &clone
+}
+
 // ListByBot returns all MCP connections for a bot.
 func (s *ConnectionService) ListByBot(ctx context.Context, botID string) ([]Connection, error) {
 	if s.queries == nil {
