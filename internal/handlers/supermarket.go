@@ -16,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"gopkg.in/yaml.v3"
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
@@ -46,6 +48,7 @@ type pluginInstaller interface {
 type pluginBundleWriter interface {
 	DeleteFile(ctx context.Context, path string, recursive bool) error
 	Mkdir(ctx context.Context, path string) error
+	Rename(ctx context.Context, oldPath, newPath string) error
 	WriteFile(ctx context.Context, path string, content []byte) error
 }
 
@@ -98,6 +101,11 @@ type pluginInstallCommandResult struct {
 const (
 	pluginInstallScriptTimeoutSeconds int32 = 10 * 60
 	pluginInstallScriptOutputLimit          = 64 * 1024
+	maxPluginBundleCompressedBytes          = 25 * 1024 * 1024
+	maxPluginBundleUncompressedBytes        = 10 * 1024 * 1024
+	maxPluginBundleFileBytes                = 2 * 1024 * 1024
+	maxPluginBundleFiles                    = 1_000
+	maxPluginBundleEntries                  = 2_000
 )
 
 func NewSupermarketHandler(
@@ -198,8 +206,11 @@ func (h *SupermarketHandler) ListPlugins(c echo.Context) error {
 // @Failure 502 {object} ErrorResponse
 // @Router /supermarket/plugins/{id} [get].
 func (h *SupermarketHandler) GetPlugin(c echo.Context) error {
-	id := c.Param("id")
-	return h.proxy(c, "/api/plugins/"+id)
+	id := strings.TrimSpace(c.Param("id"))
+	if !skillset.IsValidName(id) {
+		return echo.NewHTTPError(http.StatusBadRequest, "plugin id is invalid")
+	}
+	return h.proxy(c, "/api/plugins/"+url.PathEscape(id))
 }
 
 // ListTags godoc
@@ -251,6 +262,9 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if strings.TrimSpace(req.PluginID) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "plugin_id is required")
 	}
+	if !skillset.IsValidName(req.PluginID) {
+		return echo.NewHTTPError(http.StatusBadRequest, "plugin_id is invalid")
+	}
 
 	manifest, err := h.fetchPluginEntry(c, req.PluginID)
 	if err != nil {
@@ -279,7 +293,7 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
 		return err
 	}
-	bundleResult, err := h.installPluginBundle(ctx, target.Client, req.PluginID, manifest.ID)
+	bundleResult, err := h.installPluginBundle(ctx, target.Client, req.PluginID, manifest.ID, manifest.Skills)
 	if err != nil {
 		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
@@ -355,8 +369,12 @@ type SupermarketTagsResponse struct {
 // --- Internal helpers ---
 
 func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (pluginspkg.Manifest, error) {
-	url := h.baseURL + "/api/plugins/" + pluginID
-	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, url, nil)
+	pluginID = strings.TrimSpace(pluginID)
+	if !skillset.IsValidName(pluginID) {
+		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadRequest, "plugin id is invalid")
+	}
+	endpoint := h.baseURL + "/api/plugins/" + url.PathEscape(pluginID)
+	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, endpoint, nil)
 	if err != nil {
 		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -364,7 +382,7 @@ func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (
 
 	resp, err := h.httpClient.Do(req) //nolint:gosec // URL constructed from trusted config
 	if err != nil {
-		h.logger.Error("supermarket plugin fetch failed", slog.String("url", url), slog.Any("error", err))
+		h.logger.Error("supermarket plugin fetch failed", slog.String("url", endpoint), slog.Any("error", err))
 		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -453,8 +471,12 @@ func (h *SupermarketHandler) cleanupFailedPluginSkills(ctx context.Context, botI
 	h.pluginService.GarbageCollectRegistrySkills(cleanupCtx, botID, references)
 }
 
-func (h *SupermarketHandler) installPluginBundle(ctx context.Context, client pluginBundleWriter, downloadPluginID, targetPluginID string) (pluginBundleInstallResult, error) {
-	result := newPluginBundleInstallResult()
+func (h *SupermarketHandler) installPluginBundle(
+	ctx context.Context,
+	client pluginBundleWriter,
+	downloadPluginID, targetPluginID string,
+	expectedSkills []pluginspkg.SkillReference,
+) (pluginBundleInstallResult, error) {
 	if client == nil {
 		return pluginBundleInstallResult{}, errors.New("workspace is not reachable")
 	}
@@ -473,23 +495,29 @@ func (h *SupermarketHandler) installPluginBundle(ctx context.Context, client plu
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return result, nil
+		return pluginBundleInstallResult{}, errors.New("plugin bundle was not found in supermarket")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return pluginBundleInstallResult{}, fmt.Errorf("supermarket returned status %d", resp.StatusCode)
 	}
 
-	gz, err := gzip.NewReader(resp.Body)
+	if resp.ContentLength > maxPluginBundleCompressedBytes {
+		return pluginBundleInstallResult{}, errors.New("plugin bundle exceeds the compressed size limit")
+	}
+	gz, err := gzip.NewReader(io.LimitReader(resp.Body, maxPluginBundleCompressedBytes+1))
 	if err != nil {
 		return pluginBundleInstallResult{}, fmt.Errorf("invalid gzip response from supermarket: %w", err)
 	}
 	defer func() { _ = gz.Close() }()
 
-	result, err = extractPluginBundleArchive(ctx, client, downloadPluginID, targetPluginID, gz)
+	archive, err := readPluginBundleArchive(downloadPluginID, targetPluginID, gz)
 	if err != nil {
 		return pluginBundleInstallResult{}, err
 	}
-	return result, nil
+	if !samePluginSkillReferences(archive.skillReferences, expectedSkills) {
+		return pluginBundleInstallResult{}, errors.New("plugin bundle Skill references do not match the catalog manifest")
+	}
+	return publishPluginBundleArchive(ctx, client, targetPluginID, archive)
 }
 
 func runPluginInstallScripts(ctx context.Context, client *bridge.Client, botID, pluginID string, commands pluginspkg.InstallCommands) (pluginInstallScriptsResult, error) {
@@ -550,8 +578,9 @@ func runPluginInstallCommands(ctx context.Context, executor pluginInstallScriptE
 }
 
 const (
-	pluginArchiveKindHooks   = "hooks"
-	pluginArchiveKindScripts = "scripts"
+	pluginArchiveKindManifest = "manifest"
+	pluginArchiveKindHooks    = "hooks"
+	pluginArchiveKindScripts  = "scripts"
 )
 
 type pluginArchiveEntry struct {
@@ -560,19 +589,38 @@ type pluginArchiveEntry struct {
 	relativePath string
 }
 
+type pluginBundleArchiveFile struct {
+	entry   pluginArchiveEntry
+	content []byte
+}
+
+type pluginBundleArchive struct {
+	files           []pluginBundleArchiveFile
+	skillReferences []pluginspkg.SkillReference
+}
+
 func extractPluginBundleArchive(ctx context.Context, client pluginBundleWriter, archivePluginID, targetPluginID string, r io.Reader) (pluginBundleInstallResult, error) {
-	result := newPluginBundleInstallResult()
-	pluginRoot, err := skillset.PluginDirForID(targetPluginID)
+	archive, err := readPluginBundleArchive(archivePluginID, targetPluginID, r)
 	if err != nil {
 		return pluginBundleInstallResult{}, err
 	}
-	if err := client.DeleteFile(ctx, pluginRoot, true); err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("clear plugin root: %w", err)
+	return publishPluginBundleArchive(ctx, client, targetPluginID, archive)
+}
+
+func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader) (pluginBundleArchive, error) {
+	if !skillset.IsValidName(strings.TrimSpace(archivePluginID)) {
+		return pluginBundleArchive{}, errors.New("plugin bundle archive id is invalid")
 	}
-	if err := client.Mkdir(ctx, pluginRoot); err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("mkdir plugin root: %w", err)
+	if _, err := skillset.PluginDirForID(targetPluginID); err != nil {
+		return pluginBundleArchive{}, errors.New("plugin bundle target id is invalid")
 	}
 
+	archive := pluginBundleArchive{files: make([]pluginBundleArchiveFile, 0)}
+	seen := make(map[string]bool)
+	var totalSize int64
+	totalEntries := 0
+	regularFiles := 0
+	hasManifest := false
 	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
@@ -580,74 +628,171 @@ func extractPluginBundleArchive(ctx context.Context, client pluginBundleWriter, 
 			break
 		}
 		if err != nil {
-			return result, fmt.Errorf("invalid tar: %w", err)
+			return pluginBundleArchive{}, fmt.Errorf("invalid plugin bundle tar: %w", err)
 		}
-		if hdr.Typeflag != tar.TypeReg {
+		totalEntries++
+		if totalEntries > maxPluginBundleEntries {
+			return pluginBundleArchive{}, errors.New("plugin bundle contains too many entries")
+		}
+
+		name, err := normalizePluginBundleArchivePath(archivePluginID, hdr.Name)
+		if err != nil {
+			return pluginBundleArchive{}, err
+		}
+		if name == "" {
+			if hdr.Typeflag == tar.TypeDir {
+				continue
+			}
+			return pluginBundleArchive{}, errors.New("plugin bundle archive root must be a directory")
+		}
+		isFile := hdr.Typeflag == tar.TypeReg || hdr.Typeflag == 0
+		if err := recordPluginBundleArchivePath(seen, name, isFile); err != nil {
+			return pluginBundleArchive{}, err
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
 			continue
+		case tar.TypeReg, 0:
+		case tar.TypeSymlink, tar.TypeLink:
+			return pluginBundleArchive{}, fmt.Errorf("plugin bundle contains a link at %q", hdr.Name)
+		default:
+			return pluginBundleArchive{}, fmt.Errorf("plugin bundle contains unsupported entry %q", hdr.Name)
 		}
+		regularFiles++
+		if regularFiles > maxPluginBundleFiles {
+			return pluginBundleArchive{}, errors.New("plugin bundle exceeds the file limit")
+		}
+		if hdr.Size < 0 || hdr.Size > maxPluginBundleFileBytes {
+			return pluginBundleArchive{}, fmt.Errorf("plugin bundle file %q exceeds the file size limit", hdr.Name)
+		}
+		if hdr.Size > maxPluginBundleUncompressedBytes-totalSize {
+			return pluginBundleArchive{}, errors.New("plugin bundle exceeds the uncompressed size limit")
+		}
+		content, err := io.ReadAll(io.LimitReader(tr, hdr.Size+1))
+		if err != nil || int64(len(content)) != hdr.Size {
+			return pluginBundleArchive{}, fmt.Errorf("plugin bundle file %q is truncated", hdr.Name)
+		}
+		totalSize += int64(len(content))
 
 		entry, ok, err := pluginBundleArchiveEntry(archivePluginID, targetPluginID, hdr.Name)
 		if err != nil {
-			return result, err
+			return pluginBundleArchive{}, err
 		}
 		if !ok {
 			continue
 		}
-		content, err := io.ReadAll(tr)
-		if err != nil {
-			return result, fmt.Errorf("read tar entry failed: %w", err)
+		if entry.kind == pluginArchiveKindManifest {
+			references, err := validatePluginBundleManifest(content, targetPluginID)
+			if err != nil {
+				return pluginBundleArchive{}, err
+			}
+			archive.skillReferences = references
+			hasManifest = true
+			continue
 		}
+		archive.files = append(archive.files, pluginBundleArchiveFile{entry: entry, content: content})
+	}
+	if !hasManifest {
+		return pluginBundleArchive{}, errors.New("plugin bundle does not contain a root plugin.yaml")
+	}
+	return archive, nil
+}
 
-		if err := client.Mkdir(ctx, entry.root); err != nil {
-			return result, fmt.Errorf("mkdir %s failed: %w", entry.root, err)
+func publishPluginBundleArchive(
+	ctx context.Context,
+	client pluginBundleWriter,
+	targetPluginID string,
+	archive pluginBundleArchive,
+) (pluginBundleInstallResult, error) {
+	result := newPluginBundleInstallResult()
+	if client == nil {
+		return pluginBundleInstallResult{}, errors.New("workspace is not reachable")
+	}
+	pluginRoot, err := skillset.PluginDirForID(targetPluginID)
+	if err != nil {
+		return pluginBundleInstallResult{}, err
+	}
+	stagingRoot := path.Join(skillset.PluginDirPath, ".staging")
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+	tempDir := path.Join(stagingRoot, "install-"+targetPluginID+"-"+suffix)
+	backupDir := path.Join(stagingRoot, "backup-"+targetPluginID+"-"+suffix)
+	_ = client.DeleteFile(ctx, tempDir, true)
+	_ = client.DeleteFile(ctx, backupDir, true)
+	defer func() { _ = client.DeleteFile(context.WithoutCancel(ctx), tempDir, true) }()
+	if err := client.Mkdir(ctx, stagingRoot); err != nil {
+		return pluginBundleInstallResult{}, fmt.Errorf("create plugin staging root: %w", err)
+	}
+	if err := client.Mkdir(ctx, tempDir); err != nil {
+		return pluginBundleInstallResult{}, fmt.Errorf("create temporary plugin directory: %w", err)
+	}
+
+	for _, file := range archive.files {
+		relativePath := file.entry.relativePath
+		if file.entry.kind == pluginArchiveKindScripts {
+			relativePath = path.Join("scripts", relativePath)
 		}
-		filePath := path.Clean(path.Join(entry.root, entry.relativePath))
-		if filePath == entry.root || !strings.HasPrefix(filePath, entry.root+"/") {
-			return result, fmt.Errorf("plugin bundle path escapes root: %s", hdr.Name)
+		filePath := path.Clean(path.Join(tempDir, relativePath))
+		if filePath == tempDir || !strings.HasPrefix(filePath, tempDir+"/") {
+			return pluginBundleInstallResult{}, fmt.Errorf("plugin bundle path escapes staging root: %s", relativePath)
 		}
-		if dir := path.Dir(filePath); dir != entry.root {
+		if dir := path.Dir(filePath); dir != tempDir {
 			if err := client.Mkdir(ctx, dir); err != nil {
-				return result, fmt.Errorf("mkdir %s failed: %w", dir, err)
+				return pluginBundleInstallResult{}, fmt.Errorf("create plugin bundle directory %s: %w", dir, err)
 			}
 		}
-		if err := client.WriteFile(ctx, filePath, content); err != nil {
-			return result, fmt.Errorf("write file %s failed: %w", entry.relativePath, err)
+		if err := client.WriteFile(ctx, filePath, file.content); err != nil {
+			return pluginBundleInstallResult{}, fmt.Errorf("write plugin bundle file %s: %w", relativePath, err)
 		}
-		switch entry.kind {
+		switch file.entry.kind {
 		case pluginArchiveKindHooks:
 			result.Hooks.FilesWritten++
 		case pluginArchiveKindScripts:
 			result.Scripts.FilesWritten++
 		}
 	}
+
+	targetExists := true
+	if err := client.Rename(ctx, pluginRoot, backupDir); err != nil {
+		if errors.Is(err, bridge.ErrNotFound) {
+			targetExists = false
+		} else {
+			return pluginBundleInstallResult{}, fmt.Errorf("prepare existing plugin bundle for replacement: %w", err)
+		}
+	}
+	if err := client.Rename(ctx, tempDir, pluginRoot); err != nil {
+		if targetExists {
+			if rollbackErr := client.Rename(context.WithoutCancel(ctx), backupDir, pluginRoot); rollbackErr != nil {
+				return pluginBundleInstallResult{}, fmt.Errorf(
+					"publish plugin bundle: %w; restore previous bundle from %q: %w",
+					err, backupDir, rollbackErr,
+				)
+			}
+		}
+		return pluginBundleInstallResult{}, fmt.Errorf("publish plugin bundle: %w", err)
+	}
+	if targetExists {
+		_ = client.DeleteFile(ctx, backupDir, true)
+	}
 	return result, nil
 }
 
 func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (pluginArchiveEntry, bool, error) {
-	name := strings.TrimSpace(rawName)
-	if name == "" || strings.Contains(name, "\\") || strings.HasPrefix(name, "/") {
-		return pluginArchiveEntry{}, false, nil
-	}
-	pluginPrefix := strings.Trim(path.Clean(archivePluginID), "/")
-	if pluginPrefix != "" {
-		name = strings.TrimPrefix(name, pluginPrefix+"/")
+	name, err := normalizePluginBundleArchivePath(archivePluginID, rawName)
+	if err != nil {
+		return pluginArchiveEntry{}, false, err
 	}
 	if name == "" {
 		return pluginArchiveEntry{}, false, nil
 	}
-
 	segments := strings.Split(name, "/")
-	for _, segment := range segments {
-		if segment == "" || segment == "." || segment == ".." {
-			return pluginArchiveEntry{}, false, nil
-		}
-	}
 
 	switch segments[0] {
 	case "plugin.yaml":
 		if len(segments) == 1 {
-			return pluginArchiveEntry{}, false, nil
+			return pluginArchiveEntry{kind: pluginArchiveKindManifest, relativePath: "plugin.yaml"}, true, nil
 		}
+		return pluginArchiveEntry{}, false, errors.New("plugin bundle contains a path below plugin.yaml")
 	case "hooks.json":
 		if len(segments) != 1 {
 			return pluginArchiveEntry{}, false, nil
@@ -670,6 +815,99 @@ func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (
 		return pluginArchiveEntry{kind: pluginArchiveKindScripts, root: root, relativePath: strings.Join(segments[1:], "/")}, true, nil
 	}
 	return pluginArchiveEntry{}, false, nil
+}
+
+func normalizePluginBundleArchivePath(archivePluginID, rawName string) (string, error) {
+	if rawName == "" || rawName != strings.TrimSpace(rawName) || path.IsAbs(rawName) || strings.Contains(rawName, "\\") {
+		return "", fmt.Errorf("plugin bundle contains unsafe path %q", rawName)
+	}
+	name := strings.TrimSuffix(rawName, "/")
+	if name == "" || path.Clean(name) != name {
+		return "", fmt.Errorf("plugin bundle contains non-canonical path %q", rawName)
+	}
+	pluginPrefix := strings.TrimSpace(archivePluginID)
+	if !skillset.IsValidName(pluginPrefix) {
+		return "", errors.New("plugin bundle archive id is invalid")
+	}
+	if name == pluginPrefix {
+		return "", nil
+	}
+	name = strings.TrimPrefix(name, pluginPrefix+"/")
+	if name == "" || path.Clean(name) != name {
+		return "", fmt.Errorf("plugin bundle contains non-canonical path %q", rawName)
+	}
+	for _, segment := range strings.Split(name, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("plugin bundle contains unsafe path %q", rawName)
+		}
+	}
+	return name, nil
+}
+
+func recordPluginBundleArchivePath(seen map[string]bool, name string, isFile bool) error {
+	if _, exists := seen[name]; exists {
+		return fmt.Errorf("plugin bundle contains duplicate path %q", name)
+	}
+	for parent := path.Dir(name); parent != "." && parent != "/"; parent = path.Dir(parent) {
+		if seen[parent] {
+			return fmt.Errorf("plugin bundle path %q is nested below file %q", name, parent)
+		}
+	}
+	if isFile {
+		for candidate := range seen {
+			if strings.HasPrefix(candidate, name+"/") {
+				return fmt.Errorf("plugin bundle file %q conflicts with child path %q", name, candidate)
+			}
+		}
+	}
+	seen[name] = isFile
+	return nil
+}
+
+func validatePluginBundleManifest(content []byte, targetPluginID string) ([]pluginspkg.SkillReference, error) {
+	var manifest struct {
+		ID     string `yaml:"id"`
+		Skills []struct {
+			RegistryID string `yaml:"registry_id"`
+			PackageID  string `yaml:"package_id"`
+			SkillID    string `yaml:"skill_id"`
+		} `yaml:"skills"`
+	}
+	if err := yaml.Unmarshal(content, &manifest); err != nil {
+		return nil, fmt.Errorf("plugin bundle contains an invalid plugin.yaml: %w", err)
+	}
+	manifest.ID = strings.TrimSpace(manifest.ID)
+	if manifest.ID != targetPluginID {
+		return nil, fmt.Errorf("plugin bundle manifest id %q does not match %q", manifest.ID, targetPluginID)
+	}
+	references := make([]pluginspkg.SkillReference, 0, len(manifest.Skills))
+	for _, reference := range manifest.Skills {
+		references = append(references, pluginspkg.SkillReference{
+			RegistryID: strings.TrimSpace(reference.RegistryID),
+			PackageID:  strings.TrimSpace(reference.PackageID),
+			SkillID:    strings.TrimSpace(reference.SkillID),
+		})
+	}
+	if err := pluginspkg.ValidateSkillReferences(references); err != nil {
+		return nil, fmt.Errorf("plugin bundle manifest contains invalid Skill references: %w", err)
+	}
+	return references, nil
+}
+
+func samePluginSkillReferences(left, right []pluginspkg.SkillReference) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	identities := make(map[string]struct{}, len(left))
+	for _, reference := range left {
+		identities[pluginspkg.SkillReferenceIdentity(reference)] = struct{}{}
+	}
+	for _, reference := range right {
+		if _, ok := identities[pluginspkg.SkillReferenceIdentity(reference)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func newPluginBundleInstallResult() pluginBundleInstallResult {

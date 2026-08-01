@@ -3,16 +3,19 @@ package handlers
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 
@@ -50,6 +53,9 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 		t.Fatalf("marshal Skill descriptor: %v", err)
 	}
 	installer := &recordingPluginInstaller{}
+	bundle := gzipTarArchive(t, map[string]string{
+		"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+	})
 	handler := &SupermarketHandler{
 		baseURL: "https://supermarket.example",
 		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -62,8 +68,7 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 			case "/artifacts/meeting":
 				content = artifact
 			case "/api/plugins/notion/download":
-				status = http.StatusNotFound
-				content = nil
+				content = bundle
 			default:
 				status = http.StatusNotFound
 				content = nil
@@ -183,6 +188,7 @@ func TestPluginBundleArchiveEntryAllowsTrustedBundleFiles(t *testing.T) {
 		wantKind     string
 		wantRelative string
 	}{
+		{name: "github/plugin.yaml", wantKind: pluginArchiveKindManifest, wantRelative: "plugin.yaml"},
 		{name: "github/hooks.json", wantKind: pluginArchiveKindHooks, wantRelative: "hooks.json"},
 		{name: "github/scripts/hook.py", wantKind: pluginArchiveKindScripts, wantRelative: "hook.py"},
 	}
@@ -207,7 +213,6 @@ func TestPluginBundleArchiveEntryRejectsEmbeddedSkillContent(t *testing.T) {
 func TestPluginBundleArchiveEntryRejectsUnsafeNames(t *testing.T) {
 	for _, name := range []string{
 		"",
-		"github/plugin.yaml",
 		"github/../escape",
 		"github/skills/../escape",
 		"github/scripts/../escape",
@@ -215,8 +220,8 @@ func TestPluginBundleArchiveEntryRejectsUnsafeNames(t *testing.T) {
 		"/data/escape",
 		"github/skills\\escape",
 	} {
-		if got, ok, err := pluginBundleArchiveEntry("github", "github", name); err != nil || ok {
-			t.Fatalf("pluginBundleArchiveEntry(%q) = %+v, %v, %v; want rejected", name, got, ok, err)
+		if got, ok, err := pluginBundleArchiveEntry("github", "github", name); err == nil || ok {
+			t.Fatalf("pluginBundleArchiveEntry(%q) = %+v, %v, %v; want explicit rejection", name, got, ok, err)
 		}
 	}
 }
@@ -227,12 +232,9 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 		t.Fatalf("plugin root: %v", err)
 	}
 	archive := tarArchive(t, map[string]string{
-		"github/plugin.yaml":       "id: github",
-		"github/hooks.json":        `{"version":1,"hooks":[]}`,
-		"github/scripts/hook.py":   "print('ok')",
-		"github/scripts/../escape": "escape",
-		"github/../outside":        "outside",
-		"/data/outside":            "absolute",
+		"github/plugin.yaml":     "id: github",
+		"github/hooks.json":      `{"version":1,"hooks":[]}`,
+		"github/scripts/hook.py": "print('ok')",
 	})
 	writer := &pluginBundleTestWriter{files: map[string]string{
 		pluginRoot + "/hooks.json":          `{"version":1,"hooks":[{"name":"stale"}]}`,
@@ -248,11 +250,14 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 	if result.Hooks.FilesWritten != 1 || result.Scripts.FilesWritten != 1 {
 		t.Fatalf("install result = %+v, want 1 hook and 1 script", result)
 	}
-	if len(writer.deletes) != 1 {
-		t.Fatalf("deletes = %+v, want one plugin root delete", writer.deletes)
+	if len(writer.renames) != 2 {
+		t.Fatalf("renames = %+v, want backup and publish", writer.renames)
 	}
-	if writer.deletes[0].path != pluginRoot || !writer.deletes[0].recursive {
-		t.Fatalf("delete = %+v, want recursive delete of %s", writer.deletes[0], pluginRoot)
+	if writer.renames[0].oldPath != pluginRoot || !strings.Contains(writer.renames[0].newPath, "/.staging/backup-github-") {
+		t.Fatalf("first rename = %+v, want plugin root to backup", writer.renames[0])
+	}
+	if !strings.Contains(writer.renames[1].oldPath, "/.staging/install-github-") || writer.renames[1].newPath != pluginRoot {
+		t.Fatalf("second rename = %+v, want staged bundle publication", writer.renames[1])
 	}
 	wantFiles := map[string]string{
 		pluginRoot + "/hooks.json":      `{"version":1,"hooks":[]}`,
@@ -278,15 +283,16 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 			t.Fatalf("unrelated plugin file %s = %q, want keep", preservedPath, got)
 		}
 	}
-	for path := range writer.files {
-		if strings.Contains(path, "plugin.yaml") || strings.Contains(path, "outside") || strings.Contains(path, "escape") {
-			t.Fatalf("unsafe file was written: %s", path)
+	for filePath := range writer.files {
+		if strings.Contains(filePath, "plugin.yaml") || strings.Contains(filePath, "outside") || strings.Contains(filePath, "escape") {
+			t.Fatalf("non-runtime bundle file was written: %s", filePath)
 		}
 	}
 }
 
 func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing.T) {
 	archive := tarArchive(t, map[string]string{
+		"GitHub.Plugin/plugin.yaml":     "id: github_plugin",
 		"GitHub.Plugin/hooks.json":      `{"version":1,"hooks":[]}`,
 		"GitHub.Plugin/scripts/hook.py": "print('ok')",
 	})
@@ -309,6 +315,159 @@ func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing
 	}
 	if got := writer.files[pluginRoot+"/scripts/hook.py"]; got != "print('ok')" {
 		t.Fatalf("target script file = %q, want script", got)
+	}
+}
+
+func TestExtractPluginBundleArchiveRejectsInvalidArchiveBeforeWorkspaceMutation(t *testing.T) {
+	pluginRoot, err := skillset.PluginDirForID("github")
+	if err != nil {
+		t.Fatalf("plugin root: %v", err)
+	}
+	tooManyFiles := map[string]string{"github/plugin.yaml": "id: github"}
+	for i := 0; i < maxPluginBundleFiles; i++ {
+		tooManyFiles[fmt.Sprintf("github/ignored/%04d.txt", i)] = "x"
+	}
+	totalSizeExceeded := map[string]string{"github/plugin.yaml": "id: github"}
+	for i := 0; i < 6; i++ {
+		totalSizeExceeded[fmt.Sprintf("github/ignored/%d.bin", i)] = strings.Repeat("x", maxPluginBundleFileBytes)
+	}
+	tests := []struct {
+		name    string
+		archive []byte
+	}{
+		{name: "missing manifest", archive: tarArchive(t, map[string]string{
+			"github/hooks.json": `{"version":1,"hooks":[]}`,
+		})},
+		{name: "truncated file", archive: truncatedTarArchive(t, "github/plugin.yaml", 100, "id: github")},
+		{name: "oversized file", archive: tarArchive(t, map[string]string{
+			"github/plugin.yaml": "id: github",
+			"github/ignored.bin": strings.Repeat("x", maxPluginBundleFileBytes+1),
+		})},
+		{name: "too many files", archive: tarArchive(t, tooManyFiles)},
+		{name: "total size exceeded", archive: tarArchive(t, totalSizeExceeded)},
+		{name: "embedded skill", archive: tarArchive(t, map[string]string{
+			"github/plugin.yaml":          "id: github",
+			"github/skills/demo/SKILL.md": "---\nname: demo\n---",
+		})},
+		{name: "symlink", archive: tarArchiveEntries(t, []pluginBundleTarEntry{
+			{name: "github/plugin.yaml", content: "id: github"},
+			{name: "github/scripts/current", typeflag: tar.TypeSymlink, linkname: "../outside"},
+		})},
+		{name: "duplicate path", archive: tarArchiveEntries(t, []pluginBundleTarEntry{
+			{name: "github/plugin.yaml", content: "id: github"},
+			{name: "github/hooks.json", content: "first"},
+			{name: "github/hooks.json", content: "second"},
+		})},
+		{name: "file child conflict", archive: tarArchiveEntries(t, []pluginBundleTarEntry{
+			{name: "github/plugin.yaml", content: "id: github"},
+			{name: "github/scripts/tool", content: "file"},
+			{name: "github/scripts/tool/config", content: "child"},
+		})},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			writer := &pluginBundleTestWriter{files: map[string]string{
+				pluginRoot + "/hooks.json": "stale",
+			}}
+			if _, err := extractPluginBundleArchive(context.Background(), writer, "github", "github", bytes.NewReader(test.archive)); err == nil {
+				t.Fatal("extractPluginBundleArchive() accepted invalid archive")
+			}
+			if got := writer.files[pluginRoot+"/hooks.json"]; got != "stale" {
+				t.Fatalf("existing plugin bundle changed to %q", got)
+			}
+			if len(writer.renames) != 0 || len(writer.deletes) != 0 || len(writer.dirs) != 0 {
+				t.Fatalf("workspace mutated before archive validation: %+v", writer)
+			}
+		})
+	}
+}
+
+func TestExtractPluginBundleArchiveRollsBackStagingAndPublishFailures(t *testing.T) {
+	pluginRoot, err := skillset.PluginDirForID("github")
+	if err != nil {
+		t.Fatalf("plugin root: %v", err)
+	}
+	archive := tarArchive(t, map[string]string{
+		"github/plugin.yaml":      "id: github",
+		"github/hooks.json":       "new hooks",
+		"github/scripts/setup.sh": "new setup",
+	})
+
+	t.Run("staging write", func(t *testing.T) {
+		writer := &pluginBundleTestWriter{
+			files: map[string]string{pluginRoot + "/hooks.json": "stale"},
+			writeError: func(filePath string) error {
+				if strings.HasSuffix(filePath, "/hooks.json") {
+					return errors.New("injected staging write failure")
+				}
+				return nil
+			},
+		}
+		if _, err := extractPluginBundleArchive(context.Background(), writer, "github", "github", bytes.NewReader(archive)); err == nil {
+			t.Fatal("extractPluginBundleArchive() succeeded after staging write failure")
+		}
+		if got := writer.files[pluginRoot+"/hooks.json"]; got != "stale" {
+			t.Fatalf("existing bundle changed after staging failure: %q", got)
+		}
+		if len(writer.renames) != 0 {
+			t.Fatalf("staging failure reached publication: %+v", writer.renames)
+		}
+	})
+
+	t.Run("publish rename", func(t *testing.T) {
+		writer := &pluginBundleTestWriter{
+			files: map[string]string{pluginRoot + "/hooks.json": "stale"},
+			renameError: func(oldPath, newPath string) error {
+				if strings.Contains(oldPath, "/.staging/install-github-") && newPath == pluginRoot {
+					return errors.New("injected publish failure")
+				}
+				return nil
+			},
+		}
+		if _, err := extractPluginBundleArchive(context.Background(), writer, "github", "github", bytes.NewReader(archive)); err == nil {
+			t.Fatal("extractPluginBundleArchive() succeeded after publish failure")
+		}
+		if got := writer.files[pluginRoot+"/hooks.json"]; got != "stale" {
+			t.Fatalf("previous bundle was not restored: %q", got)
+		}
+		if len(writer.renames) != 2 || !strings.Contains(writer.renames[1].oldPath, "/.staging/backup-github-") {
+			t.Fatalf("publish rollback renames = %+v", writer.renames)
+		}
+	})
+}
+
+func TestInstallPluginBundleRejectsMissingDownload(t *testing.T) {
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return testHTTPResponse(req, http.StatusNotFound, nil), nil
+		})},
+		logger: slog.New(slog.DiscardHandler),
+	}
+	writer := &pluginBundleTestWriter{files: map[string]string{}}
+	if _, err := handler.installPluginBundle(context.Background(), writer, "github", "github", nil); err == nil {
+		t.Fatal("installPluginBundle() accepted a missing bundle")
+	}
+}
+
+func TestInstallPluginBundleRejectsManifestSkillMismatch(t *testing.T) {
+	bundle := gzipTarArchive(t, map[string]string{
+		"github/plugin.yaml": "id: github\nskills:\n  - registry_id: memoh\n    package_id: github\n    skill_id: review\n",
+	})
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return testHTTPResponse(req, http.StatusOK, bundle), nil
+		})},
+		logger: slog.New(slog.DiscardHandler),
+	}
+	writer := &pluginBundleTestWriter{files: map[string]string{}}
+	expected := []pluginspkg.SkillReference{{RegistryID: "memoh", PackageID: "github", SkillID: "issues"}}
+	if _, err := handler.installPluginBundle(context.Background(), writer, "github", "github", expected); err == nil {
+		t.Fatal("installPluginBundle() accepted mismatched Skill references")
+	}
+	if len(writer.renames) != 0 || len(writer.deletes) != 0 || len(writer.dirs) != 0 {
+		t.Fatalf("workspace mutated before manifest consistency check: %+v", writer)
 	}
 }
 
@@ -463,15 +622,86 @@ func tarArchive(t *testing.T, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
+type pluginBundleTarEntry struct {
+	name     string
+	content  string
+	typeflag byte
+	linkname string
+}
+
+func tarArchiveEntries(t *testing.T, entries []pluginBundleTarEntry) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	tw := tar.NewWriter(&output)
+	for _, entry := range entries {
+		typeflag := entry.typeflag
+		if typeflag == 0 {
+			typeflag = tar.TypeReg
+		}
+		size := int64(0)
+		if typeflag == tar.TypeReg {
+			size = int64(len(entry.content))
+		}
+		if err := tw.WriteHeader(&tar.Header{
+			Name: entry.name, Mode: 0o600, Size: size, Typeflag: typeflag, Linkname: entry.linkname,
+		}); err != nil {
+			t.Fatalf("write tar entry %q: %v", entry.name, err)
+		}
+		if size > 0 {
+			if _, err := tw.Write([]byte(entry.content)); err != nil {
+				t.Fatalf("write tar entry content %q: %v", entry.name, err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar entries: %v", err)
+	}
+	return output.Bytes()
+}
+
+func gzipTarArchive(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	zw := gzip.NewWriter(&output)
+	if _, err := zw.Write(tarArchive(t, files)); err != nil {
+		t.Fatalf("write gzip archive: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close gzip archive: %v", err)
+	}
+	return output.Bytes()
+}
+
+func truncatedTarArchive(t *testing.T, name string, declaredSize int64, content string) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	tw := tar.NewWriter(&output)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: declaredSize}); err != nil {
+		t.Fatalf("write truncated tar header: %v", err)
+	}
+	if _, err := tw.Write([]byte(content)); err != nil {
+		t.Fatalf("write truncated tar content: %v", err)
+	}
+	return output.Bytes()
+}
+
 type pluginBundleTestWriter struct {
-	dirs    []string
-	deletes []pluginBundleTestDelete
-	files   map[string]string
+	dirs        []string
+	deletes     []pluginBundleTestDelete
+	renames     []pluginBundleTestRename
+	files       map[string]string
+	writeError  func(path string) error
+	renameError func(oldPath, newPath string) error
 }
 
 type pluginBundleTestDelete struct {
 	path      string
 	recursive bool
+}
+
+type pluginBundleTestRename struct {
+	oldPath string
+	newPath string
 }
 
 func (w *pluginBundleTestWriter) DeleteFile(_ context.Context, path string, recursive bool) error {
@@ -485,17 +715,73 @@ func (w *pluginBundleTestWriter) DeleteFile(_ context.Context, path string, recu
 			delete(w.files, filePath)
 		}
 	}
+	remainingDirs := w.dirs[:0]
+	for _, dir := range w.dirs {
+		if dir != path && !strings.HasPrefix(dir, path+"/") {
+			remainingDirs = append(remainingDirs, dir)
+		}
+	}
+	w.dirs = remainingDirs
 	return nil
 }
 
 func (w *pluginBundleTestWriter) Mkdir(_ context.Context, path string) error {
-	w.dirs = append(w.dirs, path)
+	if !slices.Contains(w.dirs, path) {
+		w.dirs = append(w.dirs, path)
+	}
+	return nil
+}
+
+func (w *pluginBundleTestWriter) Rename(_ context.Context, oldPath, newPath string) error {
+	if w.renameError != nil {
+		if err := w.renameError(oldPath, newPath); err != nil {
+			return err
+		}
+	}
+	if !w.hasPath(oldPath) {
+		return bridge.ErrNotFound
+	}
+	w.renames = append(w.renames, pluginBundleTestRename{oldPath: oldPath, newPath: newPath})
+	movedFiles := make(map[string]string)
+	for filePath, content := range w.files {
+		if filePath == oldPath || strings.HasPrefix(filePath, oldPath+"/") {
+			movedFiles[newPath+strings.TrimPrefix(filePath, oldPath)] = content
+			delete(w.files, filePath)
+		}
+	}
+	for filePath, content := range movedFiles {
+		w.files[filePath] = content
+	}
+	for i, dir := range w.dirs {
+		if dir == oldPath || strings.HasPrefix(dir, oldPath+"/") {
+			w.dirs[i] = newPath + strings.TrimPrefix(dir, oldPath)
+		}
+	}
 	return nil
 }
 
 func (w *pluginBundleTestWriter) WriteFile(_ context.Context, path string, content []byte) error {
+	if w.writeError != nil {
+		if err := w.writeError(path); err != nil {
+			return err
+		}
+	}
 	w.files[path] = string(content)
 	return nil
+}
+
+func (w *pluginBundleTestWriter) hasPath(target string) bool {
+	for filePath := range w.files {
+		if filePath == target || strings.HasPrefix(filePath, target+"/") {
+			return true
+		}
+	}
+	for _, dir := range w.dirs {
+		if dir == target || strings.HasPrefix(dir, target+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 type pluginInstallScriptTestExecutor struct {
