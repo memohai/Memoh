@@ -49,7 +49,9 @@ func TestReadArchiveRejectsUnsafeEntries(t *testing.T) {
 		"nested whitespace": {{name: "SKILL.md", content: validArchiveManifest}, {
 			name: "scripts /run.sh", content: "bad",
 		}},
-		"windows alias": {{name: "SKILL.md", content: validArchiveManifest}, {name: "scripts/run.sh.", content: "bad"}},
+		"windows alias":           {{name: "SKILL.md", content: validArchiveManifest}, {name: "scripts/run.sh.", content: "bad"}},
+		"windows device":          {{name: "SKILL.md", content: validArchiveManifest}, {name: "scripts/NUL.txt", content: "bad"}},
+		"windows numbered device": {{name: "SKILL.md", content: validArchiveManifest}, {name: "references/COM1", content: "bad"}},
 	}
 	for name, entries := range tests {
 		t.Run(name, func(t *testing.T) {

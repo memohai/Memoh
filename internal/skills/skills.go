@@ -113,8 +113,7 @@ func ManagedDir() string {
 }
 
 func PluginDirForID(pluginID string) (string, error) {
-	pluginID = strings.TrimSpace(pluginID)
-	if !IsValidName(pluginID) {
+	if !IsValidPluginID(pluginID) {
 		return "", bridge.ErrBadRequest
 	}
 
@@ -475,6 +474,57 @@ func IsValidName(name string) bool {
 		}
 	}
 	return true
+}
+
+const maxPortableResourceIDBytes = 128
+
+// IsValidPluginID validates the canonical Plugin and MCP identifier alphabet.
+func IsValidPluginID(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > maxPortableResourceIDBytes || isWindowsReservedName(value) {
+		return false
+	}
+	for index, character := range []byte(value) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') ||
+			(index > 0 && (character == '-' || character == '_')) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// IsValidRegistryComponent validates one Registry, Package, or Skill path component.
+func IsValidRegistryComponent(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > maxPortableResourceIDBytes ||
+		strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") || strings.Contains(value, "..") ||
+		isWindowsReservedName(value) {
+		return false
+	}
+	if first := value[0]; (first < 'a' || first > 'z') && (first < '0' || first > '9') {
+		return false
+	}
+	for _, character := range []byte(value) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') ||
+			character == '-' || character == '_' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// IsValidRegistryID also excludes the namespace reserved for user-authored Skills.
+func IsValidRegistryID(value string) bool {
+	return value != UserSkillNamespace && IsValidRegistryComponent(value)
+}
+
+func isWindowsReservedName(value string) bool {
+	base := strings.ToLower(strings.SplitN(value, ".", 2)[0])
+	if base == "con" || base == "prn" || base == "aux" || base == "nul" {
+		return true
+	}
+	return len(base) == 4 && (strings.HasPrefix(base, "com") || strings.HasPrefix(base, "lpt")) &&
+		base[3] >= '1' && base[3] <= '9'
 }
 
 func normalizeParsed(skill Parsed) Parsed {

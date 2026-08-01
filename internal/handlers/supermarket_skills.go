@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -26,8 +25,6 @@ const (
 	maxRegistrySkillArtifactCompressedBytes = 25 * 1024 * 1024
 	maxRegistrySkillMetadataBytes           = 2 * 1024 * 1024
 )
-
-var registryComponentPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 type SupermarketRegistryListResponse struct {
 	Data []SupermarketRegistry `json:"data"`
@@ -283,14 +280,22 @@ func copySkillIconHeaders(target, source http.Header) {
 
 func requireRegistryComponent(value, field string) (string, error) {
 	value = strings.TrimSpace(value)
-	if !registryComponentPattern.MatchString(value) {
+	if !skillset.IsValidRegistryComponent(value) {
+		return "", echo.NewHTTPError(http.StatusBadRequest, field+" is invalid")
+	}
+	return value, nil
+}
+
+func requireRegistryID(value, field string) (string, error) {
+	value = strings.TrimSpace(value)
+	if !skillset.IsValidRegistryID(value) {
 		return "", echo.NewHTTPError(http.StatusBadRequest, field+" is invalid")
 	}
 	return value, nil
 }
 
 func registrySkillIdentity(registryValue, packageValue, skillValue string) (string, string, string, error) {
-	registryID, err := requireRegistryComponent(registryValue, "registry_id")
+	registryID, err := requireRegistryID(registryValue, "registry_id")
 	if err != nil {
 		return "", "", "", err
 	}

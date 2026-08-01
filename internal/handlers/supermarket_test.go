@@ -739,6 +739,8 @@ func TestPluginBundleArchiveEntryRejectsUnsafeNames(t *testing.T) {
 		"../escape",
 		"/data/escape",
 		"github/skills\\escape",
+		"github/scripts/NUL.txt",
+		"github/scripts/bad\x00name",
 	} {
 		if got, ok, err := pluginBundleArchiveEntry("github", "github", name); err == nil || ok {
 			t.Fatalf("pluginBundleArchiveEntry(%q) = %+v, %v, %v; want explicit rejection", name, got, ok, err)
@@ -813,13 +815,13 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 
 func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing.T) {
 	archive := tarArchive(t, map[string]string{
-		"GitHub.Plugin/plugin.yaml":     "id: github_plugin",
-		"GitHub.Plugin/hooks.json":      `{"version":1,"hooks":[]}`,
-		"GitHub.Plugin/scripts/hook.py": "print('ok')",
+		"github-source/plugin.yaml":     "id: github_plugin",
+		"github-source/hooks.json":      `{"version":1,"hooks":[]}`,
+		"github-source/scripts/hook.py": "print('ok')",
 	})
 	writer := &pluginBundleTestWriter{files: map[string]string{}}
 
-	result, err := extractPluginBundleArchive(context.Background(), writer, "linux", "GitHub.Plugin", "github_plugin", bytes.NewReader(archive))
+	result, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github-source", "github_plugin", bytes.NewReader(archive))
 	if err != nil {
 		t.Fatalf("extractPluginBundleArchive returned error: %v", err)
 	}
@@ -903,11 +905,11 @@ func TestExtractPluginBundleArchiveRejectsInvalidArchiveBeforeWorkspaceMutation(
 	}
 	tooManyFiles := map[string]string{"github/plugin.yaml": "id: github"}
 	for i := 0; i < maxPluginBundleFiles; i++ {
-		tooManyFiles[fmt.Sprintf("github/ignored/%04d.txt", i)] = "x"
+		tooManyFiles[fmt.Sprintf("github/scripts/ignored/%04d.txt", i)] = "x"
 	}
 	totalSizeExceeded := map[string]string{"github/plugin.yaml": "id: github"}
 	for i := 0; i < 6; i++ {
-		totalSizeExceeded[fmt.Sprintf("github/ignored/%d.bin", i)] = strings.Repeat("x", maxPluginBundleFileBytes)
+		totalSizeExceeded[fmt.Sprintf("github/scripts/ignored/%d.bin", i)] = strings.Repeat("x", maxPluginBundleFileBytes)
 	}
 	tests := []struct {
 		name    string
@@ -918,14 +920,29 @@ func TestExtractPluginBundleArchiveRejectsInvalidArchiveBeforeWorkspaceMutation(
 		})},
 		{name: "truncated file", archive: truncatedTarArchive(t, "github/plugin.yaml", 100, "id: github")},
 		{name: "oversized file", archive: tarArchive(t, map[string]string{
-			"github/plugin.yaml": "id: github",
-			"github/ignored.bin": strings.Repeat("x", maxPluginBundleFileBytes+1),
+			"github/plugin.yaml":         "id: github",
+			"github/scripts/ignored.bin": strings.Repeat("x", maxPluginBundleFileBytes+1),
 		})},
 		{name: "too many files", archive: tarArchive(t, tooManyFiles)},
 		{name: "total size exceeded", archive: tarArchive(t, totalSizeExceeded)},
 		{name: "embedded skill", archive: tarArchive(t, map[string]string{
 			"github/plugin.yaml":          "id: github",
 			"github/skills/demo/SKILL.md": "---\nname: demo\n---",
+		})},
+		{name: "wrong root", archive: tarArchive(t, map[string]string{
+			"other/plugin.yaml": "id: github",
+		})},
+		{name: "unknown file", archive: tarArchive(t, map[string]string{
+			"github/plugin.yaml": "id: github",
+			"github/README.md":   "unsupported",
+		})},
+		{name: "windows device path", archive: tarArchive(t, map[string]string{
+			"github/plugin.yaml":     "id: github",
+			"github/scripts/CON.txt": "unsupported",
+		})},
+		{name: "unknown directory", archive: tarArchiveEntries(t, []pluginBundleTarEntry{
+			{name: "github/unknown/", typeflag: tar.TypeDir},
+			{name: "github/plugin.yaml", content: "id: github"},
 		})},
 		{name: "symlink", archive: tarArchiveEntries(t, []pluginBundleTarEntry{
 			{name: "github/plugin.yaml", content: "id: github"},

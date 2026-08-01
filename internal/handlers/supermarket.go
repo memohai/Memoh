@@ -275,10 +275,11 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if strings.TrimSpace(req.PluginID) == "" {
+	req.PluginID = strings.TrimSpace(req.PluginID)
+	if req.PluginID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "plugin_id is required")
 	}
-	if !skillset.IsValidName(req.PluginID) {
+	if !skillset.IsValidPluginID(req.PluginID) {
 		return echo.NewHTTPError(http.StatusBadRequest, "plugin_id is invalid")
 	}
 	req.ReleaseRevision = strings.TrimSpace(req.ReleaseRevision)
@@ -1007,7 +1008,7 @@ func extractPluginBundleArchive(
 }
 
 func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader) (pluginBundleArchive, error) {
-	if !skillset.IsValidName(strings.TrimSpace(archivePluginID)) {
+	if !skillset.IsValidPluginID(archivePluginID) {
 		return pluginBundleArchive{}, errors.New("plugin bundle archive id is invalid")
 	}
 	if _, err := skillset.PluginDirForID(targetPluginID); err != nil {
@@ -1052,6 +1053,9 @@ func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
+			if !isAllowedPluginBundleDirectory(name) {
+				return pluginBundleArchive{}, fmt.Errorf("plugin bundle contains unsupported directory %q", hdr.Name)
+			}
 			continue
 		case tar.TypeReg, 0:
 		case tar.TypeSymlink, tar.TypeLink:
@@ -1080,7 +1084,7 @@ func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader
 			return pluginBundleArchive{}, err
 		}
 		if !ok {
-			continue
+			return pluginBundleArchive{}, fmt.Errorf("plugin bundle contains unsupported file %q", hdr.Name)
 		}
 		if entry.kind == pluginArchiveKindManifest {
 			references, err := validatePluginBundleManifest(content, targetPluginID)
@@ -1315,7 +1319,7 @@ func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (
 		return pluginArchiveEntry{}, false, errors.New("plugin bundle contains a path below plugin.yaml")
 	case "hooks.json":
 		if len(segments) != 1 {
-			return pluginArchiveEntry{}, false, nil
+			return pluginArchiveEntry{}, false, errors.New("plugin bundle contains a path below hooks.json")
 		}
 		root, err := skillset.PluginDirForID(targetPluginID)
 		if err != nil {
@@ -1326,7 +1330,7 @@ func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (
 		return pluginArchiveEntry{}, false, errors.New("plugin bundle must reference Registry Skills instead of embedding skills/**")
 	case "scripts":
 		if len(segments) < 2 {
-			return pluginArchiveEntry{}, false, nil
+			return pluginArchiveEntry{}, false, errors.New("plugin bundle scripts path must name a file")
 		}
 		root, err := skillset.PluginScriptsDirForID(targetPluginID)
 		if err != nil {
@@ -1334,7 +1338,11 @@ func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (
 		}
 		return pluginArchiveEntry{kind: pluginArchiveKindScripts, root: root, relativePath: strings.Join(segments[1:], "/")}, true, nil
 	}
-	return pluginArchiveEntry{}, false, nil
+	return pluginArchiveEntry{}, false, fmt.Errorf("plugin bundle contains unsupported file %q", rawName)
+}
+
+func isAllowedPluginBundleDirectory(name string) bool {
+	return name == "scripts" || strings.HasPrefix(name, "scripts/")
 }
 
 func normalizePluginBundleArchivePath(archivePluginID, rawName string) (string, error) {
@@ -1345,12 +1353,15 @@ func normalizePluginBundleArchivePath(archivePluginID, rawName string) (string, 
 	if name == "" || path.Clean(name) != name {
 		return "", fmt.Errorf("plugin bundle contains non-canonical path %q", rawName)
 	}
-	pluginPrefix := strings.TrimSpace(archivePluginID)
-	if !skillset.IsValidName(pluginPrefix) {
+	pluginPrefix := archivePluginID
+	if !skillset.IsValidPluginID(pluginPrefix) {
 		return "", errors.New("plugin bundle archive id is invalid")
 	}
 	if name == pluginPrefix {
 		return "", nil
+	}
+	if !strings.HasPrefix(name, pluginPrefix+"/") {
+		return "", fmt.Errorf("plugin bundle path %q is outside the %q root", rawName, pluginPrefix)
 	}
 	name = strings.TrimPrefix(name, pluginPrefix+"/")
 	if name == "" || path.Clean(name) != name {
@@ -1358,11 +1369,25 @@ func normalizePluginBundleArchivePath(archivePluginID, rawName string) (string, 
 	}
 	for _, segment := range strings.Split(name, "/") {
 		if segment == "" || segment == "." || segment == ".." || segment != strings.TrimSpace(segment) ||
-			strings.HasSuffix(segment, ".") || strings.ContainsAny(segment, `<>:"|?*`) {
+			strings.HasSuffix(segment, ".") || strings.ContainsAny(segment, `<>:"|?*`) || isWindowsReservedPathName(segment) {
 			return "", fmt.Errorf("plugin bundle contains unsafe path %q", rawName)
+		}
+		for _, character := range segment {
+			if character < 0x20 || character == 0x7f {
+				return "", fmt.Errorf("plugin bundle contains unsafe path %q", rawName)
+			}
 		}
 	}
 	return name, nil
+}
+
+func isWindowsReservedPathName(value string) bool {
+	base := strings.ToLower(strings.SplitN(value, ".", 2)[0])
+	if base == "con" || base == "prn" || base == "aux" || base == "nul" {
+		return true
+	}
+	return len(base) == 4 && (strings.HasPrefix(base, "com") || strings.HasPrefix(base, "lpt")) &&
+		base[3] >= '1' && base[3] <= '9'
 }
 
 func recordPluginBundleArchivePath(seen map[string]bool, name string, isFile bool) error {

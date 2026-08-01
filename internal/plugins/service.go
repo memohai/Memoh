@@ -1253,7 +1253,6 @@ func authorizationServerFromEndpoint(endpoint string) string {
 
 var (
 	idPattern             = regexp.MustCompile(`[^a-z0-9_-]+`)
-	registryIDPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	artifactDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	templateVarPattern    = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 )
@@ -1266,9 +1265,9 @@ func ValidateSkillReferences(references []SkillReference) error {
 	seen := make(map[string]struct{}, len(references))
 	for _, reference := range references {
 		identity := SkillReferenceIdentity(reference)
-		if !registryIDPattern.MatchString(reference.RegistryID) ||
-			!registryIDPattern.MatchString(reference.PackageID) ||
-			!registryIDPattern.MatchString(reference.SkillID) {
+		if !skillset.IsValidRegistryID(reference.RegistryID) ||
+			!skillset.IsValidRegistryComponent(reference.PackageID) ||
+			!skillset.IsValidRegistryComponent(reference.SkillID) {
 			return fmt.Errorf("plugin Skill reference %q is invalid", identity)
 		}
 		if _, ok := seen[identity]; ok {

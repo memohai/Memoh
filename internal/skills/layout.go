@@ -21,7 +21,7 @@ func SkillDirForIDs(namespaceID, packageID, skillID string) (string, error) {
 	namespaceID = strings.TrimSpace(namespaceID)
 	packageID = strings.TrimSpace(packageID)
 	skillID = strings.TrimSpace(skillID)
-	if !IsValidName(namespaceID) || !IsValidName(packageID) || !IsValidName(skillID) {
+	if !validSkillPathIDs(namespaceID, packageID, skillID) {
 		return "", bridge.ErrBadRequest
 	}
 	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID, packageID, skillID))
@@ -35,7 +35,7 @@ func SkillDirForIDs(namespaceID, packageID, skillID string) (string, error) {
 func SkillPackageDirForIDs(namespaceID, packageID string) (string, error) {
 	namespaceID = strings.TrimSpace(namespaceID)
 	packageID = strings.TrimSpace(packageID)
-	if !IsValidName(namespaceID) || !IsValidName(packageID) {
+	if !validSkillPackageIDs(namespaceID, packageID) {
 		return "", bridge.ErrBadRequest
 	}
 	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID, packageID))
@@ -64,7 +64,7 @@ func RegistrySkillDirIDs(skillDir string) (registryID, packageID, skillID string
 
 func skillNamespaceDirForID(namespaceID string) (string, error) {
 	namespaceID = strings.TrimSpace(namespaceID)
-	if !IsValidName(namespaceID) {
+	if namespaceID != UserSkillNamespace && !IsValidRegistryID(namespaceID) {
 		return "", bridge.ErrBadRequest
 	}
 	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID))
@@ -155,7 +155,7 @@ func PrunableSkillNamespaceDirs(skillDir string) []string {
 	if path.Dir(namespaceDir) != ManagedDirPath {
 		return nil
 	}
-	if !IsValidName(path.Base(skillDir)) || !IsValidName(path.Base(packageDir)) || !IsValidName(path.Base(namespaceDir)) {
+	if !validSkillPathIDs(path.Base(namespaceDir), path.Base(packageDir), path.Base(skillDir)) {
 		return nil
 	}
 	return []string{packageDir, namespaceDir}
@@ -208,10 +208,24 @@ func skillPathIDs(skillMDPath string) (namespaceID, packageID, skillID string, o
 		return "", "", "", false
 	}
 	namespaceID, packageID, skillID = path.Base(namespaceDir), path.Base(packageDir), path.Base(skillDir)
-	if !IsValidName(namespaceID) || !IsValidName(packageID) || !IsValidName(skillID) {
+	if !validSkillPathIDs(namespaceID, packageID, skillID) {
 		return "", "", "", false
 	}
 	return namespaceID, packageID, skillID, true
+}
+
+func validSkillPackageIDs(namespaceID, packageID string) bool {
+	if namespaceID == UserSkillNamespace {
+		return packageID == UserSkillPackage
+	}
+	return IsValidRegistryID(namespaceID) && IsValidRegistryComponent(packageID)
+}
+
+func validSkillPathIDs(namespaceID, packageID, skillID string) bool {
+	if namespaceID == UserSkillNamespace {
+		return packageID == UserSkillPackage && IsValidName(skillID)
+	}
+	return IsValidRegistryID(namespaceID) && IsValidRegistryComponent(packageID) && IsValidRegistryComponent(skillID)
 }
 
 var (

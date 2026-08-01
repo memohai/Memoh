@@ -317,7 +317,10 @@ func TestPlanUpsertCreateRenameAndRejectRegistryEdit(t *testing.T) {
 }
 
 func TestPluginPathsForIDRejectEscapingIDs(t *testing.T) {
-	for _, id := range []string{".", "..", ".plugin", "alpha..beta", "alpha/beta"} {
+	for _, id := range []string{
+		".", "..", ".plugin", "alpha.beta", "alpha..beta", "alpha/beta", "Alpha", "alpha+beta",
+		"con", "nul.txt", " github ", strings.Repeat("a", maxPortableResourceIDBytes+1),
+	} {
 		for name, fn := range map[string]func(string) (string, error){
 			"PluginDirForID":        PluginDirForID,
 			"PluginHooksPathForID":  PluginHooksPathForID,
@@ -360,6 +363,15 @@ func TestNamespacedSkillPaths(t *testing.T) {
 		{"reg", "..", "skill"},
 		{"reg", "pkg", "alpha/beta"},
 		{"reg", "pkg", ".hidden"},
+		{"user", "pkg", "skill"},
+		{"Registry", "pkg", "skill"},
+		{"reg", "pkg..v2", "skill"},
+		{"reg", "pkg.", "skill"},
+		{"reg", "-pkg", "skill"},
+		{"reg", "pkg", "_skill"},
+		{"reg", "con", "skill"},
+		{"reg", "pkg", "nul.txt"},
+		{"reg", "pkg", strings.Repeat("a", maxPortableResourceIDBytes+1)},
 	} {
 		if _, err := SkillDirForIDs(tc.registryID, tc.packageID, tc.skillID); !errors.Is(err, bridge.ErrBadRequest) {
 			t.Fatalf("SkillDirForIDs(%q,%q,%q) err = %v, want ErrBadRequest", tc.registryID, tc.packageID, tc.skillID, err)
@@ -389,6 +401,13 @@ func TestNamespacedSkillPaths(t *testing.T) {
 	}
 	if _, _, _, ok := RegistrySkillIDs(pathJoin(ManagedDirPath, UserSkillNamespace, UserSkillPackage, "xlsx", "SKILL.md")); ok {
 		t.Fatal("RegistrySkillIDs() accepted a user-authored Skill")
+	}
+	dottedPath, err := SkillDirForIDs("openai.api", "docs.v2", "xlsx.reader")
+	if err != nil {
+		t.Fatalf("SkillDirForIDs(dotted) error = %v", err)
+	}
+	if dottedPath != pathJoin(ManagedDirPath, "openai.api", "docs.v2", "xlsx.reader") {
+		t.Fatalf("SkillDirForIDs(dotted) = %q", dottedPath)
 	}
 }
 

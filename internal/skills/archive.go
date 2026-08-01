@@ -153,7 +153,7 @@ func ReadArchiveWithUncompressedLimit(content []byte, maximum int64) (Archive, e
 func containsUnsafePathPart(parts []string) bool {
 	for _, part := range parts {
 		if part == "" || part == "." || part == ".." || part != strings.TrimSpace(part) ||
-			strings.HasSuffix(part, ".") || strings.ContainsAny(part, `<>:"|?*`) {
+			strings.HasSuffix(part, ".") || strings.ContainsAny(part, `<>:"|?*`) || isWindowsReservedName(part) {
 			return true
 		}
 		for _, character := range part {

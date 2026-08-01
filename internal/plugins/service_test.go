@@ -96,9 +96,22 @@ func TestValidateSkillReferencesRequiresNamespacedUniqueIdentity(t *testing.T) {
 	if err := ValidateSkillReferences([]SkillReference{reference, reference}); err == nil {
 		t.Fatal("ValidateSkillReferences() accepted a duplicate reference")
 	}
+	dotted := SkillReference{RegistryID: "openai.api", PackageID: "documents.v2", SkillID: "pdf.reader"}
+	if err := ValidateSkillReferences([]SkillReference{dotted}); err != nil {
+		t.Fatalf("ValidateSkillReferences(dotted) error = %v", err)
+	}
 	reference.RegistryID = "Not Valid"
 	if err := ValidateSkillReferences([]SkillReference{reference}); err == nil {
 		t.Fatal("ValidateSkillReferences() accepted an invalid Registry ID")
+	}
+	for _, invalid := range []SkillReference{
+		{RegistryID: "user", PackageID: "github", SkillID: "github"},
+		{RegistryID: "memoh", PackageID: "github..v2", SkillID: "github"},
+		{RegistryID: "memoh", PackageID: "github", SkillID: "nul.txt"},
+	} {
+		if err := ValidateSkillReferences([]SkillReference{invalid}); err == nil {
+			t.Fatalf("ValidateSkillReferences() accepted invalid reference %+v", invalid)
+		}
 	}
 }
 
