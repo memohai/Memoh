@@ -87,16 +87,26 @@ func (s *Service) Get(ctx context.Context, botID, installationID string) (Instal
 // bot/plugin identity. An installed Plugin without release metadata is still
 // reported as installed so callers cannot mistake it for a new installation.
 func (s *Service) InstalledPluginRelease(ctx context.Context, botID, pluginID string) (string, bool, error) {
+	state, installed, err := s.InstalledPluginState(ctx, botID, pluginID)
+	return state.ReleaseRevision, installed, err
+}
+
+// InstalledPluginState returns both the immutable release revision and the
+// mutable installation generation represented by updated_at.
+func (s *Service) InstalledPluginState(
+	ctx context.Context,
+	botID, pluginID string,
+) (InstalledPluginState, bool, error) {
 	if scoped := s.scopedService(ctx, botID); scoped != nil && scoped != s {
-		return scoped.InstalledPluginRelease(ctx, botID, pluginID)
+		return scoped.InstalledPluginState(ctx, botID, pluginID)
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		return "", false, err
+		return InstalledPluginState{}, false, err
 	}
 	rows, err := s.queries.ListBotPluginInstallations(ctx, botUUID)
 	if err != nil {
-		return "", false, err
+		return InstalledPluginState{}, false, err
 	}
 	for _, row := range rows {
 		if row.PluginID != pluginID {
@@ -104,12 +114,15 @@ func (s *Service) InstalledPluginRelease(ctx context.Context, botID, pluginID st
 		}
 		metadata, err := decodeJSONMap(row.Metadata)
 		if err != nil {
-			return "", false, err
+			return InstalledPluginState{}, false, err
 		}
 		revision, _ := metadata["release_revision"].(string)
-		return strings.TrimSpace(revision), true, nil
+		return InstalledPluginState{
+			ReleaseRevision: strings.TrimSpace(revision),
+			UpdatedAt:       timeFromPg(row.UpdatedAt),
+		}, true, nil
 	}
-	return "", false, nil
+	return InstalledPluginState{}, false, nil
 }
 
 func (s *Service) Install(ctx context.Context, botID string, req InstallRequest) (Installation, error) {

@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -213,7 +214,7 @@ func TestInstallPluginRequiresExpectedInstalledRevision(t *testing.T) {
 	}
 }
 
-func TestInstallPluginRejectsInstalledRevisionChangedWhilePreparing(t *testing.T) {
+func TestInstallPluginRejectsInstallationChangedWithinSameReleaseWhilePreparing(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	manager := workspace.NewManager(
 		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
@@ -226,9 +227,12 @@ func TestInstallPluginRejectsInstalledRevisionChangedWhilePreparing(t *testing.T
 		t.Fatalf("marshal Plugin entry: %v", err)
 	}
 	oldRevision := strings.Repeat("a", 64)
-	installer := &recordingPluginInstaller{installed: true, installedRevision: oldRevision}
+	installedAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	installer := &recordingPluginInstaller{
+		installed: true, installedRevision: oldRevision, installedUpdatedAt: installedAt,
+	}
 	installer.beforeMutation = func() {
-		installer.installedRevision = strings.Repeat("b", 64)
+		installer.installedUpdatedAt = installedAt.Add(time.Second)
 	}
 	handler := &SupermarketHandler{
 		baseURL: "https://supermarket.example",
@@ -250,7 +254,8 @@ func TestInstallPluginRejectsInstalledRevisionChangedWhilePreparing(t *testing.T
 	}
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
-		PluginID: "notion", ReleaseRevision: entry.Release.Revision, ExpectedInstalledRevision: &oldRevision,
+		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
+		ExpectedInstalledRevision: &oldRevision, ExpectedInstallationUpdatedAt: &installedAt,
 	}, handler.InstallPlugin)
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
@@ -531,8 +536,11 @@ func TestPreparePluginSkillsEnforcesReleaseBudgets(t *testing.T) {
 	); err == nil || !strings.Contains(err.Error(), "Skill limit") {
 		t.Fatalf("preparePluginSkills() error = %v, want Skill limit", err)
 	}
-	if _, err := addPluginSkillArchiveBytes(maxPluginSkillArtifactsUncompressedBytes-1, 2); err == nil {
-		t.Fatal("addPluginSkillArchiveBytes() accepted an over-budget release")
+	budget := pluginSkillArtifactBudget{uncompressedBytes: maxPluginSkillArtifactsUncompressedBytes - 1}
+	if err := budget.add(SupermarketSkillArtifact{
+		Size: 1, UncompressedSize: 2, ArchiveSize: 1, FileCount: 1,
+	}); err == nil {
+		t.Fatal("pluginSkillArtifactBudget.add() accepted an over-budget release")
 	}
 }
 
@@ -1321,6 +1329,7 @@ type recordingPluginInstaller struct {
 	installErr            error
 	installed             bool
 	installedRevision     string
+	installedUpdatedAt    time.Time
 	releaseReadInMutation bool
 	beforeMutation        func()
 }
@@ -1339,9 +1348,15 @@ func (i *recordingPluginInstaller) WithBotMutation(
 	return fn(context.WithValue(ctx, recordingPluginMutationKey{}, true))
 }
 
-func (i *recordingPluginInstaller) InstalledPluginRelease(ctx context.Context, _, _ string) (string, bool, error) {
+func (i *recordingPluginInstaller) InstalledPluginState(
+	ctx context.Context,
+	_, _ string,
+) (pluginspkg.InstalledPluginState, bool, error) {
 	i.releaseReadInMutation, _ = ctx.Value(recordingPluginMutationKey{}).(bool)
-	return i.installedRevision, i.installed, nil
+	return pluginspkg.InstalledPluginState{
+		ReleaseRevision: i.installedRevision,
+		UpdatedAt:       i.installedUpdatedAt,
+	}, i.installed, nil
 }
 
 func (i *recordingPluginInstaller) Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error) {

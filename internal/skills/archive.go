@@ -31,6 +31,7 @@ type archiveFile struct {
 type Archive struct {
 	files             []archiveFile
 	uncompressedBytes int64
+	archiveBytes      int64
 }
 
 // FileCount returns the number of regular files in the archive.
@@ -43,18 +44,47 @@ func (a Archive) UncompressedSize() int64 {
 	return a.uncompressedBytes
 }
 
+// ArchiveSize returns the complete decompressed tar stream size, including
+// headers, file padding, and end markers.
+func (a Archive) ArchiveSize() int64 {
+	return a.archiveBytes
+}
+
 // ReadArchive validates and reads a Skill archive rooted at SKILL.md.
 func ReadArchive(content []byte) (Archive, error) {
-	return ReadArchiveWithUncompressedLimit(content, maxArchiveUncompressedBytes)
+	return ReadArchiveWithLimits(
+		content,
+		maxArchiveUncompressedBytes,
+		maxArchiveStreamBytes,
+		maxArchiveFiles,
+	)
 }
 
 // ReadArchiveWithUncompressedLimit applies a caller-specific aggregate budget
 // without weakening the package-wide archive limit.
 func ReadArchiveWithUncompressedLimit(content []byte, maximum int64) (Archive, error) {
-	if maximum <= 0 {
+	return ReadArchiveWithLimits(content, maximum, maxArchiveStreamBytes, maxArchiveFiles)
+}
+
+// ReadArchiveWithLimits applies caller-specific body, tar stream, and regular
+// file budgets without weakening the package-wide limits.
+func ReadArchiveWithLimits(
+	content []byte,
+	maximumContentBytes, maximumArchiveBytes int64,
+	maximumFiles int,
+) (Archive, error) {
+	if maximumContentBytes <= 0 {
 		return Archive{}, errors.New("skill artifact exceeds the uncompressed size limit")
 	}
-	maximum = min(maximum, int64(maxArchiveUncompressedBytes))
+	if maximumArchiveBytes <= 0 {
+		return Archive{}, errors.New("skill artifact exceeds the decompressed stream limit")
+	}
+	if maximumFiles <= 0 {
+		return Archive{}, errors.New("skill artifact exceeds the file limit")
+	}
+	maximumContentBytes = min(maximumContentBytes, int64(maxArchiveUncompressedBytes))
+	maximumArchiveBytes = min(maximumArchiveBytes, int64(maxArchiveStreamBytes))
+	maximumFiles = min(maximumFiles, maxArchiveFiles)
 	gz, err := gzip.NewReader(bytes.NewReader(content))
 	if err != nil {
 		return Archive{}, errors.New("skill artifact is not valid gzip")
@@ -66,7 +96,8 @@ func ReadArchiveWithUncompressedLimit(content []byte, maximum int64) (Archive, e
 	var totalSize int64
 	totalEntries := 0
 	hasManifest := false
-	stream := &io.LimitedReader{R: gz, N: maxArchiveStreamBytes + 1}
+	streamLimit := maximumArchiveBytes + 1
+	stream := &io.LimitedReader{R: gz, N: streamLimit}
 	tr := tar.NewReader(stream)
 	for {
 		header, err := tr.Next()
@@ -112,10 +143,10 @@ func ReadArchiveWithUncompressedLimit(content []byte, maximum int64) (Archive, e
 		default:
 			return Archive{}, fmt.Errorf("skill artifact contains unsupported entry %q", header.Name)
 		}
-		if len(archive.files) >= maxArchiveFiles {
+		if len(archive.files) >= maximumFiles {
 			return Archive{}, errors.New("skill artifact exceeds the file limit")
 		}
-		if header.Size < 0 || header.Size > maximum-totalSize {
+		if header.Size < 0 || header.Size > maximumContentBytes-totalSize {
 			return Archive{}, errors.New("skill artifact exceeds the uncompressed size limit")
 		}
 		fileContent, err := io.ReadAll(io.LimitReader(tr, header.Size+1))
@@ -139,6 +170,7 @@ func ReadArchiveWithUncompressedLimit(content []byte, maximum int64) (Archive, e
 	if stream.N <= 0 {
 		return Archive{}, errors.New("skill artifact exceeds the decompressed stream limit")
 	}
+	archive.archiveBytes = streamLimit - stream.N
 	if len(archive.files) == 0 {
 		return Archive{}, errors.New("skill artifact is empty")
 	}

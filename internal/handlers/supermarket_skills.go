@@ -22,10 +22,15 @@ import (
 )
 
 const (
-	maxRegistrySkillArtifactCompressedBytes   = 25 * 1024 * 1024
+	maxRegistrySkillArtifactCompressedBytes   = 6 * 1024 * 1024
 	maxRegistrySkillArtifactUncompressedBytes = 5 * 1024 * 1024
+	maxRegistrySkillArtifactArchiveBytes      = 5 * 1024 * 1024
+	maxRegistrySkillArtifactFiles             = 1_000
 	maxRegistrySkillMetadataBytes             = 2 * 1024 * 1024
+	maxConcurrentSkillArtifactPreparations    = 2
 )
+
+var skillArtifactPreparationTokens = make(chan struct{}, maxConcurrentSkillArtifactPreparations)
 
 type SupermarketRegistryListResponse struct {
 	Data []SupermarketRegistry `json:"data" validate:"required"`
@@ -77,6 +82,8 @@ type SupermarketSkillArtifact struct {
 	Digest           string `json:"digest" validate:"required"`
 	Size             int64  `json:"size" validate:"required"`
 	UncompressedSize int64  `json:"uncompressed_size" validate:"required"`
+	ArchiveSize      int64  `json:"archive_size" validate:"required"`
+	FileCount        int    `json:"file_count" validate:"required"`
 	ContentType      string `json:"content_type" validate:"required"`
 	DownloadURL      string `json:"download_url" validate:"required"`
 }
@@ -481,6 +488,23 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimit(
 	skill SupermarketCatalogSkill,
 	maxUncompressedBytes int64,
 ) (preparedRegistrySkillArtifact, error) {
+	return h.prepareResolvedRegistrySkillArtifactWithLimits(
+		ctx,
+		workspaceOS,
+		skill,
+		maxUncompressedBytes,
+		skill.Artifact.ArchiveSize,
+		skill.Artifact.FileCount,
+	)
+}
+
+func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
+	ctx context.Context,
+	workspaceOS string,
+	skill SupermarketCatalogSkill,
+	maxUncompressedBytes, maxArchiveBytes int64,
+	maxFiles int,
+) (preparedRegistrySkillArtifact, error) {
 	if !registrySkillSupportsOS(skill.RuntimeRequirements, workspaceOS) {
 		return preparedRegistrySkillArtifact{}, apperror.New(
 			apperror.CodeRegistrySkillIncompatible,
@@ -505,13 +529,39 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimit(
 			nil,
 		)
 	}
+	if skill.Artifact.ArchiveSize < 1 ||
+		skill.Artifact.ArchiveSize > maxRegistrySkillArtifactArchiveBytes ||
+		skill.Artifact.ArchiveSize > maxArchiveBytes {
+		return preparedRegistrySkillArtifact{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact decompressed archive size is invalid"),
+			nil,
+		)
+	}
+	if skill.Artifact.FileCount < 1 ||
+		skill.Artifact.FileCount > maxRegistrySkillArtifactFiles ||
+		skill.Artifact.FileCount > maxFiles {
+		return preparedRegistrySkillArtifact{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			errors.New("registry skill artifact file count is invalid"),
+			nil,
+		)
+	}
+	select {
+	case skillArtifactPreparationTokens <- struct{}{}:
+		defer func() { <-skillArtifactPreparationTokens }()
+	case <-ctx.Done():
+		return preparedRegistrySkillArtifact{}, ctx.Err()
+	}
 	artifactBytes, err := h.downloadRegistrySkillArtifact(ctx, skill.Artifact)
 	if err != nil {
 		return preparedRegistrySkillArtifact{}, err
 	}
-	archive, err := skillset.ReadArchiveWithUncompressedLimit(
+	archive, err := skillset.ReadArchiveWithLimits(
 		artifactBytes,
 		min(maxUncompressedBytes, skill.Artifact.UncompressedSize),
+		min(maxArchiveBytes, skill.Artifact.ArchiveSize),
+		min(maxFiles, skill.Artifact.FileCount),
 	)
 	if err != nil {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
@@ -523,6 +573,28 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimit(
 				"registry skill artifact uncompressed size does not match its descriptor: expected %d, got %d",
 				skill.Artifact.UncompressedSize,
 				archive.UncompressedSize(),
+			),
+			nil,
+		)
+	}
+	if archive.ArchiveSize() != skill.Artifact.ArchiveSize {
+		return preparedRegistrySkillArtifact{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			fmt.Errorf(
+				"registry skill artifact archive size does not match its descriptor: expected %d, got %d",
+				skill.Artifact.ArchiveSize,
+				archive.ArchiveSize(),
+			),
+			nil,
+		)
+	}
+	if archive.FileCount() != skill.Artifact.FileCount {
+		return preparedRegistrySkillArtifact{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid,
+			fmt.Errorf(
+				"registry skill artifact file count does not match its descriptor: expected %d, got %d",
+				skill.Artifact.FileCount,
+				archive.FileCount(),
 			),
 			nil,
 		)
@@ -651,6 +723,12 @@ func validateRegistrySkill(skill SupermarketCatalogSkill, registryID, packageID,
 	}
 	if artifact.UncompressedSize < 1 || artifact.UncompressedSize > maxRegistrySkillArtifactUncompressedBytes {
 		return errors.New("registry Skill Artifact uncompressed size is invalid")
+	}
+	if artifact.ArchiveSize < 1 || artifact.ArchiveSize > maxRegistrySkillArtifactArchiveBytes {
+		return errors.New("registry Skill Artifact archive size is invalid")
+	}
+	if artifact.FileCount < 1 || artifact.FileCount > maxRegistrySkillArtifactFiles {
+		return errors.New("registry Skill Artifact file count is invalid")
 	}
 	if strings.TrimSpace(artifact.DownloadURL) == "" {
 		return errors.New("registry Skill Artifact download URL is missing")

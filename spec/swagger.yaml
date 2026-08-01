@@ -2984,6 +2984,9 @@ definitions:
     type: object
   handlers.InstallPluginRequest:
     properties:
+      expected_installation_updated_at:
+        type: string
+        x-nullable: true
       expected_installed_revision:
         type: string
         x-nullable: true
@@ -2996,6 +2999,7 @@ definitions:
           type: string
         type: object
     required:
+    - expected_installation_updated_at
     - expected_installed_revision
     - plugin_id
     - release_revision
@@ -3569,12 +3573,16 @@ definitions:
     type: object
   handlers.SupermarketSkillArtifact:
     properties:
+      archive_size:
+        type: integer
       content_type:
         type: string
       digest:
         type: string
       download_url:
         type: string
+      file_count:
+        type: integer
       format:
         type: string
       size:
@@ -3582,9 +3590,11 @@ definitions:
       uncompressed_size:
         type: integer
     required:
+    - archive_size
     - content_type
     - digest
     - download_url
+    - file_count
     - format
     - size
     - uncompressed_size

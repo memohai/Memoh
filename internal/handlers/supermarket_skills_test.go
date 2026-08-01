@@ -51,6 +51,25 @@ func TestValidateRegistrySkillRequiresBoundedUncompressedSize(t *testing.T) {
 	}
 }
 
+func TestValidateRegistrySkillRequiresArchiveAndFileBudgets(t *testing.T) {
+	for name, mutate := range map[string]func(*SupermarketSkillArtifact){
+		"archive size": func(artifact *SupermarketSkillArtifact) {
+			artifact.ArchiveSize = maxRegistrySkillArtifactArchiveBytes + 1
+		},
+		"file count": func(artifact *SupermarketSkillArtifact) {
+			artifact.FileCount = maxRegistrySkillArtifactFiles + 1
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			skill := validRegistrySkillDescriptor()
+			mutate(&skill.Artifact)
+			if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
+				t.Fatalf("validateRegistrySkill() accepted invalid %s", name)
+			}
+		})
+	}
+}
+
 func TestRegistrySkillRuntimeRequirementsEnforceWorkspaceOS(t *testing.T) {
 	skill := validRegistrySkillDescriptor()
 	skill.RuntimeRequirements.OS = []string{"linux", "windows"}
@@ -573,6 +592,8 @@ func validRegistrySkillDescriptor() SupermarketCatalogSkill {
 			Format: "memoh_skill_v1",
 			Digest: strings.Repeat("a", 64), Size: 1,
 			UncompressedSize: validSkillArtifactUncompressedSize,
+			ArchiveSize:      2 * 1024,
+			FileCount:        1,
 			ContentType:      "application/gzip", DownloadURL: "/artifact",
 		},
 	}

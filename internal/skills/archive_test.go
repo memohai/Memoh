@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,12 @@ func TestReadArchiveReadsContentRoot(t *testing.T) {
 	}
 	if archive.UncompressedSize() != int64(len(validArchiveManifest)+len("#!/bin/sh\n")) {
 		t.Fatalf("uncompressed bytes = %d", archive.UncompressedSize())
+	}
+	if archive.ArchiveSize() != decompressedArchiveSize(t, testArchive(t, []archiveTestEntry{
+		{name: "SKILL.md", content: validArchiveManifest},
+		{name: "scripts/run.sh", content: "#!/bin/sh\n", mode: 0o755},
+	})) {
+		t.Fatalf("archive bytes = %d, want complete tar stream size", archive.ArchiveSize())
 	}
 	if !strings.Contains(string(archiveFileByPath(t, archive, "SKILL.md").content), "# Demo") {
 		t.Fatal("manifest body was not preserved")
@@ -67,6 +74,30 @@ func TestReadArchiveHonorsCallerUncompressedLimit(t *testing.T) {
 	if _, err := ReadArchiveWithUncompressedLimit(content, int64(len(validArchiveManifest)-1)); err == nil ||
 		!strings.Contains(err.Error(), "uncompressed size limit") {
 		t.Fatalf("ReadArchiveWithUncompressedLimit() error = %v", err)
+	}
+}
+
+func TestReadArchiveHonorsCallerArchiveAndFileLimits(t *testing.T) {
+	content := testArchive(t, []archiveTestEntry{
+		{name: "SKILL.md", content: validArchiveManifest},
+		{name: "reference.md", content: "reference"},
+	})
+	archiveSize := decompressedArchiveSize(t, content)
+	if _, err := ReadArchiveWithLimits(
+		content,
+		maxArchiveUncompressedBytes,
+		archiveSize-1,
+		maxArchiveFiles,
+	); err == nil || !strings.Contains(err.Error(), "decompressed stream limit") {
+		t.Fatalf("ReadArchiveWithLimits() archive error = %v", err)
+	}
+	if _, err := ReadArchiveWithLimits(
+		content,
+		maxArchiveUncompressedBytes,
+		archiveSize,
+		1,
+	); err == nil || !strings.Contains(err.Error(), "file limit") {
+		t.Fatalf("ReadArchiveWithLimits() file error = %v", err)
 	}
 }
 
@@ -136,6 +167,22 @@ func testArchive(t *testing.T, entries []archiveTestEntry) []byte {
 		t.Fatalf("gzip Close: %v", err)
 	}
 	return output.Bytes()
+}
+
+func decompressedArchiveSize(t *testing.T, content []byte) int64 {
+	t.Helper()
+	gz, err := gzip.NewReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	decompressed, err := io.ReadAll(gz)
+	if err != nil {
+		t.Fatalf("read decompressed archive: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+	return int64(len(decompressed))
 }
 
 func archiveFileByPath(t *testing.T, archive Archive, name string) archiveFile {

@@ -166,6 +166,13 @@ type Installation struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
+// InstalledPluginState identifies the mutable installation state used by
+// Supermarket compare-and-set requests.
+type InstalledPluginState struct {
+	ReleaseRevision string
+	UpdatedAt       time.Time
+}
+
 type ListResponse struct {
 	Items []Installation `json:"items"`
 }

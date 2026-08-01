@@ -207,12 +207,16 @@ async function handleInstall() {
     const expectedInstalledRevision = typeof installedRevision === 'string' && installedRevision
       ? installedRevision
       : null
+	const expectedInstallationUpdatedAt = expectedInstalledRevision && installedPlugin?.updated_at
+		? installedPlugin.updated_at
+		: null
     const { data } = await postBotsByBotIdSupermarketInstallPlugin({
       path: { bot_id: botId },
       body: {
         plugin_id: props.plugin.id,
         release_revision: props.plugin.release.revision,
         expected_installed_revision: expectedInstalledRevision,
+		expected_installation_updated_at: expectedInstallationUpdatedAt,
         variables: Object.fromEntries(
           Object.entries(variableValues).filter(([, value]) => value.trim() !== ''),
         ),

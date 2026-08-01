@@ -46,7 +46,7 @@ type SupermarketHandler struct {
 type pluginInstaller interface {
 	botMutationCoordinator
 	Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error)
-	InstalledPluginRelease(ctx context.Context, botID, pluginID string) (revision string, installed bool, err error)
+	InstalledPluginState(ctx context.Context, botID, pluginID string) (pluginspkg.InstalledPluginState, bool, error)
 	CheckSkillArtifactConflicts(
 		ctx context.Context,
 		botID, targetPluginID, workspaceTargetID string,
@@ -119,7 +119,10 @@ const (
 	maxPluginBundleEntries                         = 2_000
 	maxPluginMetadataBytes                         = 2 * 1024 * 1024
 	maxPluginReleaseSkills                         = 128
+	maxPluginSkillArtifactsCompressedBytes         = 128 * 1024 * 1024
 	maxPluginSkillArtifactsUncompressedBytes       = 128 * 1024 * 1024
+	maxPluginSkillArtifactsArchiveBytes            = 128 * 1024 * 1024
+	maxPluginSkillArtifactFiles                    = 10_000
 	pluginPublicationCleanupTimeout                = 30 * time.Second
 )
 
@@ -242,12 +245,14 @@ func (h *SupermarketHandler) ListTags(c echo.Context) error {
 
 // InstallPluginRequest is the request body for installing a plugin from supermarket.
 type InstallPluginRequest struct {
-	PluginID                  string            `json:"plugin_id" validate:"required"`
-	ReleaseRevision           string            `json:"release_revision" validate:"required"`
-	ExpectedInstalledRevision *string           `json:"expected_installed_revision" validate:"required" extensions:"x-nullable"`
-	Variables                 map[string]string `json:"variables,omitempty"`
+	PluginID                      string            `json:"plugin_id" validate:"required"`
+	ReleaseRevision               string            `json:"release_revision" validate:"required"`
+	ExpectedInstalledRevision     *string           `json:"expected_installed_revision" validate:"required" extensions:"x-nullable"`
+	ExpectedInstallationUpdatedAt *time.Time        `json:"expected_installation_updated_at" validate:"required" extensions:"x-nullable"`
+	Variables                     map[string]string `json:"variables,omitempty"`
 
-	expectedInstalledRevisionSet bool
+	expectedInstalledRevisionSet     bool
+	expectedInstallationUpdatedAtSet bool
 }
 
 func (r *InstallPluginRequest) UnmarshalJSON(data []byte) error {
@@ -262,6 +267,7 @@ func (r *InstallPluginRequest) UnmarshalJSON(data []byte) error {
 	}
 	*r = InstallPluginRequest(decoded)
 	_, r.expectedInstalledRevisionSet = fields["expected_installed_revision"]
+	_, r.expectedInstallationUpdatedAtSet = fields["expected_installation_updated_at"]
 	return nil
 }
 
@@ -310,12 +316,21 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if !req.expectedInstalledRevisionSet {
 		return echo.NewHTTPError(http.StatusBadRequest, "expected_installed_revision is required")
 	}
+	if !req.expectedInstallationUpdatedAtSet {
+		return echo.NewHTTPError(http.StatusBadRequest, "expected_installation_updated_at is required")
+	}
 	if req.ExpectedInstalledRevision != nil {
 		expectedRevision := strings.TrimSpace(*req.ExpectedInstalledRevision)
 		if !isCanonicalSHA256(expectedRevision) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected_installed_revision is invalid")
 		}
 		req.ExpectedInstalledRevision = &expectedRevision
+	}
+	if (req.ExpectedInstalledRevision == nil) != (req.ExpectedInstallationUpdatedAt == nil) {
+		return echo.NewHTTPError(
+			http.StatusBadRequest,
+			"expected Plugin revision and installation timestamp must both be null or both be set",
+		)
 	}
 
 	entry, err := h.fetchPluginEntry(c, req.PluginID)
@@ -341,6 +356,9 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := preflightPluginSkills(target.Info.OS, entry.Release.Skills); err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+	}
 	bundleArchive, err := h.preparePluginBundle(
 		ctx, req.PluginID, manifest.ID, entry.Release.Artifact, manifest.Skills,
 	)
@@ -357,13 +375,18 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 		scriptsResult pluginInstallScriptsResult
 	)
 	if err := withBotMutation(ctx, botID, h.pluginService, func(mutationCtx context.Context) error {
-		installedRevision, installed, currentErr := h.pluginService.InstalledPluginRelease(
+		installedState, installed, currentErr := h.pluginService.InstalledPluginState(
 			mutationCtx, botID, manifest.ID,
 		)
 		if currentErr != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, currentErr.Error())
 		}
-		if !matchesExpectedPluginRelease(req.ExpectedInstalledRevision, installedRevision, installed) {
+		if !matchesExpectedPluginInstallation(
+			req.ExpectedInstalledRevision,
+			req.ExpectedInstallationUpdatedAt,
+			installedState,
+			installed,
+		) {
 			return echo.NewHTTPError(http.StatusConflict, "installed Plugin changed; refresh before installing")
 		}
 		if conflictErr := h.checkPluginSkillArtifactConflicts(
@@ -432,11 +455,16 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	return c.JSON(http.StatusOK, installation)
 }
 
-func matchesExpectedPluginRelease(expected *string, actual string, installed bool) bool {
-	if expected == nil {
+func matchesExpectedPluginInstallation(
+	expectedRevision *string,
+	expectedUpdatedAt *time.Time,
+	actual pluginspkg.InstalledPluginState,
+	installed bool,
+) bool {
+	if expectedRevision == nil || expectedUpdatedAt == nil {
 		return !installed
 	}
-	return installed && actual == *expected
+	return installed && actual.ReleaseRevision == *expectedRevision && actual.UpdatedAt.Equal(*expectedUpdatedAt)
 }
 
 // InstallSkill godoc
@@ -703,7 +731,7 @@ func validateSupermarketPluginEntry(
 		return fmt.Errorf("plugin release exceeds the %d Skill limit", maxPluginReleaseSkills)
 	}
 	resolvedReferences := make([]pluginspkg.SkillReference, 0, len(entry.Release.Skills))
-	var totalUncompressedBytes int64
+	budget := pluginSkillArtifactBudget{}
 	for _, resolved := range entry.Release.Skills {
 		reference := pluginspkg.SkillReference{
 			RegistryID: resolved.RegistryID,
@@ -718,12 +746,7 @@ func validateSupermarketPluginEntry(
 		if err := validateRegistrySkill(skill, reference.RegistryID, reference.PackageID, reference.SkillID); err != nil {
 			return err
 		}
-		var err error
-		totalUncompressedBytes, err = addPluginSkillArchiveBytes(
-			totalUncompressedBytes,
-			resolved.Artifact.UncompressedSize,
-		)
-		if err != nil {
+		if err := budget.add(resolved.Artifact); err != nil {
 			return err
 		}
 	}
@@ -782,23 +805,11 @@ func (h *SupermarketHandler) preparePluginSkills(
 	if len(resolvedSkills) > maxPluginReleaseSkills {
 		return nil, result, fmt.Errorf("plugin release exceeds the %d Skill limit", maxPluginReleaseSkills)
 	}
-	var declaredUncompressedBytes int64
-	for _, resolved := range resolvedSkills {
-		if resolved.Artifact.UncompressedSize < 1 ||
-			resolved.Artifact.UncompressedSize > maxRegistrySkillArtifactUncompressedBytes {
-			return nil, result, errors.New("plugin release contains an invalid Skill Artifact uncompressed size")
-		}
-		var err error
-		declaredUncompressedBytes, err = addPluginSkillArchiveBytes(
-			declaredUncompressedBytes,
-			resolved.Artifact.UncompressedSize,
-		)
-		if err != nil {
-			return nil, result, err
-		}
+	if err := preflightPluginSkills(workspaceOS, resolvedSkills); err != nil {
+		return nil, result, err
 	}
 	prepared := make([]preparedPluginSkill, 0, len(resolvedSkills))
-	var totalUncompressedBytes int64
+	archives := make(map[string]skillset.Archive, len(resolvedSkills))
 	for _, resolved := range resolvedSkills {
 		reference := pluginspkg.SkillReference{
 			RegistryID: resolved.RegistryID,
@@ -810,21 +821,36 @@ func (h *SupermarketHandler) preparePluginSkills(
 			PackageID:  reference.PackageID,
 			SkillID:    reference.SkillID,
 		}
-		remainingBytes := int64(maxPluginSkillArtifactsUncompressedBytes) - totalUncompressedBytes
-		artifact, err := h.prepareResolvedRegistrySkillArtifactWithLimit(
-			ctx, workspaceOS, resolved.catalogSkill(), remainingBytes,
-		)
-		if err != nil {
-			item.Error = err.Error()
-			result.OK = false
-			result.Error = err.Error()
-			result.Skills = append(result.Skills, item)
-			return nil, result, err
+		artifact := preparedRegistrySkillArtifact{
+			Skill: resolved.catalogSkill(), WorkspaceOS: workspaceOS,
 		}
-		totalUncompressedBytes, err = addPluginSkillArchiveBytes(
-			totalUncompressedBytes, artifact.Archive.UncompressedSize(),
-		)
-		if err != nil {
+		if cached, ok := archives[resolved.Artifact.Digest]; ok {
+			artifact.Archive = cached
+		} else {
+			var err error
+			artifact, err = h.prepareResolvedRegistrySkillArtifactWithLimits(
+				ctx,
+				workspaceOS,
+				resolved.catalogSkill(),
+				resolved.Artifact.UncompressedSize,
+				resolved.Artifact.ArchiveSize,
+				resolved.Artifact.FileCount,
+			)
+			if err == nil {
+				archives[resolved.Artifact.Digest] = artifact.Archive
+			}
+			if err != nil {
+				item.Error = err.Error()
+				result.OK = false
+				result.Error = err.Error()
+				result.Skills = append(result.Skills, item)
+				return nil, result, err
+			}
+		}
+		if artifact.Archive.UncompressedSize() != resolved.Artifact.UncompressedSize ||
+			artifact.Archive.ArchiveSize() != resolved.Artifact.ArchiveSize ||
+			artifact.Archive.FileCount() != resolved.Artifact.FileCount {
+			err := errors.New("plugin release contains inconsistent duplicate Skill Artifact metadata")
 			item.Error = err.Error()
 			result.OK = false
 			result.Error = err.Error()
@@ -836,14 +862,75 @@ func (h *SupermarketHandler) preparePluginSkills(
 	return prepared, result, nil
 }
 
-func addPluginSkillArchiveBytes(total, next int64) (int64, error) {
-	if total < 0 || next < 0 || next > int64(maxPluginSkillArtifactsUncompressedBytes)-total {
-		return total, fmt.Errorf(
+type pluginSkillArtifactBudget struct {
+	compressedBytes   int64
+	uncompressedBytes int64
+	archiveBytes      int64
+	files             int
+}
+
+func (b *pluginSkillArtifactBudget) add(artifact SupermarketSkillArtifact) error {
+	if artifact.Size < 1 || artifact.Size > maxRegistrySkillArtifactCompressedBytes ||
+		artifact.Size > int64(maxPluginSkillArtifactsCompressedBytes)-b.compressedBytes {
+		return fmt.Errorf(
+			"plugin release Skills exceed the %d byte compressed limit",
+			maxPluginSkillArtifactsCompressedBytes,
+		)
+	}
+	if artifact.UncompressedSize < 1 ||
+		artifact.UncompressedSize > maxRegistrySkillArtifactUncompressedBytes ||
+		artifact.UncompressedSize > int64(maxPluginSkillArtifactsUncompressedBytes)-b.uncompressedBytes {
+		return fmt.Errorf(
 			"plugin release Skills exceed the %d byte uncompressed limit",
 			maxPluginSkillArtifactsUncompressedBytes,
 		)
 	}
-	return total + next, nil
+	if artifact.ArchiveSize < 1 || artifact.ArchiveSize > maxRegistrySkillArtifactArchiveBytes ||
+		artifact.ArchiveSize > int64(maxPluginSkillArtifactsArchiveBytes)-b.archiveBytes {
+		return fmt.Errorf(
+			"plugin release Skills exceed the %d byte decompressed archive limit",
+			maxPluginSkillArtifactsArchiveBytes,
+		)
+	}
+	if artifact.FileCount < 1 || artifact.FileCount > maxRegistrySkillArtifactFiles ||
+		artifact.FileCount > maxPluginSkillArtifactFiles-b.files {
+		return fmt.Errorf(
+			"plugin release Skills exceed the %d file limit",
+			maxPluginSkillArtifactFiles,
+		)
+	}
+	b.compressedBytes += artifact.Size
+	b.uncompressedBytes += artifact.UncompressedSize
+	b.archiveBytes += artifact.ArchiveSize
+	b.files += artifact.FileCount
+	return nil
+}
+
+func preflightPluginSkills(workspaceOS string, resolvedSkills []SupermarketPluginResolvedSkill) error {
+	budget := pluginSkillArtifactBudget{}
+	descriptors := make(map[string]SupermarketSkillArtifact, len(resolvedSkills))
+	for _, resolved := range resolvedSkills {
+		identity := pluginspkg.SkillReferenceIdentity(pluginspkg.SkillReference{
+			RegistryID: resolved.RegistryID,
+			PackageID:  resolved.PackageID,
+			SkillID:    resolved.SkillID,
+		})
+		if !registrySkillSupportsOS(resolved.RuntimeRequirements, workspaceOS) {
+			return fmt.Errorf(
+				"plugin Skill %q is incompatible with %s",
+				identity,
+				normalizeRegistrySkillOSLabel(workspaceOS),
+			)
+		}
+		if err := budget.add(resolved.Artifact); err != nil {
+			return err
+		}
+		if previous, ok := descriptors[resolved.Artifact.Digest]; ok && previous != resolved.Artifact {
+			return fmt.Errorf("plugin Skill %q reuses a digest with inconsistent metadata", identity)
+		}
+		descriptors[resolved.Artifact.Digest] = resolved.Artifact
+	}
+	return nil
 }
 
 func publishPreparedPluginSkills(
