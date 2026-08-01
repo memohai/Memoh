@@ -110,6 +110,12 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	if len(installer.gcCalls) != 0 {
 		t.Fatalf("successful install triggered GC: %+v", installer.gcCalls)
 	}
+	if installer.mutationCalls != 1 {
+		t.Fatalf("bot mutation scopes = %d, want 1", installer.mutationCalls)
+	}
+	if !installer.installInMutation {
+		t.Fatal("Plugin ownership was recorded outside the bot mutation scope")
+	}
 	var installation pluginspkg.Installation
 	if err := json.Unmarshal(recorder.Body.Bytes(), &installation); err != nil {
 		t.Fatalf("decode installation: %v", err)
@@ -176,6 +182,9 @@ func TestInstallPluginGarbageCollectsSkillsWhenBundleInstallFails(t *testing.T) 
 	}
 	if len(installer.gcCalls) != 1 || len(installer.gcCalls[0]) != 1 || installer.gcCalls[0][0] != reference {
 		t.Fatalf("GC calls = %+v, want failed Plugin Skill reference", installer.gcCalls)
+	}
+	if len(installer.gcInMutation) != 1 || !installer.gcInMutation[0] {
+		t.Fatalf("GC mutation scopes = %+v, want cleanup inside the bot mutation scope", installer.gcInMutation)
 	}
 	if installer.installCalls != 0 {
 		t.Fatalf("Plugin ownership was recorded after bundle failure: %d calls", installer.installCalls)
@@ -567,13 +576,28 @@ func TestRunPluginInstallCommandsReportsExecError(t *testing.T) {
 }
 
 type recordingPluginInstaller struct {
-	request      pluginspkg.InstallRequest
-	installCalls int
-	gcCalls      [][]pluginspkg.SkillReference
+	request           pluginspkg.InstallRequest
+	installCalls      int
+	installInMutation bool
+	gcCalls           [][]pluginspkg.SkillReference
+	gcInMutation      []bool
+	mutationCalls     int
 }
 
-func (i *recordingPluginInstaller) Install(_ context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error) {
+type recordingPluginMutationKey struct{}
+
+func (i *recordingPluginInstaller) WithBotMutation(
+	ctx context.Context,
+	_ string,
+	fn func(context.Context) error,
+) error {
+	i.mutationCalls++
+	return fn(context.WithValue(ctx, recordingPluginMutationKey{}, true))
+}
+
+func (i *recordingPluginInstaller) Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error) {
 	i.installCalls++
+	i.installInMutation, _ = ctx.Value(recordingPluginMutationKey{}).(bool)
 	i.request = req
 	return pluginspkg.Installation{
 		BotID:      botID,
@@ -586,8 +610,10 @@ func (i *recordingPluginInstaller) Install(_ context.Context, botID string, req 
 	}, nil
 }
 
-func (i *recordingPluginInstaller) GarbageCollectRegistrySkills(_ context.Context, _ string, references []pluginspkg.SkillReference) {
+func (i *recordingPluginInstaller) GarbageCollectRegistrySkills(ctx context.Context, _ string, references []pluginspkg.SkillReference) {
 	i.gcCalls = append(i.gcCalls, append([]pluginspkg.SkillReference(nil), references...))
+	inMutation, _ := ctx.Value(recordingPluginMutationKey{}).(bool)
+	i.gcInMutation = append(i.gcInMutation, inMutation)
 }
 
 func testHTTPResponse(req *http.Request, status int, content []byte) *http.Response {

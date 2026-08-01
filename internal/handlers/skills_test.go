@@ -268,7 +268,8 @@ func TestDeleteSkillsAPIRemovesDirectOwnerButKeepsPluginArtifact(t *testing.T) {
 	sourcePath := path.Join(skillDir, "SKILL.md")
 	env.writeSkillFile(t, sourcePath, managedSkillRaw("meeting", "Meeting notes"))
 	env.markDirectOwner(t, "memoh", "notion", "meeting")
-	env.handler.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{{
+	mutationCalls := 0
+	env.handler.SetPluginService(fakePluginInstallationLister{mutationCalls: &mutationCalls, items: []pluginspkg.Installation{{
 		PluginID: "notion", Status: pluginspkg.StatusReady, Enabled: true,
 		Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: sourcePath}},
 	}}})
@@ -278,6 +279,9 @@ func TestDeleteSkillsAPIRemovesDirectOwnerButKeepsPluginArtifact(t *testing.T) {
 	}, env.handler.DeleteSkills)
 	if err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("DeleteSkills(shared) response = %d, error = %v", rec.Code, err)
+	}
+	if mutationCalls != 1 {
+		t.Fatalf("bot mutation scopes = %d, want 1", mutationCalls)
 	}
 	if _, err := os.Stat(env.localPath(sourcePath)); err != nil {
 		t.Fatalf("shared Registry Skill Artifact should remain: %v", err)
@@ -669,8 +673,20 @@ func (env *skillsTestEnv) markDirectOwner(t *testing.T, registryID, packageID, s
 }
 
 type fakePluginInstallationLister struct {
-	items []pluginspkg.Installation
-	err   error
+	items         []pluginspkg.Installation
+	err           error
+	mutationCalls *int
+}
+
+func (f fakePluginInstallationLister) WithBotMutation(
+	ctx context.Context,
+	_ string,
+	fn func(context.Context) error,
+) error {
+	if f.mutationCalls != nil {
+		*f.mutationCalls++
+	}
+	return fn(ctx)
 }
 
 func (f fakePluginInstallationLister) List(context.Context, string) ([]pluginspkg.Installation, error) {

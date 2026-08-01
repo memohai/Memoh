@@ -66,6 +66,7 @@ type skillsOpResponse struct {
 }
 
 type PluginInstallationLister interface {
+	botMutationCoordinator
 	List(ctx context.Context, botID string) ([]pluginspkg.Installation, error)
 }
 
@@ -148,7 +149,24 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "source_path requires exactly one skill")
 	}
 
-	ctx := c.Request().Context()
+	if err := withBotMutation(
+		c.Request().Context(),
+		botID,
+		h.pluginService,
+		func(mutationCtx context.Context) error {
+			return h.upsertSkills(mutationCtx, botID, sourcePath, req.Skills)
+		},
+	); err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
+}
+
+func (h *ContainerdHandler) upsertSkills(
+	ctx context.Context,
+	botID, sourcePath string,
+	rawSkills []string,
+) error {
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return workspaceUnavailableError(err)
@@ -158,7 +176,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "plugin-owned Registry Skills cannot be edited directly")
 	}
 
-	for i, raw := range req.Skills {
+	for i, raw := range rawSkills {
 		editPath := ""
 		if i == 0 {
 			editPath = sourcePath
@@ -204,7 +222,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
+	return nil
 }
 
 func skillSaveHTTPError(err error) error {
@@ -246,7 +264,20 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "source_paths is required")
 	}
 
-	ctx := c.Request().Context()
+	if err := withBotMutation(
+		c.Request().Context(),
+		botID,
+		h.pluginService,
+		func(mutationCtx context.Context) error {
+			return h.deleteSkills(mutationCtx, botID, req.SourcePaths)
+		},
+	); err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
+}
+
+func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sourcePaths []string) error {
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return workspaceUnavailableError(err)
@@ -259,8 +290,8 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		packageID  string
 		skillID    string
 	}
-	targets := make([]deleteTarget, 0, len(req.SourcePaths))
-	for _, sourcePath := range req.SourcePaths {
+	targets := make([]deleteTarget, 0, len(sourcePaths))
+	for _, sourcePath := range sourcePaths {
 		skillDir, dirErr := skillset.DeletableSkillDirForSourcePath(sourcePath)
 		if dirErr != nil {
 			if errors.Is(dirErr, skillset.ErrBuiltinSkillReadOnly) {
@@ -308,7 +339,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		pruneEmptySkillNamespaceDirs(ctx, client, target.skillDir)
 	}
 
-	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
+	return nil
 }
 
 func (h *ContainerdHandler) pluginOwnsRegistrySkill(ctx context.Context, botID, sourcePath string) (bool, error) {
@@ -360,7 +391,20 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	ctx := c.Request().Context()
+	if err := withBotMutation(
+		c.Request().Context(),
+		botID,
+		h.pluginService,
+		func(mutationCtx context.Context) error {
+			return h.applySkillAction(mutationCtx, botID, req)
+		},
+	); err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
+}
+
+func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, req SkillsActionRequest) error {
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return workspaceUnavailableError(err)
@@ -377,7 +421,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 		return fsHTTPError(err)
 	}
 
-	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
+	return nil
 }
 
 // LoadSkills loads the effective skills from the container for the given bot.

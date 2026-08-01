@@ -41,6 +41,7 @@ type SupermarketHandler struct {
 }
 
 type pluginInstaller interface {
+	botMutationCoordinator
 	Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error)
 	GarbageCollectRegistrySkills(ctx context.Context, botID string, references []pluginspkg.SkillReference)
 }
@@ -283,35 +284,53 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	skillsResult, skillArtifacts, err := h.installPluginSkills(
-		ctx,
-		target.Client,
-		target.Info.OS,
-		manifest.Skills,
+	var (
+		installation  pluginspkg.Installation
+		skillsResult  pluginSkillsInstallResult
+		bundleResult  pluginBundleInstallResult
+		scriptsResult pluginInstallScriptsResult
 	)
-	if err != nil {
-		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
+	if err := withBotMutation(ctx, botID, h.pluginService, func(mutationCtx context.Context) error {
+		var (
+			skillArtifacts map[string]pluginspkg.SkillArtifactMetadata
+			installErr     error
+		)
+		skillsResult, skillArtifacts, installErr = h.installPluginSkills(
+			mutationCtx,
+			target.Client,
+			target.Info.OS,
+			manifest.Skills,
+		)
+		if installErr != nil {
+			h.cleanupFailedPluginSkills(mutationCtx, botID, manifest.Skills)
+			return installErr
+		}
+		bundleResult, installErr = h.installPluginBundle(
+			mutationCtx, target.Client, req.PluginID, manifest.ID, manifest.Skills,
+		)
+		if installErr != nil {
+			h.cleanupFailedPluginSkills(mutationCtx, botID, manifest.Skills)
+			return echo.NewHTTPError(http.StatusBadGateway, installErr.Error())
+		}
+		scriptsResult, installErr = runPluginInstallScripts(
+			mutationCtx, target.Client, botID, manifest.ID, manifest.Install,
+		)
+		if installErr != nil {
+			h.cleanupFailedPluginSkills(mutationCtx, botID, manifest.Skills)
+			return echo.NewHTTPError(http.StatusBadGateway, installErr.Error())
+		}
+		installation, installErr = h.pluginService.Install(mutationCtx, botID, pluginspkg.InstallRequest{
+			Manifest:       manifest,
+			Variables:      req.Variables,
+			SkillArtifacts: skillArtifacts,
+		})
+		if installErr != nil {
+			h.cleanupFailedPluginSkills(mutationCtx, botID, manifest.Skills)
+			return echo.NewHTTPError(http.StatusBadRequest, installErr.Error())
+		}
+		return nil
+	}); err != nil {
 		return err
-	}
-	bundleResult, err := h.installPluginBundle(ctx, target.Client, req.PluginID, manifest.ID, manifest.Skills)
-	if err != nil {
-		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
-		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
-	}
-	scriptsResult, err := runPluginInstallScripts(ctx, target.Client, botID, manifest.ID, manifest.Install)
-	if err != nil {
-		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
-		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
-	}
-
-	installation, err := h.pluginService.Install(ctx, botID, pluginspkg.InstallRequest{
-		Manifest:       manifest,
-		Variables:      req.Variables,
-		SkillArtifacts: skillArtifacts,
-	})
-	if err != nil {
-		h.cleanupFailedPluginSkills(ctx, botID, manifest.Skills)
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	installation = withPluginBundleInstallMetadata(installation, bundleResult, nil)
 	installation = withPluginInstallScriptsMetadata(installation, scriptsResult, nil)
@@ -341,8 +360,17 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	result, err := h.installRegistrySkill(c.Request().Context(), botID, req)
-	if err != nil {
+	var result InstallRegistrySkillResponse
+	if err := withBotMutation(
+		c.Request().Context(),
+		botID,
+		h.pluginService,
+		func(mutationCtx context.Context) error {
+			var installErr error
+			result, installErr = h.installRegistrySkill(mutationCtx, botID, req)
+			return installErr
+		},
+	); err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, result)
