@@ -292,6 +292,26 @@ func TestDeleteSkillsAPIRemovesDirectOwnerButKeepsPluginArtifact(t *testing.T) {
 	}
 }
 
+func TestDeleteSkillsAPIPreservesDirectOwnerWhenArtifactDeleteFails(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	skillDir := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting")
+	sourcePath := path.Join(skillDir, "SKILL.md")
+	env.writeSkillFile(t, sourcePath, managedSkillRaw("meeting", "Meeting notes"))
+	env.markDirectOwner(t, "memoh", "notion", "meeting")
+	env.bridge.deleteErrors[skillDir] = errors.New("injected delete failure")
+
+	_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
+		SourcePaths: []string{sourcePath},
+	}, env.handler.DeleteSkills)
+	if err == nil {
+		t.Fatal("DeleteSkills(direct-only) succeeded despite artifact delete failure")
+	}
+	markerPath := path.Join(skillDir, skillset.DirectOwnerFileName)
+	if _, statErr := os.Stat(env.localPath(markerPath)); statErr != nil {
+		t.Fatalf("direct owner marker should remain for a retry: %v", statErr)
+	}
+}
+
 func TestDeleteSkillsAPIRejectsNonManagedSourcePath(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	compatPath := path.Join("/data/.agents/skills", "alpha", "SKILL.md")
@@ -333,7 +353,7 @@ func TestUpsertSkillsAPIRejectsTraversalName(t *testing.T) {
 	}
 }
 
-func TestUpsertSkillsAPIRenamesManagedSkillAndEditsRegistryInPlace(t *testing.T) {
+func TestUpsertSkillsAPIRenamesManagedSkillAndEditsDirectRegistrySkillInPlace(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	oldPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
 	env.writeSkillFile(t, oldPath, managedSkillRaw("alpha", "Managed Alpha"))
@@ -359,6 +379,7 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndEditsRegistryInPlace(t *testing.T)
 
 	registryPath := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx", "SKILL.md")
 	env.writeSkillFile(t, registryPath, managedSkillRaw("xlsx", "Spreadsheet"))
+	env.markDirectOwner(t, "openai-api-curated", "docs", "xlsx")
 	updated := "---\nname: xlsx\ndescription: Updated sheet\n---\n\n# Updated\n"
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
 		Skills:     []string{updated},
@@ -376,6 +397,26 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndEditsRegistryInPlace(t *testing.T)
 	}
 	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "xlsx"))); !os.IsNotExist(err) {
 		t.Fatalf("registry edit should not create a user Skill, stat err = %v", err)
+	}
+}
+
+func TestUpsertSkillsAPIRejectsPluginOnlyRegistrySkill(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	registryPath := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting", "SKILL.md")
+	original := managedSkillRaw("meeting", "Meeting notes")
+	env.writeSkillFile(t, registryPath, original)
+
+	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
+		Skills:     []string{managedSkillRaw("meeting", "Changed")},
+		SourcePath: registryPath,
+	}, env.handler.UpsertSkills)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("UpsertSkills(plugin-only) error = %v, want 400", err)
+	}
+	got, readErr := os.ReadFile(env.localPath(registryPath))
+	if readErr != nil || string(got) != original {
+		t.Fatalf("plugin-only Registry Skill changed: content=%q err=%v", got, readErr)
 	}
 }
 
@@ -866,8 +907,10 @@ func mustParseUUID(s string) pgtype.UUID {
 
 type skillsTestBridgeServer struct {
 	pb.UnimplementedContainerServiceServer
-	root        string
-	writeErrors map[string]error
+	root            string
+	writeErrors     map[string]error
+	writeBaseErrors map[string]error
+	deleteErrors    map[string]error
 }
 
 func startSkillsTestBridgeServer(t *testing.T, dataRoot, botID string) *skillsTestBridgeServer {
@@ -885,8 +928,10 @@ func startSkillsTestBridgeServer(t *testing.T, dataRoot, botID string) *skillsTe
 
 	srv := grpc.NewServer()
 	bridgeServer := &skillsTestBridgeServer{
-		root:        dataRoot,
-		writeErrors: make(map[string]error),
+		root:            dataRoot,
+		writeErrors:     make(map[string]error),
+		writeBaseErrors: make(map[string]error),
+		deleteErrors:    make(map[string]error),
 	}
 	pb.RegisterContainerServiceServer(srv, bridgeServer)
 
@@ -1013,6 +1058,9 @@ func (s *skillsTestBridgeServer) WriteFile(_ context.Context, req *pb.WriteFileR
 	if err := s.writeErrors[path.Clean(req.GetPath())]; err != nil {
 		return nil, status.Errorf(codes.Internal, "write %s: %v", req.GetPath(), err)
 	}
+	if err := s.writeBaseErrors[path.Base(path.Clean(req.GetPath()))]; err != nil {
+		return nil, status.Errorf(codes.Internal, "write %s: %v", req.GetPath(), err)
+	}
 	_, localPath := s.resolvePath(req.GetPath())
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir parent for %s: %v", req.GetPath(), err)
@@ -1060,6 +1108,9 @@ func (s *skillsTestBridgeServer) Rename(_ context.Context, req *pb.RenameRequest
 }
 
 func (s *skillsTestBridgeServer) DeleteFile(_ context.Context, req *pb.DeleteFileRequest) (*pb.DeleteFileResponse, error) {
+	if err := s.deleteErrors[path.Clean(req.GetPath())]; err != nil {
+		return nil, status.Errorf(codes.Internal, "delete %s: %v", req.GetPath(), err)
+	}
 	_, localPath := s.resolvePath(req.GetPath())
 	if _, err := os.Stat(localPath); err != nil {
 		return nil, toStatusError(err, req.GetPath())

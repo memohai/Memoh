@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path"
 	"strings"
 	"testing"
@@ -33,6 +34,132 @@ func TestValidateRegistrySkillRequiresNamespacedIdentity(t *testing.T) {
 	skill.InstallID = "skill"
 	if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
 		t.Fatal("validateRegistrySkill(unnamespaced) error = nil")
+	}
+}
+
+func TestRegistrySkillRuntimeRequirementsEnforceWorkspaceOS(t *testing.T) {
+	skill := validRegistrySkillDescriptor()
+	skill.RuntimeRequirements.OS = []string{"linux", "windows"}
+	if err := validateRegistrySkill(skill, "registry", "package", "skill"); err != nil {
+		t.Fatalf("validateRegistrySkill(valid OS requirements) error = %v", err)
+	}
+	if !registrySkillSupportsOS(skill.RuntimeRequirements, "linux") {
+		t.Fatal("linux workspace should be supported")
+	}
+	if !registrySkillSupportsOS(skill.RuntimeRequirements, "win32") {
+		t.Fatal("windows alias should normalize to win32")
+	}
+	if registrySkillSupportsOS(skill.RuntimeRequirements, "darwin") {
+		t.Fatal("darwin workspace should be rejected")
+	}
+
+	skill.RuntimeRequirements.OS = []string{"freebsd"}
+	if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
+		t.Fatal("validateRegistrySkill accepted an unknown runtime OS")
+	}
+	if !registrySkillSupportsOS(SupermarketSkillRuntimeRequirements{}, "unknown") {
+		t.Fatal("an undeclared OS requirement should remain installable")
+	}
+}
+
+func TestInstallRegistrySkillArtifactRejectsIncompatibleOSBeforeDownload(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	client, err := manager.MCPClient(context.Background(), env.botID)
+	if err != nil {
+		t.Fatalf("get workspace client: %v", err)
+	}
+	skill := validRegistrySkillDescriptor()
+	skill.RuntimeRequirements.OS = []string{"linux"}
+	descriptor, err := json.Marshal(skill)
+	if err != nil {
+		t.Fatalf("marshal descriptor: %v", err)
+	}
+	artifactRequested := false
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == skill.Artifact.DownloadURL {
+				artifactRequested = true
+			}
+			return testHTTPResponse(req, http.StatusOK, descriptor), nil
+		})},
+	}
+
+	_, err = handler.installRegistrySkillArtifact(
+		context.Background(), client, "darwin", true, skill.RegistryID, skill.PackageID, skill.SkillID,
+	)
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillIncompatible {
+		t.Fatalf("incompatible OS code = %q, want %q", got, apperror.CodeRegistrySkillIncompatible)
+	}
+	if artifactRequested {
+		t.Fatal("incompatible Skill Artifact was downloaded")
+	}
+	args := apperror.ArgsOf(err)
+	if args["os"] != "darwin" || args["supported_os"] != "linux" {
+		t.Fatalf("incompatible OS args = %#v", args)
+	}
+}
+
+func TestDirectRegistrySkillOwnerIsPublishedAtomically(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	artifact := validSkillArtifact(t)
+	digest := sha256.Sum256(artifact)
+	skill := validRegistrySkillDescriptor()
+	skill.Artifact.Digest = hex.EncodeToString(digest[:])
+	skill.Artifact.Size = int64(len(artifact))
+	descriptor, err := json.Marshal(skill)
+	if err != nil {
+		t.Fatalf("marshal descriptor: %v", err)
+	}
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == skill.Artifact.DownloadURL {
+				return testHTTPResponse(req, http.StatusOK, artifact), nil
+			}
+			return testHTTPResponse(req, http.StatusOK, descriptor), nil
+		})},
+		workspaces: manager,
+	}
+
+	result, err := handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
+		RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
+	})
+	if err != nil || !result.OK {
+		t.Fatalf("installRegistrySkill() result=%+v error=%v", result, err)
+	}
+	client, err := manager.MCPClient(context.Background(), env.botID)
+	if err != nil {
+		t.Fatalf("get workspace client: %v", err)
+	}
+	if !skillset.HasDirectOwner(context.Background(), client, skill.RegistryID, skill.PackageID, skill.SkillID) {
+		t.Fatal("published Registry Skill has no direct owner")
+	}
+
+	secondEnv := newSkillsTestEnv(t)
+	secondManager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: secondEnv.dataRoot}, "", nil,
+	)
+	secondEnv.bridge.writeBaseErrors[skillset.DirectOwnerFileName] = errors.New("injected marker failure")
+	handler.workspaces = secondManager
+	_, err = handler.installRegistrySkill(context.Background(), secondEnv.botID, InstallSkillRequest{
+		RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
+	})
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInstallFailed {
+		t.Fatalf("marker failure code = %q, want %q", got, apperror.CodeRegistrySkillInstallFailed)
+	}
+	targetDir, pathErr := skillset.SkillDirForIDs(skill.RegistryID, skill.PackageID, skill.SkillID)
+	if pathErr != nil {
+		t.Fatalf("SkillDirForIDs() error = %v", pathErr)
+	}
+	if _, statErr := os.Stat(secondEnv.localPath(targetDir)); !os.IsNotExist(statErr) {
+		t.Fatalf("ownerless Registry Skill should not be published, stat err=%v", statErr)
 	}
 }
 

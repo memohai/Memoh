@@ -328,6 +328,7 @@ func (h *SupermarketHandler) installRegistrySkill(
 		targetContext,
 		target.Client,
 		target.Info.OS,
+		true,
 		registryID,
 		packageID,
 		skillID,
@@ -335,21 +336,6 @@ func (h *SupermarketHandler) installRegistrySkill(
 	if err != nil {
 		return InstallRegistrySkillResponse{}, err
 	}
-	if err := skillset.MarkDirectOwner(
-		targetContext,
-		target.Client,
-		registryID,
-		packageID,
-		skillID,
-		installed.Skill.Artifact.Digest,
-	); err != nil {
-		return InstallRegistrySkillResponse{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInstallFailed,
-			fmt.Errorf("record direct Registry Skill ownership: %w", err),
-			nil,
-		)
-	}
-
 	return InstallRegistrySkillResponse{
 		OK:                true,
 		RegistryID:        registryID,
@@ -365,7 +351,9 @@ func (h *SupermarketHandler) installRegistrySkill(
 func (h *SupermarketHandler) installRegistrySkillArtifact(
 	ctx context.Context,
 	client *bridge.Client,
-	workspaceOS, registryID, packageID, skillID string,
+	workspaceOS string,
+	directOwner bool,
+	registryID, packageID, skillID string,
 ) (registrySkillArtifactInstallResult, error) {
 	if client == nil {
 		return registrySkillArtifactInstallResult{}, apperror.Wrap(
@@ -381,6 +369,15 @@ func (h *SupermarketHandler) installRegistrySkillArtifact(
 	if err := validateRegistrySkill(skill, registryID, packageID, skillID); err != nil {
 		return registrySkillArtifactInstallResult{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 	}
+	if !registrySkillSupportsOS(skill.RuntimeRequirements, workspaceOS) {
+		return registrySkillArtifactInstallResult{}, apperror.New(
+			apperror.CodeRegistrySkillIncompatible,
+			map[string]string{
+				"os":           normalizeRegistrySkillOSLabel(workspaceOS),
+				"supported_os": strings.Join(normalizedRegistrySkillOSList(skill.RuntimeRequirements.OS), ","),
+			},
+		)
+	}
 	artifactBytes, err := h.downloadRegistrySkillArtifact(ctx, skill.Artifact)
 	if err != nil {
 		return registrySkillArtifactInstallResult{}, err
@@ -389,10 +386,18 @@ func (h *SupermarketHandler) installRegistrySkillArtifact(
 	if err != nil {
 		return registrySkillArtifactInstallResult{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 	}
-	if err := skillset.InstallArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive); err != nil {
+	var installErr error
+	if directOwner {
+		installErr = skillset.InstallArchiveWithDirectOwner(
+			ctx, client, workspaceOS, registryID, packageID, skillID, archive, skill.Artifact.Digest,
+		)
+	} else {
+		installErr = skillset.InstallArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive)
+	}
+	if installErr != nil {
 		return registrySkillArtifactInstallResult{}, apperror.Wrap(
 			apperror.CodeRegistrySkillInstallFailed,
-			fmt.Errorf("install registry Skill: %w", err),
+			fmt.Errorf("install registry Skill: %w", installErr),
 			nil,
 		)
 	}
@@ -460,6 +465,11 @@ func validateRegistrySkill(skill SupermarketCatalogSkill, registryID, packageID,
 	if skill.InstallID != expectedInstallID || !skillset.IsValidName(skill.InstallID) {
 		return errors.New("registry Skill install_id is invalid")
 	}
+	for _, runtimeOS := range skill.RuntimeRequirements.OS {
+		if _, ok := normalizeRegistrySkillOS(runtimeOS); !ok {
+			return fmt.Errorf("registry Skill runtime requirement OS %q is unsupported", runtimeOS)
+		}
+	}
 	artifact := skill.Artifact
 	if artifact.Format != "memoh_skill_v1" || artifact.ContentType != "application/gzip" {
 		return errors.New("registry Skill Artifact format is unsupported")
@@ -477,6 +487,59 @@ func validateRegistrySkill(skill SupermarketCatalogSkill, registryID, packageID,
 		return errors.New("registry Skill Artifact download URL is missing")
 	}
 	return nil
+}
+
+func normalizeRegistrySkillOS(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "darwin":
+		return "darwin", true
+	case "linux":
+		return "linux", true
+	case "windows", "win32":
+		return "win32", true
+	default:
+		return "", false
+	}
+}
+
+func normalizeRegistrySkillOSLabel(value string) string {
+	if normalized, ok := normalizeRegistrySkillOS(value); ok {
+		return normalized
+	}
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func normalizedRegistrySkillOSList(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized, ok := normalizeRegistrySkillOS(value)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result
+}
+
+func registrySkillSupportsOS(requirements SupermarketSkillRuntimeRequirements, workspaceOS string) bool {
+	if len(requirements.OS) == 0 {
+		return true
+	}
+	targetOS, ok := normalizeRegistrySkillOS(workspaceOS)
+	if !ok {
+		return false
+	}
+	for _, supportedOS := range normalizedRegistrySkillOSList(requirements.OS) {
+		if supportedOS == targetOS {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *SupermarketHandler) downloadRegistrySkillArtifact(

@@ -59,30 +59,15 @@ func MarkDirectOwner(
 	if client == nil {
 		return errors.New("workspace is not reachable")
 	}
-	registryID, packageID, skillID, err := normalizeRegistrySkillIdentity(registryID, packageID, skillID)
-	if err != nil {
-		return errors.New("registry Skill identity is invalid")
-	}
 	markerPath, err := DirectOwnerPathForIDs(registryID, packageID, skillID)
 	if err != nil {
 		return errors.New("registry Skill identity is invalid")
 	}
-	artifactDigest = strings.TrimSpace(artifactDigest)
-	digestBytes, err := hex.DecodeString(artifactDigest)
-	if err != nil || len(digestBytes) != sha256.Size || hex.EncodeToString(digestBytes) != artifactDigest {
-		return errors.New("registry Skill Artifact digest is invalid")
-	}
-	payload, err := json.Marshal(DirectOwner{
-		Version:        directOwnerSchemaVersion,
-		RegistryID:     registryID,
-		PackageID:      packageID,
-		SkillID:        skillID,
-		ArtifactDigest: artifactDigest,
-	})
+	payload, err := directOwnerPayload(registryID, packageID, skillID, artifactDigest)
 	if err != nil {
 		return err
 	}
-	if _, err := client.WriteRaw(ctx, markerPath, bytes.NewReader(append(payload, '\n'))); err != nil {
+	if _, err := client.WriteRaw(ctx, markerPath, bytes.NewReader(payload)); err != nil {
 		return fmt.Errorf("write direct Skill owner: %w", err)
 	}
 	return nil
@@ -171,11 +156,31 @@ func directOwnerBytes(
 	if !ok {
 		return nil, false
 	}
-	payload, err := json.Marshal(owner)
+	payload, err := directOwnerPayload(owner.RegistryID, owner.PackageID, owner.SkillID, owner.ArtifactDigest)
+	return payload, err == nil
+}
+
+func directOwnerPayload(registryID, packageID, skillID, artifactDigest string) ([]byte, error) {
+	registryID, packageID, skillID, err := normalizeRegistrySkillIdentity(registryID, packageID, skillID)
 	if err != nil {
-		return nil, false
+		return nil, errors.New("registry Skill identity is invalid")
 	}
-	return append(payload, '\n'), true
+	artifactDigest = strings.TrimSpace(artifactDigest)
+	digestBytes, err := hex.DecodeString(artifactDigest)
+	if err != nil || len(digestBytes) != sha256.Size || hex.EncodeToString(digestBytes) != artifactDigest {
+		return nil, errors.New("registry Skill Artifact digest is invalid")
+	}
+	payload, err := json.Marshal(DirectOwner{
+		Version:        directOwnerSchemaVersion,
+		RegistryID:     registryID,
+		PackageID:      packageID,
+		SkillID:        skillID,
+		ArtifactDigest: artifactDigest,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append(payload, '\n'), nil
 }
 
 func normalizeRegistrySkillIdentity(registryID, packageID, skillID string) (string, string, string, error) {

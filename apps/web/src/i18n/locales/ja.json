@@ -135,6 +135,7 @@
       "unavailable": "Supermarket に接続できません。しばらくしてからもう一度お試しください。",
       "skill_not_found": "この Registry Skill は現在利用できません。",
       "skill_invalid": "この Registry Skill Package は無効なため、インストールできません。",
+      "skill_incompatible": "この Registry Skill は選択したワークスペースのオペレーティングシステムをサポートしていません。",
       "skill_install_failed": "Registry Skill をインストールできませんでした。もう一度お試しください。"
     },
     "workspace": {

@@ -153,6 +153,10 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 	if err != nil {
 		return workspaceUnavailableError(err)
 	}
+	if registryID, packageID, skillID, ok := skillset.RegistrySkillIDs(sourcePath); ok &&
+		!skillset.HasDirectOwner(ctx, client, registryID, packageID, skillID) {
+		return echo.NewHTTPError(http.StatusBadRequest, "plugin-owned Registry Skills cannot be edited directly")
+	}
 
 	for i, raw := range req.Skills {
 		editPath := ""
@@ -285,16 +289,16 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 			if ownerErr != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, ownerErr.Error())
 			}
-			if err := skillset.RemoveDirectOwner(
-				ctx,
-				client,
-				target.registryID,
-				target.packageID,
-				target.skillID,
-			); err != nil {
-				return fsHTTPError(err)
-			}
 			if pluginOwned {
+				if err := skillset.RemoveDirectOwner(
+					ctx,
+					client,
+					target.registryID,
+					target.packageID,
+					target.skillID,
+				); err != nil {
+					return fsHTTPError(err)
+				}
 				continue
 			}
 		}

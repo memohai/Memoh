@@ -419,6 +419,7 @@ func (h *SupermarketHandler) installPluginSkills(
 			ctx,
 			client,
 			workspaceOS,
+			false,
 			reference.RegistryID,
 			reference.PackageID,
 			reference.SkillID,

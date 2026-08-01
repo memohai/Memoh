@@ -150,6 +150,7 @@ func TestRegistryUpstreamErrorsUseStableContracts(t *testing.T) {
 		{code: CodeRegistryUnavailable, status: http.StatusBadGateway},
 		{code: CodeRegistrySkillNotFound, status: http.StatusNotFound},
 		{code: CodeRegistrySkillInvalid, status: http.StatusBadGateway},
+		{code: CodeRegistrySkillIncompatible, status: http.StatusConflict},
 	}
 	for _, test := range tests {
 		definition, ok := Lookup(test.code)

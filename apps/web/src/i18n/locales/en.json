@@ -138,6 +138,7 @@
       "unavailable": "The Supermarket is unavailable. Please try again later.",
       "skill_not_found": "This Registry Skill is no longer available.",
       "skill_invalid": "This Registry Skill package is invalid and cannot be installed.",
+      "skill_incompatible": "This Registry Skill does not support the selected workspace operating system.",
       "skill_install_failed": "The Registry Skill could not be installed. Please try again."
     },
     "workspace": {

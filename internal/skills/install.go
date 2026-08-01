@@ -14,6 +14,28 @@ import (
 
 // InstallArchive atomically replaces a registry Skill with a validated archive.
 func InstallArchive(ctx context.Context, client *bridge.Client, workspaceOS, registryID, packageID, skillID string, archive Archive) error {
+	return installArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive, "")
+}
+
+// InstallArchiveWithDirectOwner publishes the Artifact and direct-install
+// ownership marker in the same atomic directory replacement.
+func InstallArchiveWithDirectOwner(
+	ctx context.Context,
+	client *bridge.Client,
+	workspaceOS, registryID, packageID, skillID string,
+	archive Archive,
+	artifactDigest string,
+) error {
+	return installArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive, artifactDigest)
+}
+
+func installArchive(
+	ctx context.Context,
+	client *bridge.Client,
+	workspaceOS, registryID, packageID, skillID string,
+	archive Archive,
+	directArtifactDigest string,
+) error {
 	if client == nil {
 		return errors.New("workspace is not reachable")
 	}
@@ -24,7 +46,17 @@ func InstallArchive(ctx context.Context, client *bridge.Client, workspaceOS, reg
 	if err != nil {
 		return errors.New("registry Skill identity is invalid")
 	}
-	directOwner, preserveDirectOwner := directOwnerBytes(ctx, client, registryID, packageID, skillID)
+	var directOwner []byte
+	var includeDirectOwner bool
+	if strings.TrimSpace(directArtifactDigest) != "" {
+		directOwner, err = directOwnerPayload(registryID, packageID, skillID, directArtifactDigest)
+		if err != nil {
+			return err
+		}
+		includeDirectOwner = true
+	} else {
+		directOwner, includeDirectOwner = directOwnerBytes(ctx, client, registryID, packageID, skillID)
+	}
 	packageDir, err := SkillPackageDirForIDs(registryID, packageID)
 	if err != nil {
 		return errors.New("registry Skill identity is invalid")
@@ -64,6 +96,11 @@ func InstallArchive(ctx context.Context, client *bridge.Client, workspaceOS, reg
 	if err := applyExecutableModes(ctx, client, workspaceOS, executablePaths); err != nil {
 		return err
 	}
+	if includeDirectOwner {
+		if err := client.WriteFile(ctx, path.Join(tempDir, DirectOwnerFileName), directOwner); err != nil {
+			return fmt.Errorf("stage direct Skill owner: %w", err)
+		}
+	}
 
 	registryDir, err := skillNamespaceDirForID(registryID)
 	if err != nil {
@@ -94,22 +131,6 @@ func InstallArchive(ctx context.Context, client *bridge.Client, workspaceOS, reg
 			}
 		}
 		return fmt.Errorf("publish installed Skill: %w", err)
-	}
-	if preserveDirectOwner {
-		markerPath := path.Join(targetDir, DirectOwnerFileName)
-		if err := client.WriteFile(ctx, markerPath, directOwner); err != nil {
-			rollbackCtx := context.WithoutCancel(ctx)
-			deleteErr := client.DeleteFile(rollbackCtx, targetDir, true)
-			if targetExists && deleteErr == nil {
-				if rollbackErr := client.Rename(rollbackCtx, backupDir, targetDir); rollbackErr != nil {
-					return fmt.Errorf("preserve direct Skill owner: %w; restore previous Skill from %q: %w", err, backupDir, rollbackErr)
-				}
-			}
-			if deleteErr != nil {
-				return fmt.Errorf("preserve direct Skill owner: %w; remove incomplete Skill: %w", err, deleteErr)
-			}
-			return fmt.Errorf("preserve direct Skill owner: %w", err)
-		}
 	}
 	if targetExists {
 		_ = client.DeleteFile(ctx, backupDir, true)
