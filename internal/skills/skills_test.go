@@ -420,8 +420,6 @@ func TestListDiscoversRegistrySkillsWithoutRenaming(t *testing.T) {
 	client.listings[packagePath] = []*pb.FileEntry{{Path: "xlsx", IsDir: true}}
 	client.listings[skillPath] = []*pb.FileEntry{{Path: "SKILL.md"}}
 	client.files[pathJoin(skillPath, "SKILL.md")] = "---\nname: xlsx\ndescription: Spreadsheet helper\n---\n\n# XLSX\n"
-	markDirectOwnerForTest(t, client, "openai-api-curated", "docs", "xlsx")
-
 	items, err := ListWithRegistrySkillRoots(context.Background(), client, []string{}, nil)
 	if err != nil {
 		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
@@ -439,15 +437,12 @@ func TestListDiscoversRegistrySkillsWithoutRenaming(t *testing.T) {
 	if !got.Managed {
 		t.Fatal("registry skill should be managed")
 	}
-	if !got.DirectOwned {
-		t.Fatal("direct Registry Skill should retain direct ownership")
-	}
 	if got.State != StateEffective {
 		t.Fatalf("state = %q, want %q", got.State, StateEffective)
 	}
 }
 
-func TestListHidesUnownedRegistrySkillDirectory(t *testing.T) {
+func TestListDiscoversInstalledRegistrySkillDirectory(t *testing.T) {
 	client := newFakeClient()
 	packagePath := pathJoin(ManagedDirPath, "openai", "documents")
 	skillDir := pathJoin(packagePath, "pdf")
@@ -462,17 +457,9 @@ func TestListHidesUnownedRegistrySkillDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	if _, ok := findBySourcePath(items, skillPath); ok {
-		t.Fatal("unowned Registry Skill was discovered")
-	}
-
-	items, err = ListWithRegistrySkillRoots(context.Background(), client, nil, []string{skillDir})
-	if err != nil {
-		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
-	}
 	got, ok := findBySourcePath(items, skillPath)
-	if !ok || got.SourceKind != SourceKindRegistry || got.DirectOwned {
-		t.Fatalf("Plugin-owned Registry Skill = %+v, %v", got, ok)
+	if !ok || got.SourceKind != SourceKindRegistry {
+		t.Fatalf("installed Registry Skill = %+v, %v", got, ok)
 	}
 }
 
@@ -490,8 +477,6 @@ func TestListDiscoversUserAndRegistryNamespaces(t *testing.T) {
 	client.listings[skillPath] = []*pb.FileEntry{{Path: "SKILL.md"}}
 	client.files[pathJoin(userPackage, "openai-api-curated", "SKILL.md")] = "---\nname: openai-api-curated\ndescription: User\n---\n\n# User\n"
 	client.files[pathJoin(skillPath, "SKILL.md")] = "---\nname: xlsx\ndescription: Spreadsheet\n---\n\n# XLSX\n"
-	markDirectOwnerForTest(t, client, "openai-api-curated", "docs", "xlsx")
-
 	items, err := ListWithRegistrySkillRoots(context.Background(), client, []string{}, nil)
 	if err != nil {
 		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
@@ -522,8 +507,6 @@ func TestListPrefersUserNamespaceOverSameNamedRegistrySkill(t *testing.T) {
 	client.listings[userPackage] = []*pb.FileEntry{{Path: "pdf", IsDir: true}}
 	client.files[registryPath] = "---\nname: pdf\ndescription: Registry PDF\n---\n\n# Registry\n"
 	client.files[userPath] = "---\nname: pdf\ndescription: User PDF\n---\n\n# User\n"
-	markDirectOwnerForTest(t, client, "openai", "documents", "pdf")
-
 	items, err := List(context.Background(), client, []string{})
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
@@ -763,21 +746,4 @@ func (*fakeClient) Mkdir(_ context.Context, _ string) error {
 
 func pathJoin(parts ...string) string {
 	return strings.Join(parts, "/")
-}
-
-func markDirectOwnerForTest(t *testing.T, client *fakeClient, registryID, packageID, skillID string) {
-	t.Helper()
-	if err := MarkDirectOwner(
-		context.Background(),
-		client,
-		registryID,
-		packageID,
-		skillID,
-		strings.Repeat("0", 64),
-	); err != nil {
-		t.Fatalf("MarkDirectOwner() error = %v", err)
-	}
-	if !HasDirectOwner(context.Background(), client, registryID, packageID, skillID) {
-		t.Fatal("direct owner marker did not round-trip")
-	}
 }

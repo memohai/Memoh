@@ -391,7 +391,7 @@ func (h *SupermarketHandler) installRegistrySkill(
 			}
 		}
 		publication, published, publishErr := publishPreparedRegistrySkillArtifact(
-			mutationCtx, target.Client, true, prepared,
+			mutationCtx, target.Client, prepared,
 		)
 		if publishErr != nil {
 			return publishErr
@@ -538,7 +538,6 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 func publishPreparedRegistrySkillArtifact(
 	ctx context.Context,
 	client *bridge.Client,
-	directOwner bool,
 	prepared preparedRegistrySkillArtifact,
 ) (*skillset.ArchivePublication, registrySkillArtifactInstallResult, error) {
 	if client == nil {
@@ -549,20 +548,9 @@ func publishPreparedRegistrySkillArtifact(
 		)
 	}
 	skill := prepared.Skill
-	var (
-		publication *skillset.ArchivePublication
-		installErr  error
+	publication, installErr := skillset.PublishArchive(
+		ctx, client, prepared.WorkspaceOS, skill.RegistryID, skill.PackageID, skill.SkillID, prepared.Archive,
 	)
-	if directOwner {
-		publication, installErr = skillset.PublishArchiveWithDirectOwner(
-			ctx, client, prepared.WorkspaceOS, skill.RegistryID, skill.PackageID, skill.SkillID,
-			prepared.Archive, skill.Artifact.Digest,
-		)
-	} else {
-		publication, installErr = skillset.PublishArchive(
-			ctx, client, prepared.WorkspaceOS, skill.RegistryID, skill.PackageID, skill.SkillID, prepared.Archive,
-		)
-	}
 	if installErr != nil {
 		return nil, registrySkillArtifactInstallResult{}, apperror.Wrap(
 			apperror.CodeRegistrySkillInstallFailed,

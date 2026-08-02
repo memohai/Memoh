@@ -292,9 +292,6 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 	type deleteTarget struct {
 		sourcePath string
 		skillDir   string
-		registryID string
-		packageID  string
-		skillID    string
 	}
 	targets := make([]deleteTarget, 0, len(sourcePaths))
 	for _, sourcePath := range sourcePaths {
@@ -306,14 +303,6 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 			return echo.NewHTTPError(http.StatusBadRequest, "only Memoh-managed skills can be deleted")
 		}
 		target := deleteTarget{sourcePath: path.Clean(strings.TrimSpace(sourcePath)), skillDir: skillDir}
-		if registryID, packageID, skillID, ok := skillset.RegistrySkillIDs(target.sourcePath); ok {
-			target.registryID = registryID
-			target.packageID = packageID
-			target.skillID = skillID
-			if !skillset.HasDirectOwner(ctx, client, registryID, packageID, skillID) {
-				return echo.NewHTTPError(http.StatusBadRequest, "plugin-owned Registry Skills cannot be deleted directly")
-			}
-		}
 		targets = append(targets, target)
 	}
 
@@ -321,22 +310,13 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 		if _, statErr := client.Stat(ctx, target.skillDir); statErr != nil {
 			return fsHTTPError(statErr)
 		}
-		if target.registryID != "" {
+		if _, _, _, ok := skillset.RegistrySkillIDs(target.sourcePath); ok {
 			pluginOwned, ownerErr := h.pluginOwnsRegistrySkill(ctx, botID, target.sourcePath, targetID)
 			if ownerErr != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, ownerErr.Error())
 			}
 			if pluginOwned {
-				if err := skillset.RemoveDirectOwner(
-					ctx,
-					client,
-					target.registryID,
-					target.packageID,
-					target.skillID,
-				); err != nil {
-					return fsHTTPError(err)
-				}
-				continue
+				return echo.NewHTTPError(http.StatusBadRequest, "Skill is still used by an installed Plugin")
 			}
 		}
 		if err := client.DeleteFile(ctx, target.skillDir, true); err != nil {
@@ -616,7 +596,7 @@ func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 			SourceKind:  entry.SourceKind,
 			Managed:     entry.Managed,
 			Editable:    !builtin && !registryOwned,
-			Deletable:   entry.Managed && !builtin && (!registryOwned || entry.DirectOwned),
+			Deletable:   entry.Managed && !builtin,
 			State:       entry.State,
 			ShadowedBy:  entry.ShadowedBy,
 		}

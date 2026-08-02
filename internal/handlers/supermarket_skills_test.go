@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path"
 	"strings"
 	"testing"
@@ -150,34 +149,6 @@ func TestDirectRegistrySkillOwnerIsPublishedAtomically(t *testing.T) {
 	}
 	if artifactRequestedDuringMutation || installer.mutationCalls != 1 {
 		t.Fatalf("direct Skill preflight lock state: artifact_in_lock=%v mutations=%d", artifactRequestedDuringMutation, installer.mutationCalls)
-	}
-	client, err := manager.MCPClient(context.Background(), env.botID)
-	if err != nil {
-		t.Fatalf("get workspace client: %v", err)
-	}
-	if !skillset.HasDirectOwner(context.Background(), client, skill.RegistryID, skill.PackageID, skill.SkillID) {
-		t.Fatal("published Registry Skill has no direct owner")
-	}
-
-	secondEnv := newSkillsTestEnv(t)
-	secondManager := workspace.NewManager(
-		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: secondEnv.dataRoot}, "", nil,
-	)
-	secondEnv.bridge.writeBaseErrors[skillset.DirectOwnerFileName] = errors.New("injected marker failure")
-	handler.workspaces = secondManager
-	_, err = handler.installRegistrySkill(context.Background(), secondEnv.botID, InstallSkillRequest{
-		RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
-		ArtifactDigest: skill.Artifact.Digest,
-	})
-	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInstallFailed {
-		t.Fatalf("marker failure code = %q, want %q", got, apperror.CodeRegistrySkillInstallFailed)
-	}
-	targetDir, pathErr := skillset.SkillDirForIDs(skill.RegistryID, skill.PackageID, skill.SkillID)
-	if pathErr != nil {
-		t.Fatalf("SkillDirForIDs() error = %v", pathErr)
-	}
-	if _, statErr := os.Stat(secondEnv.localPath(targetDir)); !os.IsNotExist(statErr) {
-		t.Fatalf("ownerless Registry Skill should not be published, stat err=%v", statErr)
 	}
 }
 

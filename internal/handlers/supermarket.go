@@ -390,7 +390,7 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "installed Plugin changed; refresh before installing")
 		}
 		if conflictErr := h.checkPluginSkillArtifactConflicts(
-			mutationCtx, target.Client, botID, manifest.ID, target.TargetID, entry.Release.Skills,
+			mutationCtx, botID, manifest.ID, target.TargetID, entry.Release.Skills,
 		); conflictErr != nil {
 			return echo.NewHTTPError(http.StatusConflict, conflictErr.Error())
 		}
@@ -945,7 +945,7 @@ func publishPreparedPluginSkills(
 			SkillID:    resolved.SkillID,
 		}
 		installedPublication, installed, err := publishPreparedRegistrySkillArtifact(
-			ctx, client, false, item.artifact,
+			ctx, client, item.artifact,
 		)
 		resultItem := pluginSkillInstallResult{
 			RegistryID: reference.RegistryID,
@@ -976,7 +976,6 @@ func publishPreparedPluginSkills(
 
 func (h *SupermarketHandler) checkPluginSkillArtifactConflicts(
 	ctx context.Context,
-	client *bridge.Client,
 	botID, targetPluginID, workspaceTargetID string,
 	resolvedSkills []SupermarketPluginResolvedSkill,
 ) error {
@@ -989,15 +988,6 @@ func (h *SupermarketHandler) checkPluginSkillArtifactConflicts(
 		}
 		identity := pluginspkg.SkillReferenceIdentity(reference)
 		expected[identity] = resolved.Artifact.Digest
-		owner, ok, err := skillset.ReadDirectOwner(
-			ctx, client, reference.RegistryID, reference.PackageID, reference.SkillID,
-		)
-		if err != nil {
-			return fmt.Errorf("inspect direct owner for Plugin Skill %q: %w", identity, err)
-		}
-		if ok && owner.ArtifactDigest != resolved.Artifact.Digest {
-			return fmt.Errorf("plugin Skill %q has a direct owner using a different Artifact", identity)
-		}
 	}
 	return h.pluginService.CheckSkillArtifactConflicts(
 		ctx, botID, targetPluginID, workspaceTargetID, expected,

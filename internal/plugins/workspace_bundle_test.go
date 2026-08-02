@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -29,6 +30,7 @@ const pluginBundleTestInstallationID = "22222222-2222-4222-8222-222222222222"
 type pluginBundleTestQueries struct {
 	dbstore.Queries
 	row       sqlc.BotPluginInstallation
+	resources []sqlc.BotPluginResource
 	updateErr error
 	deleted   bool
 }
@@ -40,11 +42,11 @@ func (q *pluginBundleTestQueries) GetBotPluginInstallationByID(
 	return q.row, nil
 }
 
-func (*pluginBundleTestQueries) ListBotPluginResources(
+func (q *pluginBundleTestQueries) ListBotPluginResources(
 	context.Context,
 	pgtype.UUID,
 ) ([]sqlc.BotPluginResource, error) {
-	return nil, nil
+	return q.resources, nil
 }
 
 func (*pluginBundleTestQueries) DeleteMCPConnectionsByPlugin(
@@ -54,7 +56,8 @@ func (*pluginBundleTestQueries) DeleteMCPConnectionsByPlugin(
 	return nil
 }
 
-func (*pluginBundleTestQueries) DeleteBotPluginResources(context.Context, pgtype.UUID) error {
+func (q *pluginBundleTestQueries) DeleteBotPluginResources(context.Context, pgtype.UUID) error {
+	q.resources = nil
 	return nil
 }
 
@@ -170,6 +173,25 @@ func TestUninstallRemovesPluginBundleAndRestoresItOnDatabaseFailure(t *testing.T
 			if err := os.WriteFile(pluginFile, []byte(original), 0o600); err != nil {
 				t.Fatalf("seed Plugin bundle: %v", err)
 			}
+			skillRoot, err := skillset.SkillDirForIDs("memoh", "notion", "meeting")
+			if err != nil {
+				t.Fatalf("SkillDirForIDs: %v", err)
+			}
+			skillFile := filepath.Join(root, filepath.FromSlash(skillRoot[len("/data/"):]), "SKILL.md")
+			if err := os.MkdirAll(filepath.Dir(skillFile), 0o750); err != nil {
+				t.Fatalf("create Skill directory: %v", err)
+			}
+			if err := os.WriteFile(skillFile, []byte("---\nname: meeting\n---\n"), 0o600); err != nil {
+				t.Fatalf("seed Skill: %v", err)
+			}
+			queries.resources = []sqlc.BotPluginResource{{
+				InstallationID: installationUUID,
+				ResourceType:   "skill",
+				ResourceKey:    "memoh/notion/meeting",
+				ResourceID:     path.Join(skillRoot, "SKILL.md"),
+				Status:         "installed",
+				Metadata:       []byte(`{"workspace_target_id":"native"}`),
+			}}
 
 			service := NewService(
 				slog.New(slog.DiscardHandler),
@@ -196,6 +218,10 @@ func TestUninstallRemovesPluginBundleAndRestoresItOnDatabaseFailure(t *testing.T
 				}
 			} else if !errors.Is(readErr, os.ErrNotExist) {
 				t.Fatalf("Plugin bundle still exists after uninstall: %v", readErr)
+			}
+			//nolint:gosec // skillFile is constructed below t.TempDir().
+			if _, err := os.ReadFile(skillFile); err != nil {
+				t.Fatalf("Plugin uninstall removed its Registry Skill: %v", err)
 			}
 			if len(provider.targets) != 1 || provider.targets[0] != "native" {
 				t.Fatalf("workspace targets = %v, want [native]", provider.targets)

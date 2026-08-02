@@ -55,7 +55,6 @@ type Entry struct {
 	RuntimeUsable            bool           `json:"runtime_usable,omitempty"`
 	RuntimeUnusableReason    string         `json:"runtime_unusable_reason,omitempty"`
 	RuntimeUsabilityChecked  bool           `json:"runtime_usability_checked,omitempty"`
-	DirectOwned              bool           `json:"-"`
 	runtimeMetadataMalformed bool
 }
 
@@ -73,10 +72,9 @@ type Parsed struct {
 }
 
 type Root struct {
-	Path        string
-	Kind        string
-	Managed     bool
-	DirectOwned bool
+	Path    string
+	Kind    string
+	Managed bool
 }
 
 type fileClient interface {
@@ -660,7 +658,6 @@ func entryFromParsed(parsed Parsed, raw string, root Root, sourcePath string) En
 		SourceRoot:               root.Path,
 		SourceKind:               root.Kind,
 		Managed:                  root.Managed,
-		DirectOwned:              root.DirectOwned,
 		runtimeMetadataMalformed: parsed.runtimeMetadataMalformed,
 	}
 }

@@ -124,16 +124,6 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	if _, err := os.ReadFile(env.localPath(sourcePath)); err != nil {
 		t.Fatalf("read installed Plugin Skill: %v", err)
 	}
-	client, err := manager.MCPClient(context.Background(), env.botID)
-	if err != nil {
-		t.Fatalf("get workspace client: %v", err)
-	}
-	if skillset.HasDirectOwner(context.Background(), client, "memoh", "notion", "meeting") {
-		t.Fatal("Plugin installation wrote a direct owner marker")
-	}
-	if len(installer.gcCalls) != 0 {
-		t.Fatalf("successful install triggered GC: %+v", installer.gcCalls)
-	}
 	if installer.mutationCalls != 1 {
 		t.Fatalf("bot mutation scopes = %d, want 1", installer.mutationCalls)
 	}
@@ -331,9 +321,6 @@ func TestInstallPluginRollsBackSkillsWhenBundleInstallFails(t *testing.T) {
 	}, handler.InstallPlugin)
 	if err == nil {
 		t.Fatal("InstallPlugin() succeeded after bundle download failure")
-	}
-	if len(installer.gcCalls) != 0 {
-		t.Fatalf("transactional rollback should not need GC: %+v", installer.gcCalls)
 	}
 	if installer.installCalls != 0 {
 		t.Fatalf("Plugin ownership was recorded after bundle failure: %d calls", installer.installCalls)
@@ -685,45 +672,6 @@ func TestFetchPluginEntryRejectsCrossOriginMetadataRedirect(t *testing.T) {
 	}
 	if attackerRequested {
 		t.Fatal("cross-origin metadata redirect reached the attacker origin")
-	}
-}
-
-func TestPluginSkillArtifactConflictWithDirectOwner(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	manager := workspace.NewManager(
-		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
-	)
-	client, err := manager.MCPClient(context.Background(), env.botID)
-	if err != nil {
-		t.Fatalf("get workspace client: %v", err)
-	}
-	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
-	directDigest := strings.Repeat("a", 64)
-	if err := skillset.MarkDirectOwner(
-		context.Background(), client, reference.RegistryID, reference.PackageID, reference.SkillID, directDigest,
-	); err != nil {
-		t.Fatalf("mark direct Skill owner: %v", err)
-	}
-	resolved := SupermarketPluginResolvedSkill{
-		RegistryID: reference.RegistryID,
-		PackageID:  reference.PackageID,
-		SkillID:    reference.SkillID,
-		Artifact:   SupermarketSkillArtifact{Digest: strings.Repeat("b", 64)},
-	}
-	handler := &SupermarketHandler{pluginService: &recordingPluginInstaller{}}
-	if err := handler.checkPluginSkillArtifactConflicts(
-		context.Background(), client, env.botID, "notion", "native", []SupermarketPluginResolvedSkill{resolved},
-	); err == nil {
-		t.Fatal("Plugin installation accepted a direct owner using a different Artifact")
-	}
-	resolved.Artifact.Digest = directDigest
-	if err := handler.checkPluginSkillArtifactConflicts(
-		context.Background(), client, env.botID, "notion", "native", []SupermarketPluginResolvedSkill{resolved},
-	); err != nil {
-		t.Fatalf("Plugin installation rejected a shared direct owner Artifact: %v", err)
-	}
-	if handler.pluginService.(*recordingPluginInstaller).conflictTarget != workspace.WorkspaceTargetNative {
-		t.Fatal("Plugin conflict check did not retain the workspace target")
 	}
 }
 
@@ -1267,8 +1215,6 @@ type recordingPluginInstaller struct {
 	request               pluginspkg.InstallRequest
 	installCalls          int
 	installInMutation     bool
-	gcCalls               [][]pluginspkg.SkillReference
-	gcInMutation          []bool
 	mutationCalls         int
 	conflictExpected      map[string]string
 	conflictTarget        string
@@ -1337,12 +1283,6 @@ func (i *recordingPluginInstaller) CheckSkillArtifactConflicts(
 		i.conflictExpected[identity] = digest
 	}
 	return i.conflictErr
-}
-
-func (i *recordingPluginInstaller) GarbageCollectRegistrySkills(ctx context.Context, _ string, references []pluginspkg.SkillReference) {
-	i.gcCalls = append(i.gcCalls, append([]pluginspkg.SkillReference(nil), references...))
-	inMutation, _ := ctx.Value(recordingPluginMutationKey{}).(bool)
-	i.gcInMutation = append(i.gcInMutation, inMutation)
 }
 
 func testHTTPResponse(req *http.Request, status int, content []byte) *http.Response {

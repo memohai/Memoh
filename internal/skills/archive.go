@@ -119,10 +119,6 @@ func ReadArchiveWithLimits(
 			return Archive{}, fmt.Errorf("skill artifact contains non-canonical path %q", header.Name)
 		}
 		canonicalName := strings.ToLower(name)
-		canonicalOwnerPath := strings.ToLower(DirectOwnerFileName)
-		if canonicalName == canonicalOwnerPath || strings.HasPrefix(canonicalName, canonicalOwnerPath+"/") {
-			return Archive{}, fmt.Errorf("skill artifact contains reserved path %q", header.Name)
-		}
 		if containsUnsafePathPart(strings.Split(name, "/")) {
 			return Archive{}, fmt.Errorf("skill artifact contains unsafe path %q", header.Name)
 		}

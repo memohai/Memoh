@@ -25,25 +25,6 @@ func InstallArchive(ctx context.Context, client *bridge.Client, workspaceOS, reg
 	return nil
 }
 
-// InstallArchiveWithDirectOwner publishes the Artifact and direct-install
-// ownership marker in the same atomic directory replacement.
-func InstallArchiveWithDirectOwner(
-	ctx context.Context,
-	client *bridge.Client,
-	workspaceOS, registryID, packageID, skillID string,
-	archive Archive,
-	artifactDigest string,
-) error {
-	publication, err := PublishArchiveWithDirectOwner(
-		ctx, client, workspaceOS, registryID, packageID, skillID, archive, artifactDigest,
-	)
-	if err != nil {
-		return err
-	}
-	_ = publication.Commit(ctx)
-	return nil
-}
-
 // ArchivePublication retains the previous Skill directory until the caller
 // commits, allowing a larger Plugin installation to roll back atomically.
 type archivePublicationClient interface {
@@ -65,26 +46,6 @@ func PublishArchive(
 	workspaceOS, registryID, packageID, skillID string,
 	archive Archive,
 ) (*ArchivePublication, error) {
-	return publishArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive, "")
-}
-
-func PublishArchiveWithDirectOwner(
-	ctx context.Context,
-	client *bridge.Client,
-	workspaceOS, registryID, packageID, skillID string,
-	archive Archive,
-	artifactDigest string,
-) (*ArchivePublication, error) {
-	return publishArchive(ctx, client, workspaceOS, registryID, packageID, skillID, archive, artifactDigest)
-}
-
-func publishArchive(
-	ctx context.Context,
-	client *bridge.Client,
-	workspaceOS, registryID, packageID, skillID string,
-	archive Archive,
-	directArtifactDigest string,
-) (*ArchivePublication, error) {
 	if client == nil {
 		return nil, errors.New("workspace is not reachable")
 	}
@@ -94,20 +55,6 @@ func publishArchive(
 	targetDir, err := SkillDirForIDs(registryID, packageID, skillID)
 	if err != nil {
 		return nil, errors.New("registry Skill identity is invalid")
-	}
-	var directOwner []byte
-	var includeDirectOwner bool
-	if strings.TrimSpace(directArtifactDigest) != "" {
-		directOwner, err = directOwnerPayload(registryID, packageID, skillID, directArtifactDigest)
-		if err != nil {
-			return nil, err
-		}
-		includeDirectOwner = true
-	} else {
-		directOwner, includeDirectOwner, err = directOwnerBytes(ctx, client, registryID, packageID, skillID)
-		if err != nil {
-			return nil, fmt.Errorf("preserve direct Skill owner: %w", err)
-		}
 	}
 	packageDir, err := SkillPackageDirForIDs(registryID, packageID)
 	if err != nil {
@@ -152,12 +99,6 @@ func publishArchive(
 	if err := applyExecutableModes(ctx, client, workspaceOS, executablePaths); err != nil {
 		return nil, err
 	}
-	if includeDirectOwner {
-		if err := client.WriteFile(ctx, path.Join(tempDir, DirectOwnerFileName), directOwner); err != nil {
-			return nil, fmt.Errorf("stage direct Skill owner: %w", err)
-		}
-	}
-
 	registryDir, err := skillNamespaceDirForID(registryID)
 	if err != nil {
 		return nil, errors.New("registry Skill identity is invalid")

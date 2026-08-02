@@ -33,9 +33,9 @@ func appendDiscoveryRoots(roots []Root, extra ...Root) []Root {
 // orderedDiscoveryRoots defines the source precedence consumed by resolve():
 // user > built-in > legacy > compat > Registry.
 func orderedDiscoveryRoots(ctx context.Context, client fileClient, rawCompatRoots, rawRegistrySkillRoots []string) []Root {
-	userRoots, directRegistryRoots := discoverOwnedSkillRoots(ctx, client)
+	userRoots, registryRoots := discoverManagedSkillRoots(ctx, client)
 	roots := appendDiscoveryRoots(userRoots, DiscoveryRoots(rawCompatRoots)...)
-	roots = appendDiscoveryRoots(roots, directRegistryRoots...)
+	roots = appendDiscoveryRoots(roots, registryRoots...)
 	for _, registryRoot := range normalizeRegistrySkillRoots(rawRegistrySkillRoots) {
 		roots = appendDiscoveryRoots(roots, Root{
 			Path:    registryRoot,
@@ -46,10 +46,8 @@ func orderedDiscoveryRoots(ctx context.Context, client fileClient, rawCompatRoot
 	return roots
 }
 
-// discoverOwnedSkillRoots walks the canonical namespace/package/Skill layout.
-// User packages are always owned; Registry Skills require a valid direct-owner
-// marker unless an enabled Plugin supplies their exact path separately.
-func discoverOwnedSkillRoots(ctx context.Context, client fileClient) (userRoots, directRegistryRoots []Root) {
+// discoverManagedSkillRoots walks the canonical namespace/package/Skill layout.
+func discoverManagedSkillRoots(ctx context.Context, client fileClient) (userRoots, registryRoots []Root) {
 	if client == nil {
 		return nil, nil
 	}
@@ -61,7 +59,7 @@ func discoverOwnedSkillRoots(ctx context.Context, client fileClient) (userRoots,
 		return strings.Compare(a.GetPath(), b.GetPath())
 	})
 	userRoots = make([]Root, 0)
-	directRegistryRoots = make([]Root, 0)
+	registryRoots = make([]Root, 0)
 	for _, namespaceEntry := range namespaces {
 		if !namespaceEntry.GetIsDir() {
 			continue
@@ -109,21 +107,20 @@ func discoverOwnedSkillRoots(ctx context.Context, client fileClient) (userRoots,
 					continue
 				}
 				skillID := path.Base(skillEntry.GetPath())
-				if !IsValidName(skillID) || !HasDirectOwner(ctx, client, namespaceID, packageID, skillID) {
+				if !IsValidName(skillID) {
 					continue
 				}
 				skillPath, err := SkillDirForIDs(namespaceID, packageID, skillID)
 				if err != nil {
 					continue
 				}
-				directRegistryRoots = append(directRegistryRoots, Root{
-					Path:        skillPath,
-					Kind:        SourceKindRegistry,
-					Managed:     true,
-					DirectOwned: true,
+				registryRoots = append(registryRoots, Root{
+					Path:    skillPath,
+					Kind:    SourceKindRegistry,
+					Managed: true,
 				})
 			}
 		}
 	}
-	return userRoots, directRegistryRoots
+	return userRoots, registryRoots
 }
