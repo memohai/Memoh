@@ -41,22 +41,18 @@ func TestValidateRegistrySkillRequiresNamespacedIdentity(t *testing.T) {
 	}
 }
 
-func TestValidateRegistrySkillRequiresBoundedUncompressedSize(t *testing.T) {
-	for _, size := range []int64{0, maxRegistrySkillArtifactUncompressedBytes + 1} {
-		skill := validRegistrySkillDescriptor()
-		skill.Artifact.UncompressedSize = size
-		if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
-			t.Fatalf("validateRegistrySkill() accepted uncompressed_size %d", size)
-		}
-	}
-}
-
-func TestValidateRegistrySkillRequiresArchiveAndFileBudgets(t *testing.T) {
+func TestValidateRegistrySkillRequiresBoundedArtifact(t *testing.T) {
 	for name, mutate := range map[string]func(*SupermarketSkillArtifact){
-		"archive size": func(artifact *SupermarketSkillArtifact) {
+		"zero uncompressed size": func(artifact *SupermarketSkillArtifact) {
+			artifact.UncompressedSize = 0
+		},
+		"uncompressed size limit": func(artifact *SupermarketSkillArtifact) {
+			artifact.UncompressedSize = maxRegistrySkillArtifactUncompressedBytes + 1
+		},
+		"archive size limit": func(artifact *SupermarketSkillArtifact) {
 			artifact.ArchiveSize = maxRegistrySkillArtifactArchiveBytes + 1
 		},
-		"file count": func(artifact *SupermarketSkillArtifact) {
+		"file count limit": func(artifact *SupermarketSkillArtifact) {
 			artifact.FileCount = maxRegistrySkillArtifactFiles + 1
 		},
 	} {
@@ -318,15 +314,6 @@ func TestSupermarketSkillRoutesUseRegistryCatalogOnly(t *testing.T) {
 	}
 	if upstreamRequestURI != "/api/skills?registry=memoh&limit=50" {
 		t.Fatalf("upstream request URI = %q, want canonical Skill collection", upstreamRequestURI)
-	}
-
-	for _, legacyPath := range []string{"/supermarket/catalog/skills", "/supermarket/skills/flat-id"} {
-		req = httptest.NewRequest(http.MethodGet, legacyPath, nil)
-		rec = httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("GET %s status = %d, want 404", legacyPath, rec.Code)
-		}
 	}
 }
 

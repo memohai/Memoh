@@ -839,7 +839,7 @@ func sealSupermarketPluginEntry(t *testing.T, entry *SupermarketPluginEntry) []b
 	return payload
 }
 
-func TestPluginBundleArchiveEntryAllowsTrustedBundleFiles(t *testing.T) {
+func TestPluginBundleArchiveEntryClassifiesEntries(t *testing.T) {
 	tests := []struct {
 		name         string
 		wantKind     string
@@ -859,17 +859,10 @@ func TestPluginBundleArchiveEntryAllowsTrustedBundleFiles(t *testing.T) {
 			t.Fatalf("pluginBundleArchiveEntry(%q) = %+v, %v; want kind %q relative %q", tt.name, got, ok, tt.wantKind, tt.wantRelative)
 		}
 	}
-}
 
-func TestPluginBundleArchiveEntryRejectsEmbeddedSkillContent(t *testing.T) {
-	if _, ok, err := pluginBundleArchiveEntry("github", "github", "github/skills/review/SKILL.md"); err == nil || ok {
-		t.Fatalf("embedded Skill entry = ok:%v err:%v, want explicit rejection", ok, err)
-	}
-}
-
-func TestPluginBundleArchiveEntryRejectsUnsafeNames(t *testing.T) {
 	for _, name := range []string{
 		"",
+		"github/skills/review/SKILL.md",
 		"github/../escape",
 		"github/skills/../escape",
 		"github/scripts/../escape",
@@ -885,24 +878,27 @@ func TestPluginBundleArchiveEntryRejectsUnsafeNames(t *testing.T) {
 	}
 }
 
-func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
-	pluginRoot, err := skillset.PluginDirForID("github")
+func TestExtractPluginBundleArchivePublishesSafeBundle(t *testing.T) {
+	pluginRoot, err := skillset.PluginDirForID("github_plugin")
 	if err != nil {
 		t.Fatalf("plugin root: %v", err)
 	}
-	archive := tarArchive(t, map[string]string{
-		"github/plugin.yaml":     "id: github",
-		"github/hooks.json":      `{"version":1,"hooks":[]}`,
-		"github/scripts/hook.py": "print('ok')",
+	archive := tarArchiveEntries(t, []pluginBundleTarEntry{
+		{name: "github-source/plugin.yaml", content: "id: github_plugin"},
+		{name: "github-source/hooks.json", content: `{"version":1,"hooks":[]}`},
+		{name: "github-source/scripts/it's.sh", content: "#!/bin/sh\n", mode: 0o755},
 	})
 	writer := &pluginBundleTestWriter{files: map[string]string{
-		pluginRoot + "/hooks.json":          `{"version":1,"hooks":[{"name":"stale"}]}`,
-		pluginRoot + "/scripts/stale.py":    "print('stale')",
-		"/data/.memoh/plugins/other/keep":   "keep",
-		"/data/.memoh/plugins/github2/keep": "keep",
+		pluginRoot + "/hooks.json":                "stale",
+		pluginRoot + "/scripts/stale.py":          "print('stale')",
+		"/data/.memoh/plugins/github-source/keep": "keep",
+		"/data/.memoh/plugins/other/keep":         "keep",
+		"/data/.memoh/plugins/github2/keep":       "keep",
 	}}
 
-	result, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive))
+	result, err := extractPluginBundleArchive(
+		context.Background(), writer, "linux", "github-source", "github_plugin", bytes.NewReader(archive),
+	)
 	if err != nil {
 		t.Fatalf("extractPluginBundleArchive returned error: %v", err)
 	}
@@ -912,30 +908,27 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 	if len(writer.renames) != 2 {
 		t.Fatalf("renames = %+v, want backup and publish", writer.renames)
 	}
-	if writer.renames[0].oldPath != pluginRoot || !strings.Contains(writer.renames[0].newPath, "/.staging/backup-github-") {
+	if writer.renames[0].oldPath != pluginRoot || !strings.Contains(writer.renames[0].newPath, "/.staging/backup-github_plugin-") {
 		t.Fatalf("first rename = %+v, want plugin root to backup", writer.renames[0])
 	}
-	if !strings.Contains(writer.renames[1].oldPath, "/.staging/install-github-") || writer.renames[1].newPath != pluginRoot {
+	if !strings.Contains(writer.renames[1].oldPath, "/.staging/install-github_plugin-") || writer.renames[1].newPath != pluginRoot {
 		t.Fatalf("second rename = %+v, want staged bundle publication", writer.renames[1])
 	}
 	wantFiles := map[string]string{
-		pluginRoot + "/plugin.yaml":     "id: github",
+		pluginRoot + "/plugin.yaml":     "id: github_plugin",
 		pluginRoot + "/hooks.json":      `{"version":1,"hooks":[]}`,
-		pluginRoot + "/scripts/hook.py": "print('ok')",
+		pluginRoot + "/scripts/it's.sh": "#!/bin/sh\n",
 	}
 	for path, want := range wantFiles {
 		if got := writer.files[path]; got != want {
 			t.Fatalf("file %s = %q, want %q", path, got, want)
 		}
 	}
-	for _, stalePath := range []string{
-		pluginRoot + "/scripts/stale.py",
-	} {
-		if _, ok := writer.files[stalePath]; ok {
-			t.Fatalf("stale file was not cleared before extraction: %s", stalePath)
-		}
+	if _, ok := writer.files[pluginRoot+"/scripts/stale.py"]; ok {
+		t.Fatal("stale file was not cleared before extraction")
 	}
 	for _, preservedPath := range []string{
+		"/data/.memoh/plugins/github-source/keep",
 		"/data/.memoh/plugins/other/keep",
 		"/data/.memoh/plugins/github2/keep",
 	} {
@@ -947,51 +940,6 @@ func TestExtractPluginBundleArchiveWritesOnlySafeBundleFiles(t *testing.T) {
 		if strings.Contains(filePath, "outside") || strings.Contains(filePath, "escape") {
 			t.Fatalf("non-runtime bundle file was written: %s", filePath)
 		}
-	}
-}
-
-func TestExtractPluginBundleArchiveSeparatesArchiveAndTargetPluginIDs(t *testing.T) {
-	archive := tarArchive(t, map[string]string{
-		"github-source/plugin.yaml":     "id: github_plugin",
-		"github-source/hooks.json":      `{"version":1,"hooks":[]}`,
-		"github-source/scripts/hook.py": "print('ok')",
-	})
-	writer := &pluginBundleTestWriter{files: map[string]string{}}
-
-	result, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github-source", "github_plugin", bytes.NewReader(archive))
-	if err != nil {
-		t.Fatalf("extractPluginBundleArchive returned error: %v", err)
-	}
-	if result.Hooks.FilesWritten != 1 || result.Scripts.FilesWritten != 1 {
-		t.Fatalf("install result = %+v, want one hook and one script", result)
-	}
-
-	pluginRoot, err := skillset.PluginDirForID("github_plugin")
-	if err != nil {
-		t.Fatalf("plugin root: %v", err)
-	}
-	if got := writer.files[pluginRoot+"/hooks.json"]; got != `{"version":1,"hooks":[]}` {
-		t.Fatalf("target hooks file = %q, want hooks config", got)
-	}
-	if got := writer.files[pluginRoot+"/plugin.yaml"]; got != "id: github_plugin" {
-		t.Fatalf("target plugin manifest = %q, want normalized target manifest", got)
-	}
-	if got := writer.files[pluginRoot+"/scripts/hook.py"]; got != "print('ok')" {
-		t.Fatalf("target script file = %q, want script", got)
-	}
-}
-
-func TestExtractPluginBundleArchivePreservesExecutableScriptMode(t *testing.T) {
-	archive := tarArchiveEntries(t, []pluginBundleTarEntry{
-		{name: "github/plugin.yaml", content: "id: github"},
-		{name: "github/scripts/it's.sh", content: "#!/bin/sh\n", mode: 0o755},
-	})
-	writer := &pluginBundleTestWriter{files: map[string]string{}}
-
-	if _, err := extractPluginBundleArchive(
-		context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive),
-	); err != nil {
-		t.Fatalf("extractPluginBundleArchive returned error: %v", err)
 	}
 	if len(writer.execCommands) != 1 {
 		t.Fatalf("chmod commands = %v, want one", writer.execCommands)
