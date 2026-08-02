@@ -629,26 +629,14 @@ func (s *Service) normalizeInstallation(ctx context.Context, row sqlc.BotPluginI
 	}, nil
 }
 
-// OwnsRegistrySkill reports whether an installed Plugin still references one
-// canonical Registry Skill path. Disabled and not-yet-ready Plugins retain
-// ownership so the Skill cannot be deleted directly.
-func OwnsRegistrySkill(installations []Installation, sourcePath string) bool {
-	return ownsRegistrySkill(installations, sourcePath, "", false)
-}
-
+// OwnsRegistrySkillAtTarget reports whether an installed Plugin still
+// references one canonical Registry Skill path in a workspace target.
 func OwnsRegistrySkillAtTarget(
 	installations []Installation,
 	sourcePath, workspaceTargetID string,
 ) bool {
-	return ownsRegistrySkill(installations, sourcePath, strings.TrimSpace(workspaceTargetID), true)
-}
-
-func ownsRegistrySkill(
-	installations []Installation,
-	sourcePath, workspaceTargetID string,
-	matchTarget bool,
-) bool {
 	sourcePath = path.Clean(strings.TrimSpace(sourcePath))
+	workspaceTargetID = strings.TrimSpace(workspaceTargetID)
 	if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); !ok {
 		return false
 	}
@@ -656,11 +644,9 @@ func ownsRegistrySkill(
 		if installation.Status == StatusUninstalled {
 			continue
 		}
-		if matchTarget {
-			installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
-			if strings.TrimSpace(installedTarget) != workspaceTargetID {
-				continue
-			}
+		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
+		if strings.TrimSpace(installedTarget) != workspaceTargetID {
+			continue
 		}
 		for _, resource := range installation.Resources {
 			if resource.Type == "skill" && path.Clean(strings.TrimSpace(resource.ResourceID)) == sourcePath {

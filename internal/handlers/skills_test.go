@@ -514,13 +514,11 @@ func TestLoadSkillsUsesEffectiveSetAndPromptReflectsOverrideFallback(t *testing.
 	if err != nil {
 		t.Fatalf("get bridge client: %v", err)
 	}
-	roots, registrySkillRoots, err := env.handler.skillDiscoveryRoots(
-		context.Background(), env.botID, workspace.WorkspaceTargetNative,
-	)
+	roots, err := env.handler.skillDiscoveryRoots(context.Background(), env.botID)
 	if err != nil {
 		t.Fatalf("resolve skill discovery roots: %v", err)
 	}
-	if err := skillset.ApplyActionWithRegistrySkillRoots(context.Background(), client, roots, registrySkillRoots, skillset.ActionRequest{
+	if err := skillset.ApplyAction(context.Background(), client, roots, skillset.ActionRequest{
 		Action:     skillset.ActionDisable,
 		TargetPath: managedPath,
 	}); err != nil {

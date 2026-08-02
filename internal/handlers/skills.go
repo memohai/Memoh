@@ -420,7 +420,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 }
 
 func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, req SkillsActionRequest) error {
-	ctx, targetID, err := h.pinCurrentWorkspaceTarget(ctx, botID)
+	ctx, _, err := h.pinCurrentWorkspaceTarget(ctx, botID)
 	if err != nil {
 		return workspaceUnavailableError(err)
 	}
@@ -428,12 +428,12 @@ func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, 
 	if err != nil {
 		return workspaceUnavailableError(err)
 	}
-	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID, targetID)
+	roots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	if err := skillset.ApplyActionWithRegistrySkillRoots(ctx, client, roots, registrySkillRoots, skillset.ActionRequest{
+	if err := skillset.ApplyAction(ctx, client, roots, skillset.ActionRequest{
 		Action:     req.Action,
 		TargetPath: req.TargetPath,
 	}); err != nil {
@@ -445,7 +445,7 @@ func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, 
 
 // LoadSkills loads the effective skills from the container for the given bot.
 func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]SkillItem, error) {
-	ctx, targetID, err := h.pinCurrentWorkspaceTarget(ctx, botID)
+	ctx, _, err := h.pinCurrentWorkspaceTarget(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
@@ -453,11 +453,11 @@ func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]Ski
 	if err != nil {
 		return nil, err
 	}
-	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID, targetID)
+	roots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	items, err := skillset.LoadEffectiveWithRegistrySkillRoots(ctx, client, roots, registrySkillRoots)
+	items, err := skillset.LoadEffective(ctx, client, roots)
 	if err != nil {
 		return nil, err
 	}
@@ -493,7 +493,7 @@ func (h *ContainerdHandler) listSkillsFromContainer(ctx context.Context, botID s
 }
 
 func (h *ContainerdHandler) listSkillEntriesFromContainer(ctx context.Context, botID string) ([]skillset.Entry, error) {
-	ctx, targetID, err := h.pinCurrentWorkspaceTarget(ctx, botID)
+	ctx, _, err := h.pinCurrentWorkspaceTarget(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
@@ -501,11 +501,11 @@ func (h *ContainerdHandler) listSkillEntriesFromContainer(ctx context.Context, b
 	if err != nil {
 		return nil, err
 	}
-	roots, registrySkillRoots, err := h.skillDiscoveryRoots(ctx, botID, targetID)
+	roots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	items, err := skillset.ListWithRegistrySkillRoots(ctx, client, roots, registrySkillRoots)
+	items, err := skillset.List(ctx, client, roots)
 	if err != nil {
 		return nil, err
 	}
@@ -514,68 +514,22 @@ func (h *ContainerdHandler) listSkillEntriesFromContainer(ctx context.Context, b
 
 func (h *ContainerdHandler) skillDiscoveryRoots(
 	ctx context.Context,
-	botID, targetID string,
-) ([]string, []string, error) {
+	botID string,
+) ([]string, error) {
 	var roots []string
 	if h.botService != nil {
 		bot, err := h.botService.Get(ctx, botID)
 		if err == nil {
-			roots = workspace.SkillDiscoveryRootsFromMetadata(bot.Metadata)
-			registrySkillRoots, err := h.pluginRegistrySkillRoots(ctx, botID, targetID)
-			return roots, registrySkillRoots, err
+			return workspace.SkillDiscoveryRootsFromMetadata(bot.Metadata), nil
 		}
 	}
 	if h.manager == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	var err error
 	roots, err = h.manager.ResolveWorkspaceSkillDiscoveryRoots(ctx, botID)
 	if err != nil {
-		return nil, nil, err
-	}
-	registrySkillRoots, err := h.pluginRegistrySkillRoots(ctx, botID, targetID)
-	return roots, registrySkillRoots, err
-}
-
-func (h *ContainerdHandler) pluginRegistrySkillRoots(
-	ctx context.Context,
-	botID, targetID string,
-) ([]string, error) {
-	if h.pluginService == nil {
-		return nil, nil
-	}
-	installations, err := h.pluginService.List(ctx, botID)
-	if err != nil {
 		return nil, err
-	}
-	roots := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, installation := range installations {
-		if !installation.Enabled || installation.Status != pluginspkg.StatusReady {
-			continue
-		}
-		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
-		if strings.TrimSpace(installedTarget) != targetID {
-			continue
-		}
-		for _, resource := range installation.Resources {
-			if resource.Type != "skill" || resource.Status != "installed" {
-				continue
-			}
-			registryID, packageID, skillID, ok := skillset.RegistrySkillIDs(resource.ResourceID)
-			if !ok {
-				continue
-			}
-			root, err := skillset.SkillDirForIDs(registryID, packageID, skillID)
-			if err != nil {
-				continue
-			}
-			if _, ok := seen[root]; ok {
-				continue
-			}
-			seen[root] = struct{}{}
-			roots = append(roots, root)
-		}
 	}
 	return roots, nil
 }

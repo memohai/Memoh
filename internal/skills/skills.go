@@ -170,12 +170,8 @@ func DiscoveryRoots(rawCompatRoots []string) []Root {
 }
 
 func List(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
-	return ListWithRegistrySkillRoots(ctx, client, rawCompatRoots, nil)
-}
-
-func ListWithRegistrySkillRoots(ctx context.Context, client fileClient, rawCompatRoots, rawRegistrySkillRoots []string) ([]Entry, error) {
 	idx := readIndex(ctx, client)
-	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots, rawRegistrySkillRoots)
+	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots)
 	items := scan(ctx, client, roots)
 	resolved := resolve(items, idx.Overrides)
 	writeIndex(ctx, client, idx.withItems(resolved))
@@ -183,11 +179,7 @@ func ListWithRegistrySkillRoots(ctx context.Context, client fileClient, rawCompa
 }
 
 func LoadEffective(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
-	return LoadEffectiveWithRegistrySkillRoots(ctx, client, rawCompatRoots, nil)
-}
-
-func LoadEffectiveWithRegistrySkillRoots(ctx context.Context, client fileClient, rawCompatRoots, rawRegistrySkillRoots []string) ([]Entry, error) {
-	items, err := ListWithRegistrySkillRoots(ctx, client, rawCompatRoots, rawRegistrySkillRoots)
+	items, err := List(ctx, client, rawCompatRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -276,16 +268,12 @@ func metadataBool(metadata map[string]any, key string) (bool, bool) {
 }
 
 func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string, req ActionRequest) error {
-	return ApplyActionWithRegistrySkillRoots(ctx, client, rawCompatRoots, nil, req)
-}
-
-func ApplyActionWithRegistrySkillRoots(ctx context.Context, client fileClient, rawCompatRoots, rawRegistrySkillRoots []string, req ActionRequest) error {
 	targetPath := strings.TrimSpace(req.TargetPath)
 	if targetPath == "" {
 		return bridge.ErrBadRequest
 	}
 
-	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots, rawRegistrySkillRoots)
+	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots)
 	switch strings.TrimSpace(req.Action) {
 	case ActionDisable:
 		idx := readIndex(ctx, client)
@@ -367,27 +355,6 @@ func normalizeCompatDiscoveryRoots(paths []string) []string {
 			continue
 		}
 		if p == ManagedDirPath || p == IndexDirPath || p == LegacyDirPath || p == PluginDirPath {
-			continue
-		}
-		if _, ok := seen[p]; ok {
-			continue
-		}
-		seen[p] = struct{}{}
-		out = append(out, p)
-	}
-	return out
-}
-
-func normalizeRegistrySkillRoots(paths []string) []string {
-	out := make([]string, 0, len(paths))
-	seen := make(map[string]struct{}, len(paths))
-	for _, p := range paths {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		p = path.Clean(p)
-		if _, _, _, ok := RegistrySkillDirIDs(p); !ok {
 			continue
 		}
 		if _, ok := seen[p]; ok {

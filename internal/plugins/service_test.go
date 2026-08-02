@@ -115,44 +115,33 @@ func TestValidateSkillReferencesRequiresNamespacedUniqueIdentity(t *testing.T) {
 	}
 }
 
-func TestOwnsRegistrySkillKeepsSharedAndDisabledPluginReferences(t *testing.T) {
+func TestOwnsRegistrySkillAtTargetKeepsSharedAndDisabledPluginReferences(t *testing.T) {
 	sourcePath := "/data/skills/memoh/notion/meeting/SKILL.md"
 	resource := Resource{Type: "skill", ResourceID: sourcePath, Status: "installed"}
 
 	for name, installation := range map[string]Installation{
-		"ready":      {Status: StatusReady, Enabled: true, Resources: []Resource{resource}},
-		"disabled":   {Status: StatusDisabled, Enabled: false, Resources: []Resource{resource}},
-		"needs auth": {Status: StatusNeedsAuth, Enabled: false, Resources: []Resource{resource}},
+		"ready":      {Status: StatusReady, Enabled: true, Metadata: map[string]any{"workspace_target_id": "remote-target"}, Resources: []Resource{resource}},
+		"disabled":   {Status: StatusDisabled, Enabled: false, Metadata: map[string]any{"workspace_target_id": "remote-target"}, Resources: []Resource{resource}},
+		"needs auth": {Status: StatusNeedsAuth, Enabled: false, Metadata: map[string]any{"workspace_target_id": "remote-target"}, Resources: []Resource{resource}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if !OwnsRegistrySkill([]Installation{installation}, sourcePath) {
+			if !OwnsRegistrySkillAtTarget([]Installation{installation}, sourcePath, "remote-target") {
 				t.Fatal("active installation did not retain Registry Skill ownership")
 			}
 		})
 	}
 
-	if OwnsRegistrySkill([]Installation{{Status: StatusUninstalled, Resources: []Resource{resource}}}, sourcePath) {
+	metadata := map[string]any{"workspace_target_id": "remote-target"}
+	if OwnsRegistrySkillAtTarget([]Installation{{Status: StatusUninstalled, Metadata: metadata, Resources: []Resource{resource}}}, sourcePath, "remote-target") {
 		t.Fatal("uninstalled Plugin retained Registry Skill ownership")
 	}
-	if OwnsRegistrySkill([]Installation{{Status: StatusReady, Resources: []Resource{resource}}}, "/data/skills/memoh/notion/other/SKILL.md") {
+	if OwnsRegistrySkillAtTarget([]Installation{{Status: StatusReady, Metadata: metadata, Resources: []Resource{resource}}}, "/data/skills/memoh/notion/other/SKILL.md", "remote-target") {
 		t.Fatal("Plugin owned an unrelated Registry Skill")
 	}
-	if OwnsRegistrySkill([]Installation{{Status: StatusReady, Resources: []Resource{resource}}}, "/data/skills/user/personal/meeting/SKILL.md") {
+	if OwnsRegistrySkillAtTarget([]Installation{{Status: StatusReady, Metadata: metadata, Resources: []Resource{resource}}}, "/data/skills/user/personal/meeting/SKILL.md", "remote-target") {
 		t.Fatal("Plugin owned a user-authored Skill")
 	}
-}
-
-func TestOwnsRegistrySkillAtTargetDoesNotCrossWorkspaceTargets(t *testing.T) {
-	sourcePath := "/data/skills/memoh/notion/meeting/SKILL.md"
-	installation := Installation{
-		Status:    StatusReady,
-		Metadata:  map[string]any{"workspace_target_id": "remote-target"},
-		Resources: []Resource{{Type: "skill", ResourceID: sourcePath}},
-	}
-	if !OwnsRegistrySkillAtTarget([]Installation{installation}, sourcePath, "remote-target") {
-		t.Fatal("Plugin did not own its Registry Skill on the installation target")
-	}
-	if OwnsRegistrySkillAtTarget([]Installation{installation}, sourcePath, "native") {
+	if OwnsRegistrySkillAtTarget([]Installation{{Status: StatusReady, Metadata: metadata, Resources: []Resource{resource}}}, sourcePath, "native") {
 		t.Fatal("Plugin Registry Skill ownership leaked into another workspace target")
 	}
 }

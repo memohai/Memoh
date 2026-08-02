@@ -420,9 +420,9 @@ func TestListDiscoversRegistrySkillsWithoutRenaming(t *testing.T) {
 	client.listings[packagePath] = []*pb.FileEntry{{Path: "xlsx", IsDir: true}}
 	client.listings[skillPath] = []*pb.FileEntry{{Path: "SKILL.md"}}
 	client.files[pathJoin(skillPath, "SKILL.md")] = "---\nname: xlsx\ndescription: Spreadsheet helper\n---\n\n# XLSX\n"
-	items, err := ListWithRegistrySkillRoots(context.Background(), client, []string{}, nil)
+	items, err := List(context.Background(), client, []string{})
 	if err != nil {
-		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
+		t.Fatalf("List() error = %v", err)
 	}
 	got, ok := findBySourcePath(items, pathJoin(skillPath, "SKILL.md"))
 	if !ok {
@@ -477,9 +477,9 @@ func TestListDiscoversUserAndRegistryNamespaces(t *testing.T) {
 	client.listings[skillPath] = []*pb.FileEntry{{Path: "SKILL.md"}}
 	client.files[pathJoin(userPackage, "openai-api-curated", "SKILL.md")] = "---\nname: openai-api-curated\ndescription: User\n---\n\n# User\n"
 	client.files[pathJoin(skillPath, "SKILL.md")] = "---\nname: xlsx\ndescription: Spreadsheet\n---\n\n# XLSX\n"
-	items, err := ListWithRegistrySkillRoots(context.Background(), client, []string{}, nil)
+	items, err := List(context.Background(), client, []string{})
 	if err != nil {
-		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
+		t.Fatalf("List() error = %v", err)
 	}
 	if _, ok := findBySourcePath(items, pathJoin(userPackage, "openai-api-curated", "SKILL.md")); !ok {
 		t.Fatalf("user skill not discovered: %+v", items)
@@ -546,12 +546,9 @@ func TestListKeepsBuiltinAndCompatAheadOfRegistrySkills(t *testing.T) {
 	client.files[registryBuiltinPath] = "---\nname: shared-builtin\ndescription: Registry\n---\n\n# Registry\n"
 	client.files[registryCompatPath] = "---\nname: shared-compat\ndescription: Registry\n---\n\n# Registry\n"
 
-	items, err := ListWithRegistrySkillRoots(context.Background(), client, []string{compatRoot}, []string{
-		pathJoin(registryPackage, "registry-builtin"),
-		pathJoin(registryPackage, "registry-compat"),
-	})
+	items, err := List(context.Background(), client, []string{compatRoot})
 	if err != nil {
-		t.Fatalf("ListWithRegistrySkillRoots() error = %v", err)
+		t.Fatalf("List() error = %v", err)
 	}
 	for effectivePath, registryPath := range map[string]string{
 		builtinPath: registryBuiltinPath,
@@ -609,20 +606,6 @@ func TestDiscoveryRootsAllowExplicitEmptyCompatRoots(t *testing.T) {
 	}
 	if !slices.Equal(roots, want) {
 		t.Fatalf("DiscoveryRoots(empty) = %+v, want %+v", roots, want)
-	}
-}
-
-func TestNormalizeRegistrySkillRootsRequiresExactNamespacedSkillPaths(t *testing.T) {
-	roots := normalizeRegistrySkillRoots([]string{
-		" /data/skills/memoh/github/review ",
-		"/data/skills/memoh/github/review",
-		"/data/skills/user/personal/review",
-		"/data/skills/memoh/github",
-		"relative/skills/memoh/github/review",
-	})
-	want := []string{"/data/skills/memoh/github/review"}
-	if !slices.Equal(roots, want) {
-		t.Fatalf("normalizeRegistrySkillRoots() = %+v, want %+v", roots, want)
 	}
 }
 
