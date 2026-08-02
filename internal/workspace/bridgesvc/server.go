@@ -839,6 +839,9 @@ func (s *Server) Rename(_ context.Context, req *pb.RenameRequest) (*pb.RenameRes
 		return nil, status.Errorf(codes.Internal, "mkdir parent: %v", err)
 	}
 	if err := os.Rename(oldPath, newPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, status.Errorf(codes.NotFound, "rename: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "rename: %v", err)
 	}
 	return &pb.RenameResponse{}, nil
