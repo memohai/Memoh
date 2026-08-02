@@ -3351,8 +3351,6 @@ definitions:
         type: string
       registry_id:
         type: string
-      runtime_requirements:
-        $ref: '#/definitions/handlers.SupermarketSkillRuntimeRequirements'
       schema_version:
         type: string
       skill_id:
@@ -3512,8 +3510,6 @@ definitions:
         type: string
       registry_revision:
         type: string
-      runtime_requirements:
-        $ref: '#/definitions/handlers.SupermarketSkillRuntimeRequirements'
       skill_id:
         type: string
       source_revision:
@@ -3659,15 +3655,6 @@ definitions:
     - content_type
     - digest
     - size
-    type: object
-  handlers.SupermarketSkillRuntimeRequirements:
-    properties:
-      os:
-        items:
-          type: string
-        type: array
-    required:
-    - os
     type: object
   handlers.SupermarketSkillSource:
     properties:
@@ -14302,10 +14289,6 @@ paths:
       - description: Exact tag
         in: query
         name: tag
-        type: string
-      - description: Target OS
-        in: query
-        name: os
         type: string
       - description: Page number
         in: query

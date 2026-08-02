@@ -38,7 +38,6 @@ const (
 	CodeRegistryUnavailable              Code = "registry.unavailable"
 	CodeRegistrySkillNotFound            Code = "registry.skill_not_found"
 	CodeRegistrySkillInvalid             Code = "registry.skill_invalid"
-	CodeRegistrySkillIncompatible        Code = "registry.skill_incompatible"
 	CodeRegistrySkillInstallFailed       Code = "registry.skill_install_failed"
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
@@ -180,11 +179,6 @@ var catalog = map[Code]Definition{
 	CodeRegistrySkillInvalid: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The Registry Skill package is invalid.",
-	},
-	CodeRegistrySkillIncompatible: {
-		HTTPStatus:  http.StatusConflict,
-		Detail:      "The Registry Skill does not support the selected workspace operating system.",
-		AllowedArgs: []string{"os", "supported_os"},
 	},
 	CodeRegistrySkillInstallFailed: {
 		HTTPStatus: http.StatusInternalServerError,

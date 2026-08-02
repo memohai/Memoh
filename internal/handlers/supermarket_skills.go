@@ -66,10 +66,6 @@ type SupermarketSkillCategory struct {
 	Registries []SupermarketSkillCategoryRegistry `json:"registries" validate:"required"`
 }
 
-type SupermarketSkillRuntimeRequirements struct {
-	OS []string `json:"os" validate:"required"`
-}
-
 type SupermarketSkillSource struct {
 	Type       string `json:"type" validate:"required"`
 	Revision   string `json:"revision" validate:"required"`
@@ -108,24 +104,23 @@ type SupermarketSkillIcon struct {
 }
 
 type SupermarketCatalogSkill struct {
-	SchemaVersion       string                              `json:"schema_version" validate:"required"`
-	RegistryID          string                              `json:"registry_id" validate:"required"`
-	PackageID           string                              `json:"package_id" validate:"required"`
-	SkillID             string                              `json:"skill_id" validate:"required"`
-	InstallID           string                              `json:"install_id" validate:"required"`
-	Name                string                              `json:"name" validate:"required"`
-	Description         string                              `json:"description" validate:"required"`
-	Author              SupermarketAuthor                   `json:"author" validate:"required"`
-	Homepage            string                              `json:"homepage,omitempty"`
-	Tags                []string                            `json:"tags" validate:"required"`
-	Category            string                              `json:"category" validate:"required"`
-	CategoryName        string                              `json:"category_name" validate:"required"`
-	SourceCategory      string                              `json:"source_category,omitempty"`
-	RuntimeRequirements SupermarketSkillRuntimeRequirements `json:"runtime_requirements"`
-	Source              SupermarketSkillSource              `json:"source" validate:"required"`
-	Files               []string                            `json:"files" validate:"required"`
-	Icon                *SupermarketSkillIcon               `json:"icon,omitempty"`
-	Artifact            SupermarketSkillArtifact            `json:"artifact" validate:"required"`
+	SchemaVersion  string                   `json:"schema_version" validate:"required"`
+	RegistryID     string                   `json:"registry_id" validate:"required"`
+	PackageID      string                   `json:"package_id" validate:"required"`
+	SkillID        string                   `json:"skill_id" validate:"required"`
+	InstallID      string                   `json:"install_id" validate:"required"`
+	Name           string                   `json:"name" validate:"required"`
+	Description    string                   `json:"description" validate:"required"`
+	Author         SupermarketAuthor        `json:"author" validate:"required"`
+	Homepage       string                   `json:"homepage,omitempty"`
+	Tags           []string                 `json:"tags" validate:"required"`
+	Category       string                   `json:"category" validate:"required"`
+	CategoryName   string                   `json:"category_name" validate:"required"`
+	SourceCategory string                   `json:"source_category,omitempty"`
+	Source         SupermarketSkillSource   `json:"source" validate:"required"`
+	Files          []string                 `json:"files" validate:"required"`
+	Icon           *SupermarketSkillIcon    `json:"icon,omitempty"`
+	Artifact       SupermarketSkillArtifact `json:"artifact" validate:"required"`
 }
 
 type SupermarketCatalogSkillListResponse struct {
@@ -192,7 +187,6 @@ func (h *SupermarketHandler) ListRegistryCategories(c echo.Context) error {
 // @Param package query string false "Package ID"
 // @Param category query string false "Category ID"
 // @Param tag query string false "Exact tag"
-// @Param os query string false "Target OS"
 // @Param page query int false "Page number"
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"
@@ -422,58 +416,6 @@ func (h *SupermarketHandler) installRegistrySkill(
 	}, nil
 }
 
-func (h *SupermarketHandler) installRegistrySkillArtifact(
-	ctx context.Context,
-	client *bridge.Client,
-	workspaceOS string,
-	directOwner bool,
-	registryID, packageID, skillID string,
-) (registrySkillArtifactInstallResult, error) {
-	if client == nil {
-		return registrySkillArtifactInstallResult{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInstallFailed,
-			errors.New("workspace is not reachable"),
-			nil,
-		)
-	}
-	skill, err := h.fetchRegistrySkill(ctx, registryID, packageID, skillID)
-	if err != nil {
-		return registrySkillArtifactInstallResult{}, err
-	}
-	if err := validateRegistrySkill(skill, registryID, packageID, skillID); err != nil {
-		return registrySkillArtifactInstallResult{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
-	}
-	return h.installResolvedRegistrySkillArtifact(ctx, client, workspaceOS, directOwner, skill)
-}
-
-func (h *SupermarketHandler) installResolvedRegistrySkillArtifact(
-	ctx context.Context,
-	client *bridge.Client,
-	workspaceOS string,
-	directOwner bool,
-	skill SupermarketCatalogSkill,
-) (registrySkillArtifactInstallResult, error) {
-	if client == nil {
-		return registrySkillArtifactInstallResult{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInstallFailed,
-			errors.New("workspace is not reachable"),
-			nil,
-		)
-	}
-	prepared, err := h.prepareResolvedRegistrySkillArtifact(ctx, workspaceOS, skill)
-	if err != nil {
-		return registrySkillArtifactInstallResult{}, err
-	}
-	publication, installed, err := publishPreparedRegistrySkillArtifact(ctx, client, directOwner, prepared)
-	if err != nil {
-		return registrySkillArtifactInstallResult{}, err
-	}
-	if err := publication.Commit(ctx); err != nil && h.logger != nil {
-		h.logger.Warn("cleanup Registry Skill backup failed", slog.Any("error", err))
-	}
-	return installed, nil
-}
-
 func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifact(
 	ctx context.Context,
 	workspaceOS string,
@@ -505,15 +447,6 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 	maxUncompressedBytes, maxArchiveBytes int64,
 	maxFiles int,
 ) (preparedRegistrySkillArtifact, error) {
-	if !registrySkillSupportsOS(skill.RuntimeRequirements, workspaceOS) {
-		return preparedRegistrySkillArtifact{}, apperror.New(
-			apperror.CodeRegistrySkillIncompatible,
-			map[string]string{
-				"os":           normalizeRegistrySkillOSLabel(workspaceOS),
-				"supported_os": strings.Join(normalizedRegistrySkillOSList(skill.RuntimeRequirements.OS), ","),
-			},
-		)
-	}
 	if skill.Artifact.UncompressedSize < 1 ||
 		skill.Artifact.UncompressedSize > maxRegistrySkillArtifactUncompressedBytes {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(
@@ -703,11 +636,6 @@ func validateRegistrySkill(skill SupermarketCatalogSkill, registryID, packageID,
 	if skill.InstallID != expectedInstallID || !skillset.IsValidName(skill.InstallID) {
 		return errors.New("registry Skill install_id is invalid")
 	}
-	for _, runtimeOS := range skill.RuntimeRequirements.OS {
-		if _, ok := normalizeRegistrySkillOS(runtimeOS); !ok {
-			return fmt.Errorf("registry Skill runtime requirement OS %q is unsupported", runtimeOS)
-		}
-	}
 	artifact := skill.Artifact
 	if artifact.Format != "memoh_skill_v1" || artifact.ContentType != "application/gzip" {
 		return errors.New("registry Skill Artifact format is unsupported")
@@ -734,59 +662,6 @@ func validateRegistrySkill(skill SupermarketCatalogSkill, registryID, packageID,
 		return errors.New("registry Skill Artifact download URL is missing")
 	}
 	return nil
-}
-
-func normalizeRegistrySkillOS(value string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "darwin":
-		return "darwin", true
-	case "linux":
-		return "linux", true
-	case "windows", "win32":
-		return "win32", true
-	default:
-		return "", false
-	}
-}
-
-func normalizeRegistrySkillOSLabel(value string) string {
-	if normalized, ok := normalizeRegistrySkillOS(value); ok {
-		return normalized
-	}
-	return strings.ToLower(strings.TrimSpace(value))
-}
-
-func normalizedRegistrySkillOSList(values []string) []string {
-	result := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		normalized, ok := normalizeRegistrySkillOS(value)
-		if !ok {
-			continue
-		}
-		if _, exists := seen[normalized]; exists {
-			continue
-		}
-		seen[normalized] = struct{}{}
-		result = append(result, normalized)
-	}
-	return result
-}
-
-func registrySkillSupportsOS(requirements SupermarketSkillRuntimeRequirements, workspaceOS string) bool {
-	if len(requirements.OS) == 0 {
-		return true
-	}
-	targetOS, ok := normalizeRegistrySkillOS(workspaceOS)
-	if !ok {
-		return false
-	}
-	for _, supportedOS := range normalizedRegistrySkillOSList(requirements.OS) {
-		if supportedOS == targetOS {
-			return true
-		}
-	}
-	return false
 }
 
 func (h *SupermarketHandler) downloadRegistrySkillArtifact(

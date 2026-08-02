@@ -791,14 +791,13 @@ func validSupermarketPluginEntry(
 			sourceRevision = "source-revision"
 		}
 		resolved = append(resolved, SupermarketPluginResolvedSkill{
-			RegistryID:          skill.RegistryID,
-			PackageID:           skill.PackageID,
-			SkillID:             skill.SkillID,
-			RegistryRevision:    strings.Repeat("b", 64),
-			SourceRevision:      sourceRevision,
-			InstallID:           skill.InstallID,
-			RuntimeRequirements: skill.RuntimeRequirements,
-			Artifact:            skill.Artifact,
+			RegistryID:       skill.RegistryID,
+			PackageID:        skill.PackageID,
+			SkillID:          skill.SkillID,
+			RegistryRevision: strings.Repeat("b", 64),
+			SourceRevision:   sourceRevision,
+			InstallID:        skill.InstallID,
+			Artifact:         skill.Artifact,
 		})
 	}
 	return SupermarketPluginEntry{

@@ -356,7 +356,7 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := preflightPluginSkills(target.Info.OS, entry.Release.Skills); err != nil {
+	if err := preflightPluginSkills(entry.Release.Skills); err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
 	}
 	bundleArchive, err := h.preparePluginBundle(
@@ -512,14 +512,13 @@ type SupermarketPluginArtifact struct {
 }
 
 type SupermarketPluginResolvedSkill struct {
-	RegistryID          string                              `json:"registry_id" validate:"required"`
-	PackageID           string                              `json:"package_id" validate:"required"`
-	SkillID             string                              `json:"skill_id" validate:"required"`
-	RegistryRevision    string                              `json:"registry_revision" validate:"required"`
-	SourceRevision      string                              `json:"source_revision" validate:"required"`
-	InstallID           string                              `json:"install_id" validate:"required"`
-	RuntimeRequirements SupermarketSkillRuntimeRequirements `json:"runtime_requirements"`
-	Artifact            SupermarketSkillArtifact            `json:"artifact" validate:"required"`
+	RegistryID       string                   `json:"registry_id" validate:"required"`
+	PackageID        string                   `json:"package_id" validate:"required"`
+	SkillID          string                   `json:"skill_id" validate:"required"`
+	RegistryRevision string                   `json:"registry_revision" validate:"required"`
+	SourceRevision   string                   `json:"source_revision" validate:"required"`
+	InstallID        string                   `json:"install_id" validate:"required"`
+	Artifact         SupermarketSkillArtifact `json:"artifact" validate:"required"`
 }
 
 type SupermarketPluginRelease struct {
@@ -763,13 +762,12 @@ func isCanonicalSHA256(value string) bool {
 
 func (skill SupermarketPluginResolvedSkill) catalogSkill() SupermarketCatalogSkill {
 	return SupermarketCatalogSkill{
-		RegistryID:          skill.RegistryID,
-		PackageID:           skill.PackageID,
-		SkillID:             skill.SkillID,
-		InstallID:           skill.InstallID,
-		RuntimeRequirements: skill.RuntimeRequirements,
-		Source:              SupermarketSkillSource{Revision: skill.SourceRevision},
-		Artifact:            skill.Artifact,
+		RegistryID: skill.RegistryID,
+		PackageID:  skill.PackageID,
+		SkillID:    skill.SkillID,
+		InstallID:  skill.InstallID,
+		Source:     SupermarketSkillSource{Revision: skill.SourceRevision},
+		Artifact:   skill.Artifact,
 	}
 }
 
@@ -805,7 +803,7 @@ func (h *SupermarketHandler) preparePluginSkills(
 	if len(resolvedSkills) > maxPluginReleaseSkills {
 		return nil, result, fmt.Errorf("plugin release exceeds the %d Skill limit", maxPluginReleaseSkills)
 	}
-	if err := preflightPluginSkills(workspaceOS, resolvedSkills); err != nil {
+	if err := preflightPluginSkills(resolvedSkills); err != nil {
 		return nil, result, err
 	}
 	prepared := make([]preparedPluginSkill, 0, len(resolvedSkills))
@@ -906,7 +904,7 @@ func (b *pluginSkillArtifactBudget) add(artifact SupermarketSkillArtifact) error
 	return nil
 }
 
-func preflightPluginSkills(workspaceOS string, resolvedSkills []SupermarketPluginResolvedSkill) error {
+func preflightPluginSkills(resolvedSkills []SupermarketPluginResolvedSkill) error {
 	budget := pluginSkillArtifactBudget{}
 	descriptors := make(map[string]SupermarketSkillArtifact, len(resolvedSkills))
 	for _, resolved := range resolvedSkills {
@@ -915,13 +913,6 @@ func preflightPluginSkills(workspaceOS string, resolvedSkills []SupermarketPlugi
 			PackageID:  resolved.PackageID,
 			SkillID:    resolved.SkillID,
 		})
-		if !registrySkillSupportsOS(resolved.RuntimeRequirements, workspaceOS) {
-			return fmt.Errorf(
-				"plugin Skill %q is incompatible with %s",
-				identity,
-				normalizeRegistrySkillOSLabel(workspaceOS),
-			)
-		}
 		if err := budget.add(resolved.Artifact); err != nil {
 			return err
 		}

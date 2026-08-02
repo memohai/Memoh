@@ -13081,12 +13081,6 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Target OS",
-                        "name": "os",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "description": "Page number",
                         "name": "page",
@@ -19516,9 +19510,6 @@ const docTemplate = `{
                 "registry_id": {
                     "type": "string"
                 },
-                "runtime_requirements": {
-                    "$ref": "#/definitions/handlers.SupermarketSkillRuntimeRequirements"
-                },
                 "schema_version": {
                     "type": "string"
                 },
@@ -19742,9 +19733,6 @@ const docTemplate = `{
                 "registry_revision": {
                     "type": "string"
                 },
-                "runtime_requirements": {
-                    "$ref": "#/definitions/handlers.SupermarketSkillRuntimeRequirements"
-                },
                 "skill_id": {
                     "type": "string"
                 },
@@ -19943,20 +19931,6 @@ const docTemplate = `{
                 },
                 "size": {
                     "type": "integer"
-                }
-            }
-        },
-        "handlers.SupermarketSkillRuntimeRequirements": {
-            "type": "object",
-            "required": [
-                "os"
-            ],
-            "properties": {
-                "os": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 }
             }
         },
