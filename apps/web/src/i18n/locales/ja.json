@@ -134,8 +134,7 @@
     "registry": {
       "unavailable": "Supermarket に接続できません。しばらくしてからもう一度お試しください。",
       "skill_not_found": "この Registry Skill は現在利用できません。",
-      "skill_invalid": "この Registry Skill Package は無効なため、インストールできません。",
-      "skill_incompatible": "この Registry Skill は選択したワークスペースのオペレーティングシステムをサポートしていません。",
+      "skill_invalid": "この Skill Package は無効なため、インストールできません。",
       "skill_install_failed": "Registry Skill をインストールできませんでした。もう一度お試しください。"
     },
     "workspace": {
@@ -2893,7 +2892,6 @@
       "legacyBadge": "遺産",
       "compatBadge": "外部の",
       "pluginBadge": "Plugin",
-      "registryBadge": "Registry",
       "description": "説明",
       "descriptionPlaceholder": "Skillの説明を入力してください",
       "content": "コンテンツ",

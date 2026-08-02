@@ -137,8 +137,7 @@
     "registry": {
       "unavailable": "暂时无法连接 Supermarket，请稍后重试。",
       "skill_not_found": "该 Registry Skill 已不存在。",
-      "skill_invalid": "该 Registry Skill 包无效，无法安装。",
-      "skill_incompatible": "该 Registry Skill 不支持所选工作区的操作系统。",
+      "skill_invalid": "该 Skill 包无效，无法安装。",
       "skill_install_failed": "Registry Skill 安装失败，请重试。"
     },
     "workspace": {
@@ -2912,7 +2911,6 @@
       "legacyBadge": "旧版",
       "compatBadge": "外部",
       "pluginBadge": "Plugin",
-      "registryBadge": "Registry",
       "description": "描述",
       "descriptionPlaceholder": "输入技能描述",
       "content": "内容",

@@ -619,8 +619,6 @@ function sourceKindLabel(kind?: string) {
       return t('bots.skills.compatBadge')
     case 'plugin':
       return t('bots.skills.pluginBadge')
-    case 'registry':
-      return t('bots.skills.registryBadge')
     default:
       return t('bots.skills.managedBadge')
   }
@@ -640,7 +638,7 @@ function skillStateLabel(skill: SkillItem) {
 function sourceSummary(skill: SkillItem) {
   const sourcePath = skill.source_path || ''
   if (!sourcePath) return ''
-  if (!skill.source_kind || skill.source_kind === 'managed') {
+  if (!skill.source_kind || skill.source_kind === 'managed' || skill.source_kind === 'registry') {
     return sourcePath
   }
   return `${sourceKindLabel(skill.source_kind)} · ${sourcePath}`
