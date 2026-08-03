@@ -522,14 +522,9 @@ func (h *SupermarketHandler) installRegistryPackage(
 	if err != nil {
 		return InstallRegistryPackageResponse{}, workspaceTargetHTTPError(h.logger, err)
 	}
-	pkg, err := h.fetchRegistryPackage(targetContext, registryID, packageID)
+	pkg, err := h.fetchRegistryPackageRelease(targetContext, registryID, packageID, expectedRevision)
 	if err != nil {
 		return InstallRegistryPackageResponse{}, err
-	}
-	if pkg.Revision != expectedRevision {
-		return InstallRegistryPackageResponse{}, echo.NewHTTPError(
-			http.StatusConflict, "Package changed; refresh before installing",
-		)
 	}
 	prepared, err := h.prepareRegistryPackage(targetContext, target.Info.OS, pkg, registryID, packageID, expectedRevision)
 	if err != nil {
@@ -935,13 +930,6 @@ func (h *SupermarketHandler) fetchRegistrySkill(
 	return skill, nil
 }
 
-func (h *SupermarketHandler) fetchRegistryPackage(
-	ctx context.Context,
-	registryID, packageID string,
-) (SupermarketSkillPackageDescriptor, error) {
-	return h.fetchRegistryPackagePath(ctx, registryPackageUpstreamPath(registryID, packageID))
-}
-
 func (h *SupermarketHandler) fetchRegistryPackageRelease(
 	ctx context.Context,
 	registryID, packageID, revision string,
@@ -1019,59 +1007,6 @@ func (h *SupermarketHandler) fetchRegistryPackageRelease(
 		Revision: revision,
 		Skills:   skills,
 	}, nil
-}
-
-func (h *SupermarketHandler) fetchRegistryPackagePath(
-	ctx context.Context,
-	upstreamPath string,
-) (SupermarketSkillPackageDescriptor, error) {
-	endpoint := strings.TrimRight(h.baseURL, "/") + upstreamPath
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			fmt.Errorf("create Registry Package request: %w", err),
-			nil,
-		)
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := h.doSupermarketRequest(req)
-	if err != nil {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			fmt.Errorf("fetch Registry Package: %w", err),
-			nil,
-		)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return SupermarketSkillPackageDescriptor{}, apperror.New(apperror.CodeRegistrySkillNotFound, nil)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			fmt.Errorf("fetch Registry Package: Supermarket returned status %d", resp.StatusCode),
-			nil,
-		)
-	}
-
-	var pkg SupermarketSkillPackageDescriptor
-	decoder := json.NewDecoder(io.LimitReader(resp.Body, maxRegistryPackageMetadataBytes+1))
-	if err := decoder.Decode(&pkg); err != nil {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
-			fmt.Errorf("decode Registry Package response: %w", err),
-			nil,
-		)
-	}
-	if decoder.Decode(&struct{}{}) != io.EOF {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
-			errors.New("registry Package response is too large or malformed"),
-			nil,
-		)
-	}
-	return pkg, nil
 }
 
 func validateRegistryPackage(pkg SupermarketSkillPackageDescriptor, registryID, packageID string) error {

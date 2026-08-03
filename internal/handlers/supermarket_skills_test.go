@@ -208,20 +208,25 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 		pkg.Skills[index].Artifact.Digest = hex.EncodeToString(digest[:])
 		pkg.Skills[index].Artifact.Size = int64(len(artifact))
 	}
-	descriptor, err := json.Marshal(pkg)
-	if err != nil {
-		t.Fatalf("marshal Package descriptor: %v", err)
-	}
+	release := registryPackageReleaseBytes(t, pkg)
+	revision := sha256.Sum256(release)
+	pkg.Revision = hex.EncodeToString(revision[:])
 	installer := &recordingPluginInstaller{}
 	artifactRequestedDuringMutation := false
+	releaseRequested := false
 	handler := &SupermarketHandler{
 		baseURL: "https://supermarket.example",
 		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Path == "/artifact" {
+			if strings.HasPrefix(req.URL.Path, "/api/artifacts/skill/") {
 				artifactRequestedDuringMutation = artifactRequestedDuringMutation || installer.mutationCalls > 0
 				return testHTTPResponse(req, http.StatusOK, artifact), nil
 			}
-			return testHTTPResponse(req, http.StatusOK, descriptor), nil
+			wantReleasePath := "/api/registries/registry/packages/package/releases/" + pkg.Revision
+			if req.URL.Path != wantReleasePath {
+				t.Fatalf("unexpected upstream request path %q, want %q", req.URL.Path, wantReleasePath)
+			}
+			releaseRequested = true
+			return testHTTPResponse(req, http.StatusOK, release), nil
 		})},
 		pluginService: installer,
 		workspaces:    manager,
@@ -233,8 +238,11 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	if err != nil || !result.OK || len(result.Skills) != len(pkg.Skills) {
 		t.Fatalf("installRegistryPackage() result=%+v error=%v", result, err)
 	}
-	if artifactRequestedDuringMutation || installer.mutationCalls != 1 {
-		t.Fatalf("Package preflight lock state: artifact_in_lock=%v mutations=%d", artifactRequestedDuringMutation, installer.mutationCalls)
+	if !releaseRequested || artifactRequestedDuringMutation || installer.mutationCalls != 1 {
+		t.Fatalf(
+			"Package preflight state: immutable_release=%v artifact_in_lock=%v mutations=%d",
+			releaseRequested, artifactRequestedDuringMutation, installer.mutationCalls,
+		)
 	}
 }
 
@@ -474,6 +482,34 @@ func validRegistryPackageDescriptor() SupermarketSkillPackageDescriptor {
 		Revision: strings.Repeat("b", 64),
 		Skills:   []SupermarketCatalogSkill{first, second}, ReleaseURL: "/release",
 	}
+}
+
+func registryPackageReleaseBytes(t *testing.T, pkg SupermarketSkillPackageDescriptor) []byte {
+	t.Helper()
+	members := make([]supermarketSkillPackageReleaseSkill, 0, len(pkg.Skills))
+	for _, skill := range pkg.Skills {
+		members = append(members, supermarketSkillPackageReleaseSkill{
+			SchemaVersion: skill.SchemaVersion, RegistryID: skill.RegistryID, PackageID: skill.PackageID,
+			SkillID: skill.SkillID, InstallID: skill.InstallID, Name: skill.Name,
+			Description: skill.Description, Author: skill.Author, Homepage: skill.Homepage,
+			Tags: skill.Tags, Category: skill.Category, CategoryName: skill.CategoryName,
+			SourceCategory: skill.SourceCategory, Files: skill.Files, Icon: skill.Icon, Artifact: skill.Artifact,
+		})
+	}
+	payload, err := json.Marshal(SupermarketSkillPackageRelease{
+		SchemaVersion: pkg.SchemaVersion,
+		RegistryID:    pkg.RegistryID,
+		PackageID:     pkg.PackageID,
+		Name:          pkg.Name,
+		Description:   pkg.Description,
+		Tags:          pkg.Tags,
+		Icon:          pkg.Icon,
+		Skills:        members,
+	})
+	if err != nil {
+		t.Fatalf("marshal immutable Package release: %v", err)
+	}
+	return payload
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
