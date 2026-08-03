@@ -675,57 +675,6 @@ func TestFetchPluginEntryRejectsCrossOriginMetadataRedirect(t *testing.T) {
 	}
 }
 
-func TestInstallRegistrySkillRejectsPluginArtifactConflictBeforeDownload(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	manager := workspace.NewManager(
-		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
-	)
-	skill := validRegistrySkillDescriptor()
-	artifact := validSkillArtifact(t)
-	digest := sha256.Sum256(artifact)
-	skill.Artifact.Digest = hex.EncodeToString(digest[:])
-	skill.Artifact.Size = int64(len(artifact))
-	descriptor, err := json.Marshal(skill)
-	if err != nil {
-		t.Fatalf("marshal Registry Skill descriptor: %v", err)
-	}
-	artifactRequested := false
-	installer := &recordingPluginInstaller{conflictErr: errors.New("installed Plugin requires a different Artifact")}
-	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Path == skill.Artifact.DownloadURL {
-				artifactRequested = true
-				return testHTTPResponse(req, http.StatusOK, artifact), nil
-			}
-			return testHTTPResponse(req, http.StatusOK, descriptor), nil
-		})},
-		pluginService: installer,
-		workspaces:    manager,
-	}
-
-	_, err = handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
-		RegistryID:     skill.RegistryID,
-		PackageID:      skill.PackageID,
-		SkillID:        skill.SkillID,
-		ArtifactDigest: skill.Artifact.Digest,
-	})
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
-		t.Fatalf("installRegistrySkill() error = %v, want HTTP 409", err)
-	}
-	if artifactRequested {
-		t.Fatal("conflicting direct Skill Artifact was downloaded")
-	}
-	identity := strings.Join([]string{skill.RegistryID, skill.PackageID, skill.SkillID}, "/")
-	if installer.conflictExpected[identity] != skill.Artifact.Digest {
-		t.Fatalf("conflict check = %+v, want %s", installer.conflictExpected, skill.Artifact.Digest)
-	}
-	if installer.conflictTarget != workspace.WorkspaceTargetNative {
-		t.Fatalf("conflict target = %q, want native", installer.conflictTarget)
-	}
-}
-
 func validSupermarketPluginEntry(
 	manifest pluginspkg.Manifest,
 	bundle []byte,
@@ -1268,6 +1217,10 @@ func (i *recordingPluginInstaller) Install(ctx context.Context, botID string, re
 		Status:     pluginspkg.StatusReady,
 		Enabled:    true,
 	}, nil
+}
+
+func (*recordingPluginInstaller) List(context.Context, string) ([]pluginspkg.Installation, error) {
+	return nil, nil
 }
 
 func (i *recordingPluginInstaller) CheckSkillArtifactConflicts(

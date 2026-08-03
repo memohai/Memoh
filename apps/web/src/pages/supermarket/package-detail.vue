@@ -8,11 +8,11 @@
     </InlineLoadingRow>
 
     <div
-      v-else-if="!skill"
+      v-else-if="!pkg"
       class="py-16 text-center"
     >
       <p class="text-sm font-medium">
-        {{ $t('supermarket.skillNotFound') }}
+        {{ $t('supermarket.packageNotFound') }}
       </p>
       <Button
         variant="outline"
@@ -27,44 +27,43 @@
 
     <template v-else>
       <MarketDetailHeader
-        :name="displayName"
-        :tags="skill.tags"
+        :name="pkg.name || pkg.package_id"
+        :tags="pkg.tags"
         @back="router.push({ name: 'supermarket' })"
         @install="installDialogOpen = true"
       >
         <template #icon>
           <SkillIcon
-            :icon="skill.icon"
+            :icon="pkg.icon"
             variant="detail"
           />
         </template>
       </MarketDetailHeader>
 
       <p class="mt-8 max-w-4xl text-base leading-7 text-muted-foreground">
-        {{ skill.description || $t('supermarket.noDescription') }}
+        {{ pkg.description || $t('supermarket.noDescription') }}
       </p>
 
-      <section
-        v-if="skill.files?.length"
-        class="mt-8"
-      >
+      <section class="mt-8">
         <h2 class="mb-4 text-lg font-semibold">
-          {{ $t('supermarket.files') }}
-          <span class="ml-1 text-muted-foreground">{{ skill.files.length }}</span>
+          {{ $t('supermarket.includedSkills') }}
         </h2>
         <SettingsSection>
           <SettingsRow
-            v-for="file in skill.files"
-            :key="file"
+            v-for="skill in pkg.skills"
+            :key="skill.skill_id"
           >
             <template #leading>
-              <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
-                <FileText class="size-5 text-muted-foreground" />
+              <div class="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background">
+                <SkillIcon :icon="skill.icon" />
               </div>
             </template>
             <template #content>
-              <p class="min-w-0 break-words text-sm font-medium">
-                {{ file }}
+              <p class="text-sm font-medium">
+                {{ skill.name || skill.skill_id }}
+              </p>
+              <p class="mt-1 text-xs text-muted-foreground">
+                {{ skill.description }}
               </p>
             </template>
           </SettingsRow>
@@ -78,44 +77,19 @@
         <div class="mt-4 grid gap-x-12 gap-y-5 md:grid-cols-2">
           <InfoItem
             :label="$t('supermarket.registry')"
-            :value="registryName || skill.registry_id || $t('common.none')"
-          />
-          <InfoItem
-            :label="$t('supermarket.package')"
-            :value="skill.package_id || $t('common.none')"
+            :value="registryName || pkg.registry_id"
           />
           <InfoItem
             :label="$t('supermarket.category')"
-            :value="skill.category_name || skill.category || $t('common.none')"
+            :value="categoryNames || $t('common.none')"
           />
-          <InfoItem
-            :label="$t('supermarket.developer')"
-            :value="skill.author?.name || $t('common.none')"
-          />
-          <div
-            v-if="skill.homepage"
-            class="space-y-1"
-          >
-            <p class="text-sm text-muted-foreground">
-              {{ $t('supermarket.links') }}
-            </p>
-            <a
-              :href="skill.homepage"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-            >
-              {{ $t('supermarket.website') }}
-              <ExternalLink class="size-3.5" />
-            </a>
-          </div>
         </div>
       </section>
     </template>
 
-    <InstallSkillDialog
+    <InstallPackageDialog
       v-model:open="installDialogOpen"
-      :skill="skill"
+      :pkg="pkg"
     />
   </div>
 </template>
@@ -124,63 +98,54 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, ExternalLink, FileText } from 'lucide-vue-next'
+import { ArrowLeft } from 'lucide-vue-next'
 import { Button, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import {
   getSupermarketRegistries,
-  getSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillId,
-  type HandlersSupermarketCatalogSkill,
+  getSupermarketRegistriesByRegistryIdPackagesByPackageId,
+  type HandlersSupermarketSkillPackageDescriptor,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import InstallSkillDialog from './components/install-skill-dialog.vue'
 import InfoItem from './components/info-item.vue'
+import InstallPackageDialog from './components/install-package-dialog.vue'
 import MarketDetailHeader from './components/market-detail-header.vue'
 import SkillIcon from './components/skill-icon.vue'
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
-
-const skill = ref<HandlersSupermarketCatalogSkill | null>(null)
+const pkg = ref<HandlersSupermarketSkillPackageDescriptor | null>(null)
 const registryName = ref('')
 const loading = ref(false)
 const installDialogOpen = ref(false)
-
 const registryId = computed(() => String(route.params.registryId || ''))
 const packageId = computed(() => String(route.params.packageId || ''))
-const skillId = computed(() => String(route.params.skillId || ''))
-const skillIdentity = computed(() => `${registryId.value}/${packageId.value}/${skillId.value}`)
-const displayName = computed(() => skill.value
-  ? skill.value.name || skill.value.skill_id || ''
-  : '')
+const packageIdentity = computed(() => `${registryId.value}/${packageId.value}`)
+const categoryNames = computed(() => pkg.value?.categories.map(category => category.name).join(', ') || '')
 
-async function loadSkill() {
-  if (!registryId.value || !packageId.value || !skillId.value) return
+async function loadPackage() {
+  if (!registryId.value || !packageId.value) return
   loading.value = true
   try {
     const [{ data }, registryResponse] = await Promise.all([
-      getSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillId({
-        path: {
-          registry_id: registryId.value,
-          package_id: packageId.value,
-          skill_id: skillId.value,
-        },
+      getSupermarketRegistriesByRegistryIdPackagesByPackageId({
+        path: { registry_id: registryId.value, package_id: packageId.value },
         throwOnError: true,
       }),
       getSupermarketRegistries({ throwOnError: true }).catch(() => null),
     ])
+    pkg.value = data
     registryName.value = registryResponse?.data.data
       ?.find(registry => registry.id === registryId.value)?.name || registryId.value
-    skill.value = data
   } catch (error) {
+    pkg.value = null
     registryName.value = registryId.value
-    skill.value = null
     toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
   } finally {
     loading.value = false
   }
 }
 
-onMounted(loadSkill)
-watch(skillIdentity, loadSkill)
+onMounted(loadPackage)
+watch(packageIdentity, loadPackage)
 </script>

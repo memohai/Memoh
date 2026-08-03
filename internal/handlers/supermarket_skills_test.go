@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path"
 	"strings"
 	"testing"
 
@@ -21,7 +20,6 @@ import (
 
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/config"
-	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
@@ -60,6 +58,29 @@ func TestValidateRegistrySkillRequiresBoundedArtifact(t *testing.T) {
 			mutate(&skill.Artifact)
 			if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
 				t.Fatalf("validateRegistrySkill() accepted invalid %s", name)
+			}
+		})
+	}
+}
+
+func TestValidateRegistryPackageBindsMembersToRevision(t *testing.T) {
+	pkg := validRegistryPackageDescriptor()
+	if err := validateRegistryPackage(pkg, "registry", "package"); err != nil {
+		t.Fatalf("validateRegistryPackage(valid) error = %v", err)
+	}
+
+	tests := map[string]func(*SupermarketSkillPackageDescriptor){
+		"identity": func(value *SupermarketSkillPackageDescriptor) { value.PackageID = "other" },
+		"revision": func(value *SupermarketSkillPackageDescriptor) { value.Revision = "latest" },
+		"count":    func(value *SupermarketSkillPackageDescriptor) { value.SkillCount++ },
+		"member":   func(value *SupermarketSkillPackageDescriptor) { value.Skills[0].PackageID = "other" },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			value := validRegistryPackageDescriptor()
+			mutate(&value)
+			if err := validateRegistryPackage(value, "registry", "package"); err == nil {
+				t.Fatal("validateRegistryPackage() error = nil")
 			}
 		})
 	}
@@ -111,89 +132,6 @@ func TestPrepareRegistrySkillArtifactVerifiesDeclaredUncompressedSize(t *testing
 	}
 }
 
-func TestDirectRegistrySkillOwnerIsPublishedAtomically(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	artifact := validSkillArtifact(t)
-	digest := sha256.Sum256(artifact)
-	skill := validRegistrySkillDescriptor()
-	skill.Artifact.Digest = hex.EncodeToString(digest[:])
-	skill.Artifact.Size = int64(len(artifact))
-	descriptor, err := json.Marshal(skill)
-	if err != nil {
-		t.Fatalf("marshal descriptor: %v", err)
-	}
-	manager := workspace.NewManager(
-		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
-	)
-	installer := &recordingPluginInstaller{}
-	artifactRequestedDuringMutation := false
-	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Path == skill.Artifact.DownloadURL {
-				artifactRequestedDuringMutation = installer.mutationCalls > 0
-				return testHTTPResponse(req, http.StatusOK, artifact), nil
-			}
-			return testHTTPResponse(req, http.StatusOK, descriptor), nil
-		})},
-		pluginService: installer,
-		workspaces:    manager,
-	}
-
-	result, err := handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
-		RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
-		ArtifactDigest: skill.Artifact.Digest,
-	})
-	if err != nil || !result.OK {
-		t.Fatalf("installRegistrySkill() result=%+v error=%v", result, err)
-	}
-	if artifactRequestedDuringMutation || installer.mutationCalls != 1 {
-		t.Fatalf("direct Skill preflight lock state: artifact_in_lock=%v mutations=%d", artifactRequestedDuringMutation, installer.mutationCalls)
-	}
-}
-
-func TestInstallRegistrySkillRejectsStaleArtifactBeforeDownload(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	manager := workspace.NewManager(
-		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
-	)
-	skill := validRegistrySkillDescriptor()
-	artifact := validSkillArtifact(t)
-	digest := sha256.Sum256(artifact)
-	skill.Artifact.Digest = hex.EncodeToString(digest[:])
-	skill.Artifact.Size = int64(len(artifact))
-	descriptor, err := json.Marshal(skill)
-	if err != nil {
-		t.Fatalf("marshal Skill descriptor: %v", err)
-	}
-	artifactRequested := false
-	installer := &recordingPluginInstaller{}
-	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Path == skill.Artifact.DownloadURL {
-				artifactRequested = true
-				return testHTTPResponse(req, http.StatusOK, artifact), nil
-			}
-			return testHTTPResponse(req, http.StatusOK, descriptor), nil
-		})},
-		pluginService: installer,
-		workspaces:    manager,
-	}
-
-	_, err = handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
-		RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
-		ArtifactDigest: strings.Repeat("0", 64),
-	})
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
-		t.Fatalf("installRegistrySkill() error = %v, want HTTP 409", err)
-	}
-	if artifactRequested || installer.mutationCalls != 0 {
-		t.Fatalf("stale Skill touched installation state: artifact=%v mutations=%d", artifactRequested, installer.mutationCalls)
-	}
-}
-
 func TestSupermarketSkillRoutesUseRegistryCatalogOnly(t *testing.T) {
 	var upstreamRequestURI string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -219,6 +157,84 @@ func TestSupermarketSkillRoutesUseRegistryCatalogOnly(t *testing.T) {
 	}
 	if upstreamRequestURI != "/api/skills?registry=memoh&limit=50" {
 		t.Fatalf("upstream request URI = %q, want canonical Skill collection", upstreamRequestURI)
+	}
+}
+
+func TestSupermarketPackageRoutesUsePackageCatalog(t *testing.T) {
+	var upstreamRequestURI string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamRequestURI = r.URL.RequestURI()
+		w.Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler := &SupermarketHandler{
+		baseURL: upstream.URL, httpClient: upstream.Client(), logger: slog.New(slog.DiscardHandler),
+	}
+	e := echo.New()
+	handler.Register(e)
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"/supermarket/packages?registry=memoh&limit=50", "/api/packages?registry=memoh&limit=50"},
+		{"/supermarket/registries/memoh/packages?q=web", "/api/registries/memoh/packages?q=web"},
+		{"/supermarket/registries/memoh/packages/web-tools", "/api/registries/memoh/packages/web-tools"},
+	}
+	for _, test := range tests {
+		req := httptest.NewRequest(http.MethodGet, test.path, nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200: %s", test.path, rec.Code, rec.Body.String())
+		}
+		if upstreamRequestURI != test.want {
+			t.Fatalf("GET %s upstream = %q, want %q", test.path, upstreamRequestURI, test.want)
+		}
+	}
+}
+
+func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	artifact := validSkillArtifact(t)
+	digest := sha256.Sum256(artifact)
+	pkg := validRegistryPackageDescriptor()
+	for index := range pkg.Skills {
+		pkg.Skills[index].Artifact.Digest = hex.EncodeToString(digest[:])
+		pkg.Skills[index].Artifact.Size = int64(len(artifact))
+	}
+	descriptor, err := json.Marshal(pkg)
+	if err != nil {
+		t.Fatalf("marshal Package descriptor: %v", err)
+	}
+	installer := &recordingPluginInstaller{}
+	artifactRequestedDuringMutation := false
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == "/artifact" {
+				artifactRequestedDuringMutation = artifactRequestedDuringMutation || installer.mutationCalls > 0
+				return testHTTPResponse(req, http.StatusOK, artifact), nil
+			}
+			return testHTTPResponse(req, http.StatusOK, descriptor), nil
+		})},
+		pluginService: installer,
+		workspaces:    manager,
+	}
+
+	result, err := handler.installRegistryPackage(context.Background(), env.botID, InstallPackageRequest{
+		RegistryID: pkg.RegistryID, PackageID: pkg.PackageID, Revision: pkg.Revision,
+	})
+	if err != nil || !result.OK || len(result.Skills) != len(pkg.Skills) {
+		t.Fatalf("installRegistryPackage() result=%+v error=%v", result, err)
+	}
+	if artifactRequestedDuringMutation || installer.mutationCalls != 1 {
+		t.Fatalf("Package preflight lock state: artifact_in_lock=%v mutations=%d", artifactRequestedDuringMutation, installer.mutationCalls)
 	}
 }
 
@@ -316,70 +332,6 @@ func TestFetchRegistrySkillUsesStablePrivateErrors(t *testing.T) {
 				t.Fatalf("public fetch error leaked private detail: %q", public.Detail)
 			}
 		})
-	}
-}
-
-func TestInstallRegistrySkillHidesWorkspaceFailureDetails(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	env.writeSkillFile(t, path.Join(skillset.ManagedDir(), ".staging"), "not a directory")
-
-	skill := validRegistrySkillDescriptor()
-	artifact := validSkillArtifact(t)
-	digest := sha256.Sum256(artifact)
-	skill.Artifact.Digest = hex.EncodeToString(digest[:])
-	skill.Artifact.Size = int64(len(artifact))
-	descriptor, err := json.Marshal(skill)
-	if err != nil {
-		t.Fatalf("marshal registry Skill descriptor: %v", err)
-	}
-
-	manager := workspace.NewManager(
-		slog.Default(),
-		nil,
-		nil,
-		config.WorkspaceConfig{DataRoot: env.dataRoot},
-		"",
-		nil,
-	)
-	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			body := descriptor
-			contentType := "application/json"
-			if req.URL.Path == skill.Artifact.DownloadURL {
-				body = artifact
-				contentType = "application/gzip"
-			}
-			return &http.Response{
-				StatusCode:    http.StatusOK,
-				Body:          io.NopCloser(bytes.NewReader(body)),
-				ContentLength: int64(len(body)),
-				Request:       req,
-				Header:        http.Header{"Content-Type": []string{contentType}},
-			}, nil
-		})},
-		workspaces: manager,
-	}
-
-	_, err = handler.installRegistrySkill(context.Background(), env.botID, InstallSkillRequest{
-		RegistryID:     skill.RegistryID,
-		PackageID:      skill.PackageID,
-		SkillID:        skill.SkillID,
-		ArtifactDigest: skill.Artifact.Digest,
-	})
-	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInstallFailed {
-		t.Fatalf("install failure code = %q, want %q", got, apperror.CodeRegistrySkillInstallFailed)
-	}
-	public, ok := apperror.PublicFrom(err, "request-id")
-	if !ok {
-		t.Fatal("install failure is not a public app error")
-	}
-	if strings.Contains(public.Detail, ".staging") || strings.Contains(public.Detail, env.dataRoot) {
-		t.Fatalf("public install failure leaked workspace path: %q", public.Detail)
-	}
-	cause := apperror.CauseOf(err)
-	if cause == nil || !strings.Contains(cause.Error(), ".staging") {
-		t.Fatalf("private install failure cause = %v, want staging diagnostic", cause)
 	}
 }
 
@@ -488,6 +440,21 @@ func validRegistrySkillDescriptor() SupermarketCatalogSkill {
 			FileCount:        1,
 			ContentType:      "application/gzip", DownloadURL: "/artifact",
 		},
+	}
+}
+
+func validRegistryPackageDescriptor() SupermarketSkillPackageDescriptor {
+	first := validRegistrySkillDescriptor()
+	second := validRegistrySkillDescriptor()
+	second.SkillID = "second"
+	second.InstallID = "registry+package+second"
+	return SupermarketSkillPackageDescriptor{
+		SupermarketSkillPackageSummary: SupermarketSkillPackageSummary{
+			SchemaVersion: "1", RegistryID: "registry", PackageID: "package", Name: "Package",
+			Description: "Demo", Tags: []string{}, Categories: []SupermarketSkillPackageCategory{}, SkillCount: 2,
+		},
+		Revision: strings.Repeat("b", 64), SourceRevision: "upstream-revision",
+		Skills: []SupermarketCatalogSkill{first, second}, ReleaseURL: "/release",
 	}
 }
 

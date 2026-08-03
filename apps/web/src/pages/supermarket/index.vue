@@ -98,28 +98,27 @@
           />
 
           <InlineLoadingRow
-            v-if="skillsLoading"
+            v-if="packagesLoading"
             class="justify-center py-8"
           >
             {{ $t('common.loading') }}
           </InlineLoadingRow>
 
           <div
-            v-else-if="!skills.length"
+            v-else-if="!packages.length"
             class="py-8 text-center text-xs text-muted-foreground"
           >
-            {{ $t('supermarket.noSkillResults') }}
+            {{ $t('supermarket.noPackageResults') }}
           </div>
 
           <div
             v-else
             class="grid grid-cols-1 gap-4 sm:grid-cols-2"
           >
-            <SkillCard
-              v-for="skill in skills"
-              :key="skill.install_id"
-              :skill="skill"
-              @install="openSkillInstall"
+            <PackageCard
+              v-for="pkg in packages"
+              :key="`${pkg.registry_id}/${pkg.package_id}`"
+              :pkg="pkg"
             />
           </div>
 
@@ -130,7 +129,7 @@
             <Button
               variant="outline"
               size="icon-sm"
-              :disabled="page === 1 || skillsLoading"
+              :disabled="page === 1 || packagesLoading"
               :aria-label="$t('supermarket.previousPage')"
               @click="page--"
             >
@@ -139,7 +138,7 @@
             <Button
               variant="outline"
               size="icon-sm"
-              :disabled="!hasNextPage || skillsLoading"
+              :disabled="!hasNextPage || packagesLoading"
               :aria-label="$t('supermarket.nextPage')"
               @click="page++"
             >
@@ -218,11 +217,6 @@
         :plugin="selectedPlugin"
         @installed="refreshAll"
       />
-      <InstallSkillDialog
-        v-model:open="skillDialogOpen"
-        :skill="selectedSkill"
-        @installed="refreshAll"
-      />
       <ConnectConnectorDialog
         v-model:open="connectorDialogOpen"
         :connector="selectedConnector"
@@ -260,17 +254,16 @@ import {
   getConnectorsCatalog,
   getSupermarketPlugins,
   getSupermarketRegistries,
-  getSupermarketSkills,
+  getSupermarketPackages,
   type ConnectitConnector,
-  type HandlersSupermarketCatalogSkill,
+  type HandlersSupermarketSkillPackageSummary,
   type HandlersSupermarketPluginEntry,
   type HandlersSupermarketRegistry,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import PluginCard from './components/plugin-card.vue'
-import SkillCard from './components/skill-card.vue'
+import PackageCard from './components/package-card.vue'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
-import InstallSkillDialog from './components/install-skill-dialog.vue'
 import ConnectConnectorDialog from './components/connect-connector-dialog.vue'
 import MarketItemCard from './components/market-item-card.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
@@ -307,15 +300,13 @@ const page = ref(1)
 const total = ref(0)
 const selectedRegistry = ref(allRegistriesValue)
 const plugins = ref<HandlersSupermarketPluginEntry[]>([])
-const skills = ref<HandlersSupermarketCatalogSkill[]>([])
+const packages = ref<HandlersSupermarketSkillPackageSummary[]>([])
 const registries = ref<HandlersSupermarketRegistry[]>([])
 const pluginsLoading = ref(false)
-const skillsLoading = ref(false)
+const packagesLoading = ref(false)
 
 const pluginDialogOpen = ref(false)
-const skillDialogOpen = ref(false)
 const selectedPlugin = ref<HandlersSupermarketPluginEntry | null>(null)
-const selectedSkill = ref<HandlersSupermarketCatalogSkill | null>(null)
 const connectorDialogOpen = ref(false)
 const selectedConnector = ref<ConnectitConnector | null>(null)
 
@@ -399,17 +390,12 @@ function onRegistryFilterChange(value: string | number) {
     page.value = 1
     return
   }
-  void loadSkills()
+  void loadPackages()
 }
 
 function openPluginInstall(plugin: HandlersSupermarketPluginEntry) {
   selectedPlugin.value = plugin
   pluginDialogOpen.value = true
-}
-
-function openSkillInstall(skill: HandlersSupermarketCatalogSkill) {
-  selectedSkill.value = skill
-  skillDialogOpen.value = true
 }
 
 function openConnectorConnect(connector: ConnectitConnector) {
@@ -454,10 +440,10 @@ async function loadRegistries() {
   }
 }
 
-async function loadSkills() {
-  skillsLoading.value = true
+async function loadPackages() {
+  packagesLoading.value = true
   try {
-    const { data } = await getSupermarketSkills({
+    const { data } = await getSupermarketPackages({
       query: {
         q: searchQuery.value || undefined,
         registry: selectedRegistry.value === allRegistriesValue
@@ -465,24 +451,24 @@ async function loadSkills() {
           : selectedRegistry.value,
         page: page.value,
         limit: pageSize,
-        sort: 'package',
+        sort: 'relevance',
       },
       throwOnError: true,
     })
-    skills.value = data.data ?? []
+    packages.value = data.data ?? []
     total.value = data.total ?? 0
   } catch (error) {
-    skills.value = []
+    packages.value = []
     total.value = 0
     toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
   } finally {
-    skillsLoading.value = false
+    packagesLoading.value = false
   }
 }
 
 function refreshAll() {
   void loadPlugins()
-  void loadSkills()
+  void loadPackages()
 }
 
 watch(searchQuery, () => {
@@ -493,7 +479,7 @@ watch(searchQuery, () => {
   refreshAll()
 })
 
-watch(page, loadSkills)
+watch(page, loadPackages)
 
 void loadRegistries()
 refreshAll()

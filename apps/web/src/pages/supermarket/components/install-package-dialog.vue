@@ -5,7 +5,7 @@
   >
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
-        <DialogTitle>{{ $t('supermarket.skillInstallTitle') }}</DialogTitle>
+        <DialogTitle>{{ $t('supermarket.packageInstallTitle') }}</DialogTitle>
       </DialogHeader>
       <div class="space-y-4 py-2">
         <FieldStack :label="$t('supermarket.selectBot')">
@@ -14,16 +14,15 @@
             trigger-class="w-full"
           />
         </FieldStack>
-
         <div
-          v-if="skill"
+          v-if="pkg"
           class="space-y-1 rounded-md border border-border p-3"
         >
           <p class="text-xs font-medium">
-            {{ skill.name || skill.skill_id }}
+            {{ pkg.name || pkg.package_id }}
           </p>
           <p class="line-clamp-3 text-xs text-muted-foreground">
-            {{ skill.description }}
+            {{ pkg.description }}
           </p>
         </div>
       </div>
@@ -37,7 +36,7 @@
           </Button>
         </DialogClose>
         <Button
-          :disabled="!selectedBotId || !skill?.artifact?.digest"
+          :disabled="!selectedBotId || !pkg?.revision || !pkg.skills.length"
           :loading="installing"
           @click="handleInstall"
         >
@@ -51,33 +50,28 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FieldStack, toast } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button,
+  Button, Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, FieldStack, toast,
 } from '@felinic/ui'
 import {
-  postBotsByBotIdSupermarketInstallSkill,
-  type HandlersSupermarketCatalogSkill,
+  postBotsByBotIdSupermarketInstallPackage,
+  type HandlersSupermarketSkillPackageDescriptor,
 } from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
-import { safeSkillCatalogQueryKey } from '@/composables/api/useChat'
 import BotSelect from '@/components/bot-select/index.vue'
+import { safeSkillCatalogQueryKey } from '@/composables/api/useChat'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{
   open: boolean
-  skill: HandlersSupermarketCatalogSkill | null
+  pkg: HandlersSupermarketSkillPackageDescriptor | null
 }>()
-
 const emit = defineEmits<{
   'update:open': [open: boolean]
   'installed': []
 }>()
-
 const { t } = useI18n()
 const queryCache = useQueryCache()
-
 const selectedBotId = ref('')
 const installing = ref(false)
 
@@ -89,22 +83,24 @@ watch(() => props.open, (open) => {
 })
 
 async function handleInstall() {
-  if (!selectedBotId.value || !props.skill?.registry_id || !props.skill.package_id || !props.skill.skill_id || !props.skill.artifact?.digest) return
+  if (!selectedBotId.value || !props.pkg?.registry_id || !props.pkg.package_id || !props.pkg.revision) return
+  const botID = selectedBotId.value
+  const registryID = props.pkg.registry_id
+  const packageID = props.pkg.package_id
+  const revision = props.pkg.revision
   installing.value = true
   try {
-    await postBotsByBotIdSupermarketInstallSkill({
-      path: { bot_id: selectedBotId.value },
+    await postBotsByBotIdSupermarketInstallPackage({
+      path: { bot_id: botID },
       body: {
-        registry_id: props.skill.registry_id,
-        package_id: props.skill.package_id,
-        skill_id: props.skill.skill_id,
-        artifact_digest: props.skill.artifact.digest,
+        registry_id: registryID,
+        package_id: packageID,
+        revision,
       },
       throwOnError: true,
     })
     toast.success(t('supermarket.installSuccess'))
-    void queryCache.invalidateQueries({ key: safeSkillCatalogQueryKey(selectedBotId.value) })
-    emit('update:open', false)
+    void queryCache.invalidateQueries({ key: safeSkillCatalogQueryKey(botID) })
     emit('installed')
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('supermarket.installFailed')))
@@ -112,4 +108,5 @@ async function handleInstall() {
     installing.value = false
   }
 }
+
 </script>

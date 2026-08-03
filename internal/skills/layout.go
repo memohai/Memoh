@@ -128,7 +128,7 @@ func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
 }
 
 // DeletableSkillDirForSourcePath resolves the directory to remove for a
-// user-managed or locally installed Registry Skill.
+// user-managed Skill. Registry Package Skills are immutable as individual items.
 func DeletableSkillDirForSourcePath(sourcePath string) (string, error) {
 	sourcePath = path.Clean(strings.TrimSpace(sourcePath))
 	if !path.IsAbs(sourcePath) || path.Base(sourcePath) != "SKILL.md" {
@@ -140,8 +140,8 @@ func DeletableSkillDirForSourcePath(sourcePath string) (string, error) {
 	if _, ok := BuiltinSkillName(sourcePath); ok {
 		return "", ErrBuiltinSkillReadOnly
 	}
-	if IsNamespacedSkillPath(sourcePath) {
-		return path.Dir(sourcePath), nil
+	if _, _, _, ok := RegistrySkillIDs(sourcePath); ok {
+		return "", ErrRegistrySkillReadOnly
 	}
 	return "", bridge.ErrBadRequest
 }

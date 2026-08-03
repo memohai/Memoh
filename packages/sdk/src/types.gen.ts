@@ -1764,6 +1764,13 @@ export type HandlersHooksEventsResponse = {
     events?: Array<HandlersHookEventInfo>;
 };
 
+export type HandlersInstallPackageRequest = {
+    package_id: string;
+    registry_id: string;
+    revision: string;
+    workspace_target_id?: string;
+};
+
 export type HandlersInstallPluginRequest = {
     expected_installation_updated_at: string | null;
     expected_installed_revision: string | null;
@@ -1772,6 +1779,15 @@ export type HandlersInstallPluginRequest = {
     variables?: {
         [key: string]: string;
     };
+};
+
+export type HandlersInstallRegistryPackageResponse = {
+    ok: boolean;
+    package_id: string;
+    registry_id: string;
+    revision: string;
+    skills: Array<HandlersInstallRegistrySkillResponse>;
+    workspace_target_id: string;
 };
 
 export type HandlersInstallRegistrySkillResponse = {
@@ -1783,14 +1799,6 @@ export type HandlersInstallRegistrySkillResponse = {
     registry_id: string;
     skill_id: string;
     workspace_target_id: string;
-};
-
-export type HandlersInstallSkillRequest = {
-    artifact_digest: string;
-    package_id: string;
-    registry_id: string;
-    skill_id: string;
-    workspace_target_id?: string;
 };
 
 export type HandlersListSnapshotsResponse = {
@@ -1903,8 +1911,11 @@ export type HandlersSkillItem = {
         [key: string]: unknown;
     };
     name?: string;
+    package_id?: string;
     raw?: string;
+    registry_id?: string;
     shadowed_by?: string;
+    skill_id?: string;
     source_kind?: string;
     source_path?: string;
     source_root?: string;
@@ -2096,15 +2107,52 @@ export type HandlersSupermarketSkillIconAsset = {
     size: number;
 };
 
+export type HandlersSupermarketSkillPackageCategory = {
+    id: string;
+    name: string;
+    skill_count: number;
+};
+
+export type HandlersSupermarketSkillPackageDescriptor = {
+    categories: Array<HandlersSupermarketSkillPackageCategory>;
+    description: string;
+    icon?: HandlersSupermarketSkillIcon;
+    name: string;
+    package_id: string;
+    registry_id: string;
+    release_url: string;
+    revision: string;
+    schema_version: string;
+    skill_count: number;
+    skills: Array<HandlersSupermarketCatalogSkill>;
+    source_revision: string;
+    tags: Array<string>;
+};
+
+export type HandlersSupermarketSkillPackageListResponse = {
+    data: Array<HandlersSupermarketSkillPackageSummary>;
+    limit: number;
+    page: number;
+    total: number;
+};
+
+export type HandlersSupermarketSkillPackageSummary = {
+    categories: Array<HandlersSupermarketSkillPackageCategory>;
+    description: string;
+    icon?: HandlersSupermarketSkillIcon;
+    name: string;
+    package_id: string;
+    registry_id: string;
+    schema_version: string;
+    skill_count: number;
+    tags: Array<string>;
+};
+
 export type HandlersSupermarketSkillSource = {
     path: string;
     repository?: string;
     revision: string;
     type: string;
-};
-
-export type HandlersSupermarketTagsResponse = {
-    tags?: Array<string>;
 };
 
 export type HandlersTokenUsageRecord = {
@@ -9640,6 +9688,55 @@ export type GetBotsByBotIdSkillsCatalogResponses = {
 
 export type GetBotsByBotIdSkillsCatalogResponse = GetBotsByBotIdSkillsCatalogResponses[keyof GetBotsByBotIdSkillsCatalogResponses];
 
+export type PostBotsByBotIdSupermarketInstallPackageData = {
+    /**
+     * Install Package request
+     */
+    body: HandlersInstallPackageRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/supermarket/install-package';
+};
+
+export type PostBotsByBotIdSupermarketInstallPackageErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PostBotsByBotIdSupermarketInstallPackageError = PostBotsByBotIdSupermarketInstallPackageErrors[keyof PostBotsByBotIdSupermarketInstallPackageErrors];
+
+export type PostBotsByBotIdSupermarketInstallPackageResponses = {
+    /**
+     * OK
+     */
+    200: HandlersInstallRegistryPackageResponse;
+};
+
+export type PostBotsByBotIdSupermarketInstallPackageResponse = PostBotsByBotIdSupermarketInstallPackageResponses[keyof PostBotsByBotIdSupermarketInstallPackageResponses];
+
 export type PostBotsByBotIdSupermarketInstallPluginData = {
     /**
      * Install plugin request
@@ -9688,55 +9785,6 @@ export type PostBotsByBotIdSupermarketInstallPluginResponses = {
 };
 
 export type PostBotsByBotIdSupermarketInstallPluginResponse = PostBotsByBotIdSupermarketInstallPluginResponses[keyof PostBotsByBotIdSupermarketInstallPluginResponses];
-
-export type PostBotsByBotIdSupermarketInstallSkillData = {
-    /**
-     * Install skill request
-     */
-    body: HandlersInstallSkillRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/supermarket/install-skill';
-};
-
-export type PostBotsByBotIdSupermarketInstallSkillErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Conflict
-     */
-    409: ApperrorProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ApperrorProblem;
-};
-
-export type PostBotsByBotIdSupermarketInstallSkillError = PostBotsByBotIdSupermarketInstallSkillErrors[keyof PostBotsByBotIdSupermarketInstallSkillErrors];
-
-export type PostBotsByBotIdSupermarketInstallSkillResponses = {
-    /**
-     * OK
-     */
-    200: HandlersInstallRegistrySkillResponse;
-};
-
-export type PostBotsByBotIdSupermarketInstallSkillResponse = PostBotsByBotIdSupermarketInstallSkillResponses[keyof PostBotsByBotIdSupermarketInstallSkillResponses];
 
 export type GetBotsByBotIdTokenUsageData = {
     body?: never;
@@ -13575,6 +13623,64 @@ export type GetSupermarketArtifactsIconByDigestResponses = {
     200: unknown;
 };
 
+export type GetSupermarketPackagesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Registry ID
+         */
+        registry?: string;
+        /**
+         * Category ID
+         */
+        category?: string;
+        /**
+         * Exact tag
+         */
+        tag?: string;
+        /**
+         * Page number
+         */
+        page?: number;
+        /**
+         * Items per page
+         */
+        limit?: number;
+        /**
+         * Sort order
+         */
+        sort?: string;
+    };
+    url: '/supermarket/packages';
+};
+
+export type GetSupermarketPackagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketPackagesError = GetSupermarketPackagesErrors[keyof GetSupermarketPackagesErrors];
+
+export type GetSupermarketPackagesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillPackageListResponse;
+};
+
+export type GetSupermarketPackagesResponse = GetSupermarketPackagesResponses[keyof GetSupermarketPackagesResponses];
+
 export type GetSupermarketPluginsData = {
     body?: never;
     path?: never;
@@ -13714,6 +13820,111 @@ export type GetSupermarketRegistriesByRegistryIdCategoriesResponses = {
 
 export type GetSupermarketRegistriesByRegistryIdCategoriesResponse = GetSupermarketRegistriesByRegistryIdCategoriesResponses[keyof GetSupermarketRegistriesByRegistryIdCategoriesResponses];
 
+export type GetSupermarketRegistriesByRegistryIdPackagesData = {
+    body?: never;
+    path: {
+        /**
+         * Registry ID
+         */
+        registry_id: string;
+    };
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Category ID
+         */
+        category?: string;
+        /**
+         * Exact tag
+         */
+        tag?: string;
+        /**
+         * Page number
+         */
+        page?: number;
+        /**
+         * Items per page
+         */
+        limit?: number;
+        /**
+         * Sort order
+         */
+        sort?: string;
+    };
+    url: '/supermarket/registries/{registry_id}/packages';
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesError = GetSupermarketRegistriesByRegistryIdPackagesErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesErrors];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillPackageListResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesResponse = GetSupermarketRegistriesByRegistryIdPackagesResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesResponses];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdData = {
+    body?: never;
+    path: {
+        /**
+         * Registry ID
+         */
+        registry_id: string;
+        /**
+         * Package ID
+         */
+        package_id: string;
+    };
+    query?: never;
+    url: '/supermarket/registries/{registry_id}/packages/{package_id}';
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdError = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillPackageDescriptor;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses];
+
 export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdData = {
     body?: never;
     path: {
@@ -13821,31 +14032,6 @@ export type GetSupermarketSkillsResponses = {
 };
 
 export type GetSupermarketSkillsResponse = GetSupermarketSkillsResponses[keyof GetSupermarketSkillsResponses];
-
-export type GetSupermarketTagsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/supermarket/tags';
-};
-
-export type GetSupermarketTagsErrors = {
-    /**
-     * Bad Gateway
-     */
-    502: HandlersErrorResponse;
-};
-
-export type GetSupermarketTagsError = GetSupermarketTagsErrors[keyof GetSupermarketTagsErrors];
-
-export type GetSupermarketTagsResponses = {
-    /**
-     * OK
-     */
-    200: HandlersSupermarketTagsResponse;
-};
-
-export type GetSupermarketTagsResponse = GetSupermarketTagsResponses[keyof GetSupermarketTagsResponses];
 
 export type GetTranscriptionModelsData = {
     body?: never;

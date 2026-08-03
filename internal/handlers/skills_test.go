@@ -34,7 +34,6 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
@@ -209,62 +208,26 @@ func TestDeleteSkillsAPIReportsMissingManagedSkill(t *testing.T) {
 	}
 }
 
-func TestDeleteSkillsAPIRemovesRegistrySkillBySourcePath(t *testing.T) {
+func TestDeleteSkillsAPIRejectsRegistryPackageSkill(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	registrySkillDir := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx")
 	registryPath := path.Join(registrySkillDir, "SKILL.md")
 	env.writeSkillFile(t, registryPath, managedSkillRaw("xlsx", "Spreadsheet"))
-	// A user Skill shares the short name; deleting the registry copy must not touch it.
-	flatPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "xlsx", "SKILL.md")
-	env.writeSkillFile(t, flatPath, managedSkillRaw("xlsx", "Local Spreadsheet"))
-
-	rec, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
-		SourcePaths: []string{registryPath},
-	}, env.handler.DeleteSkills)
-	if err != nil {
-		t.Fatalf("DeleteSkills(source_path) error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("DeleteSkills status = %d, want 200", rec.Code)
-	}
-	if _, err := os.Stat(env.localPath(registrySkillDir)); !os.IsNotExist(err) {
-		t.Fatalf("registry skill should be removed, stat err = %v", err)
-	}
-	if _, err := os.Stat(env.localPath(flatPath)); err != nil {
-		t.Fatalf("flat skill with the same name should survive: %v", err)
-	}
-	// The now-empty package and namespace directories are pruned.
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), "openai-api-curated"))); !os.IsNotExist(err) {
-		t.Fatalf("empty registry directory should be pruned, stat err = %v", err)
-	}
-}
-
-func TestDeleteSkillsAPIRejectsPluginOnlyRegistrySkill(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	skillDir := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting")
-	sourcePath := path.Join(skillDir, "SKILL.md")
-	env.writeSkillFile(t, sourcePath, managedSkillRaw("meeting", "Meeting notes"))
-	env.handler.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{{
-		PluginID: "notion", Status: pluginspkg.StatusReady, Enabled: true,
-		Metadata:  map[string]any{"workspace_target_id": workspace.WorkspaceTargetNative},
-		Resources: []pluginspkg.Resource{{Type: "skill", Status: "installed", ResourceID: sourcePath}},
-	}}})
-
 	_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
-		SourcePaths: []string{sourcePath},
+		SourcePaths: []string{registryPath},
 	}, env.handler.DeleteSkills)
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("DeleteSkills(plugin-only) error = %v, want 400", err)
+		t.Fatalf("DeleteSkills(Package member) error = %v, want 400", err)
 	}
-	if _, err := os.Stat(env.localPath(sourcePath)); err != nil {
-		t.Fatalf("Plugin-owned Registry Skill should remain: %v", err)
+	if _, err := os.Stat(env.localPath(registryPath)); err != nil {
+		t.Fatalf("Package Skill should remain: %v", err)
 	}
 }
 
 func TestDeleteSkillsAPIPreservesArtifactWhenDeleteFails(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	skillDir := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting")
+	skillDir := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "meeting")
 	sourcePath := path.Join(skillDir, "SKILL.md")
 	env.writeSkillFile(t, sourcePath, managedSkillRaw("meeting", "Meeting notes"))
 	env.bridge.deleteErrors[skillDir] = errors.New("injected delete failure")
@@ -600,6 +563,12 @@ func TestListSkillsAPIIncludesInstalledRegistrySkillDirectories(t *testing.T) {
 	if got.State != skillset.StateEffective {
 		t.Fatalf("state = %q, want effective", got.State)
 	}
+	if got.RegistryID != "memoh" || got.PackageID != "github" || got.SkillID != "review" {
+		t.Fatalf("Registry Package identity = %q/%q/%q", got.RegistryID, got.PackageID, got.SkillID)
+	}
+	if got.Editable || got.Deletable {
+		t.Fatalf("Registry Package Skill permissions = editable:%v deletable:%v", got.Editable, got.Deletable)
+	}
 	mustFindSkillByPath(t, skills, disabledPath)
 	mustFindSkillByPath(t, skills, remotePath)
 }
@@ -610,30 +579,6 @@ type skillsTestEnv struct {
 	botID    string
 	userID   string
 	bridge   *skillsTestBridgeServer
-}
-
-type fakePluginInstallationLister struct {
-	items         []pluginspkg.Installation
-	err           error
-	mutationCalls *int
-}
-
-func (f fakePluginInstallationLister) WithBotMutation(
-	ctx context.Context,
-	_ string,
-	fn func(context.Context) error,
-) error {
-	if f.mutationCalls != nil {
-		*f.mutationCalls++
-	}
-	return fn(ctx)
-}
-
-func (f fakePluginInstallationLister) List(context.Context, string) ([]pluginspkg.Installation, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.items, nil
 }
 
 func newSkillsTestEnv(t *testing.T) *skillsTestEnv {

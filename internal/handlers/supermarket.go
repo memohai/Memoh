@@ -46,6 +46,7 @@ type SupermarketHandler struct {
 type pluginInstaller interface {
 	botMutationCoordinator
 	Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error)
+	List(ctx context.Context, botID string) ([]pluginspkg.Installation, error)
 	InstalledPluginState(ctx context.Context, botID, pluginID string) (pluginspkg.InstalledPluginState, bool, error)
 	CheckSkillArtifactConflicts(
 		ctx context.Context,
@@ -152,15 +153,17 @@ func (h *SupermarketHandler) Register(e *echo.Echo) {
 	g.GET("/plugins", h.ListPlugins)
 	g.GET("/plugins/:id", h.GetPlugin)
 	g.GET("/skills", h.ListSkills)
-	g.GET("/tags", h.ListTags)
+	g.GET("/packages", h.ListPackages)
 	g.GET("/registries", h.ListRegistries)
 	g.GET("/registries/:registry_id/categories", h.ListRegistryCategories)
+	g.GET("/registries/:registry_id/packages", h.ListRegistryPackages)
+	g.GET("/registries/:registry_id/packages/:package_id", h.GetRegistryPackage)
 	g.GET("/registries/:registry_id/packages/:package_id/skills/:skill_id", h.GetRegistrySkill)
 	g.GET("/artifacts/icon/:digest", h.GetRegistrySkillIcon)
 
 	ig := e.Group("/bots/:bot_id/supermarket")
 	ig.POST("/install-plugin", h.InstallPlugin)
-	ig.POST("/install-skill", h.InstallSkill)
+	ig.POST("/install-package", h.InstallPackage)
 }
 
 func (h *SupermarketHandler) requireBotAccess(c echo.Context) (string, error) {
@@ -231,16 +234,6 @@ func (h *SupermarketHandler) GetPlugin(c echo.Context) error {
 	return h.proxy(c, "/api/plugins/"+url.PathEscape(id))
 }
 
-// ListTags godoc
-// @Summary List all tags from supermarket
-// @Tags supermarket
-// @Success 200 {object} SupermarketTagsResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /supermarket/tags [get].
-func (h *SupermarketHandler) ListTags(c echo.Context) error {
-	return h.proxy(c, "/api/tags")
-}
-
 // --- Install endpoints ---
 
 // InstallPluginRequest is the request body for installing a plugin from supermarket.
@@ -271,12 +264,11 @@ func (r *InstallPluginRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// InstallSkillRequest is the request body for installing a skill from supermarket.
-type InstallSkillRequest struct {
+// InstallPackageRequest installs one immutable Package revision.
+type InstallPackageRequest struct {
 	RegistryID        string `json:"registry_id" validate:"required"`
 	PackageID         string `json:"package_id" validate:"required"`
-	SkillID           string `json:"skill_id" validate:"required"`
-	ArtifactDigest    string `json:"artifact_digest" validate:"required"`
+	Revision          string `json:"revision" validate:"required"`
 	WorkspaceTargetID string `json:"workspace_target_id,omitempty"`
 }
 
@@ -467,29 +459,29 @@ func matchesExpectedPluginInstallation(
 	return installed && actual.ReleaseRevision == *expectedRevision && actual.UpdatedAt.Equal(*expectedUpdatedAt)
 }
 
-// InstallSkill godoc
-// @Summary Install skill from supermarket to bot workspace
+// InstallPackage godoc
+// @Summary Install every Skill in a supermarket Package to a bot workspace
 // @Tags supermarket
 // @Param bot_id path string true "Bot ID"
-// @Param payload body InstallSkillRequest true "Install skill request"
-// @Success 200 {object} InstallRegistrySkillResponse
+// @Param payload body InstallPackageRequest true "Install Package request"
+// @Success 200 {object} InstallRegistryPackageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
-// @Router /bots/{bot_id}/supermarket/install-skill [post].
-func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
+// @Router /bots/{bot_id}/supermarket/install-package [post].
+func (h *SupermarketHandler) InstallPackage(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
 	}
 
-	var req InstallSkillRequest
+	var req InstallPackageRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	result, err := h.installRegistrySkill(c.Request().Context(), botID, req)
+	result, err := h.installRegistryPackage(c.Request().Context(), botID, req)
 	if err != nil {
 		return err
 	}
@@ -545,10 +537,6 @@ type SupermarketPluginListResponse struct {
 	Page  int                      `json:"page"`
 	Limit int                      `json:"limit"`
 	Data  []SupermarketPluginEntry `json:"data"`
-}
-
-type SupermarketTagsResponse struct {
-	Tags []string `json:"tags"`
 }
 
 // --- Internal helpers ---

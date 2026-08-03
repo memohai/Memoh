@@ -272,6 +272,9 @@ func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string
 	if targetPath == "" {
 		return bridge.ErrBadRequest
 	}
+	if _, _, _, ok := RegistrySkillIDs(targetPath); ok {
+		return ErrRegistrySkillReadOnly
+	}
 
 	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots)
 	switch strings.TrimSpace(req.Action) {

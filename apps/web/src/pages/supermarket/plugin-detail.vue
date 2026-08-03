@@ -116,11 +116,10 @@
             <template #content>
               <RouterLink
                 :to="{
-                  name: 'supermarket-skill-detail',
+                  name: 'supermarket-package-detail',
                   params: {
                     registryId: skill.registry_id,
                     packageId: skill.package_id,
-                    skillId: skill.skill_id,
                   },
                 }"
                 class="block rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

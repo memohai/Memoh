@@ -7901,6 +7901,70 @@
                 }
             }
         },
+        "/bots/{bot_id}/supermarket/install-package": {
+            "post": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Install every Skill in a supermarket Package to a bot workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Install Package request",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.InstallPackageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.InstallRegistryPackageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/supermarket/install-plugin": {
             "post": {
                 "tags": [
@@ -7960,70 +8024,6 @@
                         "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/supermarket/install-skill": {
-            "post": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "Install skill from supermarket to bot workspace",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Install skill request",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.InstallSkillRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.InstallRegistrySkillResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -12827,6 +12827,78 @@
                 }
             }
         },
+        "/supermarket/packages": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Skill Packages across supermarket Registries",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category ID",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact tag",
+                        "name": "tag",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sort order",
+                        "name": "sort",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/supermarket/plugins": {
             "get": {
                 "tags": [
@@ -12977,6 +13049,135 @@
                 }
             }
         },
+        "/supermarket/registries/{registry_id}/packages": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Skill Packages in one Registry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category ID",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact tag",
+                        "name": "tag",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sort order",
+                        "name": "sort",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/packages/{package_id}": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Get a namespaced Skill Package",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageDescriptor"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}": {
             "get": {
                 "tags": [
@@ -13101,28 +13302,6 @@
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/supermarket/tags": {
-            "get": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "List all tags from supermarket",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketTagsResponse"
                         }
                     },
                     "502": {
@@ -18937,6 +19116,28 @@
                 }
             }
         },
+        "handlers.InstallPackageRequest": {
+            "type": "object",
+            "required": [
+                "package_id",
+                "registry_id",
+                "revision"
+            ],
+            "properties": {
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.InstallPluginRequest": {
             "type": "object",
             "required": [
@@ -18968,6 +19169,40 @@
                 }
             }
         },
+        "handlers.InstallRegistryPackageResponse": {
+            "type": "object",
+            "required": [
+                "ok",
+                "package_id",
+                "registry_id",
+                "revision",
+                "skills",
+                "workspace_target_id"
+            ],
+            "properties": {
+                "ok": {
+                    "type": "boolean"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.InstallRegistrySkillResponse"
+                    }
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.InstallRegistrySkillResponse": {
             "type": "object",
             "required": [
@@ -18992,32 +19227,6 @@
                 },
                 "ok": {
                     "type": "boolean"
-                },
-                "package_id": {
-                    "type": "string"
-                },
-                "registry_id": {
-                    "type": "string"
-                },
-                "skill_id": {
-                    "type": "string"
-                },
-                "workspace_target_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.InstallSkillRequest": {
-            "type": "object",
-            "required": [
-                "artifact_digest",
-                "package_id",
-                "registry_id",
-                "skill_id"
-            ],
-            "properties": {
-                "artifact_digest": {
-                    "type": "string"
                 },
                 "package_id": {
                     "type": "string"
@@ -19315,10 +19524,19 @@
                 "name": {
                     "type": "string"
                 },
+                "package_id": {
+                    "type": "string"
+                },
                 "raw": {
                     "type": "string"
                 },
+                "registry_id": {
+                    "type": "string"
+                },
                 "shadowed_by": {
+                    "type": "string"
+                },
+                "skill_id": {
                     "type": "string"
                 },
                 "source_kind": {
@@ -19925,6 +20143,166 @@
                 }
             }
         },
+        "handlers.SupermarketSkillPackageCategory": {
+            "type": "object",
+            "required": [
+                "id",
+                "name",
+                "skill_count"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillPackageDescriptor": {
+            "type": "object",
+            "required": [
+                "categories",
+                "description",
+                "name",
+                "package_id",
+                "registry_id",
+                "release_url",
+                "revision",
+                "schema_version",
+                "skill_count",
+                "skills",
+                "source_revision",
+                "tags"
+            ],
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillPackageCategory"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "release_url": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketCatalogSkill"
+                    }
+                },
+                "source_revision": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketSkillPackageListResponse": {
+            "type": "object",
+            "required": [
+                "data",
+                "limit",
+                "page",
+                "total"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillPackageSummary"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillPackageSummary": {
+            "type": "object",
+            "required": [
+                "categories",
+                "description",
+                "name",
+                "package_id",
+                "registry_id",
+                "schema_version",
+                "skill_count",
+                "tags"
+            ],
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillPackageCategory"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "handlers.SupermarketSkillSource": {
             "type": "object",
             "required": [
@@ -19944,17 +20322,6 @@
                 },
                 "type": {
                     "type": "string"
-                }
-            }
-        },
-        "handlers.SupermarketTagsResponse": {
-            "type": "object",
-            "properties": {
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 }
             }
         },

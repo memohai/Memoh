@@ -134,6 +134,18 @@ func TestApplyActionAdoptAndDisable(t *testing.T) {
 	}
 }
 
+func TestApplyActionRejectsRegistryPackageSkill(t *testing.T) {
+	client := newFakeClient()
+	targetPath := pathJoin(ManagedDirPath, "openai-api-curated", "docs", "xlsx", "SKILL.md")
+	for _, action := range []string{ActionDisable, ActionEnable, ActionAdopt} {
+		if err := ApplyAction(context.Background(), client, nil, ActionRequest{
+			Action: action, TargetPath: targetPath,
+		}); !errors.Is(err, ErrRegistrySkillReadOnly) {
+			t.Fatalf("ApplyAction(%s) error = %v, want ErrRegistrySkillReadOnly", action, err)
+		}
+	}
+}
+
 func TestApplyActionAdoptRejectsInvalidManagedName(t *testing.T) {
 	client := newFakeClient()
 	externalPath := pathJoin("/data/.agents/skills", "escape", "SKILL.md")
@@ -232,13 +244,9 @@ func TestDeletableSkillDirForSourcePath(t *testing.T) {
 		t.Fatalf("DeletableSkillDirForSourcePath(builtin) err = %v, want ErrBuiltinSkillReadOnly", err)
 	}
 
-	registrySkillDir := pathJoin(ManagedDirPath, "openai-api-curated", "docs", "xlsx")
-	registry, err := DeletableSkillDirForSourcePath(pathJoin(registrySkillDir, "SKILL.md"))
-	if err != nil {
-		t.Fatalf("DeletableSkillDirForSourcePath(registry) error = %v", err)
-	}
-	if registry != registrySkillDir {
-		t.Fatalf("DeletableSkillDirForSourcePath(registry) = %q", registry)
+	registryPath := pathJoin(ManagedDirPath, "openai-api-curated", "docs", "xlsx", "SKILL.md")
+	if _, err := DeletableSkillDirForSourcePath(registryPath); !errors.Is(err, ErrRegistrySkillReadOnly) {
+		t.Fatalf("DeletableSkillDirForSourcePath(registry) error = %v, want ErrRegistrySkillReadOnly", err)
 	}
 
 	for _, sourcePath := range []string{

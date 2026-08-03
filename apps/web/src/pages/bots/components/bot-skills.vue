@@ -6,6 +6,7 @@
   >
     <template #actions>
       <Button
+        v-if="!selectedPackage"
         variant="outline"
         size="sm"
         @click="isDiscoveryDialogOpen = true"
@@ -21,6 +22,7 @@
         </Badge>
       </Button>
       <Button
+        v-if="!selectedPackage"
         size="sm"
         @click="handleCreate"
       >
@@ -29,7 +31,18 @@
       </Button>
     </template>
 
-    <SettingsSection :title="$t('bots.skills.libraryTitle')">
+    <Button
+      v-if="selectedPackage"
+      variant="ghost"
+      size="sm"
+      class="mb-2 w-fit"
+      @click="closePackage"
+    >
+      <ArrowLeft class="size-4" />
+      {{ $t('bots.skills.backToLibrary') }}
+    </Button>
+
+    <SettingsSection :title="selectedPackage?.packageId || $t('bots.skills.libraryTitle')">
       <!-- Loading borrows the skill-row height to hold the list's space steady
            (no CLS) until skills load — same card-row family as the row list it
            stands in for. -->
@@ -70,131 +83,203 @@
         </EmptyContent>
       </Empty>
 
-      <!-- v-else keeps the row list mutually exclusive with the loading/empty
-           branches, so a refetch over existing data shows the spinner alone (the
-           original behavior) rather than stale rows beneath it. -->
       <template v-else>
-        <!-- Dense object-list row: a skill's name+badges, description, source path,
-             and its per-skill action cluster. align="start" top-pins the action
-             buttons to the title line since the description can wrap to two lines
-             and the shadowed hint can add a third. -->
-        <SettingsRow
-          v-for="skill in skills"
-          :key="skillKey(skill)"
-          align="start"
-        >
-          <template #content>
-            <div class="flex min-w-0 items-center gap-2">
-              <h3
-                class="truncate font-mono text-sm font-medium text-foreground"
-                :class="{ 'line-through text-muted-foreground': skill.state === 'shadowed' }"
-                :title="skill.name"
+        <template v-if="selectedPackage">
+          <SettingsRow
+            v-for="skill in selectedPackage.skills"
+            :key="skillKey(skill)"
+            align="start"
+          >
+            <template #content>
+              <div class="flex min-w-0 items-center gap-2">
+                <h3
+                  class="truncate font-mono text-sm font-medium text-foreground"
+                  :class="{ 'line-through text-muted-foreground': skill.state === 'shadowed' }"
+                  :title="skill.name"
+                >
+                  {{ skill.name }}
+                </h3>
+                <Badge
+                  variant="outline"
+                  size="sm"
+                >
+                  {{ skillStateLabel(skill) }}
+                </Badge>
+              </div>
+              <p
+                class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]"
+                :title="skill.description"
               >
-                {{ skill.name }}
-              </h3>
-              <Badge
-                variant="outline"
-                size="sm"
-              >
-                {{ skillStateLabel(skill) }}
-              </Badge>
-              <Badge
-                variant="default"
-                size="sm"
-              >
-                {{ skill.managed ? $t('bots.skills.managedBadge') : $t('bots.skills.discoveredBadge') }}
-              </Badge>
-            </div>
-            <p
-              class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]"
-              :title="skill.description"
-            >
-              {{ skill.description || '-' }}
-            </p>
-            <p
-              class="mt-2 truncate font-mono text-xs text-muted-foreground"
-              :title="sourceSummary(skill)"
-            >
-              {{ sourceSummary(skill) }}
-            </p>
-            <p
-              v-if="skill.state === 'shadowed'"
-              class="mt-3 text-xs text-muted-foreground"
-            >
-              {{ $t('bots.skills.shadowedHint') }}
-            </p>
-          </template>
-
-          <div class="flex items-center gap-1">
+                {{ skill.description || '-' }}
+              </p>
+            </template>
             <Button
-              v-if="skill.editable"
               variant="ghost"
               size="icon-sm"
-              :aria-label="!skill.managed ? $t('bots.skills.overrideTitle') : $t('common.edit')"
-              @click="handleEdit(skill)"
-            >
-              <SquarePen class="size-3.5" />
-            </Button>
-
-            <Button
-              v-if="skill.state === 'disabled'"
-              variant="ghost"
-              size="icon-sm"
-              loading-mode="icon"
-              :loading="isSkillActionPending(skill, 'enable')"
-              :disabled="isActioning"
-              :aria-label="$t('bots.skills.enableAction')"
-              @click="handleSkillAction('enable', skill)"
-            >
-              <EyeOff class="size-3.5" />
-            </Button>
-            <Button
-              v-else
-              variant="ghost"
-              size="icon-sm"
-              loading-mode="icon"
-              :loading="isSkillActionPending(skill, 'disable')"
-              :disabled="isActioning"
-              :aria-label="$t('bots.skills.disableAction')"
-              @click="handleSkillAction('disable', skill)"
+              :aria-label="$t('bots.skills.viewSkill')"
+              @click="handleView(skill)"
             >
               <Eye class="size-3.5" />
             </Button>
+          </SettingsRow>
+        </template>
 
-            <Button
-              v-if="!skill.managed"
-              variant="ghost"
-              size="icon-sm"
-              loading-mode="icon"
-              :loading="isSkillActionPending(skill, 'adopt')"
-              :disabled="isActioning || skill.state === 'shadowed'"
-              :aria-label="skill.state === 'shadowed' ? $t('bots.skills.adoptBlocked') : $t('bots.skills.adoptAction')"
-              @click="handleSkillAction('adopt', skill)"
-            >
-              <ArrowDownToLine class="size-3.5" />
-            </Button>
-
-            <ConfirmPopover
-              v-if="skill.deletable"
-              :message="$t('bots.skills.deleteConfirm')"
-              :cancel-text="$t('common.cancel')"
-              :confirm-text="$t('common.confirm')"
-              :loading="isDeleting && deletingPath === skill.source_path"
-              @confirm="handleDelete(skill)"
-            >
-              <template #trigger>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  :disabled="isDeleting"
-                  :aria-label="$t('common.delete')"
+        <template v-else>
+          <SettingsRow
+            v-for="pkg in skillPackages"
+            :key="pkg.key"
+            align="start"
+            class="cursor-pointer transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            role="button"
+            tabindex="0"
+            @click="openPackage(pkg.key)"
+            @keydown.enter.prevent="openPackage(pkg.key)"
+            @keydown.space.prevent="openPackage(pkg.key)"
+          >
+            <template #content>
+              <div class="flex min-w-0 items-center gap-2">
+                <Box class="size-4 shrink-0 text-muted-foreground" />
+                <h3
+                  class="truncate font-mono text-sm font-medium text-foreground"
+                  :title="pkg.packageId"
                 >
-                  <Trash2 class="size-3.5" />
-                </Button>
-              </template>
-            </ConfirmPopover>
-          </div>
-        </SettingsRow>
+                  {{ pkg.packageId }}
+                </h3>
+                <Badge
+                  variant="outline"
+                  size="sm"
+                >
+                  {{ $t('bots.skills.packageBadge') }}
+                </Badge>
+              </div>
+              <p class="mt-2 truncate font-mono text-xs text-muted-foreground">
+                {{ pkg.registryId }}
+              </p>
+            </template>
+            <ChevronRight
+              class="size-3.5 text-muted-foreground"
+              aria-hidden="true"
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            v-for="skill in standaloneSkills"
+            :key="skillKey(skill)"
+            align="start"
+          >
+            <template #content>
+              <div class="flex min-w-0 items-center gap-2">
+                <h3
+                  class="truncate font-mono text-sm font-medium text-foreground"
+                  :class="{ 'line-through text-muted-foreground': skill.state === 'shadowed' }"
+                  :title="skill.name"
+                >
+                  {{ skill.name }}
+                </h3>
+                <Badge
+                  variant="outline"
+                  size="sm"
+                >
+                  {{ skillStateLabel(skill) }}
+                </Badge>
+                <Badge
+                  variant="default"
+                  size="sm"
+                >
+                  {{ skill.managed ? $t('bots.skills.managedBadge') : $t('bots.skills.discoveredBadge') }}
+                </Badge>
+              </div>
+              <p
+                class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]"
+                :title="skill.description"
+              >
+                {{ skill.description || '-' }}
+              </p>
+              <p
+                class="mt-2 truncate font-mono text-xs text-muted-foreground"
+                :title="sourceSummary(skill)"
+              >
+                {{ sourceSummary(skill) }}
+              </p>
+              <p
+                v-if="skill.state === 'shadowed'"
+                class="mt-3 text-xs text-muted-foreground"
+              >
+                {{ $t('bots.skills.shadowedHint') }}
+              </p>
+            </template>
+
+            <div class="flex items-center gap-1">
+              <Button
+                v-if="skill.editable"
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="!skill.managed ? $t('bots.skills.overrideTitle') : $t('common.edit')"
+                @click="handleEdit(skill)"
+              >
+                <SquarePen class="size-3.5" />
+              </Button>
+
+              <Button
+                v-if="skill.state === 'disabled'"
+                variant="ghost"
+                size="icon-sm"
+                loading-mode="icon"
+                :loading="isSkillActionPending(skill, 'enable')"
+                :disabled="isActioning"
+                :aria-label="$t('bots.skills.enableAction')"
+                @click="handleSkillAction('enable', skill)"
+              >
+                <EyeOff class="size-3.5" />
+              </Button>
+              <Button
+                v-else
+                variant="ghost"
+                size="icon-sm"
+                loading-mode="icon"
+                :loading="isSkillActionPending(skill, 'disable')"
+                :disabled="isActioning"
+                :aria-label="$t('bots.skills.disableAction')"
+                @click="handleSkillAction('disable', skill)"
+              >
+                <Eye class="size-3.5" />
+              </Button>
+
+              <Button
+                v-if="!skill.managed"
+                variant="ghost"
+                size="icon-sm"
+                loading-mode="icon"
+                :loading="isSkillActionPending(skill, 'adopt')"
+                :disabled="isActioning || skill.state === 'shadowed'"
+                :aria-label="skill.state === 'shadowed' ? $t('bots.skills.adoptBlocked') : $t('bots.skills.adoptAction')"
+                @click="handleSkillAction('adopt', skill)"
+              >
+                <ArrowDownToLine class="size-3.5" />
+              </Button>
+
+              <ConfirmPopover
+                v-if="skill.deletable"
+                :message="$t('bots.skills.deleteConfirm')"
+                :cancel-text="$t('common.cancel')"
+                :confirm-text="$t('common.confirm')"
+                :loading="isDeleting && deletingPath === skill.source_path"
+                @confirm="handleDelete(skill)"
+              >
+                <template #trigger>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    :disabled="isDeleting"
+                    :aria-label="$t('common.delete')"
+                  >
+                    <Trash2 class="size-3.5" />
+                  </Button>
+                </template>
+              </ConfirmPopover>
+            </div>
+          </SettingsRow>
+        </template>
       </template>
     </SettingsSection>
 
@@ -203,7 +288,7 @@
       <DialogContent class="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden p-0 sm:h-[85vh] sm:max-w-4xl">
         <DialogHeader class="shrink-0 border-b border-border p-4">
           <DialogTitle class="text-sm font-semibold">
-            {{ isEditing ? $t('common.edit') : $t('bots.skills.addSkill') }}
+            {{ isViewing ? $t('bots.skills.viewSkill') : isEditing ? $t('common.edit') : $t('bots.skills.addSkill') }}
           </DialogTitle>
         </DialogHeader>
         
@@ -212,7 +297,7 @@
             <MonacoEditor
               v-model="draftRaw"
               language="markdown"
-              :readonly="isSaving"
+              :readonly="isViewing || isSaving"
               class="min-h-0 flex-1"
               :options="{
                 automaticLayout: true,
@@ -231,10 +316,11 @@
               size="sm"
               :disabled="isSaving"
             >
-              {{ $t('common.cancel') }}
+              {{ isViewing ? $t('bots.skills.close') : $t('common.cancel') }}
             </Button>
           </DialogClose>
           <Button
+            v-if="!isViewing"
             size="sm"
             class="min-w-24"
             :disabled="!canSave"
@@ -346,7 +432,7 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDownToLine, Eye, EyeOff, Plus, SlidersHorizontal, SquarePen, Trash2 } from 'lucide-vue-next'
+import { ArrowDownToLine, ArrowLeft, Box, ChevronRight, Eye, EyeOff, Plus, SlidersHorizontal, SquarePen, Trash2 } from 'lucide-vue-next'
 import { computed, onActivated, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
@@ -379,6 +465,16 @@ type SkillItem = HandlersSkillItem & {
   managed?: boolean
   state?: string
   shadowed_by?: string
+  registry_id?: string
+  package_id?: string
+  skill_id?: string
+}
+
+type SkillPackage = {
+  key: string
+  registryId: string
+  packageId: string
+  skills: SkillItem[]
 }
 
 const props = defineProps<{
@@ -413,8 +509,10 @@ const savedDiscoveryRoots = ref<string[]>([...DEFAULT_DISCOVERY_ROOTS])
 
 const isDialogOpen = ref(false)
 const isEditing = ref(false)
+const isViewing = ref(false)
 const draftRaw = ref('')
 const editingSourcePath = ref('')
+const selectedPackageKey = ref('')
 
 const SKILL_TEMPLATE = `---
 name: my-skill
@@ -425,8 +523,27 @@ description: Brief description
 `
 
 const canSave = computed(() => {
-  return draftRaw.value.trim().length > 0
+  return !isViewing.value && draftRaw.value.trim().length > 0
 })
+
+const skillPackages = computed<SkillPackage[]>(() => {
+  const grouped = new Map<string, SkillPackage>()
+  for (const skill of skills.value) {
+    if (!skill.registry_id || !skill.package_id) continue
+    const key = `${skill.registry_id}/${skill.package_id}`
+    const pkg = grouped.get(key) || {
+      key,
+      registryId: skill.registry_id,
+      packageId: skill.package_id,
+      skills: [],
+    }
+    pkg.skills.push(skill)
+    grouped.set(key, pkg)
+  }
+  return [...grouped.values()].sort((left, right) => left.packageId.localeCompare(right.packageId))
+})
+const standaloneSkills = computed(() => skills.value.filter(skill => !skill.registry_id || !skill.package_id))
+const selectedPackage = computed(() => skillPackages.value.find(pkg => pkg.key === selectedPackageKey.value) || null)
 
 const { data: bot, refetch: refetchBot } = useQuery({
   key: () => ['bot', props.botId],
@@ -590,6 +707,7 @@ function closeDiscoveryDialog() {
 }
 
 function handleCreate() {
+  isViewing.value = false
   isEditing.value = false
   editingSourcePath.value = ''
   draftRaw.value = SKILL_TEMPLATE
@@ -597,10 +715,27 @@ function handleCreate() {
 }
 
 function handleEdit(skill: SkillItem) {
+  isViewing.value = false
   isEditing.value = true
   editingSourcePath.value = skill.source_path || ''
   draftRaw.value = skill.raw || ''
   isDialogOpen.value = true
+}
+
+function handleView(skill: SkillItem) {
+  isViewing.value = true
+  isEditing.value = false
+  editingSourcePath.value = ''
+  draftRaw.value = skill.raw || ''
+  isDialogOpen.value = true
+}
+
+function openPackage(key: string) {
+  selectedPackageKey.value = key
+}
+
+function closePackage() {
+  selectedPackageKey.value = ''
 }
 
 function skillKey(skill: SkillItem) {

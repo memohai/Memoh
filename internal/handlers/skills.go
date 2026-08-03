@@ -12,7 +12,6 @@ import (
 
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -32,6 +31,9 @@ type SkillItem struct {
 	Deletable   bool           `json:"deletable"`
 	State       string         `json:"state,omitempty"`
 	ShadowedBy  string         `json:"shadowed_by,omitempty"`
+	RegistryID  string         `json:"registry_id,omitempty"`
+	PackageID   string         `json:"package_id,omitempty"`
+	SkillID     string         `json:"skill_id,omitempty"`
 }
 
 type SkillsResponse struct {
@@ -67,7 +69,6 @@ type skillsOpResponse struct {
 
 type PluginInstallationLister interface {
 	botMutationCoordinator
-	List(ctx context.Context, botID string) ([]pluginspkg.Installation, error)
 }
 
 func (h *ContainerdHandler) SetPluginService(service PluginInstallationLister) {
@@ -172,7 +173,7 @@ func (h *ContainerdHandler) upsertSkills(
 		return workspaceUnavailableError(err)
 	}
 	if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "Registry Skills cannot be edited directly")
+		return echo.NewHTTPError(http.StatusBadRequest, "Registry Package Skills cannot be edited directly")
 	}
 
 	for i, raw := range rawSkills {
@@ -186,7 +187,7 @@ func (h *ContainerdHandler) upsertSkills(
 				return apperror.New(apperror.CodeSkillBuiltinReadOnly, nil)
 			}
 			if errors.Is(planErr, skillset.ErrRegistrySkillReadOnly) {
-				return echo.NewHTTPError(http.StatusBadRequest, "Registry Skills cannot be edited directly")
+				return echo.NewHTTPError(http.StatusBadRequest, "Registry Package Skills cannot be edited directly")
 			}
 			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
 		}
@@ -280,7 +281,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 }
 
 func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sourcePaths []string) error {
-	ctx, targetID, err := h.pinCurrentWorkspaceTarget(ctx, botID)
+	ctx, _, err := h.pinCurrentWorkspaceTarget(ctx, botID)
 	if err != nil {
 		return workspaceUnavailableError(err)
 	}
@@ -300,6 +301,9 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 			if errors.Is(dirErr, skillset.ErrBuiltinSkillReadOnly) {
 				return apperror.New(apperror.CodeSkillBuiltinReadOnly, nil)
 			}
+			if errors.Is(dirErr, skillset.ErrRegistrySkillReadOnly) {
+				return echo.NewHTTPError(http.StatusBadRequest, "Registry Package Skills cannot be deleted directly")
+			}
 			return echo.NewHTTPError(http.StatusBadRequest, "only Memoh-managed skills can be deleted")
 		}
 		target := deleteTarget{sourcePath: path.Clean(strings.TrimSpace(sourcePath)), skillDir: skillDir}
@@ -310,15 +314,6 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 		if _, statErr := client.Stat(ctx, target.skillDir); statErr != nil {
 			return fsHTTPError(statErr)
 		}
-		if _, _, _, ok := skillset.RegistrySkillIDs(target.sourcePath); ok {
-			pluginOwned, ownerErr := h.pluginOwnsRegistrySkill(ctx, botID, target.sourcePath, targetID)
-			if ownerErr != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, ownerErr.Error())
-			}
-			if pluginOwned {
-				return echo.NewHTTPError(http.StatusBadRequest, "Skill is still used by an installed Plugin")
-			}
-		}
 		if err := client.DeleteFile(ctx, target.skillDir, true); err != nil {
 			return fsHTTPError(err)
 		}
@@ -326,20 +321,6 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 	}
 
 	return nil
-}
-
-func (h *ContainerdHandler) pluginOwnsRegistrySkill(
-	ctx context.Context,
-	botID, sourcePath, targetID string,
-) (bool, error) {
-	if h.pluginService == nil {
-		return false, nil
-	}
-	installations, err := h.pluginService.List(ctx, botID)
-	if err != nil {
-		return false, err
-	}
-	return pluginspkg.OwnsRegistrySkillAtTarget(installations, sourcePath, targetID), nil
 }
 
 type currentWorkspaceTargetResolver interface {
@@ -420,6 +401,9 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 }
 
 func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, req SkillsActionRequest) error {
+	if _, _, _, ok := skillset.RegistrySkillIDs(req.TargetPath); ok {
+		return echo.NewHTTPError(http.StatusBadRequest, "Registry Package Skills are read-only")
+	}
 	ctx, _, err := h.pinCurrentWorkspaceTarget(ctx, botID)
 	if err != nil {
 		return workspaceUnavailableError(err)
@@ -538,7 +522,8 @@ func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 	items := make([]SkillItem, len(entries))
 	for i, entry := range entries {
 		_, builtin := skillset.BuiltinSkillName(entry.SourcePath)
-		registryOwned := entry.SourceKind == skillset.SourceKindRegistry
+		registryID, packageID, skillID, packageMember := skillset.RegistrySkillIDs(entry.SourcePath)
+		registryOwned := entry.SourceKind == skillset.SourceKindRegistry || packageMember
 		items[i] = SkillItem{
 			Name:        entry.Name,
 			Description: entry.Description,
@@ -550,9 +535,12 @@ func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 			SourceKind:  entry.SourceKind,
 			Managed:     entry.Managed,
 			Editable:    !builtin && !registryOwned,
-			Deletable:   entry.Managed && !builtin,
+			Deletable:   entry.Managed && !builtin && !packageMember,
 			State:       entry.State,
 			ShadowedBy:  entry.ShadowedBy,
+			RegistryID:  registryID,
+			PackageID:   packageID,
+			SkillID:     skillID,
 		}
 	}
 	return items
