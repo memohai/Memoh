@@ -29,13 +29,13 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
+	supermarketclient "github.com/memohai/memoh/internal/supermarket"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 type SupermarketHandler struct {
-	baseURL        string
-	httpClient     *http.Client
+	upstream       *supermarketclient.Client
 	pluginService  pluginInstaller
 	containers     bridge.Provider
 	workspaces     *workspace.Manager
@@ -138,8 +138,7 @@ func NewSupermarketHandler(
 	accountService *accounts.Service,
 ) *SupermarketHandler {
 	return &SupermarketHandler{
-		baseURL:        cfg.Supermarket.GetBaseURL(),
-		httpClient:     &http.Client{Timeout: 30 * time.Second},
+		upstream:       supermarketclient.NewClient(cfg.Supermarket.GetBaseURL(), nil),
 		pluginService:  pluginService,
 		containers:     containers,
 		workspaces:     workspaces,
@@ -181,20 +180,13 @@ func (h *SupermarketHandler) requireBotAccess(c echo.Context) (string, error) {
 
 // proxy forwards a GET request to the supermarket and streams the JSON response back.
 func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
-	url := h.baseURL + upstreamPath
+	requestPath := upstreamPath
 	if qs := c.QueryString(); qs != "" {
-		url += "?" + qs
+		requestPath += "?" + qs
 	}
-
-	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, url, nil)
+	resp, err := h.upstream.Get(c.Request().Context(), requestPath, "application/json")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := h.doSupermarketRequest(req)
-	if err != nil {
-		h.logger.Error("supermarket proxy failed", slog.String("url", url), slog.Any("error", err))
+		h.logger.Error("supermarket proxy failed", slog.String("path", requestPath), slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -564,16 +556,10 @@ func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (
 	if !skillset.IsValidName(pluginID) {
 		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadRequest, "plugin id is invalid")
 	}
-	endpoint := strings.TrimRight(h.baseURL, "/") + "/api/plugins/" + url.PathEscape(pluginID)
-	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, endpoint, nil)
+	requestPath := "/api/plugins/" + url.PathEscape(pluginID)
+	resp, err := h.upstream.Get(c.Request().Context(), requestPath, "application/json")
 	if err != nil {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := h.doSupermarketRequest(req)
-	if err != nil {
-		h.logger.Error("supermarket plugin fetch failed", slog.String("url", endpoint), slog.Any("error", err))
+		h.logger.Error("supermarket plugin fetch failed", slog.String("path", requestPath), slog.Any("error", err))
 		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -615,16 +601,11 @@ func (h *SupermarketHandler) fetchImmutablePluginRelease(
 	ctx context.Context,
 	pluginID, revision, publishedAt string,
 ) (SupermarketPluginEntry, error) {
-	endpoint := strings.TrimRight(h.baseURL, "/") + "/api/plugins/" + url.PathEscape(pluginID) +
+	requestPath := "/api/plugins/" + url.PathEscape(pluginID) +
 		"/releases/" + url.PathEscape(revision)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	resp, err := h.upstream.Get(ctx, requestPath, "application/json")
 	if err != nil {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := h.doSupermarketRequest(req)
-	if err != nil {
-		h.logger.Error("supermarket Plugin release fetch failed", slog.String("url", endpoint), slog.Any("error", err))
+		h.logger.Error("supermarket Plugin release fetch failed", slog.String("path", requestPath), slog.Any("error", err))
 		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -663,45 +644,6 @@ func (h *SupermarketHandler) fetchImmutablePluginRelease(
 			Packages:    release.Packages,
 		},
 	}, nil
-}
-
-var (
-	errSupermarketRedirectOrigin = errors.New("supermarket redirect left the configured origin")
-	errSupermarketRedirectLimit  = errors.New("supermarket redirect limit exceeded")
-)
-
-func (h *SupermarketHandler) doSupermarketRequest(req *http.Request) (*http.Response, error) {
-	base, err := url.Parse(h.baseURL)
-	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil {
-		return nil, errors.New("configured Supermarket URL is invalid")
-	}
-	client := http.Client{Timeout: 30 * time.Second}
-	if h.httpClient != nil {
-		client = *h.httpClient
-	}
-	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
-		if len(via) >= 10 {
-			return errSupermarketRedirectLimit
-		}
-		if !sameHTTPOrigin(next.URL, base) {
-			return errSupermarketRedirectOrigin
-		}
-		return nil
-	}
-	resp, err := client.Do(req) //nolint:gosec // Initial URL is derived from trusted config; redirects remain same-origin.
-	if err != nil {
-		return nil, err
-	}
-	if resp.Request == nil || !sameHTTPOrigin(resp.Request.URL, base) {
-		_ = resp.Body.Close()
-		return nil, errSupermarketRedirectOrigin
-	}
-	return resp, nil
-}
-
-func sameHTTPOrigin(candidate, base *url.URL) bool {
-	return candidate != nil && base != nil && candidate.User == nil &&
-		candidate.Scheme == base.Scheme && strings.EqualFold(candidate.Host, base.Host)
 }
 
 func validateSupermarketPluginEntry(

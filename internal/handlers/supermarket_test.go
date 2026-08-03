@@ -27,6 +27,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
+	supermarketclient "github.com/memohai/memoh/internal/supermarket"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -63,8 +64,7 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	requestedPaths := make([]string, 0, 3)
 	artifactRequestedDuringMutation := false
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			requestedPaths = append(requestedPaths, req.URL.Path)
 			status := http.StatusOK
 			var content []byte
@@ -86,7 +86,7 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 				content = nil
 			}
 			return testHTTPResponse(req, status, content), nil
-		})},
+		})}),
 		pluginService:  installer,
 		containers:     manager,
 		workspaces:     manager,
@@ -168,8 +168,7 @@ func TestInstallPluginRejectsStaleReleaseBeforeWorkspaceMutation(t *testing.T) {
 	artifactRequested := false
 	installer := &recordingPluginInstaller{}
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
 			case "/api/plugins/notion":
 				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
@@ -181,7 +180,7 @@ func TestInstallPluginRejectsStaleReleaseBeforeWorkspaceMutation(t *testing.T) {
 			default:
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
-		})},
+		})}),
 		pluginService: installer, containers: manager, workspaces: manager,
 		botService: env.handler.botService, accountService: env.handler.accountService,
 		logger: slog.New(slog.DiscardHandler),
@@ -239,8 +238,7 @@ func TestInstallPluginRejectsInstallationChangedWithinSameReleaseWhilePreparing(
 		installer.installedUpdatedAt = installedAt.Add(time.Second)
 	}
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
 			case "/api/plugins/notion":
 				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
@@ -251,7 +249,7 @@ func TestInstallPluginRejectsInstallationChangedWithinSameReleaseWhilePreparing(
 			default:
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
-		})},
+		})}),
 		pluginService: installer, containers: manager, workspaces: manager,
 		botService: env.handler.botService, accountService: env.handler.accountService,
 		logger: slog.New(slog.DiscardHandler),
@@ -305,8 +303,7 @@ func TestInstallPluginRollsBackSkillsWhenBundleInstallFails(t *testing.T) {
 	installer := &recordingPluginInstaller{}
 	requestedMutableSkill := false
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
 			case "/api/plugins/notion":
 				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
@@ -324,7 +321,7 @@ func TestInstallPluginRollsBackSkillsWhenBundleInstallFails(t *testing.T) {
 			default:
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
-		})},
+		})}),
 		pluginService:  installer,
 		containers:     manager,
 		workspaces:     manager,
@@ -385,8 +382,7 @@ func TestInstallPluginRestoresPreviousWorkspaceWhenDatabaseInstallFails(t *testi
 	env.writeSkillFile(t, pluginPath, oldPlugin)
 	installer := &recordingPluginInstaller{installErr: errors.New("database write failed")}
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
 			case "/api/plugins/notion":
 				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
@@ -401,7 +397,7 @@ func TestInstallPluginRestoresPreviousWorkspaceWhenDatabaseInstallFails(t *testi
 			default:
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
-		})},
+		})}),
 		pluginService:  installer,
 		containers:     manager,
 		workspaces:     manager,
@@ -483,8 +479,7 @@ func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *tes
 			}
 			skillArtifactRequested := false
 			handler := &SupermarketHandler{
-				baseURL: "https://supermarket.example",
-				httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					switch req.URL.Path {
 					case "/api/plugins/notion":
 						return testHTTPResponse(req, http.StatusOK, entryJSON), nil
@@ -500,7 +495,7 @@ func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *tes
 					default:
 						return testHTTPResponse(req, http.StatusNotFound, nil), nil
 					}
-				})},
+				})}),
 				pluginService:  &recordingPluginInstaller{},
 				containers:     manager,
 				workspaces:     manager,
@@ -589,8 +584,7 @@ func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testin
 	}
 	artifactRequested := false
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
 			case "/api/plugins/notion":
 				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
@@ -602,7 +596,7 @@ func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testin
 				artifactRequested = true
 				return testHTTPResponse(req, http.StatusOK, bundle), nil
 			}
-		})},
+		})}),
 		pluginService:  &recordingPluginInstaller{},
 		containers:     manager,
 		workspaces:     manager,
@@ -637,10 +631,9 @@ func TestFetchPluginEntryRejectsOversizedAndTrailingJSON(t *testing.T) {
 	for name, responseBody := range tests {
 		t.Run(name, func(t *testing.T) {
 			handler := &SupermarketHandler{
-				baseURL: "https://supermarket.example",
-				httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					return testHTTPResponse(req, http.StatusOK, responseBody), nil
-				})},
+				})}),
 				logger: slog.New(slog.DiscardHandler),
 			}
 			e := echo.New()
@@ -663,8 +656,7 @@ func TestFetchPluginEntryRejectsReleaseBytesThatDoNotMatchRevision(t *testing.T)
 		t.Fatalf("marshal current Plugin entry: %v", err)
 	}
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
 			case "/api/plugins/notion":
 				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
@@ -673,7 +665,7 @@ func TestFetchPluginEntryRejectsReleaseBytesThatDoNotMatchRevision(t *testing.T)
 			default:
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
-		})},
+		})}),
 		logger: slog.New(slog.DiscardHandler),
 	}
 	e := echo.New()
@@ -686,8 +678,7 @@ func TestFetchPluginEntryRejectsReleaseBytesThatDoNotMatchRevision(t *testing.T)
 func TestFetchPluginEntryRejectsCrossOriginMetadataRedirect(t *testing.T) {
 	attackerRequested := false
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if req.URL.Host == "attacker.example" {
 				attackerRequested = true
 				return testHTTPResponse(req, http.StatusOK, []byte(`{}`)), nil
@@ -695,7 +686,7 @@ func TestFetchPluginEntryRejectsCrossOriginMetadataRedirect(t *testing.T) {
 			response := testHTTPResponse(req, http.StatusFound, nil)
 			response.Header.Set("Location", "https://attacker.example/release")
 			return response, nil
-		})},
+		})}),
 		logger: slog.New(slog.DiscardHandler),
 	}
 	e := echo.New()
@@ -1074,10 +1065,9 @@ func TestExtractPluginBundleArchiveRollsBackStagingAndPublishFailures(t *testing
 
 func TestInstallPluginBundleRejectsMissingDownload(t *testing.T) {
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return testHTTPResponse(req, http.StatusNotFound, nil), nil
-		})},
+		})}),
 		logger: slog.New(slog.DiscardHandler),
 	}
 	writer := &pluginBundleTestWriter{files: map[string]string{}}
@@ -1095,10 +1085,9 @@ func TestInstallPluginBundleRejectsManifestPackageMismatch(t *testing.T) {
 		"github/plugin.yaml": "id: github\npackages:\n  - registry_id: memoh\n    package_id: github\n",
 	})
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return testHTTPResponse(req, http.StatusOK, bundle), nil
-		})},
+		})}),
 		logger: slog.New(slog.DiscardHandler),
 	}
 	writer := &pluginBundleTestWriter{files: map[string]string{}}

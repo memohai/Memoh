@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/apperror"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
+	supermarketclient "github.com/memohai/memoh/internal/supermarket"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -380,17 +381,16 @@ func (h *SupermarketHandler) GetRegistrySkillIcon(c echo.Context) error {
 }
 
 func (h *SupermarketHandler) proxySkillIcon(c echo.Context, digest string) error {
-	req, err := http.NewRequestWithContext(
-		c.Request().Context(), http.MethodGet, h.baseURL+"/api/artifacts/icon/"+digest, nil,
-	)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	req.Header.Set("Accept", "image/svg+xml,image/png,image/jpeg,image/webp")
+	headers := make(http.Header)
 	if value := c.Request().Header.Get("If-None-Match"); value != "" {
-		req.Header.Set("If-None-Match", value)
+		headers.Set("If-None-Match", value)
 	}
-	resp, err := h.doSupermarketRequest(req)
+	resp, err := h.upstream.GetWithHeaders(
+		c.Request().Context(),
+		"/api/artifacts/icon/"+digest,
+		"image/svg+xml,image/png,image/jpeg,image/webp",
+		headers,
+	)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
@@ -794,17 +794,8 @@ func (h *SupermarketHandler) fetchRegistrySkill(
 	ctx context.Context,
 	registryID, packageID, skillID string,
 ) (SupermarketCatalogSkill, error) {
-	endpoint := strings.TrimRight(h.baseURL, "/") + registrySkillUpstreamPath(registryID, packageID, skillID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return SupermarketCatalogSkill{}, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			fmt.Errorf("create Registry Skill request: %w", err),
-			nil,
-		)
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := h.doSupermarketRequest(req)
+	requestPath := registrySkillUpstreamPath(registryID, packageID, skillID)
+	resp, err := h.upstream.Get(ctx, requestPath, "application/json")
 	if err != nil {
 		return SupermarketCatalogSkill{}, apperror.Wrap(
 			apperror.CodeRegistryUnavailable,
@@ -847,15 +838,8 @@ func (h *SupermarketHandler) fetchRegistryPackageRelease(
 	ctx context.Context,
 	registryID, packageID, revision string,
 ) (SupermarketSkillPackageDescriptor, error) {
-	endpoint := strings.TrimRight(h.baseURL, "/") + registryPackageReleaseUpstreamPath(registryID, packageID, revision)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistryUnavailable, fmt.Errorf("create Registry Package release request: %w", err), nil,
-		)
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := h.doSupermarketRequest(req)
+	requestPath := registryPackageReleaseUpstreamPath(registryID, packageID, revision)
+	resp, err := h.upstream.Get(ctx, requestPath, "application/json")
 	if err != nil {
 		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
 			apperror.CodeRegistryUnavailable, fmt.Errorf("fetch Registry Package release: %w", err), nil,
@@ -1016,50 +1000,10 @@ func (h *SupermarketHandler) downloadSupermarketArtifact(
 	ctx context.Context,
 	artifact supermarketArtifactDownloadDescriptor,
 ) ([]byte, error) {
-	base, err := url.Parse(h.baseURL)
-	if err != nil {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			fmt.Errorf("parse configured Supermarket URL: %w", err),
-			nil,
-		)
-	}
-	if (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			errors.New("configured Supermarket URL is invalid"),
-			nil,
-		)
-	}
-	download, err := base.Parse(artifact.DownloadURL)
-	if err != nil {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
-			fmt.Errorf("parse Registry Skill Artifact URL: %w", err),
-			nil,
-		)
-	}
-	if download.Scheme != base.Scheme || !strings.EqualFold(download.Host, base.Host) || download.User != nil {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
-			errors.New("registry skill artifact URL is not on the configured Supermarket origin"),
-			nil,
-		)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, download.String(), nil)
-	if err != nil {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
-			fmt.Errorf("create Registry Skill Artifact request: %w", err),
-			nil,
-		)
-	}
-	req.Header.Set("Accept", "application/gzip")
-	resp, err := h.doSupermarketRequest(req)
+	resp, err := h.upstream.GetArtifact(ctx, artifact.DownloadURL, "application/gzip")
 	if err != nil {
 		code := apperror.CodeRegistryUnavailable
-		if errors.Is(err, errSupermarketRedirectOrigin) || errors.Is(err, errSupermarketRedirectLimit) {
+		if errors.Is(err, supermarketclient.ErrCrossOrigin) || errors.Is(err, supermarketclient.ErrRedirectLimit) {
 			code = apperror.CodeRegistrySkillInvalid
 		}
 		return nil, apperror.Wrap(code, fmt.Errorf("download Registry Skill Artifact: %w", err), nil)
@@ -1080,13 +1024,6 @@ func (h *SupermarketHandler) downloadSupermarketArtifact(
 		return nil, apperror.Wrap(
 			code,
 			fmt.Errorf("download Registry Skill Artifact: Supermarket returned status %d", resp.StatusCode),
-			nil,
-		)
-	}
-	if resp.Request == nil || resp.Request.URL.Scheme != base.Scheme || !strings.EqualFold(resp.Request.URL.Host, base.Host) {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
-			errors.New("registry skill artifact response left the configured Supermarket origin"),
 			nil,
 		)
 	}

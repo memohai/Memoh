@@ -21,6 +21,7 @@ import (
 
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/config"
+	supermarketclient "github.com/memohai/memoh/internal/supermarket"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
@@ -113,11 +114,10 @@ func TestPrepareRegistrySkillArtifactRejectsDeclaredBudgetBeforeDownload(t *test
 	skill := validRegistrySkillDescriptor()
 	artifactRequested := false
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			artifactRequested = true
 			return testHTTPResponse(req, http.StatusOK, nil), nil
-		})},
+		})}),
 	}
 
 	_, err := handler.prepareResolvedRegistrySkillArtifactWithLimit(
@@ -139,10 +139,9 @@ func TestPrepareRegistrySkillArtifactVerifiesDeclaredUncompressedSize(t *testing
 	skill.Artifact.Size = int64(len(artifact))
 	skill.Artifact.UncompressedSize = validSkillArtifactUncompressedSize + 1
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return testHTTPResponse(req, http.StatusOK, artifact), nil
-		})},
+		})}),
 	}
 
 	_, err := handler.prepareResolvedRegistrySkillArtifact(context.Background(), "linux", skill)
@@ -165,9 +164,8 @@ func TestSupermarketSkillRoutesUseRegistryCatalogOnly(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	handler := &SupermarketHandler{
-		baseURL:    upstream.URL,
-		httpClient: upstream.Client(),
-		logger:     slog.New(slog.DiscardHandler),
+		upstream: supermarketclient.NewClient(upstream.URL, upstream.Client()),
+		logger:   slog.New(slog.DiscardHandler),
 	}
 	e := echo.New()
 	handler.Register(e)
@@ -193,7 +191,7 @@ func TestSupermarketPackageRoutesUsePackageCatalog(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	handler := &SupermarketHandler{
-		baseURL: upstream.URL, httpClient: upstream.Client(), logger: slog.New(slog.DiscardHandler),
+		upstream: supermarketclient.NewClient(upstream.URL, upstream.Client()), logger: slog.New(slog.DiscardHandler),
 	}
 	e := echo.New()
 	handler.Register(e)
@@ -241,8 +239,7 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	obsoletePath := "/data/skills/registry/package/obsolete/SKILL.md"
 	env.writeSkillFile(t, obsoletePath, managedSkillRaw("obsolete", "Obsolete"))
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if strings.HasPrefix(req.URL.Path, "/api/artifacts/skill/") {
 				artifactRequestedDuringMutation = artifactRequestedDuringMutation || installer.mutationCalls > 0
 				artifactRequestedWithPreparationLease = len(registryPackagePreparationTokens) == 1
@@ -254,7 +251,7 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 			}
 			releaseRequested = true
 			return testHTTPResponse(req, http.StatusOK, release), nil
-		})},
+		})}),
 		pluginService: installer,
 		workspaces:    manager,
 	}
@@ -294,8 +291,7 @@ func TestDownloadRegistrySkillArtifactVerifiesOriginAndDigest(t *testing.T) {
 	content := []byte("artifact")
 	digest := sha256.Sum256(content)
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode:    http.StatusOK,
 				Body:          io.NopCloser(bytes.NewReader(content)),
@@ -303,7 +299,7 @@ func TestDownloadRegistrySkillArtifactVerifiesOriginAndDigest(t *testing.T) {
 				Request:       req,
 				Header:        make(http.Header),
 			}, nil
-		})},
+		})}),
 	}
 	artifact := SupermarketSkillArtifact{
 		Digest: hex.EncodeToString(digest[:]), Size: int64(len(content)), DownloadURL: "/api/artifacts/digest/download",
@@ -369,8 +365,7 @@ func TestFetchRegistrySkillUsesStablePrivateErrors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			handler := &SupermarketHandler{
-				baseURL:    "https://supermarket.example",
-				httpClient: &http.Client{Transport: test.transport},
+				upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: test.transport}),
 			}
 			_, err := handler.fetchRegistrySkill(context.Background(), "registry", "package", "skill")
 			if got := apperror.CodeOf(err); got != test.wantCode {
@@ -393,10 +388,9 @@ func TestFetchRegistryPackageReleaseRejectsTamperedBytes(t *testing.T) {
 	revision := hex.EncodeToString(digest[:])
 	tampered := append(append([]byte(nil), payload...), '\n')
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return testHTTPResponse(req, http.StatusOK, tampered), nil
-		})},
+		})}),
 	}
 
 	_, err := handler.fetchRegistryPackageRelease(context.Background(), "memoh", "demo", revision)
@@ -410,8 +404,7 @@ func TestProxySkillIconVerifiesDigestAndHeaders(t *testing.T) {
 	digest := sha256.Sum256(content)
 	digestText := hex.EncodeToString(digest[:])
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			header := make(http.Header)
 			header.Set("Content-Type", "image/svg+xml")
 			header.Set("Cache-Control", "public, max-age=31536000, immutable")
@@ -420,7 +413,7 @@ func TestProxySkillIconVerifiesDigestAndHeaders(t *testing.T) {
 				StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(content)),
 				ContentLength: int64(len(content)), Request: req, Header: header,
 			}, nil
-		})},
+		})}),
 	}
 	e := echo.New()
 	request := httptest.NewRequest(http.MethodGet, "/supermarket/artifacts/icon/"+digestText, nil)
@@ -435,12 +428,12 @@ func TestProxySkillIconVerifiesDigestAndHeaders(t *testing.T) {
 		t.Fatalf("immutable cache header was not forwarded")
 	}
 
-	handler.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	handler.upstream = supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("wrong")),
 			ContentLength: 5, Request: req, Header: http.Header{"Content-Type": []string{"image/svg+xml"}},
 		}, nil
-	})}
+	})})
 	if err := handler.proxySkillIcon(e.NewContext(request, httptest.NewRecorder()), digestText); err == nil {
 		t.Fatal("proxySkillIcon() accepted content with the wrong digest")
 	}
@@ -451,8 +444,7 @@ func TestProxySkillIconOverridesUpstreamSecurityHeaders(t *testing.T) {
 	digest := sha256.Sum256(content)
 	digestText := hex.EncodeToString(digest[:])
 	handler := &SupermarketHandler{
-		baseURL: "https://supermarket.example",
-		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			header := make(http.Header)
 			header.Set("Content-Type", "image/svg+xml")
 			// A compromised/misconfigured upstream sends a permissive CSP; the
@@ -462,7 +454,7 @@ func TestProxySkillIconOverridesUpstreamSecurityHeaders(t *testing.T) {
 				StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(content)),
 				ContentLength: int64(len(content)), Request: req, Header: header,
 			}, nil
-		})},
+		})}),
 	}
 	e := echo.New()
 	request := httptest.NewRequest(http.MethodGet, "/supermarket/artifacts/icon/"+digestText, nil)
