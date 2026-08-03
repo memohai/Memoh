@@ -32,7 +32,7 @@ describe('desktop settings routes', () => {
       expect.arrayContaining([
         expect.objectContaining({ name: 'supermarket', path: '' }),
         expect.objectContaining({ name: 'supermarket-plugin-detail', path: 'plugins/:pluginId' }),
-        expect.objectContaining({ name: 'supermarket-skill-detail', path: 'skills/:registryId/:packageId/:skillId' }),
+        expect.objectContaining({ name: 'supermarket-package-detail', path: 'skills/:registryId/:packageId' }),
       ]),
     )
 
@@ -45,8 +45,8 @@ describe('desktop settings routes', () => {
     expect(router.resolve({ name: 'supermarket-plugin-detail', params: { pluginId: 'plugin-id' } }).path)
       .toBe('/settings/supermarket/plugins/plugin-id')
     expect(router.resolve({
-      name: 'supermarket-skill-detail',
-      params: { registryId: 'registry-id', packageId: 'package-id', skillId: 'skill-id' },
-    }).path).toBe('/settings/supermarket/skills/registry-id/package-id/skill-id')
+      name: 'supermarket-package-detail',
+      params: { registryId: 'registry-id', packageId: 'package-id' },
+    }).path).toBe('/settings/supermarket/skills/registry-id/package-id')
   })
 })

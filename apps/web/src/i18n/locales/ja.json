@@ -133,9 +133,9 @@
     },
     "registry": {
       "unavailable": "Supermarket に接続できません。しばらくしてからもう一度お試しください。",
-      "skill_not_found": "この Registry Skill は現在利用できません。",
-      "skill_invalid": "この Skill Package は無効なため、インストールできません。",
-      "skill_install_failed": "Registry Skill をインストールできませんでした。もう一度お試しください。"
+      "package_not_found": "このパッケージは現在利用できません。",
+      "package_invalid": "このパッケージは無効なため、インストールできません。",
+      "package_install_failed": "パッケージをインストールできませんでした。もう一度お試しください。"
     },
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",

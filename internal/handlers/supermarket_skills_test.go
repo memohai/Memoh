@@ -123,8 +123,8 @@ func TestPrepareRegistrySkillArtifactRejectsDeclaredBudgetBeforeDownload(t *test
 	_, err := handler.prepareResolvedRegistrySkillArtifactWithLimit(
 		context.Background(), "linux", skill, skill.Artifact.UncompressedSize-1,
 	)
-	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInvalid {
-		t.Fatalf("prepare code = %q, want %q", got, apperror.CodeRegistrySkillInvalid)
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistryPackageInvalid {
+		t.Fatalf("prepare code = %q, want %q", got, apperror.CodeRegistryPackageInvalid)
 	}
 	if artifactRequested {
 		t.Fatal("over-budget Skill Artifact was downloaded")
@@ -145,8 +145,8 @@ func TestPrepareRegistrySkillArtifactVerifiesDeclaredUncompressedSize(t *testing
 	}
 
 	_, err := handler.prepareResolvedRegistrySkillArtifact(context.Background(), "linux", skill)
-	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInvalid {
-		t.Fatalf("prepare code = %q, want %q", got, apperror.CodeRegistrySkillInvalid)
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistryPackageInvalid {
+		t.Fatalf("prepare code = %q, want %q", got, apperror.CodeRegistryPackageInvalid)
 	}
 	cause := apperror.CauseOf(err)
 	if cause == nil || !strings.Contains(cause.Error(), "does not match its descriptor") {
@@ -235,7 +235,7 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	installer := &recordingPluginInstaller{}
 	artifactRequestedDuringMutation := false
 	artifactRequestedWithPreparationLease := false
-	releaseRequested := false
+	releaseRequestedWithPreparationLease := false
 	obsoletePath := "/data/skills/registry/package/obsolete/SKILL.md"
 	env.writeSkillFile(t, obsoletePath, managedSkillRaw("obsolete", "Obsolete"))
 	handler := &SupermarketHandler{
@@ -249,7 +249,7 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 			if req.URL.Path != wantReleasePath {
 				t.Fatalf("unexpected upstream request path %q, want %q", req.URL.Path, wantReleasePath)
 			}
-			releaseRequested = true
+			releaseRequestedWithPreparationLease = len(registryPackagePreparationTokens) == 1
 			return testHTTPResponse(req, http.StatusOK, release), nil
 		})}),
 		pluginService: installer,
@@ -262,10 +262,12 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	if err != nil || !result.OK || len(result.Skills) != len(pkg.Skills) {
 		t.Fatalf("installRegistryPackage() result=%+v error=%v", result, err)
 	}
-	if !releaseRequested || !artifactRequestedWithPreparationLease || artifactRequestedDuringMutation || installer.mutationCalls != 1 {
+	if !releaseRequestedWithPreparationLease || !artifactRequestedWithPreparationLease ||
+		artifactRequestedDuringMutation || installer.mutationCalls != 1 {
 		t.Fatalf(
-			"Package preflight state: immutable_release=%v preparation_lease=%v artifact_in_lock=%v mutations=%d",
-			releaseRequested, artifactRequestedWithPreparationLease, artifactRequestedDuringMutation, installer.mutationCalls,
+			"Package preflight state: release_lease=%v artifact_lease=%v artifact_in_lock=%v mutations=%d",
+			releaseRequestedWithPreparationLease, artifactRequestedWithPreparationLease,
+			artifactRequestedDuringMutation, installer.mutationCalls,
 		)
 	}
 	if active := len(registryPackagePreparationTokens); active != 0 {
@@ -313,72 +315,13 @@ func TestDownloadRegistrySkillArtifactVerifiesOriginAndDigest(t *testing.T) {
 	}
 
 	artifact.DownloadURL = "https://attacker.example/artifact"
-	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); apperror.CodeOf(err) != apperror.CodeRegistrySkillInvalid {
-		t.Fatalf("cross-origin artifact code = %q, want %q", apperror.CodeOf(err), apperror.CodeRegistrySkillInvalid)
+	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); apperror.CodeOf(err) != apperror.CodeRegistryPackageInvalid {
+		t.Fatalf("cross-origin artifact code = %q, want %q", apperror.CodeOf(err), apperror.CodeRegistryPackageInvalid)
 	}
 	artifact.DownloadURL = "/api/artifacts/digest/download"
 	artifact.Digest = strings.Repeat("0", 64)
-	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); apperror.CodeOf(err) != apperror.CodeRegistrySkillInvalid {
-		t.Fatalf("invalid Artifact digest code = %q, want %q", apperror.CodeOf(err), apperror.CodeRegistrySkillInvalid)
-	}
-}
-
-func TestFetchRegistrySkillUsesStablePrivateErrors(t *testing.T) {
-	tests := []struct {
-		name      string
-		transport roundTripFunc
-		wantCode  apperror.Code
-	}{
-		{
-			name: "unavailable",
-			transport: func(*http.Request) (*http.Response, error) {
-				return nil, errors.New("SECRET upstream dial failure")
-			},
-			wantCode: apperror.CodeRegistryUnavailable,
-		},
-		{
-			name: "not found",
-			transport: func(req *http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusNotFound,
-					Body:       io.NopCloser(strings.NewReader("SECRET missing response")),
-					Request:    req,
-					Header:     make(http.Header),
-				}, nil
-			},
-			wantCode: apperror.CodeRegistrySkillNotFound,
-		},
-		{
-			name: "invalid response",
-			transport: func(req *http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(strings.NewReader("SECRET malformed response")),
-					Request:    req,
-					Header:     make(http.Header),
-				}, nil
-			},
-			wantCode: apperror.CodeRegistrySkillInvalid,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			handler := &SupermarketHandler{
-				upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: test.transport}),
-			}
-			_, err := handler.fetchRegistrySkill(context.Background(), "registry", "package", "skill")
-			if got := apperror.CodeOf(err); got != test.wantCode {
-				t.Fatalf("fetch code = %q, want %q", got, test.wantCode)
-			}
-			public, ok := apperror.PublicFrom(err, "request-id")
-			if !ok {
-				t.Fatal("fetch error is not a public app error")
-			}
-			if strings.Contains(public.Detail, "SECRET") || strings.Contains(public.Detail, "supermarket.example") {
-				t.Fatalf("public fetch error leaked private detail: %q", public.Detail)
-			}
-		})
+	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); apperror.CodeOf(err) != apperror.CodeRegistryPackageInvalid {
+		t.Fatalf("invalid Artifact digest code = %q, want %q", apperror.CodeOf(err), apperror.CodeRegistryPackageInvalid)
 	}
 }
 
@@ -394,8 +337,61 @@ func TestFetchRegistryPackageReleaseRejectsTamperedBytes(t *testing.T) {
 	}
 
 	_, err := handler.fetchRegistryPackageRelease(context.Background(), "memoh", "demo", revision)
-	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInvalid {
-		t.Fatalf("fetch Package release code = %q, want %q", got, apperror.CodeRegistrySkillInvalid)
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistryPackageInvalid {
+		t.Fatalf("fetch Package release code = %q, want %q", got, apperror.CodeRegistryPackageInvalid)
+	}
+}
+
+func TestFetchRegistryPackageReleaseUsesStablePrivateErrors(t *testing.T) {
+	revision := strings.Repeat("0", 64)
+	tests := []struct {
+		name      string
+		transport roundTripFunc
+		wantCode  apperror.Code
+	}{
+		{
+			name: "unavailable",
+			transport: func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("SECRET upstream dial failure")
+			},
+			wantCode: apperror.CodeRegistryUnavailable,
+		},
+		{
+			name: "not found",
+			transport: func(req *http.Request) (*http.Response, error) {
+				return testHTTPResponse(req, http.StatusNotFound, []byte("SECRET missing response")), nil
+			},
+			wantCode: apperror.CodeRegistryPackageNotFound,
+		},
+		{
+			name: "invalid release",
+			transport: func(req *http.Request) (*http.Response, error) {
+				return testHTTPResponse(req, http.StatusOK, []byte("SECRET malformed response")), nil
+			},
+			wantCode: apperror.CodeRegistryPackageInvalid,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handler := &SupermarketHandler{
+				upstream: supermarketclient.NewClient(
+					"https://supermarket.example",
+					&http.Client{Transport: test.transport},
+				),
+			}
+			_, err := handler.fetchRegistryPackageRelease(context.Background(), "registry", "package", revision)
+			if got := apperror.CodeOf(err); got != test.wantCode {
+				t.Fatalf("fetch code = %q, want %q", got, test.wantCode)
+			}
+			public, ok := apperror.PublicFrom(err, "request-id")
+			if !ok {
+				t.Fatal("fetch error is not a public app error")
+			}
+			if strings.Contains(public.Detail, "SECRET") || strings.Contains(public.Detail, "supermarket.example") {
+				t.Fatalf("public fetch error leaked private detail: %q", public.Detail)
+			}
+		})
 	}
 }
 
@@ -516,7 +512,7 @@ func validRegistryPackageDescriptor() SupermarketSkillPackageDescriptor {
 			Description: "Demo", Tags: []string{}, Categories: []SupermarketSkillPackageCategory{}, SkillCount: 2,
 		},
 		Revision: strings.Repeat("b", 64),
-		Skills:   []SupermarketCatalogSkill{first, second}, ReleaseURL: "/release",
+		Skills:   []SupermarketCatalogSkill{first, second},
 	}
 }
 

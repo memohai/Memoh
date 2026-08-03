@@ -136,9 +136,9 @@
     },
     "registry": {
       "unavailable": "暂时无法连接 Supermarket，请稍后重试。",
-      "skill_not_found": "该 Registry Skill 已不存在。",
-      "skill_invalid": "该 Skill 包无效，无法安装。",
-      "skill_install_failed": "Registry Skill 安装失败，请重试。"
+      "package_not_found": "该技能包已不存在。",
+      "package_invalid": "该技能包无效，无法安装。",
+      "package_install_failed": "技能包安装失败，请重试。"
     },
     "workspace": {
       "unreachable": "暂时无法连接工作区，请稍后重试。",

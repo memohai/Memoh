@@ -136,9 +136,9 @@
     },
     "registry": {
       "unavailable": "The Supermarket is unavailable. Please try again later.",
-      "skill_not_found": "This Registry Skill is no longer available.",
-      "skill_invalid": "This Skill package is invalid and cannot be installed.",
-      "skill_install_failed": "The Registry Skill could not be installed. Please try again."
+      "package_not_found": "This package is no longer available.",
+      "package_invalid": "This package is invalid and cannot be installed.",
+      "package_install_failed": "The package could not be installed. Please try again."
     },
     "workspace": {
       "unreachable": "The workspace could not be reached.",

@@ -95,11 +95,11 @@ submodule，setup 也会为后续 pull 启用递归更新。如果从未安装�
 - **内置记忆**：跨会话、跨平台的长期记忆，开箱即用，也支持接入 [Mem0](https://mem0.ai)、OpenViking
 - **十余种渠道**：Telegram、Discord、飞书、微信、QQ、邮件等
 - **MCP**：接入外部工具服务，每个机器人独立管理连接
-- **插件**：安装打包好的技能、工具和集成，扩展机器人的能力
+- **插件**：安装工具和集成，并锁定其依赖的 Skill Package 版本
 - **Agent 托管**：通过 ACP 在 Memoh Workspace 内托管外部 Agent，目前支持 Codex 和 Claude Code，每个机器人独立配置
 - **Browser Use**：在 Workspace 内驱动浏览器
 - **Computer Use**：操作 Workspace 桌面，处理需要 GUI 的工作流
-- **技能与应用超市**：模块化技能，从超市安装模板，重活交给子智能体
+- **技能与应用超市**：从已配置的 Registry 安装模块化 Skill Package，重活交给子智能体
 - **自动化**：定时任务与周期心跳
 
 ## 为本项目拆出的子项目
@@ -128,7 +128,7 @@ submodule，setup 也会为后续 pull 启用递归更新。如果从未安装�
 - 📚 [**文档**](https://docs.memoh.ai) — 安装、概念与指南
 - 🤝 [**合作**](mailto:business@memoh.net) — business@memoh.net
 - 💬 [**Telegram 群组**](https://t.me/memohai) — 交流与支持
-- 🛒 [**应用超市**](https://github.com/memohai/supermarket) — 整理好的技能与 MCP 模板
+- 🛒 [**应用超市**](https://github.com/memohai/supermarket) — Plugin 与 Registry Skill Package
 
 ---
 

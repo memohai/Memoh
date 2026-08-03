@@ -36,9 +36,9 @@ const (
 	CodeSkillNameTaken                   Code = "skill.name_taken"
 	CodeSkillSaveFailed                  Code = "skill.save_failed"
 	CodeRegistryUnavailable              Code = "registry.unavailable"
-	CodeRegistrySkillNotFound            Code = "registry.skill_not_found"
-	CodeRegistrySkillInvalid             Code = "registry.skill_invalid"
-	CodeRegistrySkillInstallFailed       Code = "registry.skill_install_failed"
+	CodeRegistryPackageNotFound          Code = "registry.package_not_found"
+	CodeRegistryPackageInvalid           Code = "registry.package_invalid"
+	CodeRegistryPackageInstallFailed     Code = "registry.package_install_failed"
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed              Code = "profile.update_failed"
@@ -172,17 +172,17 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The Supermarket is unavailable.",
 	},
-	CodeRegistrySkillNotFound: {
+	CodeRegistryPackageNotFound: {
 		HTTPStatus: http.StatusNotFound,
-		Detail:     "The Registry Skill was not found.",
+		Detail:     "The Skill package was not found.",
 	},
-	CodeRegistrySkillInvalid: {
+	CodeRegistryPackageInvalid: {
 		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The Registry Skill package is invalid.",
+		Detail:     "The Skill package is invalid.",
 	},
-	CodeRegistrySkillInstallFailed: {
+	CodeRegistryPackageInstallFailed: {
 		HTTPStatus: http.StatusInternalServerError,
-		Detail:     "The Registry Skill could not be installed.",
+		Detail:     "The Skill package could not be installed.",
 	},
 	CodeProfileTitleModelInvalid: {
 		HTTPStatus: http.StatusBadRequest,

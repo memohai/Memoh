@@ -24,7 +24,8 @@ type Client struct {
 
 func NewClient(rawBaseURL string, httpClient *http.Client) *Client {
 	base, err := url.Parse(strings.TrimRight(strings.TrimSpace(rawBaseURL), "/"))
-	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil {
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" ||
+		base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return &Client{initErr: ErrInvalidBaseURL}
 	}
 	if httpClient == nil {
@@ -47,8 +48,8 @@ func (c *Client) GetWithHeaders(
 	if c == nil || c.initErr != nil || c.base == nil {
 		return nil, ErrInvalidBaseURL
 	}
-	requestURL, err := c.base.Parse(requestPath)
-	if err != nil || !sameOrigin(requestURL, c.base) {
+	requestURL, err := c.resolve(requestPath)
+	if err != nil {
 		return nil, ErrCrossOrigin
 	}
 	return c.get(ctx, requestURL, accept, headers)
@@ -60,11 +61,40 @@ func (c *Client) GetArtifact(ctx context.Context, rawURL, accept string) (*http.
 	if c == nil || c.initErr != nil || c.base == nil {
 		return nil, ErrInvalidBaseURL
 	}
-	requestURL, err := c.base.Parse(rawURL)
+	reference, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, ErrCrossOrigin
+	}
+	var requestURL *url.URL
+	if reference.IsAbs() {
+		requestURL = reference
+	} else {
+		requestURL, err = c.resolve(rawURL)
+	}
 	if err != nil || !sameOrigin(requestURL, c.base) {
 		return nil, ErrCrossOrigin
 	}
 	return c.get(ctx, requestURL, accept, nil)
+}
+
+func (c *Client) resolve(requestPath string) (*url.URL, error) {
+	reference, err := url.Parse(requestPath)
+	if err != nil || reference.IsAbs() || reference.Host != "" || reference.User != nil || reference.Fragment != "" {
+		return nil, ErrCrossOrigin
+	}
+	joined, err := url.JoinPath(c.base.String(), reference.EscapedPath())
+	if err != nil {
+		return nil, err
+	}
+	requestURL, err := url.Parse(joined)
+	if err != nil {
+		return nil, err
+	}
+	requestURL.RawQuery = reference.RawQuery
+	if !sameOrigin(requestURL, c.base) {
+		return nil, ErrCrossOrigin
+	}
+	return requestURL, nil
 }
 
 func (c *Client) get(

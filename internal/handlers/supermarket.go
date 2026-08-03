@@ -341,16 +341,16 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	packageDescriptors, skillsResult, err := h.resolvePluginPackages(ctx, entry.Release.Packages)
-	if err != nil {
-		return err
-	}
-	if len(packageDescriptors) > 0 {
+	if len(entry.Release.Packages) > 0 {
 		releasePreparation, err := acquireRegistryPackagePreparation(ctx)
 		if err != nil {
 			return err
 		}
 		defer releasePreparation()
+	}
+	packageDescriptors, skillsResult, err := h.resolvePluginPackages(ctx, entry.Release.Packages)
+	if err != nil {
+		return err
 	}
 	bundleArchive, err := h.preparePluginBundle(
 		ctx, req.PluginID, manifest.ID, entry.Release.Artifact, manifest.Packages,
@@ -474,7 +474,7 @@ func matchesExpectedPluginInstallation(
 }
 
 // InstallPackage godoc
-// @Summary Install every Skill in a supermarket Package to a bot workspace
+// @Summary Install an immutable Skill Package release to a bot workspace
 // @Tags supermarket
 // @Param bot_id path string true "Bot ID"
 // @Param payload body InstallPackageRequest true "Install Package request"
@@ -759,7 +759,7 @@ func (h *SupermarketHandler) resolvePluginPackages(
 			return nil, result, errors.New("plugin Package release revision does not match its lock")
 		}
 		if err := validateRegistryPackage(pkg, resolved.RegistryID, resolved.PackageID); err != nil {
-			return nil, result, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+			return nil, result, apperror.Wrap(apperror.CodeRegistryPackageInvalid, err, nil)
 		}
 		for _, skill := range pkg.Skills {
 			if err := budget.add(skill.Artifact); err != nil {

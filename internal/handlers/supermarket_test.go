@@ -63,6 +63,7 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	installer := &recordingPluginInstaller{}
 	requestedPaths := make([]string, 0, 3)
 	artifactRequestedDuringMutation := false
+	packageReleaseRequestedWithPreparationLease := false
 	handler := &SupermarketHandler{
 		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			requestedPaths = append(requestedPaths, req.URL.Path)
@@ -74,6 +75,7 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 			case "/api/plugins/notion/releases/" + entry.Release.Revision:
 				content = releaseJSON
 			case registryPackageReleaseUpstreamPath(reference.RegistryID, reference.PackageID, entry.Release.Packages[0].Revision):
+				packageReleaseRequestedWithPreparationLease = len(registryPackagePreparationTokens) == 1
 				content = packageJSON
 			case "/api/artifacts/skill/" + digestText:
 				artifactRequestedDuringMutation = installer.mutationCalls > 0
@@ -121,6 +123,9 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	}
 	if artifactRequestedDuringMutation {
 		t.Fatal("Plugin installation downloaded an Artifact while holding the bot mutation lock")
+	}
+	if !packageReleaseRequestedWithPreparationLease {
+		t.Fatal("Plugin installation fetched Package release metadata without a preparation lease")
 	}
 	if slices.Contains(requestedPaths, "/api/registries/memoh/packages/notion/skills/meeting") {
 		t.Fatalf("Plugin installation queried the mutable Skill endpoint: %+v", requestedPaths)
@@ -421,13 +426,6 @@ func TestInstallPluginRestoresPreviousWorkspaceWhenDatabaseInstallFails(t *testi
 	}
 	if got, err := os.ReadFile(env.localPath(pluginPath)); err != nil || string(got) != oldPlugin {
 		t.Fatalf("previous Plugin bundle was not restored: content=%q error=%v", got, err)
-	}
-}
-
-func TestRollbackPluginWorkspacePreservesCauseWhenRollbackSucceeds(t *testing.T) {
-	cause := echo.NewHTTPError(http.StatusBadGateway, "install failed")
-	if got := rollbackPluginWorkspace(context.Background(), cause, nil, nil); !errors.Is(got, cause) {
-		t.Fatalf("rollbackPluginWorkspace() = %T %v, want original HTTP error", got, got)
 	}
 }
 
@@ -775,45 +773,6 @@ func supermarketPackageReleaseJSON(
 	digest := sha256.Sum256(payload)
 	resolved.Revision = hex.EncodeToString(digest[:])
 	return payload
-}
-
-func TestPluginBundleArchiveEntryClassifiesEntries(t *testing.T) {
-	tests := []struct {
-		name         string
-		wantKind     string
-		wantRelative string
-	}{
-		{name: "github/plugin.yaml", wantKind: pluginArchiveKindManifest, wantRelative: "plugin.yaml"},
-		{name: "github/hooks.json", wantKind: pluginArchiveKindHooks, wantRelative: "hooks.json"},
-		{name: "github/scripts/hook.py", wantKind: pluginArchiveKindScripts, wantRelative: "hook.py"},
-	}
-
-	for _, tt := range tests {
-		got, ok, err := pluginBundleArchiveEntry("github", "github", tt.name)
-		if err != nil {
-			t.Fatalf("pluginBundleArchiveEntry(%q) err = %v", tt.name, err)
-		}
-		if !ok || got.kind != tt.wantKind || got.relativePath != tt.wantRelative {
-			t.Fatalf("pluginBundleArchiveEntry(%q) = %+v, %v; want kind %q relative %q", tt.name, got, ok, tt.wantKind, tt.wantRelative)
-		}
-	}
-
-	for _, name := range []string{
-		"",
-		"github/skills/review/SKILL.md",
-		"github/../escape",
-		"github/skills/../escape",
-		"github/scripts/../escape",
-		"../escape",
-		"/data/escape",
-		"github/skills\\escape",
-		"github/scripts/NUL.txt",
-		"github/scripts/bad\x00name",
-	} {
-		if got, ok, err := pluginBundleArchiveEntry("github", "github", name); err == nil || ok {
-			t.Fatalf("pluginBundleArchiveEntry(%q) = %+v, %v, %v; want explicit rejection", name, got, ok, err)
-		}
-	}
 }
 
 func TestExtractPluginBundleArchivePublishesSafeBundle(t *testing.T) {

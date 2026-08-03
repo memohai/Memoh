@@ -38,6 +38,38 @@ func TestClientPinsRequestsToConfiguredOrigin(t *testing.T) {
 	}
 }
 
+func TestClientPreservesConfiguredBasePath(t *testing.T) {
+	requested := make([]string, 0, 2)
+	client := NewClient("https://gateway.example/memoh/supermarket", &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requested = append(requested, req.URL.String())
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("{}")),
+				Request:    req,
+				Header:     make(http.Header),
+			}, nil
+		}),
+	})
+	apiResp, err := client.Get(context.Background(), "/api/packages?q=docs", "application/json")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	_ = apiResp.Body.Close()
+	artifactResp, err := client.GetArtifact(context.Background(), "/api/artifacts/skill/digest", "application/gzip")
+	if err != nil {
+		t.Fatalf("GetArtifact() error = %v", err)
+	}
+	_ = artifactResp.Body.Close()
+	want := []string{
+		"https://gateway.example/memoh/supermarket/api/packages?q=docs",
+		"https://gateway.example/memoh/supermarket/api/artifacts/skill/digest",
+	}
+	if len(requested) != len(want) || requested[0] != want[0] || requested[1] != want[1] {
+		t.Fatalf("requested URLs = %#v, want %#v", requested, want)
+	}
+}
+
 func TestClientForwardsHeadersAndRejectsCrossOriginRedirect(t *testing.T) {
 	redirectTarget := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(redirectTarget.Close)
@@ -65,13 +97,15 @@ func TestClientForwardsHeadersAndRejectsCrossOriginRedirect(t *testing.T) {
 }
 
 func TestClientRejectsInvalidBaseURL(t *testing.T) {
-	client := NewClient("file:///tmp/supermarket", nil)
-	resp, err := client.Get(context.Background(), "/api/packages", "application/json")
-	if resp != nil {
-		_ = resp.Body.Close()
-	}
-	if !errors.Is(err, ErrInvalidBaseURL) {
-		t.Fatalf("invalid base URL error = %v, want ErrInvalidBaseURL", err)
+	for _, rawURL := range []string{"file:///tmp/supermarket", "https://supermarket.example?tenant=memoh"} {
+		client := NewClient(rawURL, nil)
+		resp, err := client.Get(context.Background(), "/api/packages", "application/json")
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		if !errors.Is(err, ErrInvalidBaseURL) {
+			t.Fatalf("base URL %q error = %v, want ErrInvalidBaseURL", rawURL, err)
+		}
 	}
 }
 

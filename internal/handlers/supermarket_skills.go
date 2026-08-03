@@ -29,7 +29,6 @@ const (
 	maxRegistrySkillArtifactUncompressedBytes = 5 * 1024 * 1024
 	maxRegistrySkillArtifactArchiveBytes      = 5 * 1024 * 1024
 	maxRegistrySkillArtifactFiles             = 1_000
-	maxRegistrySkillMetadataBytes             = 2 * 1024 * 1024
 	maxRegistryPackageMetadataBytes           = 8 * 1024 * 1024
 	maxRegistryPackageSkills                  = 128
 	maxConcurrentRegistryPackagePreparations  = 2
@@ -155,9 +154,8 @@ type SupermarketSkillPackageSummary struct {
 
 type SupermarketSkillPackageDescriptor struct {
 	SupermarketSkillPackageSummary
-	Revision   string                    `json:"revision" validate:"required"`
-	Skills     []SupermarketCatalogSkill `json:"skills" validate:"required"`
-	ReleaseURL string                    `json:"release_url,omitempty"`
+	Revision string                    `json:"revision" validate:"required"`
+	Skills   []SupermarketCatalogSkill `json:"skills" validate:"required"`
 }
 
 type supermarketSkillPackageReleaseSkill struct {
@@ -498,7 +496,7 @@ func (h *SupermarketHandler) installRegistryPackage(
 	}
 	if h.workspaces == nil {
 		return InstallRegistryPackageResponse{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInstallFailed,
+			apperror.CodeRegistryPackageInstallFailed,
 			errors.New("workspace manager is not configured"),
 			nil,
 		)
@@ -508,15 +506,15 @@ func (h *SupermarketHandler) installRegistryPackage(
 	if err != nil {
 		return InstallRegistryPackageResponse{}, workspaceTargetHTTPError(h.logger, err)
 	}
-	pkg, err := h.fetchRegistryPackageRelease(targetContext, registryID, packageID, expectedRevision)
-	if err != nil {
-		return InstallRegistryPackageResponse{}, err
-	}
 	releasePreparation, err := acquireRegistryPackagePreparation(targetContext)
 	if err != nil {
 		return InstallRegistryPackageResponse{}, err
 	}
 	defer releasePreparation()
+	pkg, err := h.fetchRegistryPackageRelease(targetContext, registryID, packageID, expectedRevision)
+	if err != nil {
+		return InstallRegistryPackageResponse{}, err
+	}
 	prepared, err := h.prepareRegistryPackage(targetContext, target.Info.OS, pkg, registryID, packageID, expectedRevision)
 	if err != nil {
 		return InstallRegistryPackageResponse{}, err
@@ -613,14 +611,14 @@ func (h *SupermarketHandler) prepareRegistryPackage(
 ) (preparedRegistryPackage, error) {
 	if pkg.Revision != revision {
 		return preparedRegistryPackage{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid, errors.New("registry Package revision does not match the request"), nil,
+			apperror.CodeRegistryPackageInvalid, errors.New("registry Package revision does not match the request"), nil,
 		)
 	}
 	if err := validateRegistryPackage(pkg, registryID, packageID); err != nil {
-		return preparedRegistryPackage{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+		return preparedRegistryPackage{}, apperror.Wrap(apperror.CodeRegistryPackageInvalid, err, nil)
 	}
 	if err := validateRegistryPackageArtifactBudget(pkg.Skills); err != nil {
-		return preparedRegistryPackage{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+		return preparedRegistryPackage{}, apperror.Wrap(apperror.CodeRegistryPackageInvalid, err, nil)
 	}
 	prepared := preparedRegistryPackage{
 		Descriptor:        pkg,
@@ -648,7 +646,7 @@ func publishPreparedRegistryPackage(
 ) (*skillset.PackagePublication, []InstallRegistrySkillResponse, error) {
 	if client == nil {
 		return nil, nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInstallFailed, errors.New("workspace is not reachable"), nil,
+			apperror.CodeRegistryPackageInstallFailed, errors.New("workspace is not reachable"), nil,
 		)
 	}
 	registryID := prepared.Descriptor.RegistryID
@@ -662,7 +660,7 @@ func publishPreparedRegistryPackage(
 	)
 	if err != nil {
 		return nil, nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInstallFailed, fmt.Errorf("publish Registry Package: %w", err), nil,
+			apperror.CodeRegistryPackageInstallFailed, fmt.Errorf("publish Registry Package: %w", err), nil,
 		)
 	}
 
@@ -711,14 +709,14 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 	if skill.Artifact.UncompressedSize < 1 ||
 		skill.Artifact.UncompressedSize > maxRegistrySkillArtifactUncompressedBytes {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			errors.New("registry skill artifact uncompressed size is invalid"),
 			nil,
 		)
 	}
 	if skill.Artifact.UncompressedSize > maxUncompressedBytes {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			errors.New("registry skill artifact exceeds the remaining uncompressed size limit"),
 			nil,
 		)
@@ -727,7 +725,7 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 		skill.Artifact.ArchiveSize > maxRegistrySkillArtifactArchiveBytes ||
 		skill.Artifact.ArchiveSize > maxArchiveBytes {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			errors.New("registry skill artifact decompressed archive size is invalid"),
 			nil,
 		)
@@ -736,7 +734,7 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 		skill.Artifact.FileCount > maxRegistrySkillArtifactFiles ||
 		skill.Artifact.FileCount > maxFiles {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			errors.New("registry skill artifact file count is invalid"),
 			nil,
 		)
@@ -752,11 +750,11 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 		min(maxFiles, skill.Artifact.FileCount),
 	)
 	if err != nil {
-		return preparedRegistrySkillArtifact{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+		return preparedRegistrySkillArtifact{}, apperror.Wrap(apperror.CodeRegistryPackageInvalid, err, nil)
 	}
 	if archive.UncompressedSize() != skill.Artifact.UncompressedSize {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			fmt.Errorf(
 				"registry skill artifact uncompressed size does not match its descriptor: expected %d, got %d",
 				skill.Artifact.UncompressedSize,
@@ -767,7 +765,7 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 	}
 	if archive.ArchiveSize() != skill.Artifact.ArchiveSize {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			fmt.Errorf(
 				"registry skill artifact archive size does not match its descriptor: expected %d, got %d",
 				skill.Artifact.ArchiveSize,
@@ -778,7 +776,7 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 	}
 	if archive.FileCount() != skill.Artifact.FileCount {
 		return preparedRegistrySkillArtifact{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			fmt.Errorf(
 				"registry skill artifact file count does not match its descriptor: expected %d, got %d",
 				skill.Artifact.FileCount,
@@ -788,50 +786,6 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 		)
 	}
 	return preparedRegistrySkillArtifact{Skill: skill, Archive: archive, WorkspaceOS: workspaceOS}, nil
-}
-
-func (h *SupermarketHandler) fetchRegistrySkill(
-	ctx context.Context,
-	registryID, packageID, skillID string,
-) (SupermarketCatalogSkill, error) {
-	requestPath := registrySkillUpstreamPath(registryID, packageID, skillID)
-	resp, err := h.upstream.Get(ctx, requestPath, "application/json")
-	if err != nil {
-		return SupermarketCatalogSkill{}, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			fmt.Errorf("fetch Registry Skill: %w", err),
-			nil,
-		)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return SupermarketCatalogSkill{}, apperror.New(apperror.CodeRegistrySkillNotFound, nil)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return SupermarketCatalogSkill{}, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			fmt.Errorf("fetch Registry Skill: Supermarket returned status %d", resp.StatusCode),
-			nil,
-		)
-	}
-
-	var skill SupermarketCatalogSkill
-	decoder := json.NewDecoder(io.LimitReader(resp.Body, maxRegistrySkillMetadataBytes+1))
-	if err := decoder.Decode(&skill); err != nil {
-		return SupermarketCatalogSkill{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
-			fmt.Errorf("decode Registry Skill response: %w", err),
-			nil,
-		)
-	}
-	if decoder.Decode(&struct{}{}) != io.EOF {
-		return SupermarketCatalogSkill{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
-			errors.New("registry skill response is too large or malformed"),
-			nil,
-		)
-	}
-	return skill, nil
 }
 
 func (h *SupermarketHandler) fetchRegistryPackageRelease(
@@ -847,7 +801,7 @@ func (h *SupermarketHandler) fetchRegistryPackageRelease(
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
-		return SupermarketSkillPackageDescriptor{}, apperror.New(apperror.CodeRegistrySkillNotFound, nil)
+		return SupermarketSkillPackageDescriptor{}, apperror.New(apperror.CodeRegistryPackageNotFound, nil)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
@@ -863,20 +817,20 @@ func (h *SupermarketHandler) fetchRegistryPackageRelease(
 	}
 	if len(payload) > maxRegistryPackageMetadataBytes {
 		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid, errors.New("registry Package release is too large"), nil,
+			apperror.CodeRegistryPackageInvalid, errors.New("registry Package release is too large"), nil,
 		)
 	}
 	digest := sha256.Sum256(payload)
 	if hex.EncodeToString(digest[:]) != revision {
 		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid, errors.New("registry Package release SHA-256 verification failed"), nil,
+			apperror.CodeRegistryPackageInvalid, errors.New("registry Package release SHA-256 verification failed"), nil,
 		)
 	}
 	var release SupermarketSkillPackageRelease
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	if err := decoder.Decode(&release); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid, errors.New("registry Package release is malformed"), nil,
+			apperror.CodeRegistryPackageInvalid, errors.New("registry Package release is malformed"), nil,
 		)
 	}
 	skills := make([]SupermarketCatalogSkill, 0, len(release.Skills))
@@ -1004,20 +958,20 @@ func (h *SupermarketHandler) downloadSupermarketArtifact(
 	if err != nil {
 		code := apperror.CodeRegistryUnavailable
 		if errors.Is(err, supermarketclient.ErrCrossOrigin) || errors.Is(err, supermarketclient.ErrRedirectLimit) {
-			code = apperror.CodeRegistrySkillInvalid
+			code = apperror.CodeRegistryPackageInvalid
 		}
 		return nil, apperror.Wrap(code, fmt.Errorf("download Registry Skill Artifact: %w", err), nil)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			errors.New("registry skill artifact was not found"),
 			nil,
 		)
 	}
 	if resp.StatusCode != http.StatusOK {
-		code := apperror.CodeRegistrySkillInvalid
+		code := apperror.CodeRegistryPackageInvalid
 		if resp.StatusCode >= http.StatusInternalServerError {
 			code = apperror.CodeRegistryUnavailable
 		}
@@ -1029,7 +983,7 @@ func (h *SupermarketHandler) downloadSupermarketArtifact(
 	}
 	if resp.ContentLength >= 0 && resp.ContentLength != artifact.Size {
 		return nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			errors.New("registry skill artifact content length does not match its descriptor"),
 			nil,
 		)
@@ -1045,7 +999,7 @@ func (h *SupermarketHandler) downloadSupermarketArtifact(
 	}
 	if int64(len(content)) != artifact.Size {
 		return nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			errors.New("registry skill artifact size does not match its descriptor"),
 			nil,
 		)
@@ -1053,7 +1007,7 @@ func (h *SupermarketHandler) downloadSupermarketArtifact(
 	digest := sha256.Sum256(content)
 	if hex.EncodeToString(digest[:]) != artifact.Digest {
 		return nil, apperror.Wrap(
-			apperror.CodeRegistrySkillInvalid,
+			apperror.CodeRegistryPackageInvalid,
 			errors.New("registry skill artifact SHA-256 verification failed"),
 			nil,
 		)

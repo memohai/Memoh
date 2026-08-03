@@ -7915,7 +7915,7 @@ const docTemplate = `{
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Install every Skill in a supermarket Package to a bot workspace",
+                "summary": "Install an immutable Skill Package release to a bot workspace",
                 "parameters": [
                     {
                         "type": "string",
@@ -20189,9 +20189,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "registry_id": {
-                    "type": "string"
-                },
-                "release_url": {
                     "type": "string"
                 },
                 "revision": {

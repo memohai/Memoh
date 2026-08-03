@@ -2116,7 +2116,6 @@ export type HandlersSupermarketSkillPackageDescriptor = {
     name: string;
     package_id: string;
     registry_id: string;
-    release_url?: string;
     revision: string;
     schema_version: string;
     skill_count: number;

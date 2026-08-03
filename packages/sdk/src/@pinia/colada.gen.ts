@@ -2556,7 +2556,7 @@ export const getBotsByBotIdSkillsCatalogQuery = defineQueryOptions<Options<GetBo
 }));
 
 /**
- * Install every Skill in a supermarket Package to a bot workspace
+ * Install an immutable Skill Package release to a bot workspace
  */
 export const postBotsByBotIdSupermarketInstallPackageMutation = (options?: Partial<Options<PostBotsByBotIdSupermarketInstallPackageData>>): UseMutationOptions<PostBotsByBotIdSupermarketInstallPackageResponse, Options<PostBotsByBotIdSupermarketInstallPackageData>, PostBotsByBotIdSupermarketInstallPackageError> => ({
     mutation: async (vars) => {

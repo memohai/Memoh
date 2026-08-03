@@ -1435,7 +1435,7 @@ export const putBotsByBotIdSettings = <ThrowOnError extends boolean = false>(opt
 export const getBotsByBotIdSkillsCatalog = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdSkillsCatalogData, ThrowOnError>): RequestResult<GetBotsByBotIdSkillsCatalogResponses, GetBotsByBotIdSkillsCatalogErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdSkillsCatalogResponses, GetBotsByBotIdSkillsCatalogErrors, ThrowOnError>({ url: '/bots/{bot_id}/skills/catalog', ...options });
 
 /**
- * Install every Skill in a supermarket Package to a bot workspace
+ * Install an immutable Skill Package release to a bot workspace
  */
 export const postBotsByBotIdSupermarketInstallPackage = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdSupermarketInstallPackageData, ThrowOnError>): RequestResult<PostBotsByBotIdSupermarketInstallPackageResponses, PostBotsByBotIdSupermarketInstallPackageErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdSupermarketInstallPackageResponses, PostBotsByBotIdSupermarketInstallPackageErrors, ThrowOnError>({
     url: '/bots/{bot_id}/supermarket/install-package',
