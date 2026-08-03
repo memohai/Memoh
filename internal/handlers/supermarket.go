@@ -353,6 +353,13 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if len(packageDescriptors) > 0 {
+		releasePreparation, err := acquireRegistryPackagePreparation(ctx)
+		if err != nil {
+			return err
+		}
+		defer releasePreparation()
+	}
 	bundleArchive, err := h.preparePluginBundle(
 		ctx, req.PluginID, manifest.ID, entry.Release.Artifact, manifest.Packages,
 	)

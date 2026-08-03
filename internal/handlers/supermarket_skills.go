@@ -31,10 +31,10 @@ const (
 	maxRegistrySkillMetadataBytes             = 2 * 1024 * 1024
 	maxRegistryPackageMetadataBytes           = 8 * 1024 * 1024
 	maxRegistryPackageSkills                  = 128
-	maxConcurrentSkillArtifactPreparations    = 2
+	maxConcurrentRegistryPackagePreparations  = 2
 )
 
-var skillArtifactPreparationTokens = make(chan struct{}, maxConcurrentSkillArtifactPreparations)
+var registryPackagePreparationTokens = make(chan struct{}, maxConcurrentRegistryPackagePreparations)
 
 type SupermarketRegistryListResponse struct {
 	Data []SupermarketRegistry `json:"data" validate:"required"`
@@ -512,6 +512,11 @@ func (h *SupermarketHandler) installRegistryPackage(
 	if err != nil {
 		return InstallRegistryPackageResponse{}, err
 	}
+	releasePreparation, err := acquireRegistryPackagePreparation(targetContext)
+	if err != nil {
+		return InstallRegistryPackageResponse{}, err
+	}
+	defer releasePreparation()
 	prepared, err := h.prepareRegistryPackage(targetContext, target.Info.OS, pkg, registryID, packageID, expectedRevision)
 	if err != nil {
 		return InstallRegistryPackageResponse{}, err
@@ -552,6 +557,15 @@ func (h *SupermarketHandler) installRegistryPackage(
 		OK: true, RegistryID: registryID, PackageID: packageID, Revision: prepared.Descriptor.Revision,
 		WorkspaceTargetID: target.TargetID, Skills: installed,
 	}, nil
+}
+
+func acquireRegistryPackagePreparation(ctx context.Context) (func(), error) {
+	select {
+	case registryPackagePreparationTokens <- struct{}{}:
+		return func() { <-registryPackagePreparationTokens }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (h *SupermarketHandler) checkPluginPackageMembers(
@@ -726,12 +740,6 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 			errors.New("registry skill artifact file count is invalid"),
 			nil,
 		)
-	}
-	select {
-	case skillArtifactPreparationTokens <- struct{}{}:
-		defer func() { <-skillArtifactPreparationTokens }()
-	case <-ctx.Done():
-		return preparedRegistrySkillArtifact{}, ctx.Err()
 	}
 	artifactBytes, err := h.downloadRegistrySkillArtifact(ctx, skill.Artifact)
 	if err != nil {

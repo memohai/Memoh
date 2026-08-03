@@ -39,6 +39,28 @@ func TestValidateRegistrySkillRequiresNamespacedIdentity(t *testing.T) {
 	}
 }
 
+func TestRegistryPackagePreparationLimitCoversRequestLifecycle(t *testing.T) {
+	first, err := acquireRegistryPackagePreparation(context.Background())
+	if err != nil {
+		t.Fatalf("acquire first Package preparation: %v", err)
+	}
+	second, err := acquireRegistryPackagePreparation(context.Background())
+	if err != nil {
+		first()
+		t.Fatalf("acquire second Package preparation: %v", err)
+	}
+	defer func() {
+		first()
+		second()
+	}()
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if release, err := acquireRegistryPackagePreparation(canceled); !errors.Is(err, context.Canceled) || release != nil {
+		t.Fatalf("saturated Package preparation acquire: release_nil=%v error=%v", release == nil, err)
+	}
+}
+
 func TestValidateRegistrySkillRequiresBoundedArtifact(t *testing.T) {
 	for name, mutate := range map[string]func(*SupermarketSkillArtifact){
 		"zero uncompressed size": func(artifact *SupermarketSkillArtifact) {
@@ -214,6 +236,7 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	pkg.Revision = hex.EncodeToString(revision[:])
 	installer := &recordingPluginInstaller{}
 	artifactRequestedDuringMutation := false
+	artifactRequestedWithPreparationLease := false
 	releaseRequested := false
 	obsoletePath := "/data/skills/registry/package/obsolete/SKILL.md"
 	env.writeSkillFile(t, obsoletePath, managedSkillRaw("obsolete", "Obsolete"))
@@ -222,6 +245,7 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if strings.HasPrefix(req.URL.Path, "/api/artifacts/skill/") {
 				artifactRequestedDuringMutation = artifactRequestedDuringMutation || installer.mutationCalls > 0
+				artifactRequestedWithPreparationLease = len(registryPackagePreparationTokens) == 1
 				return testHTTPResponse(req, http.StatusOK, artifact), nil
 			}
 			wantReleasePath := "/api/registries/registry/packages/package/releases/" + pkg.Revision
@@ -241,11 +265,14 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	if err != nil || !result.OK || len(result.Skills) != len(pkg.Skills) {
 		t.Fatalf("installRegistryPackage() result=%+v error=%v", result, err)
 	}
-	if !releaseRequested || artifactRequestedDuringMutation || installer.mutationCalls != 1 {
+	if !releaseRequested || !artifactRequestedWithPreparationLease || artifactRequestedDuringMutation || installer.mutationCalls != 1 {
 		t.Fatalf(
-			"Package preflight state: immutable_release=%v artifact_in_lock=%v mutations=%d",
-			releaseRequested, artifactRequestedDuringMutation, installer.mutationCalls,
+			"Package preflight state: immutable_release=%v preparation_lease=%v artifact_in_lock=%v mutations=%d",
+			releaseRequested, artifactRequestedWithPreparationLease, artifactRequestedDuringMutation, installer.mutationCalls,
 		)
+	}
+	if active := len(registryPackagePreparationTokens); active != 0 {
+		t.Fatalf("Package preparation lease remained active after install: %d", active)
 	}
 	if _, err := os.Stat(env.localPath(obsoletePath)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("obsolete Package member survived replacement: %v", err)
