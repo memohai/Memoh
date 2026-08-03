@@ -793,7 +793,7 @@ func TestExtractPluginBundleArchivePublishesSafeBundle(t *testing.T) {
 		"/data/.memoh/plugins/github2/keep":       "keep",
 	}}
 
-	result, err := extractPluginBundleArchive(
+	result, err := extractPluginBundleArchiveForTest(
 		context.Background(), writer, "linux", "github-source", "github_plugin", bytes.NewReader(archive),
 	)
 	if err != nil {
@@ -851,32 +851,43 @@ func TestExtractPluginBundleArchivePublishesSafeBundle(t *testing.T) {
 
 func TestPluginBundlePublicationCommitCanRetryCleanup(t *testing.T) {
 	failures := 0
-	writer := &pluginBundleTestWriter{
-		files: map[string]string{"/backup/plugin.yaml": "old"},
-		deleteError: func(string) error {
-			if failures == 0 {
+	pluginRoot, err := skillset.PluginDirForID("github")
+	if err != nil {
+		t.Fatalf("plugin root: %v", err)
+	}
+	var writer *pluginBundleTestWriter
+	writer = &pluginBundleTestWriter{
+		files: map[string]string{pluginRoot + "/plugin.yaml": "id: github"},
+		deleteError: func(filePath string) error {
+			if strings.Contains(filePath, "/.staging/backup-github-") && len(writer.renames) >= 2 && failures == 0 {
 				failures++
 				return errors.New("temporary cleanup failure")
 			}
 			return nil
 		},
 	}
-	publication := &pluginBundlePublication{
-		client: writer, backupDir: "/backup", targetExists: true,
+	archive, err := pluginspkg.ReadBundleArchive(
+		"github", "github",
+		bytes.NewReader(tarArchive(t, map[string]string{"github/plugin.yaml": "id: github"})),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("read bundle: %v", err)
+	}
+	publication, err := pluginspkg.PublishBundleArchive(context.Background(), writer, "linux", "github", archive)
+	if err != nil {
+		t.Fatalf("publish bundle: %v", err)
 	}
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := publication.commit(canceled); err == nil {
+	if err := publication.Commit(canceled); err == nil {
 		t.Fatal("first commit error = nil")
 	}
-	if publication.closed {
-		t.Fatal("failed cleanup closed the publication")
-	}
-	if err := publication.commit(canceled); err != nil {
+	if err := publication.Commit(canceled); err != nil {
 		t.Fatalf("second commit error = %v", err)
 	}
-	if !publication.closed || len(writer.deleteHasDeadline) != 2 || !writer.deleteHasDeadline[0] || !writer.deleteHasDeadline[1] {
-		t.Fatalf("closed=%v cleanup deadlines=%v", publication.closed, writer.deleteHasDeadline)
+	if len(writer.deleteHasDeadline) < 2 || !writer.deleteHasDeadline[len(writer.deleteHasDeadline)-2] || !writer.deleteHasDeadline[len(writer.deleteHasDeadline)-1] {
+		t.Fatalf("cleanup deadlines=%v", writer.deleteHasDeadline)
 	}
 }
 
@@ -886,12 +897,12 @@ func TestExtractPluginBundleArchiveRejectsInvalidArchiveBeforeWorkspaceMutation(
 		t.Fatalf("plugin root: %v", err)
 	}
 	tooManyFiles := map[string]string{"github/plugin.yaml": "id: github"}
-	for i := 0; i < maxPluginBundleFiles; i++ {
+	for i := 0; i < pluginspkg.MaxBundleFiles; i++ {
 		tooManyFiles[fmt.Sprintf("github/scripts/ignored/%04d.txt", i)] = "x"
 	}
 	totalSizeExceeded := map[string]string{"github/plugin.yaml": "id: github"}
 	for i := 0; i < 6; i++ {
-		totalSizeExceeded[fmt.Sprintf("github/scripts/ignored/%d.bin", i)] = strings.Repeat("x", maxPluginBundleFileBytes)
+		totalSizeExceeded[fmt.Sprintf("github/scripts/ignored/%d.bin", i)] = strings.Repeat("x", pluginspkg.MaxBundleFileBytes)
 	}
 	tests := []struct {
 		name    string
@@ -903,7 +914,7 @@ func TestExtractPluginBundleArchiveRejectsInvalidArchiveBeforeWorkspaceMutation(
 		{name: "truncated file", archive: truncatedTarArchive(t, "github/plugin.yaml", 100, "id: github")},
 		{name: "oversized file", archive: tarArchive(t, map[string]string{
 			"github/plugin.yaml":         "id: github",
-			"github/scripts/ignored.bin": strings.Repeat("x", maxPluginBundleFileBytes+1),
+			"github/scripts/ignored.bin": strings.Repeat("x", pluginspkg.MaxBundleFileBytes+1),
 		})},
 		{name: "too many files", archive: tarArchive(t, tooManyFiles)},
 		{name: "total size exceeded", archive: tarArchive(t, totalSizeExceeded)},
@@ -947,7 +958,7 @@ func TestExtractPluginBundleArchiveRejectsInvalidArchiveBeforeWorkspaceMutation(
 		})},
 		{name: "decompressed stream limit", archive: append(
 			tarArchive(t, map[string]string{"github/plugin.yaml": "id: github"}),
-			bytes.Repeat([]byte{0}, maxPluginBundleStreamBytes+1)...,
+			bytes.Repeat([]byte{0}, pluginspkg.MaxBundleStreamBytes+1)...,
 		)},
 	}
 	for _, test := range tests {
@@ -955,7 +966,7 @@ func TestExtractPluginBundleArchiveRejectsInvalidArchiveBeforeWorkspaceMutation(
 			writer := &pluginBundleTestWriter{files: map[string]string{
 				pluginRoot + "/hooks.json": "stale",
 			}}
-			if _, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github", "github", bytes.NewReader(test.archive)); err == nil {
+			if _, err := extractPluginBundleArchiveForTest(context.Background(), writer, "linux", "github", "github", bytes.NewReader(test.archive)); err == nil {
 				t.Fatal("extractPluginBundleArchive() accepted invalid archive")
 			}
 			if got := writer.files[pluginRoot+"/hooks.json"]; got != "stale" {
@@ -989,7 +1000,7 @@ func TestExtractPluginBundleArchiveRollsBackStagingAndPublishFailures(t *testing
 				return nil
 			},
 		}
-		if _, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive)); err == nil {
+		if _, err := extractPluginBundleArchiveForTest(context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive)); err == nil {
 			t.Fatal("extractPluginBundleArchive() succeeded after staging write failure")
 		}
 		if got := writer.files[pluginRoot+"/hooks.json"]; got != "stale" {
@@ -1010,7 +1021,7 @@ func TestExtractPluginBundleArchiveRollsBackStagingAndPublishFailures(t *testing
 				return nil
 			},
 		}
-		if _, err := extractPluginBundleArchive(context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive)); err == nil {
+		if _, err := extractPluginBundleArchiveForTest(context.Background(), writer, "linux", "github", "github", bytes.NewReader(archive)); err == nil {
 			t.Fatal("extractPluginBundleArchive() succeeded after publish failure")
 		}
 		if got := writer.files[pluginRoot+"/hooks.json"]; got != "stale" {
@@ -1020,6 +1031,24 @@ func TestExtractPluginBundleArchiveRollsBackStagingAndPublishFailures(t *testing
 			t.Fatalf("publish rollback renames = %+v", writer.renames)
 		}
 	})
+}
+
+func extractPluginBundleArchiveForTest(
+	ctx context.Context,
+	writer *pluginBundleTestWriter,
+	workspaceOS, archivePluginID, targetPluginID string,
+	r io.Reader,
+) (pluginspkg.BundleInstallResult, error) {
+	archive, err := pluginspkg.ReadBundleArchive(archivePluginID, targetPluginID, r, nil)
+	if err != nil {
+		return pluginspkg.BundleInstallResult{}, err
+	}
+	publication, err := pluginspkg.PublishBundleArchive(ctx, writer, workspaceOS, targetPluginID, archive)
+	if err != nil {
+		return pluginspkg.BundleInstallResult{}, err
+	}
+	_ = publication.Commit(ctx)
+	return publication.Result(), nil
 }
 
 func TestInstallPluginBundleRejectsMissingDownload(t *testing.T) {
