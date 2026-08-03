@@ -19,7 +19,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/config"
 	supermarketclient "github.com/memohai/memoh/internal/supermarket"
 	"github.com/memohai/memoh/internal/workspace"
@@ -28,131 +27,6 @@ import (
 const validSkillArtifactContent = "---\nname: skill\ndescription: Demo\n---\n\n# Demo\n"
 
 const validSkillArtifactUncompressedSize = int64(len(validSkillArtifactContent))
-
-func TestValidateRegistrySkillRequiresNamespacedIdentity(t *testing.T) {
-	skill := validRegistrySkillDescriptor()
-	if err := validateRegistrySkill(skill, "registry", "package", "skill"); err != nil {
-		t.Fatalf("validateRegistrySkill(valid) error = %v", err)
-	}
-	skill.InstallID = "skill"
-	if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
-		t.Fatal("validateRegistrySkill(unnamespaced) error = nil")
-	}
-}
-
-func TestRegistryPackagePreparationLimitCoversRequestLifecycle(t *testing.T) {
-	first, err := acquireRegistryPackagePreparation(context.Background())
-	if err != nil {
-		t.Fatalf("acquire first Package preparation: %v", err)
-	}
-	second, err := acquireRegistryPackagePreparation(context.Background())
-	if err != nil {
-		first()
-		t.Fatalf("acquire second Package preparation: %v", err)
-	}
-	defer func() {
-		first()
-		second()
-	}()
-
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if release, err := acquireRegistryPackagePreparation(canceled); !errors.Is(err, context.Canceled) || release != nil {
-		t.Fatalf("saturated Package preparation acquire: release_nil=%v error=%v", release == nil, err)
-	}
-}
-
-func TestValidateRegistrySkillRequiresBoundedArtifact(t *testing.T) {
-	for name, mutate := range map[string]func(*SupermarketSkillArtifact){
-		"zero uncompressed size": func(artifact *SupermarketSkillArtifact) {
-			artifact.UncompressedSize = 0
-		},
-		"uncompressed size limit": func(artifact *SupermarketSkillArtifact) {
-			artifact.UncompressedSize = maxRegistrySkillArtifactUncompressedBytes + 1
-		},
-		"archive size limit": func(artifact *SupermarketSkillArtifact) {
-			artifact.ArchiveSize = maxRegistrySkillArtifactArchiveBytes + 1
-		},
-		"file count limit": func(artifact *SupermarketSkillArtifact) {
-			artifact.FileCount = maxRegistrySkillArtifactFiles + 1
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			skill := validRegistrySkillDescriptor()
-			mutate(&skill.Artifact)
-			if err := validateRegistrySkill(skill, "registry", "package", "skill"); err == nil {
-				t.Fatalf("validateRegistrySkill() accepted invalid %s", name)
-			}
-		})
-	}
-}
-
-func TestValidateRegistryPackageBindsMembersToRevision(t *testing.T) {
-	pkg := validRegistryPackageDescriptor()
-	if err := validateRegistryPackage(pkg, "registry", "package"); err != nil {
-		t.Fatalf("validateRegistryPackage(valid) error = %v", err)
-	}
-
-	tests := map[string]func(*SupermarketSkillPackageDescriptor){
-		"identity": func(value *SupermarketSkillPackageDescriptor) { value.PackageID = "other" },
-		"revision": func(value *SupermarketSkillPackageDescriptor) { value.Revision = "latest" },
-		"count":    func(value *SupermarketSkillPackageDescriptor) { value.SkillCount++ },
-		"member":   func(value *SupermarketSkillPackageDescriptor) { value.Skills[0].PackageID = "other" },
-	}
-	for name, mutate := range tests {
-		t.Run(name, func(t *testing.T) {
-			value := validRegistryPackageDescriptor()
-			mutate(&value)
-			if err := validateRegistryPackage(value, "registry", "package"); err == nil {
-				t.Fatal("validateRegistryPackage() error = nil")
-			}
-		})
-	}
-}
-
-func TestPrepareRegistrySkillArtifactRejectsDeclaredBudgetBeforeDownload(t *testing.T) {
-	skill := validRegistrySkillDescriptor()
-	artifactRequested := false
-	handler := &SupermarketHandler{
-		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			artifactRequested = true
-			return testHTTPResponse(req, http.StatusOK, nil), nil
-		})}),
-	}
-
-	_, err := handler.prepareResolvedRegistrySkillArtifactWithLimit(
-		context.Background(), "linux", skill, skill.Artifact.UncompressedSize-1,
-	)
-	if got := apperror.CodeOf(err); got != apperror.CodeRegistryPackageInvalid {
-		t.Fatalf("prepare code = %q, want %q", got, apperror.CodeRegistryPackageInvalid)
-	}
-	if artifactRequested {
-		t.Fatal("over-budget Skill Artifact was downloaded")
-	}
-}
-
-func TestPrepareRegistrySkillArtifactVerifiesDeclaredUncompressedSize(t *testing.T) {
-	artifact := validSkillArtifact(t)
-	digest := sha256.Sum256(artifact)
-	skill := validRegistrySkillDescriptor()
-	skill.Artifact.Digest = hex.EncodeToString(digest[:])
-	skill.Artifact.Size = int64(len(artifact))
-	skill.Artifact.UncompressedSize = validSkillArtifactUncompressedSize + 1
-	handler := &SupermarketHandler{
-		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return testHTTPResponse(req, http.StatusOK, artifact), nil
-		})}),
-	}
-
-	_, err := handler.prepareResolvedRegistrySkillArtifact(context.Background(), "linux", skill)
-	if got := apperror.CodeOf(err); got != apperror.CodeRegistryPackageInvalid {
-		t.Fatalf("prepare code = %q, want %q", got, apperror.CodeRegistryPackageInvalid)
-	}
-	cause := apperror.CauseOf(err)
-	if cause == nil || !strings.Contains(cause.Error(), "does not match its descriptor") {
-		t.Fatalf("prepare cause = %v, want declared size mismatch", cause)
-	}
-}
 
 func TestSupermarketSkillRoutesUseRegistryCatalogOnly(t *testing.T) {
 	var upstreamRequestURI string
@@ -234,44 +108,34 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	pkg.Revision = hex.EncodeToString(revision[:])
 	installer := &recordingPluginInstaller{}
 	artifactRequestedDuringMutation := false
-	artifactRequestedWithPreparationLease := false
-	releaseRequestedWithPreparationLease := false
 	obsoletePath := "/data/skills/registry/package/obsolete/SKILL.md"
 	env.writeSkillFile(t, obsoletePath, managedSkillRaw("obsolete", "Obsolete"))
 	handler := &SupermarketHandler{
 		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if strings.HasPrefix(req.URL.Path, "/api/artifacts/skill/") {
 				artifactRequestedDuringMutation = artifactRequestedDuringMutation || installer.mutationCalls > 0
-				artifactRequestedWithPreparationLease = len(registryPackagePreparationTokens) == 1
 				return testHTTPResponse(req, http.StatusOK, artifact), nil
 			}
 			wantReleasePath := "/api/registries/registry/packages/package/releases/" + pkg.Revision
 			if req.URL.Path != wantReleasePath {
 				t.Fatalf("unexpected upstream request path %q, want %q", req.URL.Path, wantReleasePath)
 			}
-			releaseRequestedWithPreparationLease = len(registryPackagePreparationTokens) == 1
 			return testHTTPResponse(req, http.StatusOK, release), nil
 		})}),
-		pluginService: installer,
-		workspaces:    manager,
 	}
 
-	result, err := handler.installRegistryPackage(context.Background(), env.botID, InstallPackageRequest{
+	service := supermarketclient.NewInstaller(handler.upstream, installer, nil, manager, slog.New(slog.DiscardHandler))
+	result, err := service.InstallPackage(context.Background(), env.botID, supermarketclient.InstallPackageRequest{
 		RegistryID: pkg.RegistryID, PackageID: pkg.PackageID, Revision: pkg.Revision,
 	})
 	if err != nil || !result.OK || len(result.Skills) != len(pkg.Skills) {
 		t.Fatalf("installRegistryPackage() result=%+v error=%v", result, err)
 	}
-	if !releaseRequestedWithPreparationLease || !artifactRequestedWithPreparationLease ||
-		artifactRequestedDuringMutation || installer.mutationCalls != 1 {
+	if artifactRequestedDuringMutation || installer.mutationCalls != 1 {
 		t.Fatalf(
-			"Package preflight state: release_lease=%v artifact_lease=%v artifact_in_lock=%v mutations=%d",
-			releaseRequestedWithPreparationLease, artifactRequestedWithPreparationLease,
+			"Package preflight state: artifact_in_lock=%v mutations=%d",
 			artifactRequestedDuringMutation, installer.mutationCalls,
 		)
-	}
-	if active := len(registryPackagePreparationTokens); active != 0 {
-		t.Fatalf("Package preparation lease remained active after install: %d", active)
 	}
 	if _, err := os.Stat(env.localPath(obsoletePath)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("obsolete Package member survived replacement: %v", err)
@@ -286,112 +150,6 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	stagingEntries, err := os.ReadDir(env.localPath("/data/skills/.staging"))
 	if err != nil || len(stagingEntries) != 0 {
 		t.Fatalf("Package staging was not cleaned: entries=%v error=%v", stagingEntries, err)
-	}
-}
-
-func TestDownloadRegistrySkillArtifactVerifiesOriginAndDigest(t *testing.T) {
-	content := []byte("artifact")
-	digest := sha256.Sum256(content)
-	handler := &SupermarketHandler{
-		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				StatusCode:    http.StatusOK,
-				Body:          io.NopCloser(bytes.NewReader(content)),
-				ContentLength: int64(len(content)),
-				Request:       req,
-				Header:        make(http.Header),
-			}, nil
-		})}),
-	}
-	artifact := SupermarketSkillArtifact{
-		Digest: hex.EncodeToString(digest[:]), Size: int64(len(content)), DownloadURL: "/api/artifacts/digest/download",
-	}
-	got, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact)
-	if err != nil {
-		t.Fatalf("downloadRegistrySkillArtifact() error = %v", err)
-	}
-	if !bytes.Equal(got, content) {
-		t.Fatalf("content = %q, want %q", got, content)
-	}
-
-	artifact.DownloadURL = "https://attacker.example/artifact"
-	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); apperror.CodeOf(err) != apperror.CodeRegistryPackageInvalid {
-		t.Fatalf("cross-origin artifact code = %q, want %q", apperror.CodeOf(err), apperror.CodeRegistryPackageInvalid)
-	}
-	artifact.DownloadURL = "/api/artifacts/digest/download"
-	artifact.Digest = strings.Repeat("0", 64)
-	if _, err := handler.downloadRegistrySkillArtifact(context.Background(), artifact); apperror.CodeOf(err) != apperror.CodeRegistryPackageInvalid {
-		t.Fatalf("invalid Artifact digest code = %q, want %q", apperror.CodeOf(err), apperror.CodeRegistryPackageInvalid)
-	}
-}
-
-func TestFetchRegistryPackageReleaseRejectsTamperedBytes(t *testing.T) {
-	payload := []byte(`{"schema_version":"1","registry_id":"memoh","package_id":"demo","name":"Demo","description":"Demo","tags":[],"skills":[]}`)
-	digest := sha256.Sum256(payload)
-	revision := hex.EncodeToString(digest[:])
-	tampered := append(append([]byte(nil), payload...), '\n')
-	handler := &SupermarketHandler{
-		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return testHTTPResponse(req, http.StatusOK, tampered), nil
-		})}),
-	}
-
-	_, err := handler.fetchRegistryPackageRelease(context.Background(), "memoh", "demo", revision)
-	if got := apperror.CodeOf(err); got != apperror.CodeRegistryPackageInvalid {
-		t.Fatalf("fetch Package release code = %q, want %q", got, apperror.CodeRegistryPackageInvalid)
-	}
-}
-
-func TestFetchRegistryPackageReleaseUsesStablePrivateErrors(t *testing.T) {
-	revision := strings.Repeat("0", 64)
-	tests := []struct {
-		name      string
-		transport roundTripFunc
-		wantCode  apperror.Code
-	}{
-		{
-			name: "unavailable",
-			transport: func(*http.Request) (*http.Response, error) {
-				return nil, errors.New("SECRET upstream dial failure")
-			},
-			wantCode: apperror.CodeRegistryUnavailable,
-		},
-		{
-			name: "not found",
-			transport: func(req *http.Request) (*http.Response, error) {
-				return testHTTPResponse(req, http.StatusNotFound, []byte("SECRET missing response")), nil
-			},
-			wantCode: apperror.CodeRegistryPackageNotFound,
-		},
-		{
-			name: "invalid release",
-			transport: func(req *http.Request) (*http.Response, error) {
-				return testHTTPResponse(req, http.StatusOK, []byte("SECRET malformed response")), nil
-			},
-			wantCode: apperror.CodeRegistryPackageInvalid,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			handler := &SupermarketHandler{
-				upstream: supermarketclient.NewClient(
-					"https://supermarket.example",
-					&http.Client{Transport: test.transport},
-				),
-			}
-			_, err := handler.fetchRegistryPackageRelease(context.Background(), "registry", "package", revision)
-			if got := apperror.CodeOf(err); got != test.wantCode {
-				t.Fatalf("fetch code = %q, want %q", got, test.wantCode)
-			}
-			public, ok := apperror.PublicFrom(err, "request-id")
-			if !ok {
-				t.Fatal("fetch error is not a public app error")
-			}
-			if strings.Contains(public.Detail, "SECRET") || strings.Contains(public.Detail, "supermarket.example") {
-				t.Fatalf("public fetch error leaked private detail: %q", public.Detail)
-			}
-		})
 	}
 }
 

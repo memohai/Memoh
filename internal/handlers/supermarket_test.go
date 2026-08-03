@@ -13,7 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path"
 	"slices"
@@ -63,7 +62,6 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	installer := &recordingPluginInstaller{}
 	requestedPaths := make([]string, 0, 3)
 	artifactRequestedDuringMutation := false
-	packageReleaseRequestedWithPreparationLease := false
 	handler := &SupermarketHandler{
 		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			requestedPaths = append(requestedPaths, req.URL.Path)
@@ -75,7 +73,6 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 			case "/api/plugins/notion/releases/" + entry.Release.Revision:
 				content = releaseJSON
 			case registryPackageReleaseUpstreamPath(reference.RegistryID, reference.PackageID, entry.Release.Packages[0].Revision):
-				packageReleaseRequestedWithPreparationLease = len(registryPackagePreparationTokens) == 1
 				content = packageJSON
 			case "/api/artifacts/skill/" + digestText:
 				artifactRequestedDuringMutation = installer.mutationCalls > 0
@@ -89,13 +86,11 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 			}
 			return testHTTPResponse(req, status, content), nil
 		})}),
-		pluginService:  installer,
-		containers:     manager,
-		workspaces:     manager,
 		botService:     env.handler.botService,
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
 	}
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
 
 	recorder, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -123,9 +118,6 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	}
 	if artifactRequestedDuringMutation {
 		t.Fatal("Plugin installation downloaded an Artifact while holding the bot mutation lock")
-	}
-	if !packageReleaseRequestedWithPreparationLease {
-		t.Fatal("Plugin installation fetched Package release metadata without a preparation lease")
 	}
 	if slices.Contains(requestedPaths, "/api/registries/memoh/packages/notion/skills/meeting") {
 		t.Fatalf("Plugin installation queried the mutable Skill endpoint: %+v", requestedPaths)
@@ -186,10 +178,10 @@ func TestInstallPluginRejectsStaleReleaseBeforeWorkspaceMutation(t *testing.T) {
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
 		})}),
-		pluginService: installer, containers: manager, workspaces: manager,
 		botService: env.handler.botService, accountService: env.handler.accountService,
 		logger: slog.New(slog.DiscardHandler),
 	}
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: strings.Repeat("0", 64),
@@ -206,7 +198,6 @@ func TestInstallPluginRejectsStaleReleaseBeforeWorkspaceMutation(t *testing.T) {
 func TestInstallPluginRequiresExpectedInstalledRevision(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	handler := &SupermarketHandler{
-		pluginService:  &recordingPluginInstaller{},
 		botService:     env.handler.botService,
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
@@ -255,10 +246,10 @@ func TestInstallPluginRejectsInstallationChangedWithinSameReleaseWhilePreparing(
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
 		})}),
-		pluginService: installer, containers: manager, workspaces: manager,
 		botService: env.handler.botService, accountService: env.handler.accountService,
 		logger: slog.New(slog.DiscardHandler),
 	}
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -327,13 +318,11 @@ func TestInstallPluginRollsBackSkillsWhenBundleInstallFails(t *testing.T) {
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
 		})}),
-		pluginService:  installer,
-		containers:     manager,
-		workspaces:     manager,
 		botService:     env.handler.botService,
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
 	}
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -403,13 +392,11 @@ func TestInstallPluginRestoresPreviousWorkspaceWhenDatabaseInstallFails(t *testi
 				return testHTTPResponse(req, http.StatusNotFound, nil), nil
 			}
 		})}),
-		pluginService:  installer,
-		containers:     manager,
-		workspaces:     manager,
 		botService:     env.handler.botService,
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
 	}
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
 
 	_, installErr := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -476,6 +463,7 @@ func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *tes
 				t.Fatalf("marshal Plugin release: %v", err)
 			}
 			skillArtifactRequested := false
+			pluginInstaller := &recordingPluginInstaller{}
 			handler := &SupermarketHandler{
 				upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					switch req.URL.Path {
@@ -494,13 +482,11 @@ func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *tes
 						return testHTTPResponse(req, http.StatusNotFound, nil), nil
 					}
 				})}),
-				pluginService:  &recordingPluginInstaller{},
-				containers:     manager,
-				workspaces:     manager,
 				botService:     env.handler.botService,
 				accountService: env.handler.accountService,
 				logger:         slog.New(slog.DiscardHandler),
 			}
+			handler.installer = supermarketclient.NewInstaller(handler.upstream, pluginInstaller, manager, manager, handler.logger)
 
 			if _, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 				PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -515,40 +501,6 @@ func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *tes
 				t.Fatalf("workspace changed before Plugin Artifact validation: %v", err)
 			}
 		})
-	}
-}
-
-func TestValidateSupermarketPluginEntryRejectsPackageLockMismatch(t *testing.T) {
-	reference := pluginspkg.PackageReference{RegistryID: "memoh", PackageID: "notion"}
-	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Packages: []pluginspkg.PackageReference{reference}}
-	bundle := gzipTarArchive(t, map[string]string{
-		"notion/plugin.yaml": "id: notion\npackages:\n  - registry_id: memoh\n    package_id: notion\n",
-	})
-	skill := validRegistrySkillDescriptor()
-	skill.RegistryID = reference.RegistryID
-	skill.PackageID = reference.PackageID
-	skill.SkillID = "meeting"
-	skill.InstallID = "memoh+notion+meeting"
-	entry := validSupermarketPluginEntry(manifest, bundle, skill)
-	entry.Release.Packages[0].PackageID = "other"
-
-	if err := validateSupermarketPluginEntry(entry, "notion", manifest); err == nil {
-		t.Fatal("validateSupermarketPluginEntry() accepted a Package lock that differs from plugin.yaml")
-	}
-}
-
-func TestPreparePluginPackagesEnforcesReleaseLimit(t *testing.T) {
-	handler := &SupermarketHandler{}
-	if _, _, err := handler.resolvePluginPackages(
-		context.Background(), make([]SupermarketPluginResolvedPackage, maxPluginReleasePackages+1),
-	); err == nil || !strings.Contains(err.Error(), "Package limit") {
-		t.Fatalf("preparePluginPackages() error = %v, want Package limit", err)
-	}
-	budget := pluginSkillArtifactBudget{uncompressedBytes: maxPluginSkillArtifactsUncompressedBytes - 1}
-	if err := budget.add(SupermarketSkillArtifact{
-		Size: 1, UncompressedSize: 2, ArchiveSize: 1, FileCount: 1,
-	}); err == nil {
-		t.Fatal("pluginSkillArtifactBudget.add() accepted an over-budget release")
 	}
 }
 
@@ -567,7 +519,7 @@ func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testin
 		skill.PackageID = reference.PackageID
 		skill.SkillID = skillID
 		skill.InstallID = strings.Join([]string{reference.RegistryID, reference.PackageID, skillID}, "+")
-		skill.Artifact.UncompressedSize = maxRegistrySkillArtifactUncompressedBytes
+		skill.Artifact.UncompressedSize = 5 * 1024 * 1024
 		skills = append(skills, skill)
 	}
 	bundle := gzipTarArchive(t, map[string]string{
@@ -581,6 +533,7 @@ func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testin
 		t.Fatalf("marshal Plugin entry: %v", err)
 	}
 	artifactRequested := false
+	pluginInstaller := &recordingPluginInstaller{}
 	handler := &SupermarketHandler{
 		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
@@ -595,13 +548,11 @@ func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testin
 				return testHTTPResponse(req, http.StatusOK, bundle), nil
 			}
 		})}),
-		pluginService:  &recordingPluginInstaller{},
-		containers:     manager,
-		workspaces:     manager,
 		botService:     env.handler.botService,
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
 	}
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, pluginInstaller, manager, manager, handler.logger)
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -611,89 +562,6 @@ func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testin
 	}
 	if artifactRequested {
 		t.Fatal("an Artifact was downloaded before the declared Skill budget was rejected")
-	}
-}
-
-func TestFetchPluginEntryRejectsOversizedAndTrailingJSON(t *testing.T) {
-	entry := validSupermarketPluginEntry(pluginspkg.Manifest{ID: "notion", Name: "Notion"}, gzipTarArchive(t, map[string]string{
-		"notion/plugin.yaml": "id: notion\n",
-	}))
-	payload, err := json.Marshal(entry)
-	if err != nil {
-		t.Fatalf("marshal Plugin release: %v", err)
-	}
-	tests := map[string][]byte{
-		"oversized":     append(append([]byte(nil), payload...), bytes.Repeat([]byte(" "), maxPluginMetadataBytes-len(payload)+1)...),
-		"trailing JSON": append(append([]byte(nil), payload...), []byte("{}")...),
-	}
-	for name, responseBody := range tests {
-		t.Run(name, func(t *testing.T) {
-			handler := &SupermarketHandler{
-				upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-					return testHTTPResponse(req, http.StatusOK, responseBody), nil
-				})}),
-				logger: slog.New(slog.DiscardHandler),
-			}
-			e := echo.New()
-			ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
-			if _, err := handler.fetchPluginEntry(ctx, "notion"); err == nil {
-				t.Fatal("fetchPluginEntry() accepted malformed Plugin metadata")
-			}
-		})
-	}
-}
-
-func TestFetchPluginEntryRejectsReleaseBytesThatDoNotMatchRevision(t *testing.T) {
-	entry := validSupermarketPluginEntry(
-		pluginspkg.Manifest{ID: "notion", Name: "Notion"},
-		gzipTarArchive(t, map[string]string{"notion/plugin.yaml": "id: notion\n"}),
-	)
-	releaseJSON := sealSupermarketPluginEntry(t, &entry)
-	entryJSON, err := json.Marshal(entry)
-	if err != nil {
-		t.Fatalf("marshal current Plugin entry: %v", err)
-	}
-	handler := &SupermarketHandler{
-		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			switch req.URL.Path {
-			case "/api/plugins/notion":
-				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
-			case "/api/plugins/notion/releases/" + entry.Release.Revision:
-				return testHTTPResponse(req, http.StatusOK, append(releaseJSON, ' ')), nil
-			default:
-				return testHTTPResponse(req, http.StatusNotFound, nil), nil
-			}
-		})}),
-		logger: slog.New(slog.DiscardHandler),
-	}
-	e := echo.New()
-	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
-	if _, err := handler.fetchPluginEntry(ctx, "notion"); err == nil || !strings.Contains(err.Error(), "SHA-256") {
-		t.Fatalf("fetchPluginEntry() error = %v, want release SHA-256 rejection", err)
-	}
-}
-
-func TestFetchPluginEntryRejectsCrossOriginMetadataRedirect(t *testing.T) {
-	attackerRequested := false
-	handler := &SupermarketHandler{
-		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Host == "attacker.example" {
-				attackerRequested = true
-				return testHTTPResponse(req, http.StatusOK, []byte(`{}`)), nil
-			}
-			response := testHTTPResponse(req, http.StatusFound, nil)
-			response.Header.Set("Location", "https://attacker.example/release")
-			return response, nil
-		})}),
-		logger: slog.New(slog.DiscardHandler),
-	}
-	e := echo.New()
-	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
-	if _, err := handler.fetchPluginEntry(ctx, "notion"); err == nil {
-		t.Fatal("fetchPluginEntry() followed a cross-origin metadata redirect")
-	}
-	if attackerRequested {
-		t.Fatal("cross-origin metadata redirect reached the attacker origin")
 	}
 }
 
@@ -1051,143 +919,6 @@ func extractPluginBundleArchiveForTest(
 	return publication.Result(), nil
 }
 
-func TestInstallPluginBundleRejectsMissingDownload(t *testing.T) {
-	handler := &SupermarketHandler{
-		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return testHTTPResponse(req, http.StatusNotFound, nil), nil
-		})}),
-		logger: slog.New(slog.DiscardHandler),
-	}
-	writer := &pluginBundleTestWriter{files: map[string]string{}}
-	artifact := SupermarketPluginArtifact{
-		Format: "memoh_plugin_v1", Digest: strings.Repeat("a", 64), Size: 1,
-		ContentType: "application/gzip", DownloadURL: "/artifacts/plugin",
-	}
-	if _, err := handler.installPluginBundle(context.Background(), writer, "linux", "github", "github", artifact, nil); err == nil {
-		t.Fatal("installPluginBundle() accepted a missing bundle")
-	}
-}
-
-func TestInstallPluginBundleRejectsManifestPackageMismatch(t *testing.T) {
-	bundle := gzipTarArchive(t, map[string]string{
-		"github/plugin.yaml": "id: github\npackages:\n  - registry_id: memoh\n    package_id: github\n",
-	})
-	handler := &SupermarketHandler{
-		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return testHTTPResponse(req, http.StatusOK, bundle), nil
-		})}),
-		logger: slog.New(slog.DiscardHandler),
-	}
-	writer := &pluginBundleTestWriter{files: map[string]string{}}
-	expected := []pluginspkg.PackageReference{{RegistryID: "memoh", PackageID: "issues"}}
-	digest := sha256.Sum256(bundle)
-	artifact := SupermarketPluginArtifact{
-		Format: "memoh_plugin_v1", Digest: hex.EncodeToString(digest[:]), Size: int64(len(bundle)),
-		ContentType: "application/gzip", DownloadURL: "/artifacts/plugin",
-	}
-	if _, err := handler.installPluginBundle(context.Background(), writer, "linux", "github", "github", artifact, expected); err == nil {
-		t.Fatal("installPluginBundle() accepted mismatched Package references")
-	}
-	if len(writer.renames) != 0 || len(writer.deletes) != 0 || len(writer.dirs) != 0 {
-		t.Fatalf("workspace mutated before manifest consistency check: %+v", writer)
-	}
-}
-
-func TestRunPluginInstallCommandsUsesPluginRootAndMemohEnv(t *testing.T) {
-	pluginRoot, err := skillset.PluginDirForID("github")
-	if err != nil {
-		t.Fatalf("plugin root: %v", err)
-	}
-	longOutput := strings.Repeat("x", pluginInstallScriptOutputLimit+8)
-	executor := &pluginInstallScriptTestExecutor{
-		results: []*bridge.ExecResult{
-			{Stdout: longOutput, ExitCode: 0},
-			{Stderr: "setup ok\n", ExitCode: 0},
-		},
-	}
-
-	result, err := runPluginInstallCommands(context.Background(), executor, "bot-1", "github", []string{
-		" sh scripts/install.sh ",
-		"",
-		"python3 scripts/setup.py",
-	})
-	if err != nil {
-		t.Fatalf("runPluginInstallCommands returned error: %v", err)
-	}
-	if !result.OK || result.CommandsRun != 2 || len(result.Results) != 2 {
-		t.Fatalf("result = %+v, want two successful commands", result)
-	}
-	if len(result.Results[0].Stdout) != pluginInstallScriptOutputLimit {
-		t.Fatalf("stdout was not truncated to limit: %d", len(result.Results[0].Stdout))
-	}
-
-	wantCommands := []string{"sh scripts/install.sh", "python3 scripts/setup.py"}
-	if len(executor.calls) != len(wantCommands) {
-		t.Fatalf("calls = %+v, want %d calls", executor.calls, len(wantCommands))
-	}
-	for i, call := range executor.calls {
-		if call.command != wantCommands[i] {
-			t.Fatalf("call %d command = %q, want %q", i, call.command, wantCommands[i])
-		}
-		if call.workDir != pluginRoot {
-			t.Fatalf("call %d work dir = %q, want %q", i, call.workDir, pluginRoot)
-		}
-		if call.timeout != pluginInstallScriptTimeoutSeconds {
-			t.Fatalf("call %d timeout = %d, want %d", i, call.timeout, pluginInstallScriptTimeoutSeconds)
-		}
-		wantEnv := []string{
-			"MEMOH_PLUGIN_ID=github",
-			"MEMOH_PLUGIN_DIR=" + pluginRoot,
-			"MEMOH_BOT_ID=bot-1",
-		}
-		if strings.Join(call.env, "\n") != strings.Join(wantEnv, "\n") {
-			t.Fatalf("call %d env = %#v, want %#v", i, call.env, wantEnv)
-		}
-	}
-}
-
-func TestRunPluginInstallCommandsStopsOnNonZeroExit(t *testing.T) {
-	executor := &pluginInstallScriptTestExecutor{
-		results: []*bridge.ExecResult{
-			{Stdout: "ok\n", ExitCode: 0},
-			{Stderr: "boom\n", ExitCode: 7},
-			{Stdout: "should not run\n", ExitCode: 0},
-		},
-	}
-
-	result, err := runPluginInstallCommands(context.Background(), executor, "bot-1", "github", []string{
-		"sh scripts/one.sh",
-		"sh scripts/two.sh",
-		"sh scripts/three.sh",
-	})
-	if err == nil {
-		t.Fatal("expected non-zero exit to fail")
-	}
-	if result.OK || result.CommandsRun != 2 || len(result.Results) != 2 {
-		t.Fatalf("result = %+v, want failure after second command", result)
-	}
-	if result.Results[1].ExitCode != 7 || result.Results[1].Stderr != "boom\n" || result.Results[1].Error == "" {
-		t.Fatalf("failed command result = %+v, want exit code, stderr, and error", result.Results[1])
-	}
-	if len(executor.calls) != 2 {
-		t.Fatalf("commands run = %d, want 2", len(executor.calls))
-	}
-}
-
-func TestRunPluginInstallCommandsReportsExecError(t *testing.T) {
-	executor := &pluginInstallScriptTestExecutor{
-		errors: []error{errors.New("bridge unavailable")},
-	}
-
-	result, err := runPluginInstallCommands(context.Background(), executor, "bot-1", "github", []string{"sh scripts/install.sh"})
-	if err == nil {
-		t.Fatal("expected exec error")
-	}
-	if result.OK || result.CommandsRun != 1 || len(result.Results) != 1 || result.Results[0].Error != "bridge unavailable" {
-		t.Fatalf("result = %+v, want exec error metadata", result)
-	}
-}
-
 type recordingPluginInstaller struct {
 	request               pluginspkg.InstallRequest
 	installCalls          int
@@ -1483,39 +1214,4 @@ func (w *pluginBundleTestWriter) hasPath(target string) bool {
 		}
 	}
 	return false
-}
-
-type pluginInstallScriptTestExecutor struct {
-	calls   []pluginInstallScriptTestCall
-	results []*bridge.ExecResult
-	errors  []error
-}
-
-type pluginInstallScriptTestCall struct {
-	command string
-	workDir string
-	timeout int32
-	env     []string
-}
-
-func (e *pluginInstallScriptTestExecutor) ExecWithEnv(_ context.Context, command, workDir string, timeout int32, env []string) (*bridge.ExecResult, error) {
-	callIndex := len(e.calls)
-	e.calls = append(e.calls, pluginInstallScriptTestCall{
-		command: command,
-		workDir: workDir,
-		timeout: timeout,
-		env:     append([]string(nil), env...),
-	})
-	var result *bridge.ExecResult
-	if callIndex < len(e.results) {
-		result = e.results[callIndex]
-	}
-	if result == nil {
-		result = &bridge.ExecResult{ExitCode: 0}
-	}
-	var err error
-	if callIndex < len(e.errors) {
-		err = e.errors[callIndex]
-	}
-	return result, err
 }

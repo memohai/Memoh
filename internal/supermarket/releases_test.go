@@ -81,6 +81,27 @@ func TestFetchPluginEntryRejectsTamperedRelease(t *testing.T) {
 	}
 }
 
+func TestFetchPluginEntryRejectsOversizedAndTrailingCurrentMetadata(t *testing.T) {
+	valid := mustJSONBytes(t, PluginEntry{Release: PluginRelease{
+		Revision: strings.Repeat("a", 64), PublishedAt: "2026-08-01T00:00:00Z",
+	}})
+	tests := map[string][]byte{
+		"oversized": append(append([]byte(nil), valid...), make([]byte, maxPluginMetadataBytes-len(valid)+1)...),
+		"trailing":  append(append([]byte(nil), valid...), []byte(`{}`)...),
+	}
+	for name, payload := range tests {
+		t.Run(name, func(t *testing.T) {
+			client := NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return protocolTestResponse(req, http.StatusOK, payload), nil
+			})})
+			_, err := client.FetchPluginEntry(context.Background(), "example")
+			if ErrorKindOf(err) != ErrorInvalidResponse {
+				t.Fatalf("error = %v, kind = %q", err, ErrorKindOf(err))
+			}
+		})
+	}
+}
+
 func TestFetchPackageReleaseHydratesArtifactURLs(t *testing.T) {
 	release := SkillPackageRelease{
 		SchemaVersion: "1", RegistryID: "openai", PackageID: "docs",

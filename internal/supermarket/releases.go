@@ -259,3 +259,8 @@ func isCanonicalSHA256(value string) bool {
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == sha256.Size && hex.EncodeToString(decoded) == value
 }
+
+// IsCanonicalSHA256 reports whether value is a lowercase SHA-256 digest.
+func IsCanonicalSHA256(value string) bool {
+	return isCanonicalSHA256(value)
+}
