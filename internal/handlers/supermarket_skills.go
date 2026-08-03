@@ -12,10 +12,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/apperror"
@@ -218,11 +216,6 @@ type InstallRegistrySkillResponse struct {
 	FilesWritten      int    `json:"files_written" validate:"required"`
 }
 
-type registrySkillArtifactInstallResult struct {
-	Skill        SupermarketCatalogSkill
-	FilesWritten int
-}
-
 type preparedRegistrySkillArtifact struct {
 	Skill       SupermarketCatalogSkill
 	Archive     skillset.Archive
@@ -233,14 +226,7 @@ type preparedRegistryPackage struct {
 	Descriptor        SupermarketSkillPackageDescriptor
 	Skills            []preparedRegistrySkillArtifact
 	ExpectedArtifacts map[string]string
-}
-
-type registryPackagePublication struct {
-	client       *bridge.Client
-	packageDir   string
-	backupDir    string
-	rootMoved    bool
-	publications []*skillset.ArchivePublication
+	WorkspaceOS       string
 }
 
 // ListRegistries godoc
@@ -626,6 +612,7 @@ func (h *SupermarketHandler) prepareRegistryPackage(
 		Descriptor:        pkg,
 		Skills:            make([]preparedRegistrySkillArtifact, 0, len(pkg.Skills)),
 		ExpectedArtifacts: make(map[string]string, len(pkg.Skills)),
+		WorkspaceOS:       workspaceOS,
 	}
 	for _, skill := range pkg.Skills {
 		identity := strings.Join([]string{registryID, packageID, skill.SkillID}, "/")
@@ -644,7 +631,7 @@ func publishPreparedRegistryPackage(
 	client *bridge.Client,
 	prepared preparedRegistryPackage,
 	workspaceTargetID string,
-) (*registryPackagePublication, []InstallRegistrySkillResponse, error) {
+) (*skillset.PackagePublication, []InstallRegistrySkillResponse, error) {
 	if client == nil {
 		return nil, nil, apperror.Wrap(
 			apperror.CodeRegistrySkillInstallFailed, errors.New("workspace is not reachable"), nil,
@@ -652,82 +639,28 @@ func publishPreparedRegistryPackage(
 	}
 	registryID := prepared.Descriptor.RegistryID
 	packageID := prepared.Descriptor.PackageID
-	packageDir, err := skillset.SkillPackageDirForIDs(registryID, packageID)
+	members := make([]skillset.PackageArchive, 0, len(prepared.Skills))
+	for _, item := range prepared.Skills {
+		members = append(members, skillset.PackageArchive{SkillID: item.Skill.SkillID, Archive: item.Archive})
+	}
+	publication, err := skillset.PublishPackage(
+		ctx, client, prepared.WorkspaceOS, registryID, packageID, members,
+	)
 	if err != nil {
-		return nil, nil, err
-	}
-	publication := &registryPackagePublication{
-		client:       client,
-		packageDir:   packageDir,
-		backupDir:    path.Join(skillset.ManagedDirPath, ".staging", "replace-package-"+uuid.NewString()),
-		publications: make([]*skillset.ArchivePublication, 0, len(prepared.Skills)),
-	}
-	if _, err := client.Stat(ctx, packageDir); err == nil {
-		if err := client.Mkdir(ctx, path.Dir(publication.backupDir)); err != nil {
-			return nil, nil, err
-		}
-		if err := client.Rename(ctx, packageDir, publication.backupDir); err != nil {
-			return nil, nil, err
-		}
-		publication.rootMoved = true
-	} else if !errors.Is(err, bridge.ErrNotFound) {
-		return nil, nil, err
+		return nil, nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInstallFailed, fmt.Errorf("publish Registry Package: %w", err), nil,
+		)
 	}
 
 	installed := make([]InstallRegistrySkillResponse, 0, len(prepared.Skills))
 	for _, item := range prepared.Skills {
-		skillPublication, result, err := publishPreparedRegistrySkillArtifact(ctx, client, item)
-		if err != nil {
-			if rollbackErr := publication.Rollback(ctx); rollbackErr != nil {
-				return nil, nil, errors.Join(err, rollbackErr)
-			}
-			return nil, nil, err
-		}
-		publication.publications = append(publication.publications, skillPublication)
 		installed = append(installed, InstallRegistrySkillResponse{
-			OK: true, RegistryID: registryID, PackageID: packageID, SkillID: result.Skill.SkillID,
-			InstallID: result.Skill.InstallID, WorkspaceTargetID: workspaceTargetID,
-			ArtifactDigest: result.Skill.Artifact.Digest, FilesWritten: result.FilesWritten,
+			OK: true, RegistryID: registryID, PackageID: packageID, SkillID: item.Skill.SkillID,
+			InstallID: item.Skill.InstallID, WorkspaceTargetID: workspaceTargetID,
+			ArtifactDigest: item.Skill.Artifact.Digest, FilesWritten: item.Archive.FileCount(),
 		})
 	}
 	return publication, installed, nil
-}
-
-func (p *registryPackagePublication) Rollback(ctx context.Context) error {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pluginPublicationCleanupTimeout)
-	defer cancel()
-	var errs []error
-	for index := len(p.publications) - 1; index >= 0; index-- {
-		if err := p.publications[index].Rollback(cleanupCtx); err != nil {
-			errs = append(errs, fmt.Errorf("roll back Package Skill: %w", err))
-		}
-	}
-	if err := p.client.DeleteFile(cleanupCtx, p.packageDir, true); err != nil && !errors.Is(err, bridge.ErrNotFound) {
-		errs = append(errs, fmt.Errorf("remove replacement Package: %w", err))
-	}
-	if p.rootMoved {
-		if err := p.client.Rename(cleanupCtx, p.backupDir, p.packageDir); err != nil {
-			errs = append(errs, fmt.Errorf("restore previous Package: %w", err))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func (p *registryPackagePublication) Commit(ctx context.Context) error {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pluginPublicationCleanupTimeout)
-	defer cancel()
-	var errs []error
-	if p.rootMoved {
-		if err := p.client.DeleteFile(cleanupCtx, p.backupDir, true); err != nil && !errors.Is(err, bridge.ErrNotFound) {
-			errs = append(errs, err)
-		}
-	}
-	for _, publication := range p.publications {
-		if err := publication.Commit(cleanupCtx); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
 }
 
 func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifact(
@@ -847,34 +780,6 @@ func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifactWithLimits(
 		)
 	}
 	return preparedRegistrySkillArtifact{Skill: skill, Archive: archive, WorkspaceOS: workspaceOS}, nil
-}
-
-func publishPreparedRegistrySkillArtifact(
-	ctx context.Context,
-	client *bridge.Client,
-	prepared preparedRegistrySkillArtifact,
-) (*skillset.ArchivePublication, registrySkillArtifactInstallResult, error) {
-	if client == nil {
-		return nil, registrySkillArtifactInstallResult{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInstallFailed,
-			errors.New("workspace is not reachable"),
-			nil,
-		)
-	}
-	skill := prepared.Skill
-	publication, installErr := skillset.PublishArchive(
-		ctx, client, prepared.WorkspaceOS, skill.RegistryID, skill.PackageID, skill.SkillID, prepared.Archive,
-	)
-	if installErr != nil {
-		return nil, registrySkillArtifactInstallResult{}, apperror.Wrap(
-			apperror.CodeRegistrySkillInstallFailed,
-			fmt.Errorf("install registry Skill: %w", installErr),
-			nil,
-		)
-	}
-	return publication, registrySkillArtifactInstallResult{
-		Skill: skill, FilesWritten: prepared.Archive.FileCount(),
-	}, nil
 }
 
 func (h *SupermarketHandler) fetchRegistrySkill(

@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -214,6 +215,8 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	installer := &recordingPluginInstaller{}
 	artifactRequestedDuringMutation := false
 	releaseRequested := false
+	obsoletePath := "/data/skills/registry/package/obsolete/SKILL.md"
+	env.writeSkillFile(t, obsoletePath, managedSkillRaw("obsolete", "Obsolete"))
 	handler := &SupermarketHandler{
 		baseURL: "https://supermarket.example",
 		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -243,6 +246,20 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 			"Package preflight state: immutable_release=%v artifact_in_lock=%v mutations=%d",
 			releaseRequested, artifactRequestedDuringMutation, installer.mutationCalls,
 		)
+	}
+	if _, err := os.Stat(env.localPath(obsoletePath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("obsolete Package member survived replacement: %v", err)
+	}
+	for _, skillID := range []string{"skill", "second"} {
+		installedPath := "/data/skills/registry/package/" + skillID + "/SKILL.md"
+		content, err := os.ReadFile(env.localPath(installedPath))
+		if err != nil || string(content) != validSkillArtifactContent {
+			t.Fatalf("installed Package member %q content=%q error=%v", skillID, content, err)
+		}
+	}
+	stagingEntries, err := os.ReadDir(env.localPath("/data/skills/.staging"))
+	if err != nil || len(stagingEntries) != 0 {
+		t.Fatalf("Package staging was not cleaned: entries=%v error=%v", stagingEntries, err)
 	}
 }
 

@@ -402,7 +402,7 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 		var (
 			skillArtifacts      map[string]pluginspkg.SkillArtifactMetadata
 			installedSkills     []pluginspkg.InstalledSkill
-			packagePublications []*registryPackagePublication
+			packagePublications []*skillset.PackagePublication
 			installErr          error
 		)
 		skillsResult, installedSkills, skillArtifacts, packagePublications, installErr = publishPreparedPluginPackages(
@@ -886,12 +886,12 @@ func publishPreparedPluginPackages(
 	pluginSkillsInstallResult,
 	[]pluginspkg.InstalledSkill,
 	map[string]pluginspkg.SkillArtifactMetadata,
-	[]*registryPackagePublication,
+	[]*skillset.PackagePublication,
 	error,
 ) {
 	installedSkills := make([]pluginspkg.InstalledSkill, 0)
 	artifacts := make(map[string]pluginspkg.SkillArtifactMetadata)
-	publications := make([]*registryPackagePublication, 0, len(prepared))
+	publications := make([]*skillset.PackagePublication, 0, len(prepared))
 	for _, pkg := range prepared {
 		publication, installed, err := publishPreparedRegistryPackage(ctx, client, pkg, workspaceTargetID)
 		if err != nil {
@@ -921,7 +921,7 @@ func publishPreparedPluginPackages(
 	return result, installedSkills, artifacts, publications, nil
 }
 
-func rollbackRegistryPackages(ctx context.Context, publications []*registryPackagePublication) error {
+func rollbackRegistryPackages(ctx context.Context, publications []*skillset.PackagePublication) error {
 	var errs []error
 	for index := len(publications) - 1; index >= 0; index-- {
 		if err := publications[index].Rollback(ctx); err != nil {
@@ -935,7 +935,7 @@ func rollbackPluginWorkspace(
 	ctx context.Context,
 	cause error,
 	bundle *pluginBundlePublication,
-	packages []*registryPackagePublication,
+	packages []*skillset.PackagePublication,
 ) error {
 	errorsToJoin := []error{cause}
 	if bundle != nil {

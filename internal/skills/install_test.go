@@ -12,9 +12,9 @@ func TestShellQuoteEscapesApostrophes(t *testing.T) {
 	}
 }
 
-func TestArchivePublicationCommitCanRetryCleanup(t *testing.T) {
-	client := &archivePublicationTestClient{deleteErrors: []error{errors.New("temporary failure"), nil}}
-	publication := &ArchivePublication{
+func TestPackagePublicationCommitCanRetryCleanup(t *testing.T) {
+	client := &packagePublicationTestClient{deleteErrors: []error{errors.New("temporary failure"), nil}}
+	publication := &PackagePublication{
 		client: client, backupDir: "/backup", targetExists: true,
 	}
 	canceled, cancel := context.WithCancel(context.Background())
@@ -33,13 +33,13 @@ func TestArchivePublicationCommitCanRetryCleanup(t *testing.T) {
 	}
 }
 
-type archivePublicationTestClient struct {
+type packagePublicationTestClient struct {
 	deleteErrors []error
 	calls        int
 	sawDeadline  bool
 }
 
-func (c *archivePublicationTestClient) DeleteFile(ctx context.Context, _ string, _ bool) error {
+func (c *packagePublicationTestClient) DeleteFile(ctx context.Context, _ string, _ bool) error {
 	c.calls++
 	_, c.sawDeadline = ctx.Deadline()
 	if len(c.deleteErrors) == 0 {
@@ -50,6 +50,6 @@ func (c *archivePublicationTestClient) DeleteFile(ctx context.Context, _ string,
 	return err
 }
 
-func (*archivePublicationTestClient) Rename(context.Context, string, string) error {
+func (*packagePublicationTestClient) Rename(context.Context, string, string) error {
 	return nil
 }
