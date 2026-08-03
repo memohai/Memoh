@@ -93,19 +93,19 @@ RETURNING installation.id;
 
 -- name: UpsertBotPluginPackageReference :one
 INSERT INTO bot_plugin_package_references (
-  plugin_installation_id, package_installation_id, required_revision
+  bot_id, plugin_installation_id, package_installation_id, required_revision
 )
-VALUES ($1, $2, $3)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (team_id, plugin_installation_id, package_installation_id)
 DO UPDATE SET required_revision = EXCLUDED.required_revision,
               updated_at = now()
-RETURNING team_id, plugin_installation_id, package_installation_id,
+RETURNING team_id, bot_id, plugin_installation_id, package_installation_id,
           required_revision, created_at, updated_at;
 
 -- name: ListBotPluginPackageReferences :many
-SELECT ref.team_id, ref.plugin_installation_id, ref.package_installation_id,
+SELECT ref.team_id, ref.bot_id, ref.plugin_installation_id, ref.package_installation_id,
        ref.required_revision, ref.created_at, ref.updated_at,
-       installation.bot_id, installation.workspace_target_id,
+       installation.workspace_target_id,
        installation.registry_id, installation.package_id,
        installation.revision, installation.directly_installed
 FROM bot_plugin_package_references AS ref

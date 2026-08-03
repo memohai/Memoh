@@ -37,6 +37,7 @@ const (
 type fakeRemoteBindingStore struct {
 	records   []dbstore.BotRemoteRuntimeBindingRecord
 	createErr error
+	deleteErr error
 }
 
 func (s *fakeRemoteBindingStore) CreateOrUpdateMount(_ context.Context, botID, runtimeID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
@@ -116,6 +117,9 @@ func (s *fakeRemoteBindingStore) UpdateToolApproval(_ context.Context, botID, ta
 }
 
 func (s *fakeRemoteBindingStore) DeleteMount(_ context.Context, botID, targetID string) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	for i := range s.records {
 		if s.records[i].BotID == botID && s.records[i].ID == targetID {
 			s.records = append(s.records[:i], s.records[i+1:]...)
@@ -123,6 +127,21 @@ func (s *fakeRemoteBindingStore) DeleteMount(_ context.Context, botID, targetID 
 		}
 	}
 	return db.ErrNotFound
+}
+
+func TestDeleteMountRejectsTargetWithInstalledResources(t *testing.T) {
+	store := &fakeRemoteBindingStore{
+		records: []dbstore.BotRemoteRuntimeBindingRecord{{
+			ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
+		}},
+		deleteErr: db.ErrNotFound,
+	}
+	service := &RemoteWorkspaceService{store: store}
+
+	err := service.DeleteMount(context.Background(), remoteTestBotID, remoteTestTargetID)
+	if !errors.Is(err, ErrWorkspaceTargetInUse) {
+		t.Fatalf("DeleteMount() error = %v, want ErrWorkspaceTargetInUse", err)
+	}
 }
 
 type fakeRuntimeConnections map[string]*userruntime.Connection

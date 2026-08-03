@@ -27,12 +27,16 @@ func (s *Service) prepareObsoletePackageRemovals(ctx context.Context, botID stri
 	}
 	keep := make(map[string]struct{}, len(req.InstalledPackages))
 	for _, pkg := range req.InstalledPackages {
-		keep[PackageReferenceIdentity(PackageReference{RegistryID: pkg.RegistryID, PackageID: pkg.PackageID})] = struct{}{}
+		keep[packageTargetIdentity(req.WorkspaceTargetID, pkg.RegistryID, pkg.PackageID)] = struct{}{}
 	}
 	return s.preparePackageRemovals(ctx, botID, row, func(item skillpackages.Installation) bool {
-		_, retained := keep[PackageReferenceIdentity(PackageReference{RegistryID: item.RegistryID, PackageID: item.PackageID})]
+		_, retained := keep[packageTargetIdentity(item.WorkspaceTargetID, item.RegistryID, item.PackageID)]
 		return !retained
 	})
+}
+
+func packageTargetIdentity(targetID, registryID, packageID string) string {
+	return strings.TrimSpace(targetID) + "/" + PackageReferenceIdentity(PackageReference{RegistryID: registryID, PackageID: packageID})
 }
 
 func (s *Service) prepareUnownedPackageRemovals(ctx context.Context, botID string, row sqlc.BotPluginInstallation) (*packageRemovals, error) {

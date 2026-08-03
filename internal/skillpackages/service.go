@@ -23,16 +23,16 @@ var (
 )
 
 type Installation struct {
-	ID                   string    `json:"id"`
-	BotID                string    `json:"bot_id"`
-	WorkspaceTargetID    string    `json:"workspace_target_id"`
-	RegistryID           string    `json:"registry_id"`
-	PackageID            string    `json:"package_id"`
-	Revision             string    `json:"revision"`
-	DirectlyInstalled    bool      `json:"directly_installed"`
-	PluginReferenceCount int64     `json:"plugin_reference_count"`
-	InstalledAt          time.Time `json:"installed_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ID                   string    `json:"id" validate:"required"`
+	BotID                string    `json:"bot_id" validate:"required"`
+	WorkspaceTargetID    string    `json:"workspace_target_id" validate:"required"`
+	RegistryID           string    `json:"registry_id" validate:"required"`
+	PackageID            string    `json:"package_id" validate:"required"`
+	Revision             string    `json:"revision" validate:"required"`
+	DirectlyInstalled    bool      `json:"directly_installed" validate:"required"`
+	PluginReferenceCount int64     `json:"plugin_reference_count" validate:"required"`
+	InstalledAt          time.Time `json:"installed_at" validate:"required"`
+	UpdatedAt            time.Time `json:"updated_at" validate:"required"`
 }
 
 type Requirement struct {
@@ -83,6 +83,21 @@ func (s *Service) List(ctx context.Context, botID string) ([]Installation, error
 			return nil, err
 		}
 		result = append(result, item)
+	}
+	return result, nil
+}
+
+func (s *Service) ListForTarget(ctx context.Context, botID, workspaceTargetID string) ([]Installation, error) {
+	items, err := s.List(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	targetID := strings.TrimSpace(workspaceTargetID)
+	result := make([]Installation, 0, len(items))
+	for _, item := range items {
+		if item.WorkspaceTargetID == targetID {
+			result = append(result, item)
+		}
 	}
 	return result, nil
 }
@@ -183,7 +198,10 @@ func (s *Service) ReleaseDirect(ctx context.Context, botID, installationID strin
 		if updateErr != nil {
 			return updateErr
 		}
-		result = installationFromRow(row)
+		result, updateErr = installationWithReferences(ctx, q, row)
+		if updateErr != nil {
+			return updateErr
+		}
 		if _, deleteErr := q.DeleteBotSkillPackageInstallationIfUnreferenced(ctx, dbsqlc.DeleteBotSkillPackageInstallationIfUnreferencedParams{BotID: botUUID, ID: id}); deleteErr == nil {
 			removed = true
 		} else if !errors.Is(deleteErr, pgx.ErrNoRows) {
@@ -235,7 +253,7 @@ func ReplacePluginReferences(ctx context.Context, q Store, botID, pluginInstalla
 			return nil, err
 		}
 		if _, err := q.UpsertBotPluginPackageReference(ctx, dbsqlc.UpsertBotPluginPackageReferenceParams{
-			PluginInstallationID: pluginInstallationID, PackageInstallationID: row.ID,
+			BotID: botID, PluginInstallationID: pluginInstallationID, PackageInstallationID: row.ID,
 			RequiredRevision: requirement.Revision,
 		}); err != nil {
 			return nil, err

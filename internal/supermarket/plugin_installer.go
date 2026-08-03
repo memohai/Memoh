@@ -13,6 +13,7 @@ import (
 	"time"
 
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
+	"github.com/memohai/memoh/internal/skillpackages"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -165,7 +166,11 @@ func (i *Installer) InstallPlugin(ctx context.Context, botID string, req Install
 			WorkspaceTargetID: target.TargetID,
 		})
 		if err != nil {
-			return rollbackPluginPublications(mutationCtx, withStatus(http.StatusBadRequest, err), bundlePublication, publications)
+			status := http.StatusBadRequest
+			if errors.Is(err, skillpackages.ErrRevisionConflict) {
+				status = http.StatusConflict
+			}
+			return rollbackPluginPublications(mutationCtx, withStatus(status, err), bundlePublication, publications)
 		}
 		if err := bundlePublication.Commit(mutationCtx); err != nil && i.logger != nil {
 			i.logger.Warn("cleanup Plugin bundle backup failed", slog.Any("error", err))

@@ -849,10 +849,10 @@ func TestRunLoadsReadyPluginHooksWithPluginRuntimeDefaults(t *testing.T) {
 	client := newHookBridgeTestClient(t, server)
 	service := NewService(nil, hookBridgeProvider{client: client})
 	service.SetPluginService(fakePluginInstallationLister{items: []pluginspkg.Installation{
-		{PluginID: "github", Enabled: true, Status: pluginspkg.StatusReady, Metadata: map[string]any{"workspace_target_id": "native"}},
-		{PluginID: "disabled", Enabled: false, Status: pluginspkg.StatusReady, Metadata: map[string]any{"workspace_target_id": "native"}},
-		{PluginID: "needsauth", Enabled: true, Status: pluginspkg.StatusNeedsAuth, Metadata: map[string]any{"workspace_target_id": "native"}},
-		{PluginID: "forged", Enabled: true, Status: pluginspkg.StatusReady, Metadata: map[string]any{"workspace_target_id": "remote-target"}},
+		{PluginID: "github", Enabled: true, Status: pluginspkg.StatusReady, WorkspaceTargetID: "native"},
+		{PluginID: "disabled", Enabled: false, Status: pluginspkg.StatusReady, WorkspaceTargetID: "native"},
+		{PluginID: "needsauth", Enabled: true, Status: pluginspkg.StatusNeedsAuth, WorkspaceTargetID: "native"},
+		{PluginID: "forged", Enabled: true, Status: pluginspkg.StatusReady, WorkspaceTargetID: "remote-target"},
 	}})
 	runner := &fakeToolRunner{}
 

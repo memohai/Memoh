@@ -13,9 +13,9 @@ import (
 
 const createBotPluginInstallation = `-- name: CreateBotPluginInstallation :one
 INSERT INTO bot_plugin_installations (
-  bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest
+  bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, workspace_target_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (team_id, bot_id, plugin_id)
 DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               version = EXCLUDED.version,
@@ -24,20 +24,22 @@ DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               config = EXCLUDED.config,
               metadata = EXCLUDED.metadata,
               manifest = EXCLUDED.manifest,
+              workspace_target_id = EXCLUDED.workspace_target_id,
               updated_at = now()
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id, workspace_target_id
 `
 
 type CreateBotPluginInstallationParams struct {
-	BotID      pgtype.UUID `json:"bot_id"`
-	PluginID   string      `json:"plugin_id"`
-	PluginName string      `json:"plugin_name"`
-	Version    string      `json:"version"`
-	Status     string      `json:"status"`
-	Enabled    bool        `json:"enabled"`
-	Config     []byte      `json:"config"`
-	Metadata   []byte      `json:"metadata"`
-	Manifest   []byte      `json:"manifest"`
+	BotID             pgtype.UUID `json:"bot_id"`
+	PluginID          string      `json:"plugin_id"`
+	PluginName        string      `json:"plugin_name"`
+	Version           string      `json:"version"`
+	Status            string      `json:"status"`
+	Enabled           bool        `json:"enabled"`
+	Config            []byte      `json:"config"`
+	Metadata          []byte      `json:"metadata"`
+	Manifest          []byte      `json:"manifest"`
+	WorkspaceTargetID string      `json:"workspace_target_id"`
 }
 
 func (q *Queries) CreateBotPluginInstallation(ctx context.Context, arg CreateBotPluginInstallationParams) (BotPluginInstallation, error) {
@@ -51,6 +53,7 @@ func (q *Queries) CreateBotPluginInstallation(ctx context.Context, arg CreateBot
 		arg.Config,
 		arg.Metadata,
 		arg.Manifest,
+		arg.WorkspaceTargetID,
 	)
 	var i BotPluginInstallation
 	err := row.Scan(
@@ -67,6 +70,7 @@ func (q *Queries) CreateBotPluginInstallation(ctx context.Context, arg CreateBot
 		&i.InstalledAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.WorkspaceTargetID,
 	)
 	return i, err
 }
@@ -97,7 +101,7 @@ func (q *Queries) DeleteBotPluginResources(ctx context.Context, installationID p
 }
 
 const getBotPluginInstallationByID = `-- name: GetBotPluginInstallationByID :one
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id, workspace_target_id
 FROM bot_plugin_installations
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND id = $2
 LIMIT 1
@@ -125,12 +129,13 @@ func (q *Queries) GetBotPluginInstallationByID(ctx context.Context, arg GetBotPl
 		&i.InstalledAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.WorkspaceTargetID,
 	)
 	return i, err
 }
 
 const listBotPluginInstallations = `-- name: ListBotPluginInstallations :many
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id, workspace_target_id
 FROM bot_plugin_installations
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY installed_at DESC
@@ -159,6 +164,7 @@ func (q *Queries) ListBotPluginInstallations(ctx context.Context, botID pgtype.U
 			&i.InstalledAt,
 			&i.UpdatedAt,
 			&i.TeamID,
+			&i.WorkspaceTargetID,
 		); err != nil {
 			return nil, err
 		}
@@ -214,7 +220,7 @@ SET status = $3,
     enabled = $4,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND id = $2
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id, workspace_target_id
 `
 
 type UpdateBotPluginInstallationStatusParams struct {
@@ -246,6 +252,7 @@ func (q *Queries) UpdateBotPluginInstallationStatus(ctx context.Context, arg Upd
 		&i.InstalledAt,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.WorkspaceTargetID,
 	)
 	return i, err
 }

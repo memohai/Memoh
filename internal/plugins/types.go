@@ -157,19 +157,20 @@ type Resource struct {
 }
 
 type Installation struct {
-	ID          string         `json:"id"`
-	BotID       string         `json:"bot_id"`
-	PluginID    string         `json:"plugin_id"`
-	PluginName  string         `json:"plugin_name"`
-	Version     string         `json:"version"`
-	Status      string         `json:"status"`
-	Enabled     bool           `json:"enabled"`
-	Config      map[string]any `json:"config,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Manifest    Manifest       `json:"manifest"`
-	Resources   []Resource     `json:"resources,omitempty"`
-	InstalledAt time.Time      `json:"installed_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	ID                string         `json:"id"`
+	BotID             string         `json:"bot_id"`
+	PluginID          string         `json:"plugin_id"`
+	PluginName        string         `json:"plugin_name"`
+	Version           string         `json:"version"`
+	Status            string         `json:"status"`
+	Enabled           bool           `json:"enabled"`
+	Config            map[string]any `json:"config,omitempty"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
+	Manifest          Manifest       `json:"manifest"`
+	Resources         []Resource     `json:"resources,omitempty"`
+	WorkspaceTargetID string         `json:"workspace_target_id,omitempty"`
+	InstalledAt       time.Time      `json:"installed_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 // InstalledPluginState identifies the mutable installation state used by

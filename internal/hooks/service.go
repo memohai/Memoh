@@ -161,8 +161,7 @@ func (s *Service) loadPluginHooks(ctx context.Context, botID, targetID string) (
 		if !installation.Enabled || installation.Status != pluginspkg.StatusReady {
 			continue
 		}
-		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
-		if strings.TrimSpace(installedTarget) != targetID {
+		if strings.TrimSpace(installation.WorkspaceTargetID) != targetID {
 			continue
 		}
 		pluginID := strings.TrimSpace(installation.PluginID)

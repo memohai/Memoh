@@ -133,15 +133,22 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		if err != nil {
 			return err
 		}
+		bundleRemoval, err := scoped.prepareObsoleteBundleRemoval(scopedCtx, botID, req)
+		if err != nil {
+			return errors.Join(err, removals.rollback(scopedCtx))
+		}
 		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
 			var installErr error
 			result, installErr = txService.install(scopedCtx, botID, req)
 			return installErr
 		}); err != nil {
-			return errors.Join(err, removals.rollback(scopedCtx))
+			return errors.Join(err, removals.rollback(scopedCtx), bundleRemoval.rollback(scopedCtx))
 		}
 		if err := removals.commit(scopedCtx); err != nil {
 			scoped.logger.Warn("cleanup obsolete Plugin Packages failed", slog.String("bot_id", botID), slog.String("plugin_id", req.Manifest.ID), slog.Any("error", err))
+		}
+		if err := bundleRemoval.commit(scopedCtx); err != nil {
+			scoped.logger.Warn("cleanup obsolete Plugin bundle failed", slog.String("bot_id", botID), slog.String("plugin_id", req.Manifest.ID), slog.Any("error", err))
 		}
 		return nil
 	})
@@ -193,9 +200,6 @@ func (s *Service) install(
 		metadata["release_revision"] = req.Release.Revision
 		metadata["plugin_artifact_digest"] = req.Release.ArtifactDigest
 	}
-	if workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID); workspaceTargetID != "" {
-		metadata["workspace_target_id"] = workspaceTargetID
-	}
 	metadataPayload, err := encodeJSON(metadata)
 	if err != nil {
 		return Installation{}, err
@@ -205,16 +209,21 @@ func (s *Service) install(
 		return Installation{}, err
 	}
 
+	workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID)
+	if workspaceTargetID == "" {
+		workspaceTargetID = "native"
+	}
 	row, err := s.queries.CreateBotPluginInstallation(ctx, sqlc.CreateBotPluginInstallationParams{
-		BotID:      botUUID,
-		PluginID:   manifest.ID,
-		PluginName: manifest.Name,
-		Version:    manifest.Version,
-		Status:     status,
-		Enabled:    enabled,
-		Config:     configPayload,
-		Metadata:   metadataPayload,
-		Manifest:   manifestPayload,
+		BotID:             botUUID,
+		PluginID:          manifest.ID,
+		PluginName:        manifest.Name,
+		Version:           manifest.Version,
+		Status:            status,
+		Enabled:           enabled,
+		Config:            configPayload,
+		Metadata:          metadataPayload,
+		Manifest:          manifestPayload,
+		WorkspaceTargetID: workspaceTargetID,
 	})
 	if err != nil {
 		return Installation{}, err
@@ -668,48 +677,21 @@ func (s *Service) normalizeInstallation(ctx context.Context, row sqlc.BotPluginI
 		outResources = append(outResources, item)
 	}
 	return Installation{
-		ID:          row.ID.String(),
-		BotID:       row.BotID.String(),
-		PluginID:    row.PluginID,
-		PluginName:  row.PluginName,
-		Version:     row.Version,
-		Status:      row.Status,
-		Enabled:     row.Enabled,
-		Config:      redactConfig(manifest, config),
-		Metadata:    metadata,
-		Manifest:    manifest,
-		Resources:   outResources,
-		InstalledAt: timeFromPg(row.InstalledAt),
-		UpdatedAt:   timeFromPg(row.UpdatedAt),
+		ID:                row.ID.String(),
+		BotID:             row.BotID.String(),
+		PluginID:          row.PluginID,
+		PluginName:        row.PluginName,
+		Version:           row.Version,
+		Status:            row.Status,
+		Enabled:           row.Enabled,
+		Config:            redactConfig(manifest, config),
+		Metadata:          metadata,
+		Manifest:          manifest,
+		Resources:         outResources,
+		WorkspaceTargetID: row.WorkspaceTargetID,
+		InstalledAt:       timeFromPg(row.InstalledAt),
+		UpdatedAt:         timeFromPg(row.UpdatedAt),
 	}, nil
-}
-
-// OwnsRegistrySkillAtTarget reports whether an installed Plugin still
-// references one canonical Registry Skill path in a workspace target.
-func OwnsRegistrySkillAtTarget(
-	installations []Installation,
-	sourcePath, workspaceTargetID string,
-) bool {
-	sourcePath = path.Clean(strings.TrimSpace(sourcePath))
-	workspaceTargetID = strings.TrimSpace(workspaceTargetID)
-	if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); !ok {
-		return false
-	}
-	for _, installation := range installations {
-		if installation.Status == StatusUninstalled {
-			continue
-		}
-		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
-		if strings.TrimSpace(installedTarget) != workspaceTargetID {
-			continue
-		}
-		for _, resource := range installation.Resources {
-			if resource.Type == "skill" && path.Clean(strings.TrimSpace(resource.ResourceID)) == sourcePath {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]string) string {

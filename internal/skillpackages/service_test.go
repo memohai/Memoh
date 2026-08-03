@@ -20,8 +20,13 @@ type packageStoreStub struct {
 	directUpsertErr    error
 	pluginUpsertErr    error
 	previousReferences []dbsqlc.ListBotPluginPackageReferencesRow
+	rows               []dbsqlc.BotSkillPackageInstallation
 	deletedReferences  bool
 	deleteUnreferenced bool
+}
+
+func (s *packageStoreStub) ListBotSkillPackageInstallations(context.Context, pgtype.UUID) ([]dbsqlc.BotSkillPackageInstallation, error) {
+	return s.rows, nil
 }
 
 func (s *packageStoreStub) CountBotSkillPackageReferences(context.Context, pgtype.UUID) (int64, error) {
@@ -82,6 +87,23 @@ func TestRecordDirectMapsRevisionConflict(t *testing.T) {
 	}
 }
 
+func TestListForTargetExcludesOtherWorkspaceTargets(t *testing.T) {
+	native := packageRow(true)
+	native.WorkspaceTargetID = "native"
+	remote := packageRow(false)
+	remote.ID = packageUUID(4)
+	remote.WorkspaceTargetID = "remote"
+	store := &packageStoreStub{rows: []dbsqlc.BotSkillPackageInstallation{native, remote}}
+
+	items, err := NewService(store).ListForTarget(context.Background(), native.BotID.String(), "native")
+	if err != nil {
+		t.Fatalf("ListForTarget() error = %v", err)
+	}
+	if len(items) != 1 || items[0].WorkspaceTargetID != "native" {
+		t.Fatalf("ListForTarget() = %+v, want only native", items)
+	}
+}
+
 func TestReleaseDirectKeepsPackageReferencedByPlugin(t *testing.T) {
 	row := packageRow(true)
 	store := &packageStoreStub{row: row, referenceCount: 1}
@@ -91,7 +113,7 @@ func TestReleaseDirectKeepsPackageReferencedByPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReleaseDirect() error = %v", err)
 	}
-	if removed || installation.DirectlyInstalled {
+	if removed || installation.DirectlyInstalled || installation.PluginReferenceCount != 1 {
 		t.Fatalf("ReleaseDirect() = removed %v, installation %+v", removed, installation)
 	}
 }

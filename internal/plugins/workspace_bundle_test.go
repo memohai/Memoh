@@ -27,6 +27,20 @@ import (
 
 const pluginBundleTestInstallationID = "22222222-2222-4222-8222-222222222222"
 
+func TestPluginTargetChanged(t *testing.T) {
+	row := sqlc.BotPluginInstallation{Status: StatusReady, WorkspaceTargetID: "target-a"}
+	if !pluginTargetChanged(row, "target-b") {
+		t.Fatal("pluginTargetChanged() did not detect a workspace move")
+	}
+	if pluginTargetChanged(row, " target-a ") {
+		t.Fatal("pluginTargetChanged() treated the same target as a move")
+	}
+	row.Status = StatusUninstalled
+	if pluginTargetChanged(row, "target-b") {
+		t.Fatal("pluginTargetChanged() tried to remove an already uninstalled bundle")
+	}
+}
+
 type pluginBundleTestQueries struct {
 	dbstore.Queries
 	row               sqlc.BotPluginInstallation
@@ -134,7 +148,7 @@ func TestPurgeUninstalledPluginDoesNotRequireOriginalWorkspace(t *testing.T) {
 	queries := &pluginBundleTestQueries{row: sqlc.BotPluginInstallation{
 		ID: installationUUID, BotID: botUUID, PluginID: "notion", PluginName: "Notion",
 		Status: StatusUninstalled, Config: []byte(`{}`),
-		Metadata: []byte(`{"workspace_target_id":"deleted-remote"}`),
+		WorkspaceTargetID: "deleted-remote", Metadata: []byte(`{}`),
 		Manifest: []byte(`{"id":"notion","name":"Notion","author":{"name":"Memoh"}}`),
 	}}
 	provider := &pluginBundleTestBridgeProvider{err: errors.New("remote workspace is gone")}
@@ -183,7 +197,7 @@ func TestUninstallRemovesPluginBundleAndRestoresItOnDatabaseFailure(t *testing.T
 				row: sqlc.BotPluginInstallation{
 					ID: installationUUID, BotID: botUUID, PluginID: "notion", PluginName: "Notion",
 					Status: StatusReady, Enabled: true, Config: []byte(`{}`),
-					Metadata: []byte(`{"workspace_target_id":"native"}`),
+					WorkspaceTargetID: "native", Metadata: []byte(`{}`),
 					Manifest: []byte(`{"id":"notion","name":"Notion","author":{"name":"Memoh"}}`),
 				},
 				updateErr: test.updateErr,

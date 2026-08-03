@@ -3,10 +3,12 @@ package supermarket
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
+	"github.com/memohai/memoh/internal/skillpackages"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -135,6 +137,14 @@ func TestInstallPluginRejectsPartialExpectedState(t *testing.T) {
 	var statusErr *StatusError
 	if !errors.As(err, &statusErr) || statusErr.Status != 400 {
 		t.Fatalf("InstallPlugin partial state error = %v", err)
+	}
+}
+
+func TestPackageRevisionConflictUsesHTTPConflict(t *testing.T) {
+	err := packageLifecycleError(skillpackages.ErrRevisionConflict)
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) || statusErr.Status != http.StatusConflict {
+		t.Fatalf("packageLifecycleError() = %v, want HTTP 409", err)
 	}
 }
 

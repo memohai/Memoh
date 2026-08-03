@@ -29,6 +29,21 @@ type pluginBundleRemoval struct {
 	closed     bool
 }
 
+func (s *Service) prepareObsoleteBundleRemoval(ctx context.Context, botID string, req InstallRequest) (*pluginBundleRemoval, error) {
+	if s.bridges == nil {
+		return nil, nil
+	}
+	row, found, err := s.pluginRowByID(ctx, botID, req.Manifest.ID)
+	if err != nil || !found || !pluginTargetChanged(row, req.WorkspaceTargetID) {
+		return nil, err
+	}
+	return s.preparePluginBundleRemoval(ctx, botID, row)
+}
+
+func pluginTargetChanged(row sqlc.BotPluginInstallation, nextTargetID string) bool {
+	return row.Status != StatusUninstalled && strings.TrimSpace(row.WorkspaceTargetID) != strings.TrimSpace(nextTargetID)
+}
+
 func (s *Service) preparePluginBundleRemoval(
 	ctx context.Context,
 	botID string,
@@ -41,13 +56,8 @@ func (s *Service) preparePluginBundleRemoval(
 	if err != nil {
 		return nil, fmt.Errorf("resolve Plugin bundle path: %w", err)
 	}
-	metadata, err := decodeJSONMap(row.Metadata)
-	if err != nil {
-		return nil, fmt.Errorf("decode Plugin workspace metadata: %w", err)
-	}
-	workspaceTargetID, _ := metadata["workspace_target_id"].(string)
 	targetContext := ctx
-	if workspaceTargetID = strings.TrimSpace(workspaceTargetID); workspaceTargetID != "" {
+	if workspaceTargetID := strings.TrimSpace(row.WorkspaceTargetID); workspaceTargetID != "" {
 		targetContext = bridge.WithWorkspaceTarget(ctx, workspaceTargetID)
 	}
 	client, err := s.bridges.MCPClient(targetContext, botID)

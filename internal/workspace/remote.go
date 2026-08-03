@@ -30,6 +30,7 @@ const (
 
 var (
 	ErrWorkspaceTargetNotFound          = errors.New("workspace target not found")
+	ErrWorkspaceTargetInUse             = errors.New("workspace target has installed Plugins or Skill Packages")
 	ErrRemoteWorkspaceNotBound          = errors.New("remote workspace is not bound")
 	ErrRemoteRuntimeNotUsable           = errors.New("remote runtime not found, revoked, or owned by another user")
 	ErrRemoteRuntimeOffline             = errors.New("remote runtime is offline")
@@ -219,8 +220,11 @@ func (s *RemoteWorkspaceService) DeleteMount(ctx context.Context, botID, targetI
 	if !ok {
 		return ErrWorkspaceTargetNotFound
 	}
+	if _, err := s.getRecord(ctx, botID, targetID); err != nil {
+		return err
+	}
 	if err := s.store.DeleteMount(ctx, botID, targetID); errors.Is(err, db.ErrNotFound) {
-		return ErrWorkspaceTargetNotFound
+		return ErrWorkspaceTargetInUse
 	} else {
 		return err
 	}

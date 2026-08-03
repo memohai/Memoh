@@ -39,7 +39,7 @@ var localBotMutationLocks = struct {
 	items map[string]*localBotMutationLock
 }{items: make(map[string]*localBotMutationLock)}
 
-// WithBotMutation serializes Plugin and Registry Skill ownership changes for a
+// WithBotMutation serializes Plugin and Skill Package ownership changes for a
 // bot. PostgreSQL-backed services also take a cross-process advisory lock.
 func (s *Service) WithBotMutation(ctx context.Context, botID string, fn func(context.Context) error) error {
 	if s == nil || s.queries == nil {

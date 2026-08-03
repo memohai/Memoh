@@ -115,37 +115,6 @@ func TestValidatePackageReferencesRequiresNamespacedUniqueIdentity(t *testing.T)
 	}
 }
 
-func TestOwnsRegistrySkillAtTargetKeepsSharedAndDisabledPluginReferences(t *testing.T) {
-	sourcePath := "/data/skills/memoh/notion/meeting/SKILL.md"
-	resource := Resource{Type: "skill", ResourceID: sourcePath, Status: "installed"}
-
-	for name, installation := range map[string]Installation{
-		"ready":      {Status: StatusReady, Enabled: true, Metadata: map[string]any{"workspace_target_id": "remote-target"}, Resources: []Resource{resource}},
-		"disabled":   {Status: StatusDisabled, Enabled: false, Metadata: map[string]any{"workspace_target_id": "remote-target"}, Resources: []Resource{resource}},
-		"needs auth": {Status: StatusNeedsAuth, Enabled: false, Metadata: map[string]any{"workspace_target_id": "remote-target"}, Resources: []Resource{resource}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if !OwnsRegistrySkillAtTarget([]Installation{installation}, sourcePath, "remote-target") {
-				t.Fatal("active installation did not retain Registry Skill ownership")
-			}
-		})
-	}
-
-	metadata := map[string]any{"workspace_target_id": "remote-target"}
-	if OwnsRegistrySkillAtTarget([]Installation{{Status: StatusUninstalled, Metadata: metadata, Resources: []Resource{resource}}}, sourcePath, "remote-target") {
-		t.Fatal("uninstalled Plugin retained Registry Skill ownership")
-	}
-	if OwnsRegistrySkillAtTarget([]Installation{{Status: StatusReady, Metadata: metadata, Resources: []Resource{resource}}}, "/data/skills/memoh/notion/other/SKILL.md", "remote-target") {
-		t.Fatal("Plugin owned an unrelated Registry Skill")
-	}
-	if OwnsRegistrySkillAtTarget([]Installation{{Status: StatusReady, Metadata: metadata, Resources: []Resource{resource}}}, "/data/skills/user/personal/meeting/SKILL.md", "remote-target") {
-		t.Fatal("Plugin owned a user-authored Skill")
-	}
-	if OwnsRegistrySkillAtTarget([]Installation{{Status: StatusReady, Metadata: metadata, Resources: []Resource{resource}}}, sourcePath, "native") {
-		t.Fatal("Plugin Registry Skill ownership leaked into another workspace target")
-	}
-}
-
 func TestValidateInstalledPackagesRequiresPinnedManifestPackages(t *testing.T) {
 	references := []PackageReference{{RegistryID: "memoh", PackageID: "notion"}}
 	installed := []InstalledPackage{{RegistryID: "memoh", PackageID: "notion", Revision: strings.Repeat("b", 64)}}

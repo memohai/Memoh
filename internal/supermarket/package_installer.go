@@ -122,7 +122,7 @@ func (i *Installer) InstallPackage(ctx context.Context, botID string, req Instal
 			RegistryID: registryID, PackageID: packageID, Revision: revision,
 		})
 		if err != nil {
-			return errors.Join(err, publication.Rollback(mutationCtx))
+			return errors.Join(packageLifecycleError(err), publication.Rollback(mutationCtx))
 		}
 		if err := publication.Commit(mutationCtx); err != nil && i.logger != nil {
 			i.logger.Warn("cleanup replaced Skill Package failed", slog.Any("error", err))
