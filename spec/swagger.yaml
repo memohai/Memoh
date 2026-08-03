@@ -3473,14 +3473,14 @@ definitions:
         type: array
       name:
         type: string
+      packages:
+        items:
+          $ref: '#/definitions/plugins.PackageReference'
+        type: array
       release:
         $ref: '#/definitions/handlers.SupermarketPluginRelease'
       schema_version:
         type: string
-      skills:
-        items:
-          $ref: '#/definitions/plugins.SkillReference'
-        type: array
       tags:
         items:
           type: string
@@ -3511,44 +3511,32 @@ definitions:
     properties:
       artifact:
         $ref: '#/definitions/handlers.SupermarketPluginArtifact'
+      packages:
+        items:
+          $ref: '#/definitions/handlers.SupermarketPluginResolvedPackage'
+        type: array
       published_at:
         type: string
       revision:
         type: string
-      skills:
-        items:
-          $ref: '#/definitions/handlers.SupermarketPluginResolvedSkill'
-        type: array
     required:
     - artifact
+    - packages
     - published_at
     - revision
-    - skills
     type: object
-  handlers.SupermarketPluginResolvedSkill:
+  handlers.SupermarketPluginResolvedPackage:
     properties:
-      artifact:
-        $ref: '#/definitions/handlers.SupermarketSkillArtifact'
-      install_id:
-        type: string
       package_id:
         type: string
       registry_id:
         type: string
-      registry_revision:
-        type: string
-      skill_id:
-        type: string
-      source_revision:
+      revision:
         type: string
     required:
-    - artifact
-    - install_id
     - package_id
     - registry_id
-    - registry_revision
-    - skill_id
-    - source_revision
+    - revision
     type: object
   handlers.SupermarketRegistry:
     properties:
@@ -3724,8 +3712,6 @@ definitions:
         items:
           $ref: '#/definitions/handlers.SupermarketCatalogSkill'
         type: array
-      source_revision:
-        type: string
       tags:
         items:
           type: string
@@ -3736,12 +3722,10 @@ definitions:
     - name
     - package_id
     - registry_id
-    - release_url
     - revision
     - schema_version
     - skill_count
     - skills
-    - source_revision
     - tags
     type: object
   handlers.SupermarketSkillPackageListResponse:
@@ -4749,12 +4733,12 @@ definitions:
         type: array
       name:
         type: string
+      packages:
+        items:
+          $ref: '#/definitions/plugins.PackageReference'
+        type: array
       schema_version:
         type: string
-      skills:
-        items:
-          $ref: '#/definitions/plugins.SkillReference'
-        type: array
       tags:
         items:
           type: string
@@ -4770,6 +4754,16 @@ definitions:
     properties:
       callback_url:
         type: string
+    type: object
+  plugins.PackageReference:
+    properties:
+      package_id:
+        type: string
+      registry_id:
+        type: string
+    required:
+    - package_id
+    - registry_id
     type: object
   plugins.Resource:
     properties:
@@ -4789,15 +4783,6 @@ definitions:
       status:
         type: string
       updated_at:
-        type: string
-    type: object
-  plugins.SkillReference:
-    properties:
-      package_id:
-        type: string
-      registry_id:
-        type: string
-      skill_id:
         type: string
     type: object
   providers.CountResponse:

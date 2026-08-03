@@ -335,6 +335,24 @@ func TestFetchRegistrySkillUsesStablePrivateErrors(t *testing.T) {
 	}
 }
 
+func TestFetchRegistryPackageReleaseRejectsTamperedBytes(t *testing.T) {
+	payload := []byte(`{"schema_version":"1","registry_id":"memoh","package_id":"demo","name":"Demo","description":"Demo","tags":[],"skills":[]}`)
+	digest := sha256.Sum256(payload)
+	revision := hex.EncodeToString(digest[:])
+	tampered := append(append([]byte(nil), payload...), '\n')
+	handler := &SupermarketHandler{
+		baseURL: "https://supermarket.example",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return testHTTPResponse(req, http.StatusOK, tampered), nil
+		})},
+	}
+
+	_, err := handler.fetchRegistryPackageRelease(context.Background(), "memoh", "demo", revision)
+	if got := apperror.CodeOf(err); got != apperror.CodeRegistrySkillInvalid {
+		t.Fatalf("fetch Package release code = %q, want %q", got, apperror.CodeRegistrySkillInvalid)
+	}
+}
+
 func TestProxySkillIconVerifiesDigestAndHeaders(t *testing.T) {
 	content := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
 	digest := sha256.Sum256(content)
@@ -453,8 +471,8 @@ func validRegistryPackageDescriptor() SupermarketSkillPackageDescriptor {
 			SchemaVersion: "1", RegistryID: "registry", PackageID: "package", Name: "Package",
 			Description: "Demo", Tags: []string{}, Categories: []SupermarketSkillPackageCategory{}, SkillCount: 2,
 		},
-		Revision: strings.Repeat("b", 64), SourceRevision: "upstream-revision",
-		Skills: []SupermarketCatalogSkill{first, second}, ReleaseURL: "/release",
+		Revision: strings.Repeat("b", 64),
+		Skills:   []SupermarketCatalogSkill{first, second}, ReleaseURL: "/release",
 	}
 }
 

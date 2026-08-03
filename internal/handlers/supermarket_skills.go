@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -155,10 +156,39 @@ type SupermarketSkillPackageSummary struct {
 
 type SupermarketSkillPackageDescriptor struct {
 	SupermarketSkillPackageSummary
-	Revision       string                    `json:"revision" validate:"required"`
-	SourceRevision string                    `json:"source_revision" validate:"required"`
-	Skills         []SupermarketCatalogSkill `json:"skills" validate:"required"`
-	ReleaseURL     string                    `json:"release_url" validate:"required"`
+	Revision   string                    `json:"revision" validate:"required"`
+	Skills     []SupermarketCatalogSkill `json:"skills" validate:"required"`
+	ReleaseURL string                    `json:"release_url,omitempty"`
+}
+
+type supermarketSkillPackageReleaseSkill struct {
+	SchemaVersion  string                   `json:"schema_version"`
+	RegistryID     string                   `json:"registry_id"`
+	PackageID      string                   `json:"package_id"`
+	SkillID        string                   `json:"skill_id"`
+	InstallID      string                   `json:"install_id"`
+	Name           string                   `json:"name"`
+	Description    string                   `json:"description"`
+	Author         SupermarketAuthor        `json:"author"`
+	Homepage       string                   `json:"homepage,omitempty"`
+	Tags           []string                 `json:"tags"`
+	Category       string                   `json:"category"`
+	CategoryName   string                   `json:"category_name"`
+	SourceCategory string                   `json:"source_category,omitempty"`
+	Files          []string                 `json:"files"`
+	Icon           *SupermarketSkillIcon    `json:"icon,omitempty"`
+	Artifact       SupermarketSkillArtifact `json:"artifact"`
+}
+
+type SupermarketSkillPackageRelease struct {
+	SchemaVersion string                                `json:"schema_version"`
+	RegistryID    string                                `json:"registry_id"`
+	PackageID     string                                `json:"package_id"`
+	Name          string                                `json:"name"`
+	Description   string                                `json:"description"`
+	Tags          []string                              `json:"tags"`
+	Icon          *SupermarketSkillIcon                 `json:"icon,omitempty"`
+	Skills        []supermarketSkillPackageReleaseSkill `json:"skills"`
 }
 
 type SupermarketSkillPackageListResponse struct {
@@ -197,6 +227,20 @@ type preparedRegistrySkillArtifact struct {
 	Skill       SupermarketCatalogSkill
 	Archive     skillset.Archive
 	WorkspaceOS string
+}
+
+type preparedRegistryPackage struct {
+	Descriptor        SupermarketSkillPackageDescriptor
+	Skills            []preparedRegistrySkillArtifact
+	ExpectedArtifacts map[string]string
+}
+
+type registryPackagePublication struct {
+	client       *bridge.Client
+	packageDir   string
+	backupDir    string
+	rootMoved    bool
+	publications []*skillset.ArchivePublication
 }
 
 // ListRegistries godoc
@@ -445,6 +489,10 @@ func registryPackageUpstreamPath(registryID, packageID string) string {
 	return "/api/registries/" + url.PathEscape(registryID) + "/packages/" + url.PathEscape(packageID)
 }
 
+func registryPackageReleaseUpstreamPath(registryID, packageID, revision string) string {
+	return registryPackageUpstreamPath(registryID, packageID) + "/releases/" + url.PathEscape(revision)
+}
+
 func (h *SupermarketHandler) installRegistryPackage(
 	ctx context.Context,
 	botID string,
@@ -483,112 +531,51 @@ func (h *SupermarketHandler) installRegistryPackage(
 			http.StatusConflict, "Package changed; refresh before installing",
 		)
 	}
-	if err := validateRegistryPackage(pkg, registryID, packageID); err != nil {
-		return InstallRegistryPackageResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
-	}
-
-	expectedArtifacts := make(map[string]string, len(pkg.Skills))
-	prepared := make([]preparedRegistrySkillArtifact, 0, len(pkg.Skills))
-	if err := validateRegistryPackageArtifactBudget(pkg.Skills); err != nil {
-		return InstallRegistryPackageResponse{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
-	}
-	for _, skill := range pkg.Skills {
-		identity := strings.Join([]string{registryID, packageID, skill.SkillID}, "/")
-		expectedArtifacts[identity] = skill.Artifact.Digest
-		item, prepareErr := h.prepareResolvedRegistrySkillArtifact(targetContext, target.Info.OS, skill)
-		if prepareErr != nil {
-			return InstallRegistryPackageResponse{}, prepareErr
-		}
-		prepared = append(prepared, item)
+	prepared, err := h.prepareRegistryPackage(targetContext, target.Info.OS, pkg, registryID, packageID, expectedRevision)
+	if err != nil {
+		return InstallRegistryPackageResponse{}, err
 	}
 	if h.pluginService != nil {
 		if err := h.pluginService.CheckSkillArtifactConflicts(
-			targetContext, botID, "", target.TargetID, expectedArtifacts,
+			targetContext, botID, "", target.TargetID, prepared.ExpectedArtifacts,
 		); err != nil {
 			return InstallRegistryPackageResponse{}, echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
 	}
 
-	installed := make([]InstallRegistrySkillResponse, 0, len(prepared))
+	installed := make([]InstallRegistrySkillResponse, 0, len(prepared.Skills))
 	if err := withBotMutation(targetContext, botID, h.pluginService, func(mutationCtx context.Context) error {
 		if h.pluginService != nil {
 			if conflictErr := h.pluginService.CheckSkillArtifactConflicts(
-				mutationCtx, botID, "", target.TargetID, expectedArtifacts,
+				mutationCtx, botID, "", target.TargetID, prepared.ExpectedArtifacts,
 			); conflictErr != nil {
 				return echo.NewHTTPError(http.StatusConflict, conflictErr.Error())
 			}
 		}
-		if err := h.checkPluginPackageMembers(mutationCtx, botID, target.TargetID, registryID, packageID, expectedArtifacts); err != nil {
+		if err := h.checkPluginPackageMembers(mutationCtx, botID, target.TargetID, "", registryID, packageID, prepared.ExpectedArtifacts); err != nil {
 			return err
 		}
-		packageDir, pathErr := skillset.SkillPackageDirForIDs(registryID, packageID)
-		if pathErr != nil {
-			return pathErr
+		publication, published, publishErr := publishPreparedRegistryPackage(mutationCtx, target.Client, prepared, target.TargetID)
+		if publishErr != nil {
+			return publishErr
 		}
-		backupDir := path.Join(skillset.ManagedDirPath, ".staging", "replace-package-"+uuid.NewString())
-		rootMoved := false
-		if _, statErr := target.Client.Stat(mutationCtx, packageDir); statErr == nil {
-			if mkdirErr := target.Client.Mkdir(mutationCtx, path.Dir(backupDir)); mkdirErr != nil {
-				return mkdirErr
-			}
-			if renameErr := target.Client.Rename(mutationCtx, packageDir, backupDir); renameErr != nil {
-				return renameErr
-			}
-			rootMoved = true
-		} else if !errors.Is(statErr, bridge.ErrNotFound) {
-			return statErr
-		}
-		publications := make([]*skillset.ArchivePublication, 0, len(prepared))
-		rollback := func(cause error) error {
-			cause = rollbackPluginWorkspace(mutationCtx, cause, nil, publications)
-			cleanupCtx := context.WithoutCancel(mutationCtx)
-			if removeErr := target.Client.DeleteFile(cleanupCtx, packageDir, true); removeErr != nil && !errors.Is(removeErr, bridge.ErrNotFound) {
-				return fmt.Errorf("%w; remove replacement Package: %w", cause, removeErr)
-			}
-			if rootMoved {
-				if restoreErr := target.Client.Rename(cleanupCtx, backupDir, packageDir); restoreErr != nil {
-					return fmt.Errorf("%w; restore previous Package: %w", cause, restoreErr)
-				}
-			}
-			return cause
-		}
-		for _, item := range prepared {
-			publication, published, publishErr := publishPreparedRegistrySkillArtifact(
-				mutationCtx, target.Client, item,
-			)
-			if publishErr != nil {
-				return rollback(publishErr)
-			}
-			publications = append(publications, publication)
-			installed = append(installed, InstallRegistrySkillResponse{
-				OK: true, RegistryID: registryID, PackageID: packageID, SkillID: published.Skill.SkillID,
-				InstallID: published.Skill.InstallID, WorkspaceTargetID: target.TargetID,
-				ArtifactDigest: published.Skill.Artifact.Digest, FilesWritten: published.FilesWritten,
-			})
-		}
-		if rootMoved {
-			if cleanupErr := target.Client.DeleteFile(context.WithoutCancel(mutationCtx), backupDir, true); cleanupErr != nil && h.logger != nil {
-				h.logger.Warn("cleanup replaced Skill Package failed", slog.Any("error", cleanupErr))
-			}
-		}
-		for _, publication := range publications {
-			if commitErr := publication.Commit(mutationCtx); commitErr != nil && h.logger != nil {
-				h.logger.Warn("cleanup Registry Package Skill backup failed", slog.Any("error", commitErr))
-			}
+		installed = published
+		if commitErr := publication.Commit(mutationCtx); commitErr != nil && h.logger != nil {
+			h.logger.Warn("cleanup replaced Skill Package failed", slog.Any("error", commitErr))
 		}
 		return nil
 	}); err != nil {
 		return InstallRegistryPackageResponse{}, err
 	}
 	return InstallRegistryPackageResponse{
-		OK: true, RegistryID: registryID, PackageID: packageID, Revision: pkg.Revision,
+		OK: true, RegistryID: registryID, PackageID: packageID, Revision: prepared.Descriptor.Revision,
 		WorkspaceTargetID: target.TargetID, Skills: installed,
 	}, nil
 }
 
 func (h *SupermarketHandler) checkPluginPackageMembers(
 	ctx context.Context,
-	botID, targetID, registryID, packageID string,
+	botID, targetID, targetPluginID, registryID, packageID string,
 	expected map[string]string,
 ) error {
 	if h.pluginService == nil {
@@ -600,6 +587,9 @@ func (h *SupermarketHandler) checkPluginPackageMembers(
 	}
 	for _, installation := range installations {
 		if installation.Status == pluginspkg.StatusUninstalled {
+			continue
+		}
+		if targetPluginID != "" && installation.PluginID == targetPluginID {
 			continue
 		}
 		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
@@ -618,6 +608,131 @@ func (h *SupermarketHandler) checkPluginPackageMembers(
 		}
 	}
 	return nil
+}
+
+func (h *SupermarketHandler) prepareRegistryPackage(
+	ctx context.Context,
+	workspaceOS string,
+	pkg SupermarketSkillPackageDescriptor,
+	registryID, packageID, revision string,
+) (preparedRegistryPackage, error) {
+	if pkg.Revision != revision {
+		return preparedRegistryPackage{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid, errors.New("registry Package revision does not match the request"), nil,
+		)
+	}
+	if err := validateRegistryPackage(pkg, registryID, packageID); err != nil {
+		return preparedRegistryPackage{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+	}
+	if err := validateRegistryPackageArtifactBudget(pkg.Skills); err != nil {
+		return preparedRegistryPackage{}, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
+	}
+	prepared := preparedRegistryPackage{
+		Descriptor:        pkg,
+		Skills:            make([]preparedRegistrySkillArtifact, 0, len(pkg.Skills)),
+		ExpectedArtifacts: make(map[string]string, len(pkg.Skills)),
+	}
+	for _, skill := range pkg.Skills {
+		identity := strings.Join([]string{registryID, packageID, skill.SkillID}, "/")
+		prepared.ExpectedArtifacts[identity] = skill.Artifact.Digest
+		item, err := h.prepareResolvedRegistrySkillArtifact(ctx, workspaceOS, skill)
+		if err != nil {
+			return preparedRegistryPackage{}, err
+		}
+		prepared.Skills = append(prepared.Skills, item)
+	}
+	return prepared, nil
+}
+
+func publishPreparedRegistryPackage(
+	ctx context.Context,
+	client *bridge.Client,
+	prepared preparedRegistryPackage,
+	workspaceTargetID string,
+) (*registryPackagePublication, []InstallRegistrySkillResponse, error) {
+	if client == nil {
+		return nil, nil, apperror.Wrap(
+			apperror.CodeRegistrySkillInstallFailed, errors.New("workspace is not reachable"), nil,
+		)
+	}
+	registryID := prepared.Descriptor.RegistryID
+	packageID := prepared.Descriptor.PackageID
+	packageDir, err := skillset.SkillPackageDirForIDs(registryID, packageID)
+	if err != nil {
+		return nil, nil, err
+	}
+	publication := &registryPackagePublication{
+		client:       client,
+		packageDir:   packageDir,
+		backupDir:    path.Join(skillset.ManagedDirPath, ".staging", "replace-package-"+uuid.NewString()),
+		publications: make([]*skillset.ArchivePublication, 0, len(prepared.Skills)),
+	}
+	if _, err := client.Stat(ctx, packageDir); err == nil {
+		if err := client.Mkdir(ctx, path.Dir(publication.backupDir)); err != nil {
+			return nil, nil, err
+		}
+		if err := client.Rename(ctx, packageDir, publication.backupDir); err != nil {
+			return nil, nil, err
+		}
+		publication.rootMoved = true
+	} else if !errors.Is(err, bridge.ErrNotFound) {
+		return nil, nil, err
+	}
+
+	installed := make([]InstallRegistrySkillResponse, 0, len(prepared.Skills))
+	for _, item := range prepared.Skills {
+		skillPublication, result, err := publishPreparedRegistrySkillArtifact(ctx, client, item)
+		if err != nil {
+			if rollbackErr := publication.Rollback(ctx); rollbackErr != nil {
+				return nil, nil, errors.Join(err, rollbackErr)
+			}
+			return nil, nil, err
+		}
+		publication.publications = append(publication.publications, skillPublication)
+		installed = append(installed, InstallRegistrySkillResponse{
+			OK: true, RegistryID: registryID, PackageID: packageID, SkillID: result.Skill.SkillID,
+			InstallID: result.Skill.InstallID, WorkspaceTargetID: workspaceTargetID,
+			ArtifactDigest: result.Skill.Artifact.Digest, FilesWritten: result.FilesWritten,
+		})
+	}
+	return publication, installed, nil
+}
+
+func (p *registryPackagePublication) Rollback(ctx context.Context) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pluginPublicationCleanupTimeout)
+	defer cancel()
+	var errs []error
+	for index := len(p.publications) - 1; index >= 0; index-- {
+		if err := p.publications[index].Rollback(cleanupCtx); err != nil {
+			errs = append(errs, fmt.Errorf("roll back Package Skill: %w", err))
+		}
+	}
+	if err := p.client.DeleteFile(cleanupCtx, p.packageDir, true); err != nil && !errors.Is(err, bridge.ErrNotFound) {
+		errs = append(errs, fmt.Errorf("remove replacement Package: %w", err))
+	}
+	if p.rootMoved {
+		if err := p.client.Rename(cleanupCtx, p.backupDir, p.packageDir); err != nil {
+			errs = append(errs, fmt.Errorf("restore previous Package: %w", err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (p *registryPackagePublication) Commit(ctx context.Context) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pluginPublicationCleanupTimeout)
+	defer cancel()
+	var errs []error
+	if p.rootMoved {
+		if err := p.client.DeleteFile(cleanupCtx, p.backupDir, true); err != nil && !errors.Is(err, bridge.ErrNotFound) {
+			errs = append(errs, err)
+		}
+	}
+	for _, publication := range p.publications {
+		if err := publication.Commit(cleanupCtx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (h *SupermarketHandler) prepareResolvedRegistrySkillArtifact(
@@ -824,7 +939,93 @@ func (h *SupermarketHandler) fetchRegistryPackage(
 	ctx context.Context,
 	registryID, packageID string,
 ) (SupermarketSkillPackageDescriptor, error) {
-	endpoint := strings.TrimRight(h.baseURL, "/") + registryPackageUpstreamPath(registryID, packageID)
+	return h.fetchRegistryPackagePath(ctx, registryPackageUpstreamPath(registryID, packageID))
+}
+
+func (h *SupermarketHandler) fetchRegistryPackageRelease(
+	ctx context.Context,
+	registryID, packageID, revision string,
+) (SupermarketSkillPackageDescriptor, error) {
+	endpoint := strings.TrimRight(h.baseURL, "/") + registryPackageReleaseUpstreamPath(registryID, packageID, revision)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
+			apperror.CodeRegistryUnavailable, fmt.Errorf("create Registry Package release request: %w", err), nil,
+		)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := h.doSupermarketRequest(req)
+	if err != nil {
+		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
+			apperror.CodeRegistryUnavailable, fmt.Errorf("fetch Registry Package release: %w", err), nil,
+		)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return SupermarketSkillPackageDescriptor{}, apperror.New(apperror.CodeRegistrySkillNotFound, nil)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
+			apperror.CodeRegistryUnavailable,
+			fmt.Errorf("fetch Registry Package release: Supermarket returned status %d", resp.StatusCode), nil,
+		)
+	}
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxRegistryPackageMetadataBytes+1))
+	if err != nil {
+		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
+			apperror.CodeRegistryUnavailable, fmt.Errorf("read Registry Package release: %w", err), nil,
+		)
+	}
+	if len(payload) > maxRegistryPackageMetadataBytes {
+		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid, errors.New("registry Package release is too large"), nil,
+		)
+	}
+	digest := sha256.Sum256(payload)
+	if hex.EncodeToString(digest[:]) != revision {
+		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid, errors.New("registry Package release SHA-256 verification failed"), nil,
+		)
+	}
+	var release SupermarketSkillPackageRelease
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	if err := decoder.Decode(&release); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
+			apperror.CodeRegistrySkillInvalid, errors.New("registry Package release is malformed"), nil,
+		)
+	}
+	skills := make([]SupermarketCatalogSkill, 0, len(release.Skills))
+	for _, member := range release.Skills {
+		member.Artifact.DownloadURL = "/api/artifacts/skill/" + member.Artifact.Digest
+		skills = append(skills, SupermarketCatalogSkill{
+			SchemaVersion: member.SchemaVersion, RegistryID: member.RegistryID, PackageID: member.PackageID,
+			SkillID: member.SkillID, InstallID: member.InstallID, Name: member.Name,
+			Description: member.Description, Author: member.Author, Homepage: member.Homepage,
+			Tags: member.Tags, Category: member.Category, CategoryName: member.CategoryName,
+			SourceCategory: member.SourceCategory, Files: member.Files, Icon: member.Icon, Artifact: member.Artifact,
+		})
+	}
+	return SupermarketSkillPackageDescriptor{
+		SupermarketSkillPackageSummary: SupermarketSkillPackageSummary{
+			SchemaVersion: release.SchemaVersion,
+			RegistryID:    release.RegistryID,
+			PackageID:     release.PackageID,
+			Name:          release.Name,
+			Description:   release.Description,
+			Tags:          release.Tags,
+			SkillCount:    len(release.Skills),
+			Icon:          release.Icon,
+		},
+		Revision: revision,
+		Skills:   skills,
+	}, nil
+}
+
+func (h *SupermarketHandler) fetchRegistryPackagePath(
+	ctx context.Context,
+	upstreamPath string,
+) (SupermarketSkillPackageDescriptor, error) {
+	endpoint := strings.TrimRight(h.baseURL, "/") + upstreamPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
@@ -880,7 +1081,7 @@ func validateRegistryPackage(pkg SupermarketSkillPackageDescriptor, registryID, 
 	if pkg.RegistryID != registryID || pkg.PackageID != packageID {
 		return errors.New("registry Package identity does not match the request")
 	}
-	if !isCanonicalSHA256(pkg.Revision) || strings.TrimSpace(pkg.SourceRevision) == "" {
+	if !isCanonicalSHA256(pkg.Revision) {
 		return errors.New("registry Package revision is invalid")
 	}
 	if len(pkg.Skills) == 0 || len(pkg.Skills) > maxRegistryPackageSkills || pkg.SkillCount != len(pkg.Skills) {

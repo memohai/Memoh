@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
@@ -119,7 +120,7 @@ const (
 	maxPluginBundleFiles                           = 1_000
 	maxPluginBundleEntries                         = 2_000
 	maxPluginMetadataBytes                         = 2 * 1024 * 1024
-	maxPluginReleaseSkills                         = 128
+	maxPluginReleasePackages                       = 128
 	maxPluginSkillArtifactsCompressedBytes         = 128 * 1024 * 1024
 	maxPluginSkillArtifactsUncompressedBytes       = 128 * 1024 * 1024
 	maxPluginSkillArtifactsArchiveBytes            = 128 * 1024 * 1024
@@ -336,7 +337,7 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if manifest.ID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "plugin id is required")
 	}
-	if err := pluginspkg.ValidateSkillReferences(manifest.Skills); err != nil {
+	if err := pluginspkg.ValidatePackageReferences(manifest.Packages); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := validateSupermarketPluginEntry(entry, req.PluginID, manifest); err != nil {
@@ -348,16 +349,19 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := preflightPluginSkills(entry.Release.Skills); err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+	packageDescriptors, skillsResult, err := h.resolvePluginPackages(ctx, entry.Release.Packages)
+	if err != nil {
+		return err
 	}
 	bundleArchive, err := h.preparePluginBundle(
-		ctx, req.PluginID, manifest.ID, entry.Release.Artifact, manifest.Skills,
+		ctx, req.PluginID, manifest.ID, entry.Release.Artifact, manifest.Packages,
 	)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
 	}
-	preparedSkills, skillsResult, err := h.preparePluginSkills(ctx, target.Info.OS, entry.Release.Skills)
+	preparedPackages, skillsResult, err := h.preparePluginPackages(
+		ctx, target.Info.OS, entry.Release.Packages, packageDescriptors, skillsResult,
+	)
 	if err != nil {
 		return err
 	}
@@ -381,28 +385,38 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 		) {
 			return echo.NewHTTPError(http.StatusConflict, "installed Plugin changed; refresh before installing")
 		}
-		if conflictErr := h.checkPluginSkillArtifactConflicts(
-			mutationCtx, botID, manifest.ID, target.TargetID, entry.Release.Skills,
+		expectedArtifacts := expectedPluginPackageArtifacts(preparedPackages)
+		if conflictErr := h.pluginService.CheckSkillArtifactConflicts(
+			mutationCtx, botID, manifest.ID, target.TargetID, expectedArtifacts,
 		); conflictErr != nil {
 			return echo.NewHTTPError(http.StatusConflict, conflictErr.Error())
 		}
+		for _, prepared := range preparedPackages {
+			if err := h.checkPluginPackageMembers(
+				mutationCtx, botID, target.TargetID, manifest.ID,
+				prepared.Descriptor.RegistryID, prepared.Descriptor.PackageID, prepared.ExpectedArtifacts,
+			); err != nil {
+				return err
+			}
+		}
 		var (
-			skillArtifacts    map[string]pluginspkg.SkillArtifactMetadata
-			skillPublications []*skillset.ArchivePublication
-			installErr        error
+			skillArtifacts      map[string]pluginspkg.SkillArtifactMetadata
+			installedSkills     []pluginspkg.InstalledSkill
+			packagePublications []*registryPackagePublication
+			installErr          error
 		)
-		skillsResult, skillArtifacts, skillPublications, installErr = publishPreparedPluginSkills(
-			mutationCtx, target.Client, preparedSkills, skillsResult,
+		skillsResult, installedSkills, skillArtifacts, packagePublications, installErr = publishPreparedPluginPackages(
+			mutationCtx, target.Client, target.TargetID, preparedPackages, skillsResult,
 		)
 		if installErr != nil {
-			return rollbackPluginWorkspace(mutationCtx, installErr, nil, skillPublications)
+			return installErr
 		}
 		bundlePublication, installErr := publishPluginBundleArchiveTransaction(
 			mutationCtx, target.Client, target.Info.OS, manifest.ID, bundleArchive,
 		)
 		if installErr != nil {
 			return rollbackPluginWorkspace(
-				mutationCtx, echo.NewHTTPError(http.StatusBadGateway, installErr.Error()), nil, skillPublications,
+				mutationCtx, echo.NewHTTPError(http.StatusBadGateway, installErr.Error()), nil, packagePublications,
 			)
 		}
 		bundleResult = bundlePublication.result
@@ -411,13 +425,14 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 		)
 		if installErr != nil {
 			return rollbackPluginWorkspace(
-				mutationCtx, echo.NewHTTPError(http.StatusBadGateway, installErr.Error()), bundlePublication, skillPublications,
+				mutationCtx, echo.NewHTTPError(http.StatusBadGateway, installErr.Error()), bundlePublication, packagePublications,
 			)
 		}
 		installation, installErr = h.pluginService.Install(mutationCtx, botID, pluginspkg.InstallRequest{
-			Manifest:       manifest,
-			Variables:      req.Variables,
-			SkillArtifacts: skillArtifacts,
+			Manifest:        manifest,
+			Variables:       req.Variables,
+			InstalledSkills: installedSkills,
+			SkillArtifacts:  skillArtifacts,
 			Release: pluginspkg.ReleaseMetadata{
 				Revision:       entry.Release.Revision,
 				ArtifactDigest: entry.Release.Artifact.Digest,
@@ -426,15 +441,15 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 		})
 		if installErr != nil {
 			return rollbackPluginWorkspace(
-				mutationCtx, echo.NewHTTPError(http.StatusBadRequest, installErr.Error()), bundlePublication, skillPublications,
+				mutationCtx, echo.NewHTTPError(http.StatusBadRequest, installErr.Error()), bundlePublication, packagePublications,
 			)
 		}
 		if err := bundlePublication.commit(mutationCtx); err != nil && h.logger != nil {
 			h.logger.Warn("cleanup Plugin bundle backup failed", slog.Any("error", err))
 		}
-		for _, publication := range skillPublications {
+		for _, publication := range packagePublications {
 			if err := publication.Commit(mutationCtx); err != nil && h.logger != nil {
-				h.logger.Warn("cleanup Plugin Skill backup failed", slog.Any("error", err))
+				h.logger.Warn("cleanup Plugin Package backup failed", slog.Any("error", err))
 			}
 		}
 		return nil
@@ -503,28 +518,24 @@ type SupermarketPluginArtifact struct {
 	DownloadURL string `json:"download_url" validate:"required"`
 }
 
-type SupermarketPluginResolvedSkill struct {
-	RegistryID       string                   `json:"registry_id" validate:"required"`
-	PackageID        string                   `json:"package_id" validate:"required"`
-	SkillID          string                   `json:"skill_id" validate:"required"`
-	RegistryRevision string                   `json:"registry_revision" validate:"required"`
-	SourceRevision   string                   `json:"source_revision" validate:"required"`
-	InstallID        string                   `json:"install_id" validate:"required"`
-	Artifact         SupermarketSkillArtifact `json:"artifact" validate:"required"`
+type SupermarketPluginResolvedPackage struct {
+	RegistryID string `json:"registry_id" validate:"required"`
+	PackageID  string `json:"package_id" validate:"required"`
+	Revision   string `json:"revision" validate:"required"`
 }
 
 type SupermarketPluginRelease struct {
-	Revision    string                           `json:"revision" validate:"required"`
-	PublishedAt string                           `json:"published_at" validate:"required"`
-	Artifact    SupermarketPluginArtifact        `json:"artifact" validate:"required"`
-	Skills      []SupermarketPluginResolvedSkill `json:"skills" validate:"required"`
+	Revision    string                             `json:"revision" validate:"required"`
+	PublishedAt string                             `json:"published_at" validate:"required"`
+	Artifact    SupermarketPluginArtifact          `json:"artifact" validate:"required"`
+	Packages    []SupermarketPluginResolvedPackage `json:"packages" validate:"required"`
 }
 
 type SupermarketImmutablePluginRelease struct {
-	SchemaVersion string                           `json:"schema_version"`
-	Plugin        pluginspkg.Manifest              `json:"plugin"`
-	Artifact      SupermarketPluginArtifact        `json:"artifact"`
-	Skills        []SupermarketPluginResolvedSkill `json:"skills"`
+	SchemaVersion string                             `json:"schema_version"`
+	Plugin        pluginspkg.Manifest                `json:"plugin"`
+	Artifact      SupermarketPluginArtifact          `json:"artifact"`
+	Packages      []SupermarketPluginResolvedPackage `json:"packages"`
 }
 
 type SupermarketPluginEntry struct {
@@ -636,16 +647,13 @@ func (h *SupermarketHandler) fetchImmutablePluginRelease(
 		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "unsupported immutable Plugin release schema")
 	}
 	release.Artifact.DownloadURL = "/api/artifacts/plugin/" + release.Artifact.Digest
-	for index := range release.Skills {
-		release.Skills[index].Artifact.DownloadURL = "/api/artifacts/skill/" + release.Skills[index].Artifact.Digest
-	}
 	return SupermarketPluginEntry{
 		Manifest: release.Plugin,
 		Release: SupermarketPluginRelease{
 			Revision:    revision,
 			PublishedAt: publishedAt,
 			Artifact:    release.Artifact,
-			Skills:      release.Skills,
+			Packages:    release.Packages,
 		},
 	}, nil
 }
@@ -711,34 +719,25 @@ func validateSupermarketPluginEntry(
 		artifact.Size > maxPluginBundleCompressedBytes || strings.TrimSpace(artifact.DownloadURL) == "" {
 		return errors.New("plugin Artifact descriptor is invalid")
 	}
-	if len(entry.Release.Skills) != len(manifest.Skills) {
-		return errors.New("plugin release does not lock every Skill reference")
+	if len(entry.Release.Packages) != len(manifest.Packages) {
+		return errors.New("plugin release does not lock every Package reference")
 	}
-	if len(entry.Release.Skills) > maxPluginReleaseSkills {
-		return fmt.Errorf("plugin release exceeds the %d Skill limit", maxPluginReleaseSkills)
+	if len(entry.Release.Packages) > maxPluginReleasePackages {
+		return fmt.Errorf("plugin release exceeds the %d Package limit", maxPluginReleasePackages)
 	}
-	resolvedReferences := make([]pluginspkg.SkillReference, 0, len(entry.Release.Skills))
-	budget := pluginSkillArtifactBudget{}
-	for _, resolved := range entry.Release.Skills {
-		reference := pluginspkg.SkillReference{
+	resolvedReferences := make([]pluginspkg.PackageReference, 0, len(entry.Release.Packages))
+	for _, resolved := range entry.Release.Packages {
+		reference := pluginspkg.PackageReference{
 			RegistryID: resolved.RegistryID,
 			PackageID:  resolved.PackageID,
-			SkillID:    resolved.SkillID,
 		}
 		resolvedReferences = append(resolvedReferences, reference)
-		if !isCanonicalSHA256(resolved.RegistryRevision) || strings.TrimSpace(resolved.SourceRevision) == "" {
-			return fmt.Errorf("plugin Skill %q release metadata is invalid", pluginspkg.SkillReferenceIdentity(reference))
-		}
-		skill := resolved.catalogSkill()
-		if err := validateRegistrySkill(skill, reference.RegistryID, reference.PackageID, reference.SkillID); err != nil {
-			return err
-		}
-		if err := budget.add(resolved.Artifact); err != nil {
-			return err
+		if !isCanonicalSHA256(resolved.Revision) {
+			return fmt.Errorf("plugin Package %q revision is invalid", pluginspkg.PackageReferenceIdentity(reference))
 		}
 	}
-	if !samePluginSkillReferences(resolvedReferences, manifest.Skills) {
-		return errors.New("plugin release Skill locks do not match plugin.yaml")
+	if !samePluginPackageReferences(resolvedReferences, manifest.Packages) {
+		return errors.New("plugin release Package locks do not match plugin.yaml")
 	}
 	return nil
 }
@@ -746,17 +745,6 @@ func validateSupermarketPluginEntry(
 func isCanonicalSHA256(value string) bool {
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == sha256.Size && hex.EncodeToString(decoded) == value
-}
-
-func (skill SupermarketPluginResolvedSkill) catalogSkill() SupermarketCatalogSkill {
-	return SupermarketCatalogSkill{
-		RegistryID: skill.RegistryID,
-		PackageID:  skill.PackageID,
-		SkillID:    skill.SkillID,
-		InstallID:  skill.InstallID,
-		Source:     SupermarketSkillSource{Revision: skill.SourceRevision},
-		Artifact:   skill.Artifact,
-	}
 }
 
 func (h *SupermarketHandler) resolvePluginInstallTarget(ctx context.Context, botID string) (workspace.ResolvedWorkspaceTarget, error) {
@@ -777,75 +765,61 @@ func (h *SupermarketHandler) resolvePluginInstallTarget(ctx context.Context, bot
 	return workspace.ResolvedWorkspaceTarget{Client: client}, nil
 }
 
-type preparedPluginSkill struct {
-	resolved SupermarketPluginResolvedSkill
-	artifact preparedRegistrySkillArtifact
-}
-
-func (h *SupermarketHandler) preparePluginSkills(
+func (h *SupermarketHandler) preparePluginPackages(
 	ctx context.Context,
 	workspaceOS string,
-	resolvedSkills []SupermarketPluginResolvedSkill,
-) ([]preparedPluginSkill, pluginSkillsInstallResult, error) {
-	result := pluginSkillsInstallResult{OK: true, Skills: make([]pluginSkillInstallResult, 0, len(resolvedSkills))}
-	if len(resolvedSkills) > maxPluginReleaseSkills {
-		return nil, result, fmt.Errorf("plugin release exceeds the %d Skill limit", maxPluginReleaseSkills)
+	resolvedPackages []SupermarketPluginResolvedPackage,
+	descriptors []SupermarketSkillPackageDescriptor,
+	result pluginSkillsInstallResult,
+) ([]preparedRegistryPackage, pluginSkillsInstallResult, error) {
+	if len(descriptors) != len(resolvedPackages) {
+		return nil, result, errors.New("plugin Package descriptor count does not match its locks")
 	}
-	if err := preflightPluginSkills(resolvedSkills); err != nil {
-		return nil, result, err
+	prepared := make([]preparedRegistryPackage, 0, len(descriptors))
+	for index, pkg := range descriptors {
+		resolved := resolvedPackages[index]
+		item, err := h.prepareRegistryPackage(
+			ctx, workspaceOS, pkg, resolved.RegistryID, resolved.PackageID, resolved.Revision,
+		)
+		if err != nil {
+			result.OK = false
+			result.Error = err.Error()
+			return nil, result, err
+		}
+		prepared = append(prepared, item)
 	}
-	prepared := make([]preparedPluginSkill, 0, len(resolvedSkills))
-	archives := make(map[string]skillset.Archive, len(resolvedSkills))
-	for _, resolved := range resolvedSkills {
-		reference := pluginspkg.SkillReference{
-			RegistryID: resolved.RegistryID,
-			PackageID:  resolved.PackageID,
-			SkillID:    resolved.SkillID,
+	return prepared, result, nil
+}
+
+func (h *SupermarketHandler) resolvePluginPackages(
+	ctx context.Context,
+	resolvedPackages []SupermarketPluginResolvedPackage,
+) ([]SupermarketSkillPackageDescriptor, pluginSkillsInstallResult, error) {
+	result := pluginSkillsInstallResult{OK: true}
+	if len(resolvedPackages) > maxPluginReleasePackages {
+		return nil, result, fmt.Errorf("plugin release exceeds the %d Package limit", maxPluginReleasePackages)
+	}
+	descriptors := make([]SupermarketSkillPackageDescriptor, 0, len(resolvedPackages))
+	budget := pluginSkillArtifactBudget{}
+	for _, resolved := range resolvedPackages {
+		pkg, err := h.fetchRegistryPackageRelease(ctx, resolved.RegistryID, resolved.PackageID, resolved.Revision)
+		if err != nil {
+			return nil, result, err
 		}
-		item := pluginSkillInstallResult{
-			RegistryID: reference.RegistryID,
-			PackageID:  reference.PackageID,
-			SkillID:    reference.SkillID,
+		if pkg.Revision != resolved.Revision {
+			return nil, result, errors.New("plugin Package release revision does not match its lock")
 		}
-		artifact := preparedRegistrySkillArtifact{
-			Skill: resolved.catalogSkill(), WorkspaceOS: workspaceOS,
+		if err := validateRegistryPackage(pkg, resolved.RegistryID, resolved.PackageID); err != nil {
+			return nil, result, apperror.Wrap(apperror.CodeRegistrySkillInvalid, err, nil)
 		}
-		if cached, ok := archives[resolved.Artifact.Digest]; ok {
-			artifact.Archive = cached
-		} else {
-			var err error
-			artifact, err = h.prepareResolvedRegistrySkillArtifactWithLimits(
-				ctx,
-				workspaceOS,
-				resolved.catalogSkill(),
-				resolved.Artifact.UncompressedSize,
-				resolved.Artifact.ArchiveSize,
-				resolved.Artifact.FileCount,
-			)
-			if err == nil {
-				archives[resolved.Artifact.Digest] = artifact.Archive
-			}
-			if err != nil {
-				item.Error = err.Error()
-				result.OK = false
-				result.Error = err.Error()
-				result.Skills = append(result.Skills, item)
+		for _, skill := range pkg.Skills {
+			if err := budget.add(skill.Artifact); err != nil {
 				return nil, result, err
 			}
 		}
-		if artifact.Archive.UncompressedSize() != resolved.Artifact.UncompressedSize ||
-			artifact.Archive.ArchiveSize() != resolved.Artifact.ArchiveSize ||
-			artifact.Archive.FileCount() != resolved.Artifact.FileCount {
-			err := errors.New("plugin release contains inconsistent duplicate Skill Artifact metadata")
-			item.Error = err.Error()
-			result.OK = false
-			result.Error = err.Error()
-			result.Skills = append(result.Skills, item)
-			return nil, result, err
-		}
-		prepared = append(prepared, preparedPluginSkill{resolved: resolved, artifact: artifact})
+		descriptors = append(descriptors, pkg)
 	}
-	return prepared, result, nil
+	return descriptors, result, nil
 }
 
 type pluginSkillArtifactBudget struct {
@@ -892,101 +866,76 @@ func (b *pluginSkillArtifactBudget) add(artifact SupermarketSkillArtifact) error
 	return nil
 }
 
-func preflightPluginSkills(resolvedSkills []SupermarketPluginResolvedSkill) error {
-	budget := pluginSkillArtifactBudget{}
-	descriptors := make(map[string]SupermarketSkillArtifact, len(resolvedSkills))
-	for _, resolved := range resolvedSkills {
-		identity := pluginspkg.SkillReferenceIdentity(pluginspkg.SkillReference{
-			RegistryID: resolved.RegistryID,
-			PackageID:  resolved.PackageID,
-			SkillID:    resolved.SkillID,
-		})
-		if err := budget.add(resolved.Artifact); err != nil {
-			return err
+func expectedPluginPackageArtifacts(prepared []preparedRegistryPackage) map[string]string {
+	expected := make(map[string]string)
+	for _, pkg := range prepared {
+		for identity, digest := range pkg.ExpectedArtifacts {
+			expected[identity] = digest
 		}
-		if previous, ok := descriptors[resolved.Artifact.Digest]; ok && previous != resolved.Artifact {
-			return fmt.Errorf("plugin Skill %q reuses a digest with inconsistent metadata", identity)
-		}
-		descriptors[resolved.Artifact.Digest] = resolved.Artifact
 	}
-	return nil
+	return expected
 }
 
-func publishPreparedPluginSkills(
+func publishPreparedPluginPackages(
 	ctx context.Context,
 	client *bridge.Client,
-	prepared []preparedPluginSkill,
+	workspaceTargetID string,
+	prepared []preparedRegistryPackage,
 	result pluginSkillsInstallResult,
 ) (
 	pluginSkillsInstallResult,
+	[]pluginspkg.InstalledSkill,
 	map[string]pluginspkg.SkillArtifactMetadata,
-	[]*skillset.ArchivePublication,
+	[]*registryPackagePublication,
 	error,
 ) {
-	artifacts := make(map[string]pluginspkg.SkillArtifactMetadata, len(prepared))
-	publications := make([]*skillset.ArchivePublication, 0, len(prepared))
-	for _, item := range prepared {
-		resolved := item.resolved
-		reference := pluginspkg.SkillReference{
-			RegistryID: resolved.RegistryID,
-			PackageID:  resolved.PackageID,
-			SkillID:    resolved.SkillID,
-		}
-		installedPublication, installed, err := publishPreparedRegistrySkillArtifact(
-			ctx, client, item.artifact,
-		)
-		resultItem := pluginSkillInstallResult{
-			RegistryID: reference.RegistryID,
-			PackageID:  reference.PackageID,
-			SkillID:    reference.SkillID,
-		}
+	installedSkills := make([]pluginspkg.InstalledSkill, 0)
+	artifacts := make(map[string]pluginspkg.SkillArtifactMetadata)
+	publications := make([]*registryPackagePublication, 0, len(prepared))
+	for _, pkg := range prepared {
+		publication, installed, err := publishPreparedRegistryPackage(ctx, client, pkg, workspaceTargetID)
 		if err != nil {
-			resultItem.Error = err.Error()
 			result.OK = false
 			result.Error = err.Error()
-			result.Skills = append(result.Skills, resultItem)
-			return result, nil, publications, err
+			if rollbackErr := rollbackRegistryPackages(ctx, publications); rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return result, nil, nil, publications, err
 		}
-		publications = append(publications, installedPublication)
-		resultItem.InstallID = installed.Skill.InstallID
-		resultItem.ArtifactDigest = installed.Skill.Artifact.Digest
-		resultItem.FilesWritten = installed.FilesWritten
-		result.Skills = append(result.Skills, resultItem)
-		artifacts[pluginspkg.SkillReferenceIdentity(reference)] = pluginspkg.SkillArtifactMetadata{
-			RegistryRevision: resolved.RegistryRevision,
-			InstallID:        resultItem.InstallID,
-			ArtifactDigest:   resultItem.ArtifactDigest,
-			FilesWritten:     resultItem.FilesWritten,
+		publications = append(publications, publication)
+		for _, skill := range installed {
+			installedSkill := pluginspkg.InstalledSkill{
+				RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
+			}
+			installedSkills = append(installedSkills, installedSkill)
+			result.Skills = append(result.Skills, pluginSkillInstallResult{
+				RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID,
+				InstallID: skill.InstallID, ArtifactDigest: skill.ArtifactDigest, FilesWritten: skill.FilesWritten,
+			})
+			artifacts[pluginspkg.InstalledSkillIdentity(installedSkill)] = pluginspkg.SkillArtifactMetadata{
+				PackageRevision: pkg.Descriptor.Revision,
+				InstallID:       skill.InstallID, ArtifactDigest: skill.ArtifactDigest, FilesWritten: skill.FilesWritten,
+			}
 		}
 	}
-	return result, artifacts, publications, nil
+	return result, installedSkills, artifacts, publications, nil
 }
 
-func (h *SupermarketHandler) checkPluginSkillArtifactConflicts(
-	ctx context.Context,
-	botID, targetPluginID, workspaceTargetID string,
-	resolvedSkills []SupermarketPluginResolvedSkill,
-) error {
-	expected := make(map[string]string, len(resolvedSkills))
-	for _, resolved := range resolvedSkills {
-		reference := pluginspkg.SkillReference{
-			RegistryID: resolved.RegistryID,
-			PackageID:  resolved.PackageID,
-			SkillID:    resolved.SkillID,
+func rollbackRegistryPackages(ctx context.Context, publications []*registryPackagePublication) error {
+	var errs []error
+	for index := len(publications) - 1; index >= 0; index-- {
+		if err := publications[index].Rollback(ctx); err != nil {
+			errs = append(errs, err)
 		}
-		identity := pluginspkg.SkillReferenceIdentity(reference)
-		expected[identity] = resolved.Artifact.Digest
 	}
-	return h.pluginService.CheckSkillArtifactConflicts(
-		ctx, botID, targetPluginID, workspaceTargetID, expected,
-	)
+	return errors.Join(errs...)
 }
 
 func rollbackPluginWorkspace(
 	ctx context.Context,
 	cause error,
 	bundle *pluginBundlePublication,
-	skills []*skillset.ArchivePublication,
+	packages []*registryPackagePublication,
 ) error {
 	errorsToJoin := []error{cause}
 	if bundle != nil {
@@ -994,9 +943,9 @@ func rollbackPluginWorkspace(
 			errorsToJoin = append(errorsToJoin, fmt.Errorf("roll back Plugin bundle: %w", err))
 		}
 	}
-	for index := len(skills) - 1; index >= 0; index-- {
-		if err := skills[index].Rollback(ctx); err != nil {
-			errorsToJoin = append(errorsToJoin, fmt.Errorf("roll back Plugin Skill: %w", err))
+	if len(packages) > 0 {
+		if err := rollbackRegistryPackages(ctx, packages); err != nil {
+			errorsToJoin = append(errorsToJoin, fmt.Errorf("roll back Plugin Packages: %w", err))
 		}
 	}
 	if len(errorsToJoin) == 1 {
@@ -1011,12 +960,12 @@ func (h *SupermarketHandler) installPluginBundle(
 	workspaceOS string,
 	downloadPluginID, targetPluginID string,
 	artifact SupermarketPluginArtifact,
-	expectedSkills []pluginspkg.SkillReference,
+	expectedPackages []pluginspkg.PackageReference,
 ) (pluginBundleInstallResult, error) {
 	if client == nil {
 		return pluginBundleInstallResult{}, errors.New("workspace is not reachable")
 	}
-	archive, err := h.preparePluginBundle(ctx, downloadPluginID, targetPluginID, artifact, expectedSkills)
+	archive, err := h.preparePluginBundle(ctx, downloadPluginID, targetPluginID, artifact, expectedPackages)
 	if err != nil {
 		return pluginBundleInstallResult{}, err
 	}
@@ -1027,7 +976,7 @@ func (h *SupermarketHandler) preparePluginBundle(
 	ctx context.Context,
 	downloadPluginID, targetPluginID string,
 	artifact SupermarketPluginArtifact,
-	expectedSkills []pluginspkg.SkillReference,
+	expectedPackages []pluginspkg.PackageReference,
 ) (pluginBundleArchive, error) {
 	bundle, err := h.downloadSupermarketArtifact(ctx, supermarketArtifactDownloadDescriptor{
 		Digest: artifact.Digest, Size: artifact.Size, DownloadURL: artifact.DownloadURL,
@@ -1045,8 +994,8 @@ func (h *SupermarketHandler) preparePluginBundle(
 	if err != nil {
 		return pluginBundleArchive{}, err
 	}
-	if !samePluginSkillReferences(archive.skillReferences, expectedSkills) {
-		return pluginBundleArchive{}, errors.New("plugin bundle Skill references do not match the catalog manifest")
+	if !samePluginPackageReferences(archive.packageReferences, expectedPackages) {
+		return pluginBundleArchive{}, errors.New("plugin bundle Package references do not match the catalog manifest")
 	}
 	return archive, nil
 }
@@ -1127,8 +1076,8 @@ type pluginBundleArchiveFile struct {
 }
 
 type pluginBundleArchive struct {
-	files           []pluginBundleArchiveFile
-	skillReferences []pluginspkg.SkillReference
+	files             []pluginBundleArchiveFile
+	packageReferences []pluginspkg.PackageReference
 }
 
 func extractPluginBundleArchive(
@@ -1228,7 +1177,7 @@ func readPluginBundleArchive(archivePluginID, targetPluginID string, r io.Reader
 			if err != nil {
 				return pluginBundleArchive{}, err
 			}
-			archive.skillReferences = references
+			archive.packageReferences = references
 			hasManifest = true
 		}
 		archive.files = append(archive.files, pluginBundleArchiveFile{
@@ -1548,14 +1497,13 @@ func recordPluginBundleArchivePath(seen map[string]bool, name string, isFile boo
 	return nil
 }
 
-func validatePluginBundleManifest(content []byte, targetPluginID string) ([]pluginspkg.SkillReference, error) {
+func validatePluginBundleManifest(content []byte, targetPluginID string) ([]pluginspkg.PackageReference, error) {
 	var manifest struct {
-		ID     string `yaml:"id"`
-		Skills []struct {
+		ID       string `yaml:"id"`
+		Packages []struct {
 			RegistryID string `yaml:"registry_id"`
 			PackageID  string `yaml:"package_id"`
-			SkillID    string `yaml:"skill_id"`
-		} `yaml:"skills"`
+		} `yaml:"packages"`
 	}
 	if err := yaml.Unmarshal(content, &manifest); err != nil {
 		return nil, fmt.Errorf("plugin bundle contains an invalid plugin.yaml: %w", err)
@@ -1564,30 +1512,29 @@ func validatePluginBundleManifest(content []byte, targetPluginID string) ([]plug
 	if manifest.ID != targetPluginID {
 		return nil, fmt.Errorf("plugin bundle manifest id %q does not match %q", manifest.ID, targetPluginID)
 	}
-	references := make([]pluginspkg.SkillReference, 0, len(manifest.Skills))
-	for _, reference := range manifest.Skills {
-		references = append(references, pluginspkg.SkillReference{
+	references := make([]pluginspkg.PackageReference, 0, len(manifest.Packages))
+	for _, reference := range manifest.Packages {
+		references = append(references, pluginspkg.PackageReference{
 			RegistryID: strings.TrimSpace(reference.RegistryID),
 			PackageID:  strings.TrimSpace(reference.PackageID),
-			SkillID:    strings.TrimSpace(reference.SkillID),
 		})
 	}
-	if err := pluginspkg.ValidateSkillReferences(references); err != nil {
-		return nil, fmt.Errorf("plugin bundle manifest contains invalid Skill references: %w", err)
+	if err := pluginspkg.ValidatePackageReferences(references); err != nil {
+		return nil, fmt.Errorf("plugin bundle manifest contains invalid Package references: %w", err)
 	}
 	return references, nil
 }
 
-func samePluginSkillReferences(left, right []pluginspkg.SkillReference) bool {
+func samePluginPackageReferences(left, right []pluginspkg.PackageReference) bool {
 	if len(left) != len(right) {
 		return false
 	}
 	identities := make(map[string]struct{}, len(left))
 	for _, reference := range left {
-		identities[pluginspkg.SkillReferenceIdentity(reference)] = struct{}{}
+		identities[pluginspkg.PackageReferenceIdentity(reference)] = struct{}{}
 	}
 	for _, reference := range right {
-		if _, ok := identities[pluginspkg.SkillReferenceIdentity(reference)]; !ok {
+		if _, ok := identities[pluginspkg.PackageReferenceIdentity(reference)]; !ok {
 			return false
 		}
 	}

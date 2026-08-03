@@ -19849,17 +19849,17 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "packages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.PackageReference"
+                    }
+                },
                 "release": {
                     "$ref": "#/definitions/handlers.SupermarketPluginRelease"
                 },
                 "schema_version": {
                     "type": "string"
-                },
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.SkillReference"
-                    }
                 },
                 "tags": {
                     "type": "array",
@@ -19902,59 +19902,43 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "artifact",
+                "packages",
                 "published_at",
-                "revision",
-                "skills"
+                "revision"
             ],
             "properties": {
                 "artifact": {
                     "$ref": "#/definitions/handlers.SupermarketPluginArtifact"
+                },
+                "packages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketPluginResolvedPackage"
+                    }
                 },
                 "published_at": {
                     "type": "string"
                 },
                 "revision": {
                     "type": "string"
-                },
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.SupermarketPluginResolvedSkill"
-                    }
                 }
             }
         },
-        "handlers.SupermarketPluginResolvedSkill": {
+        "handlers.SupermarketPluginResolvedPackage": {
             "type": "object",
             "required": [
-                "artifact",
-                "install_id",
                 "package_id",
                 "registry_id",
-                "registry_revision",
-                "skill_id",
-                "source_revision"
+                "revision"
             ],
             "properties": {
-                "artifact": {
-                    "$ref": "#/definitions/handlers.SupermarketSkillArtifact"
-                },
-                "install_id": {
-                    "type": "string"
-                },
                 "package_id": {
                     "type": "string"
                 },
                 "registry_id": {
                     "type": "string"
                 },
-                "registry_revision": {
-                    "type": "string"
-                },
-                "skill_id": {
-                    "type": "string"
-                },
-                "source_revision": {
+                "revision": {
                     "type": "string"
                 }
             }
@@ -20179,12 +20163,10 @@ const docTemplate = `{
                 "name",
                 "package_id",
                 "registry_id",
-                "release_url",
                 "revision",
                 "schema_version",
                 "skill_count",
                 "skills",
-                "source_revision",
                 "tags"
             ],
             "properties": {
@@ -20226,9 +20208,6 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/handlers.SupermarketCatalogSkill"
                     }
-                },
-                "source_revision": {
-                    "type": "string"
                 },
                 "tags": {
                     "type": "array",
@@ -21753,14 +21732,14 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "schema_version": {
-                    "type": "string"
-                },
-                "skills": {
+                "packages": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/plugins.SkillReference"
+                        "$ref": "#/definitions/plugins.PackageReference"
                     }
+                },
+                "schema_version": {
+                    "type": "string"
                 },
                 "tags": {
                     "type": "array",
@@ -21783,6 +21762,21 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "callback_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "plugins.PackageReference": {
+            "type": "object",
+            "required": [
+                "package_id",
+                "registry_id"
+            ],
+            "properties": {
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
                     "type": "string"
                 }
             }
@@ -21813,20 +21807,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.SkillReference": {
-            "type": "object",
-            "properties": {
-                "package_id": {
-                    "type": "string"
-                },
-                "registry_id": {
-                    "type": "string"
-                },
-                "skill_id": {
                     "type": "string"
                 }
             }

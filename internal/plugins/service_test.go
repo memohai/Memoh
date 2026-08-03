@@ -85,32 +85,32 @@ func TestManifestScopesOverrideDiscoveredScopes(t *testing.T) {
 	}
 }
 
-func TestValidateSkillReferencesRequiresNamespacedUniqueIdentity(t *testing.T) {
-	reference := SkillReference{RegistryID: "memoh", PackageID: "github", SkillID: "github"}
-	if err := ValidateSkillReferences([]SkillReference{reference}); err != nil {
-		t.Fatalf("ValidateSkillReferences(valid) error = %v", err)
+func TestValidatePackageReferencesRequiresNamespacedUniqueIdentity(t *testing.T) {
+	reference := PackageReference{RegistryID: "memoh", PackageID: "github"}
+	if err := ValidatePackageReferences([]PackageReference{reference}); err != nil {
+		t.Fatalf("ValidatePackageReferences(valid) error = %v", err)
 	}
-	if got := SkillReferenceIdentity(reference); got != "memoh/github/github" {
-		t.Fatalf("SkillReferenceIdentity() = %q", got)
+	if got := PackageReferenceIdentity(reference); got != "memoh/github" {
+		t.Fatalf("PackageReferenceIdentity() = %q", got)
 	}
-	if err := ValidateSkillReferences([]SkillReference{reference, reference}); err == nil {
-		t.Fatal("ValidateSkillReferences() accepted a duplicate reference")
+	if err := ValidatePackageReferences([]PackageReference{reference, reference}); err == nil {
+		t.Fatal("ValidatePackageReferences() accepted a duplicate reference")
 	}
-	dotted := SkillReference{RegistryID: "openai.api", PackageID: "documents.v2", SkillID: "pdf.reader"}
-	if err := ValidateSkillReferences([]SkillReference{dotted}); err != nil {
-		t.Fatalf("ValidateSkillReferences(dotted) error = %v", err)
+	dotted := PackageReference{RegistryID: "openai.api", PackageID: "documents.v2"}
+	if err := ValidatePackageReferences([]PackageReference{dotted}); err != nil {
+		t.Fatalf("ValidatePackageReferences(dotted) error = %v", err)
 	}
 	reference.RegistryID = "Not Valid"
-	if err := ValidateSkillReferences([]SkillReference{reference}); err == nil {
-		t.Fatal("ValidateSkillReferences() accepted an invalid Registry ID")
+	if err := ValidatePackageReferences([]PackageReference{reference}); err == nil {
+		t.Fatal("ValidatePackageReferences() accepted an invalid Registry ID")
 	}
-	for _, invalid := range []SkillReference{
-		{RegistryID: "user", PackageID: "github", SkillID: "github"},
-		{RegistryID: "memoh", PackageID: "github..v2", SkillID: "github"},
-		{RegistryID: "memoh", PackageID: "github", SkillID: "nul.txt"},
+	for _, invalid := range []PackageReference{
+		{RegistryID: "user", PackageID: "github"},
+		{RegistryID: "memoh", PackageID: "github..v2"},
+		{RegistryID: "memoh", PackageID: "nul.txt"},
 	} {
-		if err := ValidateSkillReferences([]SkillReference{invalid}); err == nil {
-			t.Fatalf("ValidateSkillReferences() accepted invalid reference %+v", invalid)
+		if err := ValidatePackageReferences([]PackageReference{invalid}); err == nil {
+			t.Fatalf("ValidatePackageReferences() accepted invalid reference %+v", invalid)
 		}
 	}
 }
@@ -147,24 +147,39 @@ func TestOwnsRegistrySkillAtTargetKeepsSharedAndDisabledPluginReferences(t *test
 }
 
 func TestValidateSkillArtifactsRequiresVerifiedInstallResult(t *testing.T) {
-	reference := SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
-	identity := SkillReferenceIdentity(reference)
+	reference := InstalledSkill{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	identity := InstalledSkillIdentity(reference)
 	valid := SkillArtifactMetadata{
-		RegistryRevision: strings.Repeat("b", 64),
-		InstallID:        "memoh+notion+meeting",
-		ArtifactDigest:   strings.Repeat("a", 64),
-		FilesWritten:     2,
+		PackageRevision: strings.Repeat("b", 64),
+		InstallID:       "memoh+notion+meeting",
+		ArtifactDigest:  strings.Repeat("a", 64),
+		FilesWritten:    2,
 	}
-	if err := validateSkillArtifacts([]SkillReference{reference}, map[string]SkillArtifactMetadata{identity: valid}); err != nil {
+	if err := validateSkillArtifacts([]InstalledSkill{reference}, map[string]SkillArtifactMetadata{identity: valid}); err != nil {
 		t.Fatalf("validateSkillArtifacts(valid) error = %v", err)
 	}
-	if err := validateSkillArtifacts([]SkillReference{reference}, nil); err == nil {
+	if err := validateSkillArtifacts([]InstalledSkill{reference}, nil); err == nil {
 		t.Fatal("validateSkillArtifacts() accepted missing Artifact metadata")
 	}
 	invalid := valid
 	invalid.ArtifactDigest = "not-a-digest"
-	if err := validateSkillArtifacts([]SkillReference{reference}, map[string]SkillArtifactMetadata{identity: invalid}); err == nil {
+	if err := validateSkillArtifacts([]InstalledSkill{reference}, map[string]SkillArtifactMetadata{identity: invalid}); err == nil {
 		t.Fatal("validateSkillArtifacts() accepted an invalid digest")
+	}
+}
+
+func TestValidateInstalledSkillsRequiresEveryReferencedPackage(t *testing.T) {
+	packages := []PackageReference{{RegistryID: "memoh", PackageID: "notion"}}
+	if err := validateInstalledSkills(packages, nil); err == nil {
+		t.Fatal("validateInstalledSkills() accepted a Package without installed Skills")
+	}
+	skill := InstalledSkill{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	if err := validateInstalledSkills(packages, []InstalledSkill{skill}); err != nil {
+		t.Fatalf("validateInstalledSkills(valid) error = %v", err)
+	}
+	skill.PackageID = "other"
+	if err := validateInstalledSkills(packages, []InstalledSkill{skill}); err == nil {
+		t.Fatal("validateInstalledSkills() accepted a Skill outside the referenced Package")
 	}
 }
 

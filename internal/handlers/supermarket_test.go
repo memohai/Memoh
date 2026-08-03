@@ -23,6 +23,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/config"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
@@ -35,23 +36,24 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	manager := workspace.NewManager(
 		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
 	)
-	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	reference := pluginspkg.PackageReference{RegistryID: "memoh", PackageID: "notion"}
 	artifact := validSkillArtifact(t)
 	digest := sha256.Sum256(artifact)
 	digestText := hex.EncodeToString(digest[:])
 	descriptor := validRegistrySkillDescriptor()
 	descriptor.RegistryID = reference.RegistryID
 	descriptor.PackageID = reference.PackageID
-	descriptor.SkillID = reference.SkillID
+	descriptor.SkillID = "meeting"
 	descriptor.InstallID = "memoh+notion+meeting"
 	descriptor.Artifact.Digest = digestText
 	descriptor.Artifact.Size = int64(len(artifact))
 	descriptor.Artifact.DownloadURL = "/artifacts/meeting"
-	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Packages: []pluginspkg.PackageReference{reference}}
 	bundle := gzipTarArchive(t, map[string]string{
-		"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+		"notion/plugin.yaml": "id: notion\npackages:\n  - registry_id: memoh\n    package_id: notion\n",
 	})
 	entry := validSupermarketPluginEntry(manifest, bundle, descriptor)
+	packageJSON := supermarketPackageReleaseJSON(t, &entry.Release.Packages[0], descriptor)
 	releaseJSON := sealSupermarketPluginEntry(t, &entry)
 	entryJSON, err := json.Marshal(entry)
 	if err != nil {
@@ -71,6 +73,8 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 				content = entryJSON
 			case "/api/plugins/notion/releases/" + entry.Release.Revision:
 				content = releaseJSON
+			case registryPackageReleaseUpstreamPath(reference.RegistryID, reference.PackageID, entry.Release.Packages[0].Revision):
+				content = packageJSON
 			case "/api/artifacts/skill/" + digestText:
 				artifactRequestedDuringMutation = installer.mutationCalls > 0
 				content = artifact
@@ -95,17 +99,18 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
 	}, handler.InstallPlugin)
 	if err != nil {
-		t.Fatalf("InstallPlugin() error = %v", err)
+		t.Fatalf("InstallPlugin() error = %v, cause = %v", err, apperror.CauseOf(err))
 	}
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("InstallPlugin() status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	metadata, ok := installer.request.SkillArtifacts[pluginspkg.SkillReferenceIdentity(reference)]
+	installedSkill := pluginspkg.InstalledSkill{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	metadata, ok := installer.request.SkillArtifacts[pluginspkg.InstalledSkillIdentity(installedSkill)]
 	if !ok || metadata.ArtifactDigest != digestText || metadata.FilesWritten != 1 {
 		t.Fatalf("installed Skill metadata = %+v, %v", metadata, ok)
 	}
-	if metadata.RegistryRevision != entry.Release.Skills[0].RegistryRevision {
-		t.Fatalf("Registry revision = %q, want %q", metadata.RegistryRevision, entry.Release.Skills[0].RegistryRevision)
+	if metadata.PackageRevision != entry.Release.Packages[0].Revision {
+		t.Fatalf("Package revision = %q, want %q", metadata.PackageRevision, entry.Release.Packages[0].Revision)
 	}
 	if installer.request.Release.Revision != entry.Release.Revision ||
 		installer.request.Release.ArtifactDigest != entry.Release.Artifact.Digest {
@@ -119,6 +124,15 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	}
 	if slices.Contains(requestedPaths, "/api/registries/memoh/packages/notion/skills/meeting") {
 		t.Fatalf("Plugin installation queried the mutable Skill endpoint: %+v", requestedPaths)
+	}
+	packageReleasePath := registryPackageReleaseUpstreamPath(
+		reference.RegistryID, reference.PackageID, entry.Release.Packages[0].Revision,
+	)
+	if !slices.Contains(requestedPaths, packageReleasePath) {
+		t.Fatalf("Plugin installation did not fetch its immutable Package release: %+v", requestedPaths)
+	}
+	if slices.Contains(requestedPaths, registryPackageUpstreamPath(reference.RegistryID, reference.PackageID)) {
+		t.Fatalf("Plugin installation queried the mutable Package endpoint: %+v", requestedPaths)
 	}
 	sourcePath := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting", "SKILL.md")
 	if _, err := os.ReadFile(env.localPath(sourcePath)); err != nil {
@@ -265,22 +279,23 @@ func TestInstallPluginRollsBackSkillsWhenBundleInstallFails(t *testing.T) {
 	manager := workspace.NewManager(
 		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
 	)
-	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	reference := pluginspkg.PackageReference{RegistryID: "memoh", PackageID: "notion"}
 	artifact := validSkillArtifact(t)
 	digest := sha256.Sum256(artifact)
 	descriptor := validRegistrySkillDescriptor()
 	descriptor.RegistryID = reference.RegistryID
 	descriptor.PackageID = reference.PackageID
-	descriptor.SkillID = reference.SkillID
+	descriptor.SkillID = "meeting"
 	descriptor.InstallID = "memoh+notion+meeting"
 	descriptor.Artifact.Digest = hex.EncodeToString(digest[:])
 	descriptor.Artifact.Size = int64(len(artifact))
 	descriptor.Artifact.DownloadURL = "/artifacts/meeting"
-	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Packages: []pluginspkg.PackageReference{reference}}
 	bundle := gzipTarArchive(t, map[string]string{
-		"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+		"notion/plugin.yaml": "id: notion\npackages:\n  - registry_id: memoh\n    package_id: notion\n",
 	})
 	entry := validSupermarketPluginEntry(manifest, bundle, descriptor)
+	packageJSON := supermarketPackageReleaseJSON(t, &entry.Release.Packages[0], descriptor)
 	releaseJSON := sealSupermarketPluginEntry(t, &entry)
 	entryJSON, err := json.Marshal(entry)
 	if err != nil {
@@ -297,10 +312,12 @@ func TestInstallPluginRollsBackSkillsWhenBundleInstallFails(t *testing.T) {
 				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
 			case "/api/plugins/notion/releases/" + entry.Release.Revision:
 				return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
+			case registryPackageReleaseUpstreamPath(reference.RegistryID, reference.PackageID, entry.Release.Packages[0].Revision):
+				return testHTTPResponse(req, http.StatusOK, packageJSON), nil
 			case "/api/registries/memoh/packages/notion/skills/meeting":
 				requestedMutableSkill = true
 				return testHTTPResponse(req, http.StatusInternalServerError, nil), nil
-			case "/api/artifacts/skill/" + entry.Release.Skills[0].Artifact.Digest:
+			case "/api/artifacts/skill/" + descriptor.Artifact.Digest:
 				return testHTTPResponse(req, http.StatusOK, artifact), nil
 			case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
 				return testHTTPResponse(req, http.StatusOK, bundle), nil
@@ -339,21 +356,22 @@ func TestInstallPluginRestoresPreviousWorkspaceWhenDatabaseInstallFails(t *testi
 	manager := workspace.NewManager(
 		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
 	)
-	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	reference := pluginspkg.PackageReference{RegistryID: "memoh", PackageID: "notion"}
 	skillArtifact := validSkillArtifact(t)
 	skillDigest := sha256.Sum256(skillArtifact)
 	descriptor := validRegistrySkillDescriptor()
 	descriptor.RegistryID = reference.RegistryID
 	descriptor.PackageID = reference.PackageID
-	descriptor.SkillID = reference.SkillID
+	descriptor.SkillID = "meeting"
 	descriptor.InstallID = "memoh+notion+meeting"
 	descriptor.Artifact.Digest = hex.EncodeToString(skillDigest[:])
 	descriptor.Artifact.Size = int64(len(skillArtifact))
-	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Packages: []pluginspkg.PackageReference{reference}}
 	bundle := gzipTarArchive(t, map[string]string{
-		"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+		"notion/plugin.yaml": "id: notion\npackages:\n  - registry_id: memoh\n    package_id: notion\n",
 	})
 	entry := validSupermarketPluginEntry(manifest, bundle, descriptor)
+	packageJSON := supermarketPackageReleaseJSON(t, &entry.Release.Packages[0], descriptor)
 	releaseJSON := sealSupermarketPluginEntry(t, &entry)
 	entryJSON, err := json.Marshal(entry)
 	if err != nil {
@@ -374,6 +392,8 @@ func TestInstallPluginRestoresPreviousWorkspaceWhenDatabaseInstallFails(t *testi
 				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
 			case "/api/plugins/notion/releases/" + entry.Release.Revision:
 				return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
+			case registryPackageReleaseUpstreamPath(reference.RegistryID, reference.PackageID, entry.Release.Packages[0].Revision):
+				return testHTTPResponse(req, http.StatusOK, packageJSON), nil
 			case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
 				return testHTTPResponse(req, http.StatusOK, bundle), nil
 			case "/api/artifacts/skill/" + descriptor.Artifact.Digest:
@@ -390,10 +410,15 @@ func TestInstallPluginRestoresPreviousWorkspaceWhenDatabaseInstallFails(t *testi
 		logger:         slog.New(slog.DiscardHandler),
 	}
 
-	if _, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
+	_, installErr := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
-	}, handler.InstallPlugin); err == nil {
+	}, handler.InstallPlugin)
+	if installErr == nil {
 		t.Fatal("InstallPlugin() succeeded after database failure")
+	}
+	var httpErr *echo.HTTPError
+	if !errors.As(installErr, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("InstallPlugin() error = %v, want original HTTP 400 after successful rollback", installErr)
 	}
 	if got, err := os.ReadFile(env.localPath(skillPath)); err != nil || string(got) != oldSkill {
 		t.Fatalf("previous Skill was not restored: content=%q error=%v", got, err)
@@ -433,22 +458,23 @@ func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *tes
 			manager := workspace.NewManager(
 				slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
 			)
-			reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+			reference := pluginspkg.PackageReference{RegistryID: "memoh", PackageID: "notion"}
 			skillArtifact := validSkillArtifact(t)
 			skillDigest := sha256.Sum256(skillArtifact)
 			descriptor := validRegistrySkillDescriptor()
 			descriptor.RegistryID = reference.RegistryID
 			descriptor.PackageID = reference.PackageID
-			descriptor.SkillID = reference.SkillID
+			descriptor.SkillID = "meeting"
 			descriptor.InstallID = "memoh+notion+meeting"
 			descriptor.Artifact.Digest = hex.EncodeToString(skillDigest[:])
 			descriptor.Artifact.Size = int64(len(skillArtifact))
 			descriptor.Artifact.DownloadURL = "/artifacts/meeting"
-			manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+			manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Packages: []pluginspkg.PackageReference{reference}}
 			bundle := gzipTarArchive(t, map[string]string{
-				"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+				"notion/plugin.yaml": "id: notion\npackages:\n  - registry_id: memoh\n    package_id: notion\n",
 			})
 			entry := validSupermarketPluginEntry(manifest, bundle, descriptor)
+			packageJSON := supermarketPackageReleaseJSON(t, &entry.Release.Packages[0], descriptor)
 			test.mutate(&entry.Release.Artifact)
 			releaseJSON := sealSupermarketPluginEntry(t, &entry)
 			entryJSON, err := json.Marshal(entry)
@@ -464,9 +490,11 @@ func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *tes
 						return testHTTPResponse(req, http.StatusOK, entryJSON), nil
 					case "/api/plugins/notion/releases/" + entry.Release.Revision:
 						return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
+					case registryPackageReleaseUpstreamPath(reference.RegistryID, reference.PackageID, entry.Release.Packages[0].Revision):
+						return testHTTPResponse(req, http.StatusOK, packageJSON), nil
 					case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
 						return testHTTPResponse(req, http.StatusOK, bundle), nil
-					case "/api/artifacts/skill/" + entry.Release.Skills[0].Artifact.Digest:
+					case "/api/artifacts/skill/" + descriptor.Artifact.Digest:
 						skillArtifactRequested = true
 						return testHTTPResponse(req, http.StatusOK, skillArtifact), nil
 					default:
@@ -497,31 +525,31 @@ func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *tes
 	}
 }
 
-func TestValidateSupermarketPluginEntryRejectsSkillLockMismatch(t *testing.T) {
-	reference := pluginspkg.SkillReference{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
-	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Skills: []pluginspkg.SkillReference{reference}}
+func TestValidateSupermarketPluginEntryRejectsPackageLockMismatch(t *testing.T) {
+	reference := pluginspkg.PackageReference{RegistryID: "memoh", PackageID: "notion"}
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Packages: []pluginspkg.PackageReference{reference}}
 	bundle := gzipTarArchive(t, map[string]string{
-		"notion/plugin.yaml": "id: notion\nskills:\n  - registry_id: memoh\n    package_id: notion\n    skill_id: meeting\n",
+		"notion/plugin.yaml": "id: notion\npackages:\n  - registry_id: memoh\n    package_id: notion\n",
 	})
 	skill := validRegistrySkillDescriptor()
 	skill.RegistryID = reference.RegistryID
 	skill.PackageID = reference.PackageID
-	skill.SkillID = reference.SkillID
+	skill.SkillID = "meeting"
 	skill.InstallID = "memoh+notion+meeting"
 	entry := validSupermarketPluginEntry(manifest, bundle, skill)
-	entry.Release.Skills[0].SkillID = "other"
+	entry.Release.Packages[0].PackageID = "other"
 
 	if err := validateSupermarketPluginEntry(entry, "notion", manifest); err == nil {
-		t.Fatal("validateSupermarketPluginEntry() accepted a Skill lock that differs from plugin.yaml")
+		t.Fatal("validateSupermarketPluginEntry() accepted a Package lock that differs from plugin.yaml")
 	}
 }
 
-func TestPreparePluginSkillsEnforcesReleaseBudgets(t *testing.T) {
+func TestPreparePluginPackagesEnforcesReleaseLimit(t *testing.T) {
 	handler := &SupermarketHandler{}
-	if _, _, err := handler.preparePluginSkills(
-		context.Background(), "linux", make([]SupermarketPluginResolvedSkill, maxPluginReleaseSkills+1),
-	); err == nil || !strings.Contains(err.Error(), "Skill limit") {
-		t.Fatalf("preparePluginSkills() error = %v, want Skill limit", err)
+	if _, _, err := handler.resolvePluginPackages(
+		context.Background(), make([]SupermarketPluginResolvedPackage, maxPluginReleasePackages+1),
+	); err == nil || !strings.Contains(err.Error(), "Package limit") {
+		t.Fatalf("preparePluginPackages() error = %v, want Package limit", err)
 	}
 	budget := pluginSkillArtifactBudget{uncompressedBytes: maxPluginSkillArtifactsUncompressedBytes - 1}
 	if err := budget.add(SupermarketSkillArtifact{
@@ -533,26 +561,27 @@ func TestPreparePluginSkillsEnforcesReleaseBudgets(t *testing.T) {
 
 func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion"}
+	manager := workspace.NewManager(
+		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+	)
+	reference := pluginspkg.PackageReference{RegistryID: "memoh", PackageID: "notion"}
+	manifest := pluginspkg.Manifest{ID: "notion", Name: "Notion", Packages: []pluginspkg.PackageReference{reference}}
 	skills := make([]SupermarketCatalogSkill, 0, 26)
 	for index := 0; index < 26; index++ {
 		skillID := fmt.Sprintf("skill-%02d", index)
-		reference := pluginspkg.SkillReference{
-			RegistryID: "memoh",
-			PackageID:  "notion",
-			SkillID:    skillID,
-		}
-		manifest.Skills = append(manifest.Skills, reference)
 		skill := validRegistrySkillDescriptor()
 		skill.RegistryID = reference.RegistryID
 		skill.PackageID = reference.PackageID
-		skill.SkillID = reference.SkillID
-		skill.InstallID = strings.Join([]string{reference.RegistryID, reference.PackageID, reference.SkillID}, "+")
+		skill.SkillID = skillID
+		skill.InstallID = strings.Join([]string{reference.RegistryID, reference.PackageID, skillID}, "+")
 		skill.Artifact.UncompressedSize = maxRegistrySkillArtifactUncompressedBytes
 		skills = append(skills, skill)
 	}
-	bundle := gzipTarArchive(t, map[string]string{"notion/plugin.yaml": "id: notion\n"})
+	bundle := gzipTarArchive(t, map[string]string{
+		"notion/plugin.yaml": "id: notion\npackages:\n  - registry_id: memoh\n    package_id: notion\n",
+	})
 	entry := validSupermarketPluginEntry(manifest, bundle, skills...)
+	packageJSON := supermarketPackageReleaseJSON(t, &entry.Release.Packages[0], skills...)
 	releaseJSON := sealSupermarketPluginEntry(t, &entry)
 	entryJSON, err := json.Marshal(entry)
 	if err != nil {
@@ -567,12 +596,16 @@ func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testin
 				return testHTTPResponse(req, http.StatusOK, entryJSON), nil
 			case "/api/plugins/notion/releases/" + entry.Release.Revision:
 				return testHTTPResponse(req, http.StatusOK, releaseJSON), nil
+			case registryPackageReleaseUpstreamPath(reference.RegistryID, reference.PackageID, entry.Release.Packages[0].Revision):
+				return testHTTPResponse(req, http.StatusOK, packageJSON), nil
 			default:
 				artifactRequested = true
 				return testHTTPResponse(req, http.StatusOK, bundle), nil
 			}
 		})},
 		pluginService:  &recordingPluginInstaller{},
+		containers:     manager,
+		workspaces:     manager,
 		botService:     env.handler.botService,
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
@@ -678,23 +711,13 @@ func TestFetchPluginEntryRejectsCrossOriginMetadataRedirect(t *testing.T) {
 func validSupermarketPluginEntry(
 	manifest pluginspkg.Manifest,
 	bundle []byte,
-	skills ...SupermarketCatalogSkill,
+	_ ...SupermarketCatalogSkill,
 ) SupermarketPluginEntry {
 	digest := sha256.Sum256(bundle)
-	resolved := make([]SupermarketPluginResolvedSkill, 0, len(skills))
-	for _, skill := range skills {
-		sourceRevision := skill.Source.Revision
-		if sourceRevision == "" {
-			sourceRevision = "source-revision"
-		}
-		resolved = append(resolved, SupermarketPluginResolvedSkill{
-			RegistryID:       skill.RegistryID,
-			PackageID:        skill.PackageID,
-			SkillID:          skill.SkillID,
-			RegistryRevision: strings.Repeat("b", 64),
-			SourceRevision:   sourceRevision,
-			InstallID:        skill.InstallID,
-			Artifact:         skill.Artifact,
+	resolved := make([]SupermarketPluginResolvedPackage, 0, len(manifest.Packages))
+	for _, pkg := range manifest.Packages {
+		resolved = append(resolved, SupermarketPluginResolvedPackage{
+			RegistryID: pkg.RegistryID, PackageID: pkg.PackageID, Revision: strings.Repeat("b", 64),
 		})
 	}
 	return SupermarketPluginEntry{
@@ -709,7 +732,7 @@ func validSupermarketPluginEntry(
 				ContentType: "application/gzip",
 				DownloadURL: "/artifacts/plugin",
 			},
-			Skills: resolved,
+			Packages: resolved,
 		},
 	}
 }
@@ -720,18 +743,46 @@ func sealSupermarketPluginEntry(t *testing.T, entry *SupermarketPluginEntry) []b
 		SchemaVersion: "1",
 		Plugin:        entry.Manifest,
 		Artifact:      entry.Release.Artifact,
-		Skills:        append([]SupermarketPluginResolvedSkill(nil), entry.Release.Skills...),
+		Packages:      append([]SupermarketPluginResolvedPackage(nil), entry.Release.Packages...),
 	}
 	release.Artifact.DownloadURL = ""
-	for index := range release.Skills {
-		release.Skills[index].Artifact.DownloadURL = ""
-	}
 	payload, err := json.Marshal(release)
 	if err != nil {
 		t.Fatalf("marshal immutable Plugin release: %v", err)
 	}
 	digest := sha256.Sum256(payload)
 	entry.Release.Revision = hex.EncodeToString(digest[:])
+	return payload
+}
+
+func supermarketPackageReleaseJSON(
+	t *testing.T,
+	resolved *SupermarketPluginResolvedPackage,
+	skills ...SupermarketCatalogSkill,
+) []byte {
+	t.Helper()
+	members := make([]supermarketSkillPackageReleaseSkill, 0, len(skills))
+	for _, skill := range skills {
+		members = append(members, supermarketSkillPackageReleaseSkill{
+			SchemaVersion: skill.SchemaVersion, RegistryID: skill.RegistryID, PackageID: skill.PackageID,
+			SkillID: skill.SkillID, InstallID: skill.InstallID, Name: skill.Name,
+			Description: skill.Description, Author: skill.Author, Homepage: skill.Homepage,
+			Tags: skill.Tags, Category: skill.Category, CategoryName: skill.CategoryName,
+			SourceCategory: skill.SourceCategory, Files: skill.Files, Icon: skill.Icon, Artifact: skill.Artifact,
+		})
+	}
+	release := SupermarketSkillPackageRelease{
+		SchemaVersion: "1", RegistryID: resolved.RegistryID, PackageID: resolved.PackageID,
+		Name: resolved.PackageID, Description: resolved.PackageID, Tags: []string{},
+		Skills: members,
+	}
+	payload, err := json.MarshalIndent(release, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal immutable Package release: %v", err)
+	}
+	payload = append(payload, '\n')
+	digest := sha256.Sum256(payload)
+	resolved.Revision = hex.EncodeToString(digest[:])
 	return payload
 }
 
@@ -1039,9 +1090,9 @@ func TestInstallPluginBundleRejectsMissingDownload(t *testing.T) {
 	}
 }
 
-func TestInstallPluginBundleRejectsManifestSkillMismatch(t *testing.T) {
+func TestInstallPluginBundleRejectsManifestPackageMismatch(t *testing.T) {
 	bundle := gzipTarArchive(t, map[string]string{
-		"github/plugin.yaml": "id: github\nskills:\n  - registry_id: memoh\n    package_id: github\n    skill_id: review\n",
+		"github/plugin.yaml": "id: github\npackages:\n  - registry_id: memoh\n    package_id: github\n",
 	})
 	handler := &SupermarketHandler{
 		baseURL: "https://supermarket.example",
@@ -1051,14 +1102,14 @@ func TestInstallPluginBundleRejectsManifestSkillMismatch(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler),
 	}
 	writer := &pluginBundleTestWriter{files: map[string]string{}}
-	expected := []pluginspkg.SkillReference{{RegistryID: "memoh", PackageID: "github", SkillID: "issues"}}
+	expected := []pluginspkg.PackageReference{{RegistryID: "memoh", PackageID: "issues"}}
 	digest := sha256.Sum256(bundle)
 	artifact := SupermarketPluginArtifact{
 		Format: "memoh_plugin_v1", Digest: hex.EncodeToString(digest[:]), Size: int64(len(bundle)),
 		ContentType: "application/gzip", DownloadURL: "/artifacts/plugin",
 	}
 	if _, err := handler.installPluginBundle(context.Background(), writer, "linux", "github", "github", artifact, expected); err == nil {
-		t.Fatal("installPluginBundle() accepted mismatched Skill references")
+		t.Fatal("installPluginBundle() accepted mismatched Package references")
 	}
 	if len(writer.renames) != 0 || len(writer.deletes) != 0 || len(writer.dirs) != 0 {
 		t.Fatalf("workspace mutated before manifest consistency check: %+v", writer)

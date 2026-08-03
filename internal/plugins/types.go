@@ -60,17 +60,22 @@ type MCPResource struct {
 	Capabilities []string    `json:"capabilities,omitempty"`
 }
 
-type SkillReference struct {
+type PackageReference struct {
+	RegistryID string `json:"registry_id" validate:"required"`
+	PackageID  string `json:"package_id" validate:"required"`
+}
+
+type InstalledSkill struct {
 	RegistryID string `json:"registry_id"`
 	PackageID  string `json:"package_id"`
 	SkillID    string `json:"skill_id"`
 }
 
 type SkillArtifactMetadata struct {
-	RegistryRevision string `json:"registry_revision,omitempty"`
-	InstallID        string `json:"install_id,omitempty"`
-	ArtifactDigest   string `json:"artifact_digest,omitempty"`
-	FilesWritten     int    `json:"files_written,omitempty"`
+	PackageRevision string `json:"package_revision,omitempty"`
+	InstallID       string `json:"install_id,omitempty"`
+	ArtifactDigest  string `json:"artifact_digest,omitempty"`
+	FilesWritten    int    `json:"files_written,omitempty"`
 }
 
 type ReleaseMetadata struct {
@@ -110,26 +115,27 @@ func (c InstallCommands) MarshalJSON() ([]byte, error) {
 }
 
 type Manifest struct {
-	SchemaVersion    string            `json:"schema_version,omitempty"`
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Version          string            `json:"version,omitempty"`
-	Description      string            `json:"description,omitempty"`
-	Author           Author            `json:"author"`
-	Icon             *Icon             `json:"icon,omitempty"`
-	Homepage         string            `json:"homepage,omitempty"`
-	Tags             []string          `json:"tags,omitempty"`
-	Capabilities     []string          `json:"capabilities,omitempty"`
-	Install          InstallCommands   `json:"install,omitempty"`
-	Variables        []ConfigVar       `json:"variables,omitempty"`
-	AuthRequirements []AuthRequirement `json:"auth_requirements,omitempty"`
-	MCPs             []MCPResource     `json:"mcps,omitempty"`
-	Skills           []SkillReference  `json:"skills,omitempty"`
+	SchemaVersion    string             `json:"schema_version,omitempty"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Version          string             `json:"version,omitempty"`
+	Description      string             `json:"description,omitempty"`
+	Author           Author             `json:"author"`
+	Icon             *Icon              `json:"icon,omitempty"`
+	Homepage         string             `json:"homepage,omitempty"`
+	Tags             []string           `json:"tags,omitempty"`
+	Capabilities     []string           `json:"capabilities,omitempty"`
+	Install          InstallCommands    `json:"install,omitempty"`
+	Variables        []ConfigVar        `json:"variables,omitempty"`
+	AuthRequirements []AuthRequirement  `json:"auth_requirements,omitempty"`
+	MCPs             []MCPResource      `json:"mcps,omitempty"`
+	Packages         []PackageReference `json:"packages,omitempty"`
 }
 
 type InstallRequest struct {
 	Manifest          Manifest                         `json:"manifest"`
 	Variables         map[string]string                `json:"variables,omitempty"`
+	InstalledSkills   []InstalledSkill                 `json:"-"`
 	SkillArtifacts    map[string]SkillArtifactMetadata `json:"-"`
 	Release           ReleaseMetadata                  `json:"-"`
 	WorkspaceTargetID string                           `json:"-"`

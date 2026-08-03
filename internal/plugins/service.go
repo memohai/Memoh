@@ -153,13 +153,16 @@ func (s *Service) install(
 	if manifest.ID == "" {
 		return Installation{}, errors.New("plugin id is required")
 	}
-	if err := ValidateSkillReferences(manifest.Skills); err != nil {
+	if err := ValidatePackageReferences(manifest.Packages); err != nil {
+		return Installation{}, err
+	}
+	if err := validateInstalledSkills(manifest.Packages, req.InstalledSkills); err != nil {
 		return Installation{}, err
 	}
 	if err := validateReleaseMetadata(req.Release); err != nil {
 		return Installation{}, err
 	}
-	if err := validateSkillArtifacts(manifest.Skills, req.SkillArtifacts); err != nil {
+	if err := validateSkillArtifacts(req.InstalledSkills, req.SkillArtifacts); err != nil {
 		return Installation{}, err
 	}
 	if manifest.Name == "" {
@@ -240,12 +243,12 @@ func (s *Service) install(
 		}
 	}
 
-	for _, resource := range manifest.Skills {
+	for _, resource := range req.InstalledSkills {
 		dirPath, err := skillset.SkillDirForIDs(resource.RegistryID, resource.PackageID, resource.SkillID)
 		if err != nil {
-			return Installation{}, fmt.Errorf("plugin Skill reference %q is invalid", SkillReferenceIdentity(resource))
+			return Installation{}, fmt.Errorf("installed Plugin Skill %q is invalid", InstalledSkillIdentity(resource))
 		}
-		identity := SkillReferenceIdentity(resource)
+		identity := InstalledSkillIdentity(resource)
 		metadata := map[string]any{
 			"registry_id": resource.RegistryID,
 			"package_id":  resource.PackageID,
@@ -255,7 +258,7 @@ func (s *Service) install(
 			metadata["workspace_target_id"] = workspaceTargetID
 		}
 		if artifact, ok := req.SkillArtifacts[identity]; ok {
-			metadata["registry_revision"] = artifact.RegistryRevision
+			metadata["package_revision"] = artifact.PackageRevision
 			metadata["install_id"] = artifact.InstallID
 			metadata["artifact_digest"] = artifact.ArtifactDigest
 			metadata["files_written"] = artifact.FilesWritten
@@ -822,10 +825,9 @@ func normalizeManifest(manifest Manifest) Manifest {
 			manifest.MCPs[i].Name = manifest.MCPs[i].DisplayName
 		}
 	}
-	for i := range manifest.Skills {
-		manifest.Skills[i].RegistryID = strings.TrimSpace(manifest.Skills[i].RegistryID)
-		manifest.Skills[i].PackageID = strings.TrimSpace(manifest.Skills[i].PackageID)
-		manifest.Skills[i].SkillID = strings.TrimSpace(manifest.Skills[i].SkillID)
+	for i := range manifest.Packages {
+		manifest.Packages[i].RegistryID = strings.TrimSpace(manifest.Packages[i].RegistryID)
+		manifest.Packages[i].PackageID = strings.TrimSpace(manifest.Packages[i].PackageID)
 	}
 	return manifest
 }
@@ -1156,23 +1158,62 @@ var (
 	templateVarPattern    = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 )
 
-func SkillReferenceIdentity(reference SkillReference) string {
-	return reference.RegistryID + "/" + reference.PackageID + "/" + reference.SkillID
+func PackageReferenceIdentity(reference PackageReference) string {
+	return reference.RegistryID + "/" + reference.PackageID
 }
 
-func ValidateSkillReferences(references []SkillReference) error {
+func ValidatePackageReferences(references []PackageReference) error {
 	seen := make(map[string]struct{}, len(references))
 	for _, reference := range references {
-		identity := SkillReferenceIdentity(reference)
+		identity := PackageReferenceIdentity(reference)
 		if !skillset.IsValidRegistryID(reference.RegistryID) ||
-			!skillset.IsValidRegistryComponent(reference.PackageID) ||
-			!skillset.IsValidRegistryComponent(reference.SkillID) {
-			return fmt.Errorf("plugin Skill reference %q is invalid", identity)
+			!skillset.IsValidRegistryComponent(reference.PackageID) {
+			return fmt.Errorf("plugin Package reference %q is invalid", identity)
 		}
 		if _, ok := seen[identity]; ok {
-			return fmt.Errorf("plugin Skill reference %q is duplicated", identity)
+			return fmt.Errorf("plugin Package reference %q is duplicated", identity)
 		}
 		seen[identity] = struct{}{}
+	}
+	return nil
+}
+
+func InstalledSkillIdentity(skill InstalledSkill) string {
+	return skill.RegistryID + "/" + skill.PackageID + "/" + skill.SkillID
+}
+
+func validateInstalledSkills(packages []PackageReference, skills []InstalledSkill) error {
+	allowed := make(map[string]struct{}, len(packages))
+	counts := make(map[string]int, len(packages))
+	for _, reference := range packages {
+		identity := PackageReferenceIdentity(reference)
+		allowed[identity] = struct{}{}
+		counts[identity] = 0
+	}
+	seen := make(map[string]struct{}, len(skills))
+	for _, skill := range skills {
+		identity := InstalledSkillIdentity(skill)
+		if !skillset.IsValidRegistryID(skill.RegistryID) ||
+			!skillset.IsValidRegistryComponent(skill.PackageID) ||
+			!skillset.IsValidRegistryComponent(skill.SkillID) {
+			return fmt.Errorf("installed Plugin Skill %q is invalid", identity)
+		}
+		packageIdentity := PackageReferenceIdentity(PackageReference{
+			RegistryID: skill.RegistryID, PackageID: skill.PackageID,
+		})
+		if _, ok := allowed[packageIdentity]; !ok {
+			return fmt.Errorf("installed Plugin Skill %q does not belong to a referenced Package", identity)
+		}
+		if _, ok := seen[identity]; ok {
+			return fmt.Errorf("installed Plugin Skill %q is duplicated", identity)
+		}
+		seen[identity] = struct{}{}
+		counts[packageIdentity]++
+	}
+	for identity, count := range counts {
+		if count == 0 {
+			return fmt.Errorf("plugin Package %q installed no Skills", identity)
+		}
 	}
 	return nil
 }
@@ -1188,15 +1229,15 @@ func validateReleaseMetadata(release ReleaseMetadata) error {
 	return nil
 }
 
-func validateSkillArtifacts(references []SkillReference, artifacts map[string]SkillArtifactMetadata) error {
-	for _, reference := range references {
-		identity := SkillReferenceIdentity(reference)
+func validateSkillArtifacts(skills []InstalledSkill, artifacts map[string]SkillArtifactMetadata) error {
+	for _, skill := range skills {
+		identity := InstalledSkillIdentity(skill)
 		artifact, ok := artifacts[identity]
 		if !ok {
 			return fmt.Errorf("plugin Skill %q was not installed", identity)
 		}
-		expectedInstallID := strings.Join([]string{reference.RegistryID, reference.PackageID, reference.SkillID}, "+")
-		if !artifactDigestPattern.MatchString(artifact.RegistryRevision) ||
+		expectedInstallID := strings.Join([]string{skill.RegistryID, skill.PackageID, skill.SkillID}, "+")
+		if !artifactDigestPattern.MatchString(artifact.PackageRevision) ||
 			artifact.InstallID != expectedInstallID ||
 			!artifactDigestPattern.MatchString(artifact.ArtifactDigest) ||
 			artifact.FilesWritten < 1 {
