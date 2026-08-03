@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,164 +34,41 @@ const (
 
 var registryPackagePreparationTokens = make(chan struct{}, maxConcurrentRegistryPackagePreparations)
 
-type SupermarketRegistryListResponse struct {
-	Data []SupermarketRegistry `json:"data" validate:"required"`
-}
+type SupermarketRegistryListResponse = supermarketclient.RegistryListResponse
 
-type SupermarketRegistry struct {
-	ID                  string `json:"id" validate:"required"`
-	Name                string `json:"name" validate:"required"`
-	Enabled             bool   `json:"enabled" validate:"required"`
-	Priority            int    `json:"priority" validate:"required"`
-	Adapter             string `json:"adapter" validate:"required"`
-	Revision            string `json:"revision,omitempty"`
-	PublishedAt         string `json:"published_at,omitempty"`
-	SkillCount          int    `json:"skill_count" validate:"required"`
-	PackageCount        int    `json:"package_count" validate:"required"`
-	CategoryCount       int    `json:"category_count" validate:"required"`
-	SkippedPackageCount int    `json:"skipped_package_count" validate:"required"`
-}
+type SupermarketRegistry = supermarketclient.Registry
 
-type SupermarketSkillCategoryListResponse struct {
-	Data []SupermarketSkillCategory `json:"data" validate:"required"`
-}
+type SupermarketSkillCategoryListResponse = supermarketclient.SkillCategoryListResponse
 
-type SupermarketSkillCategoryRegistry struct {
-	ID    string `json:"id" validate:"required"`
-	Count int    `json:"count" validate:"required"`
-}
+type SupermarketSkillCategoryRegistry = supermarketclient.SkillCategoryRegistry
 
-type SupermarketSkillCategory struct {
-	ID         string                             `json:"id" validate:"required"`
-	Name       string                             `json:"name" validate:"required"`
-	Count      int                                `json:"count" validate:"required"`
-	Registries []SupermarketSkillCategoryRegistry `json:"registries" validate:"required"`
-}
+type SupermarketSkillCategory = supermarketclient.SkillCategory
 
-type SupermarketSkillSource struct {
-	Type       string `json:"type" validate:"required"`
-	Revision   string `json:"revision" validate:"required"`
-	Path       string `json:"path" validate:"required"`
-	Repository string `json:"repository,omitempty"`
-}
+type SupermarketSkillSource = supermarketclient.SkillSource
 
-type SupermarketSkillArtifact struct {
-	Format           string `json:"format" validate:"required"`
-	Digest           string `json:"digest" validate:"required"`
-	Size             int64  `json:"size" validate:"required"`
-	UncompressedSize int64  `json:"uncompressed_size" validate:"required"`
-	ArchiveSize      int64  `json:"archive_size" validate:"required"`
-	FileCount        int    `json:"file_count" validate:"required"`
-	ContentType      string `json:"content_type" validate:"required"`
-	DownloadURL      string `json:"download_url" validate:"required"`
-}
+type SupermarketSkillArtifact = supermarketclient.SkillArtifact
 
-type supermarketArtifactDownloadDescriptor struct {
-	Digest      string
-	Size        int64
-	DownloadURL string
-}
+type supermarketArtifactDownloadDescriptor = supermarketclient.ArtifactDownloadDescriptor
 
-type SupermarketSkillIconAsset struct {
-	Digest      string `json:"digest" validate:"required"`
-	Size        int64  `json:"size" validate:"required"`
-	ContentType string `json:"content_type" validate:"required"`
-}
+type SupermarketSkillIconAsset = supermarketclient.SkillIconAsset
 
-type SupermarketSkillIcon struct {
-	Card       *SupermarketSkillIconAsset `json:"card,omitempty"`
-	Detail     *SupermarketSkillIconAsset `json:"detail,omitempty"`
-	Dark       *SupermarketSkillIconAsset `json:"dark,omitempty"`
-	BrandColor string                     `json:"brand_color,omitempty"`
-}
+type SupermarketSkillIcon = supermarketclient.SkillIcon
 
-type SupermarketCatalogSkill struct {
-	SchemaVersion  string                   `json:"schema_version" validate:"required"`
-	RegistryID     string                   `json:"registry_id" validate:"required"`
-	PackageID      string                   `json:"package_id" validate:"required"`
-	SkillID        string                   `json:"skill_id" validate:"required"`
-	InstallID      string                   `json:"install_id" validate:"required"`
-	Name           string                   `json:"name" validate:"required"`
-	Description    string                   `json:"description" validate:"required"`
-	Author         SupermarketAuthor        `json:"author" validate:"required"`
-	Homepage       string                   `json:"homepage,omitempty"`
-	Tags           []string                 `json:"tags" validate:"required"`
-	Category       string                   `json:"category" validate:"required"`
-	CategoryName   string                   `json:"category_name" validate:"required"`
-	SourceCategory string                   `json:"source_category,omitempty"`
-	Source         SupermarketSkillSource   `json:"source" validate:"required"`
-	Files          []string                 `json:"files" validate:"required"`
-	Icon           *SupermarketSkillIcon    `json:"icon,omitempty"`
-	Artifact       SupermarketSkillArtifact `json:"artifact" validate:"required"`
-}
+type SupermarketCatalogSkill = supermarketclient.CatalogSkill
 
-type SupermarketCatalogSkillListResponse struct {
-	Total int                       `json:"total" validate:"required"`
-	Page  int                       `json:"page" validate:"required"`
-	Limit int                       `json:"limit" validate:"required"`
-	Data  []SupermarketCatalogSkill `json:"data" validate:"required"`
-}
+type SupermarketCatalogSkillListResponse = supermarketclient.CatalogSkillListResponse
 
-type SupermarketSkillPackageCategory struct {
-	ID         string `json:"id" validate:"required"`
-	Name       string `json:"name" validate:"required"`
-	SkillCount int    `json:"skill_count" validate:"required"`
-}
+type SupermarketSkillPackageCategory = supermarketclient.SkillPackageCategory
 
-type SupermarketSkillPackageSummary struct {
-	SchemaVersion string                            `json:"schema_version" validate:"required"`
-	RegistryID    string                            `json:"registry_id" validate:"required"`
-	PackageID     string                            `json:"package_id" validate:"required"`
-	Name          string                            `json:"name" validate:"required"`
-	Description   string                            `json:"description" validate:"required"`
-	Tags          []string                          `json:"tags" validate:"required"`
-	Categories    []SupermarketSkillPackageCategory `json:"categories" validate:"required"`
-	SkillCount    int                               `json:"skill_count" validate:"required"`
-	Icon          *SupermarketSkillIcon             `json:"icon,omitempty"`
-}
+type SupermarketSkillPackageSummary = supermarketclient.SkillPackageSummary
 
-type SupermarketSkillPackageDescriptor struct {
-	SupermarketSkillPackageSummary
-	Revision string                    `json:"revision" validate:"required"`
-	Skills   []SupermarketCatalogSkill `json:"skills" validate:"required"`
-}
+type SupermarketSkillPackageDescriptor = supermarketclient.SkillPackageDescriptor
 
-type supermarketSkillPackageReleaseSkill struct {
-	SchemaVersion  string                   `json:"schema_version"`
-	RegistryID     string                   `json:"registry_id"`
-	PackageID      string                   `json:"package_id"`
-	SkillID        string                   `json:"skill_id"`
-	InstallID      string                   `json:"install_id"`
-	Name           string                   `json:"name"`
-	Description    string                   `json:"description"`
-	Author         SupermarketAuthor        `json:"author"`
-	Homepage       string                   `json:"homepage,omitempty"`
-	Tags           []string                 `json:"tags"`
-	Category       string                   `json:"category"`
-	CategoryName   string                   `json:"category_name"`
-	SourceCategory string                   `json:"source_category,omitempty"`
-	Files          []string                 `json:"files"`
-	Icon           *SupermarketSkillIcon    `json:"icon,omitempty"`
-	Artifact       SupermarketSkillArtifact `json:"artifact"`
-}
+type supermarketSkillPackageReleaseSkill = supermarketclient.SkillPackageReleaseSkill
 
-type SupermarketSkillPackageRelease struct {
-	SchemaVersion string                                `json:"schema_version"`
-	RegistryID    string                                `json:"registry_id"`
-	PackageID     string                                `json:"package_id"`
-	Name          string                                `json:"name"`
-	Description   string                                `json:"description"`
-	Tags          []string                              `json:"tags"`
-	Icon          *SupermarketSkillIcon                 `json:"icon,omitempty"`
-	Skills        []supermarketSkillPackageReleaseSkill `json:"skills"`
-}
+type SupermarketSkillPackageRelease = supermarketclient.SkillPackageRelease
 
-type SupermarketSkillPackageListResponse struct {
-	Total int                              `json:"total" validate:"required"`
-	Page  int                              `json:"page" validate:"required"`
-	Limit int                              `json:"limit" validate:"required"`
-	Data  []SupermarketSkillPackageSummary `json:"data" validate:"required"`
-}
+type SupermarketSkillPackageListResponse = supermarketclient.SkillPackageListResponse
 
 type InstallRegistryPackageResponse struct {
 	OK                bool                           `json:"ok" validate:"required"`
@@ -792,72 +667,22 @@ func (h *SupermarketHandler) fetchRegistryPackageRelease(
 	ctx context.Context,
 	registryID, packageID, revision string,
 ) (SupermarketSkillPackageDescriptor, error) {
-	requestPath := registryPackageReleaseUpstreamPath(registryID, packageID, revision)
-	resp, err := h.upstream.Get(ctx, requestPath, "application/json")
-	if err != nil {
+	pkg, err := h.upstream.FetchPackageRelease(ctx, registryID, packageID, revision)
+	if err == nil {
+		return pkg, nil
+	}
+	switch supermarketclient.ErrorKindOf(err) {
+	case supermarketclient.ErrorNotFound:
+		return SupermarketSkillPackageDescriptor{}, apperror.New(apperror.CodeRegistryPackageNotFound, nil)
+	case supermarketclient.ErrorUnavailable:
 		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
 			apperror.CodeRegistryUnavailable, fmt.Errorf("fetch Registry Package release: %w", err), nil,
 		)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return SupermarketSkillPackageDescriptor{}, apperror.New(apperror.CodeRegistryPackageNotFound, nil)
-	}
-	if resp.StatusCode != http.StatusOK {
+	default:
 		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			fmt.Errorf("fetch Registry Package release: Supermarket returned status %d", resp.StatusCode), nil,
+			apperror.CodeRegistryPackageInvalid, fmt.Errorf("invalid Registry Package release: %w", err), nil,
 		)
 	}
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxRegistryPackageMetadataBytes+1))
-	if err != nil {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistryUnavailable, fmt.Errorf("read Registry Package release: %w", err), nil,
-		)
-	}
-	if len(payload) > maxRegistryPackageMetadataBytes {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistryPackageInvalid, errors.New("registry Package release is too large"), nil,
-		)
-	}
-	digest := sha256.Sum256(payload)
-	if hex.EncodeToString(digest[:]) != revision {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistryPackageInvalid, errors.New("registry Package release SHA-256 verification failed"), nil,
-		)
-	}
-	var release SupermarketSkillPackageRelease
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	if err := decoder.Decode(&release); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		return SupermarketSkillPackageDescriptor{}, apperror.Wrap(
-			apperror.CodeRegistryPackageInvalid, errors.New("registry Package release is malformed"), nil,
-		)
-	}
-	skills := make([]SupermarketCatalogSkill, 0, len(release.Skills))
-	for _, member := range release.Skills {
-		member.Artifact.DownloadURL = "/api/artifacts/skill/" + member.Artifact.Digest
-		skills = append(skills, SupermarketCatalogSkill{
-			SchemaVersion: member.SchemaVersion, RegistryID: member.RegistryID, PackageID: member.PackageID,
-			SkillID: member.SkillID, InstallID: member.InstallID, Name: member.Name,
-			Description: member.Description, Author: member.Author, Homepage: member.Homepage,
-			Tags: member.Tags, Category: member.Category, CategoryName: member.CategoryName,
-			SourceCategory: member.SourceCategory, Files: member.Files, Icon: member.Icon, Artifact: member.Artifact,
-		})
-	}
-	return SupermarketSkillPackageDescriptor{
-		SupermarketSkillPackageSummary: SupermarketSkillPackageSummary{
-			SchemaVersion: release.SchemaVersion,
-			RegistryID:    release.RegistryID,
-			PackageID:     release.PackageID,
-			Name:          release.Name,
-			Description:   release.Description,
-			Tags:          release.Tags,
-			SkillCount:    len(release.Skills),
-			Icon:          release.Icon,
-		},
-		Revision: revision,
-		Skills:   skills,
-	}, nil
 }
 
 func validateRegistryPackage(pkg SupermarketSkillPackageDescriptor, registryID, packageID string) error {
@@ -954,63 +779,13 @@ func (h *SupermarketHandler) downloadSupermarketArtifact(
 	ctx context.Context,
 	artifact supermarketArtifactDownloadDescriptor,
 ) ([]byte, error) {
-	resp, err := h.upstream.GetArtifact(ctx, artifact.DownloadURL, "application/gzip")
-	if err != nil {
-		code := apperror.CodeRegistryUnavailable
-		if errors.Is(err, supermarketclient.ErrCrossOrigin) || errors.Is(err, supermarketclient.ErrRedirectLimit) {
-			code = apperror.CodeRegistryPackageInvalid
-		}
-		return nil, apperror.Wrap(code, fmt.Errorf("download Registry Skill Artifact: %w", err), nil)
+	content, err := h.upstream.DownloadArtifact(ctx, artifact)
+	if err == nil {
+		return content, nil
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistryPackageInvalid,
-			errors.New("registry skill artifact was not found"),
-			nil,
-		)
+	code := apperror.CodeRegistryPackageInvalid
+	if supermarketclient.ErrorKindOf(err) == supermarketclient.ErrorUnavailable {
+		code = apperror.CodeRegistryUnavailable
 	}
-	if resp.StatusCode != http.StatusOK {
-		code := apperror.CodeRegistryPackageInvalid
-		if resp.StatusCode >= http.StatusInternalServerError {
-			code = apperror.CodeRegistryUnavailable
-		}
-		return nil, apperror.Wrap(
-			code,
-			fmt.Errorf("download Registry Skill Artifact: Supermarket returned status %d", resp.StatusCode),
-			nil,
-		)
-	}
-	if resp.ContentLength >= 0 && resp.ContentLength != artifact.Size {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistryPackageInvalid,
-			errors.New("registry skill artifact content length does not match its descriptor"),
-			nil,
-		)
-	}
-
-	content, err := io.ReadAll(io.LimitReader(resp.Body, artifact.Size+1))
-	if err != nil {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistryUnavailable,
-			fmt.Errorf("read Registry Skill Artifact: %w", err),
-			nil,
-		)
-	}
-	if int64(len(content)) != artifact.Size {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistryPackageInvalid,
-			errors.New("registry skill artifact size does not match its descriptor"),
-			nil,
-		)
-	}
-	digest := sha256.Sum256(content)
-	if hex.EncodeToString(digest[:]) != artifact.Digest {
-		return nil, apperror.Wrap(
-			apperror.CodeRegistryPackageInvalid,
-			errors.New("registry skill artifact SHA-256 verification failed"),
-			nil,
-		)
-	}
-	return content, nil
+	return nil, apperror.Wrap(code, fmt.Errorf("download Registry Skill Artifact: %w", err), nil)
 }

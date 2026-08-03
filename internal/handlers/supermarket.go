@@ -487,50 +487,19 @@ func (h *SupermarketHandler) InstallPackage(c echo.Context) error {
 
 // --- Supermarket upstream types (for swagger) ---
 
-type SupermarketAuthor struct {
-	Name  string `json:"name" validate:"required"`
-	Email string `json:"email" validate:"required"`
-}
+type SupermarketAuthor = supermarketclient.Author
 
-type SupermarketPluginArtifact struct {
-	Format      string `json:"format" validate:"required"`
-	Digest      string `json:"digest" validate:"required"`
-	Size        int64  `json:"size" validate:"required"`
-	ContentType string `json:"content_type" validate:"required"`
-	DownloadURL string `json:"download_url" validate:"required"`
-}
+type SupermarketPluginArtifact = supermarketclient.PluginArtifact
 
-type SupermarketPluginResolvedPackage struct {
-	RegistryID string `json:"registry_id" validate:"required"`
-	PackageID  string `json:"package_id" validate:"required"`
-	Revision   string `json:"revision" validate:"required"`
-}
+type SupermarketPluginResolvedPackage = supermarketclient.PluginResolvedPackage
 
-type SupermarketPluginRelease struct {
-	Revision    string                             `json:"revision" validate:"required"`
-	PublishedAt string                             `json:"published_at" validate:"required"`
-	Artifact    SupermarketPluginArtifact          `json:"artifact" validate:"required"`
-	Packages    []SupermarketPluginResolvedPackage `json:"packages" validate:"required"`
-}
+type SupermarketPluginRelease = supermarketclient.PluginRelease
 
-type SupermarketImmutablePluginRelease struct {
-	SchemaVersion string                             `json:"schema_version"`
-	Plugin        pluginspkg.Manifest                `json:"plugin"`
-	Artifact      SupermarketPluginArtifact          `json:"artifact"`
-	Packages      []SupermarketPluginResolvedPackage `json:"packages"`
-}
+type SupermarketImmutablePluginRelease = supermarketclient.ImmutablePluginRelease
 
-type SupermarketPluginEntry struct {
-	pluginspkg.Manifest
-	Release SupermarketPluginRelease `json:"release" validate:"required"`
-}
+type SupermarketPluginEntry = supermarketclient.PluginEntry
 
-type SupermarketPluginListResponse struct {
-	Total int                      `json:"total"`
-	Page  int                      `json:"page"`
-	Limit int                      `json:"limit"`
-	Data  []SupermarketPluginEntry `json:"data"`
-}
+type SupermarketPluginListResponse = supermarketclient.PluginListResponse
 
 // --- Internal helpers ---
 
@@ -539,94 +508,19 @@ func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (
 	if !skillset.IsValidName(pluginID) {
 		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadRequest, "plugin id is invalid")
 	}
-	requestPath := "/api/plugins/" + url.PathEscape(pluginID)
-	resp, err := h.upstream.Get(c.Request().Context(), requestPath, "application/json")
-	if err != nil {
-		h.logger.Error("supermarket plugin fetch failed", slog.String("path", requestPath), slog.Any("error", err))
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+	entry, err := h.upstream.FetchPluginEntry(c.Request().Context(), pluginID)
+	if err == nil {
+		return entry, nil
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("plugin %q not found in supermarket", pluginID))
+	if h.logger != nil {
+		h.logger.Error("supermarket Plugin fetch failed", slog.String("plugin_id", pluginID), slog.Any("error", err))
 	}
-	if resp.StatusCode != http.StatusOK {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
-	}
-
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxPluginMetadataBytes+1))
-	if err != nil {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
-	}
-	if len(payload) > maxPluginMetadataBytes {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "Plugin response is too large or malformed")
-	}
-	var entry SupermarketPluginEntry
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	if err := decoder.Decode(&entry); err != nil {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
-	}
-	if decoder.Decode(&struct{}{}) != io.EOF {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "Plugin response is too large or malformed")
-	}
-	if !isCanonicalSHA256(entry.Release.Revision) {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid Plugin release revision from supermarket")
-	}
-	if _, err := time.Parse(time.RFC3339, entry.Release.PublishedAt); err != nil {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid Plugin release publication time from supermarket")
-	}
-	return h.fetchImmutablePluginRelease(
-		c.Request().Context(), pluginID, entry.Release.Revision, entry.Release.PublishedAt,
-	)
-}
-
-func (h *SupermarketHandler) fetchImmutablePluginRelease(
-	ctx context.Context,
-	pluginID, revision, publishedAt string,
-) (SupermarketPluginEntry, error) {
-	requestPath := "/api/plugins/" + url.PathEscape(pluginID) +
-		"/releases/" + url.PathEscape(revision)
-	resp, err := h.upstream.Get(ctx, requestPath, "application/json")
-	if err != nil {
-		h.logger.Error("supermarket Plugin release fetch failed", slog.String("path", requestPath), slog.Any("error", err))
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "approved Plugin release is missing")
-	}
-	if resp.StatusCode != http.StatusOK {
+	if supermarketclient.ErrorKindOf(err) == supermarketclient.ErrorNotFound {
 		return SupermarketPluginEntry{}, echo.NewHTTPError(
-			http.StatusBadGateway,
-			fmt.Sprintf("supermarket returned status %d for Plugin release", resp.StatusCode),
+			http.StatusNotFound, fmt.Sprintf("plugin %q not found in supermarket", pluginID),
 		)
 	}
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxPluginMetadataBytes+1))
-	if err != nil || len(payload) > maxPluginMetadataBytes {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "Plugin release is too large or malformed")
-	}
-	digest := sha256.Sum256(payload)
-	if hex.EncodeToString(digest[:]) != revision {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "Plugin release SHA-256 verification failed")
-	}
-	var release SupermarketImmutablePluginRelease
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	if err := decoder.Decode(&release); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid immutable Plugin release from supermarket")
-	}
-	if release.SchemaVersion != "1" {
-		return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, "unsupported immutable Plugin release schema")
-	}
-	release.Artifact.DownloadURL = "/api/artifacts/plugin/" + release.Artifact.Digest
-	return SupermarketPluginEntry{
-		Manifest: release.Plugin,
-		Release: SupermarketPluginRelease{
-			Revision:    revision,
-			PublishedAt: publishedAt,
-			Artifact:    release.Artifact,
-			Packages:    release.Packages,
-		},
-	}, nil
+	return SupermarketPluginEntry{}, echo.NewHTTPError(http.StatusBadGateway, err.Error())
 }
 
 func validateSupermarketPluginEntry(

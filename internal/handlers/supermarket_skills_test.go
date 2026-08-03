@@ -507,7 +507,7 @@ func validRegistryPackageDescriptor() SupermarketSkillPackageDescriptor {
 	second.SkillID = "second"
 	second.InstallID = "registry+package+second"
 	return SupermarketSkillPackageDescriptor{
-		SupermarketSkillPackageSummary: SupermarketSkillPackageSummary{
+		SkillPackageSummary: SupermarketSkillPackageSummary{
 			SchemaVersion: "1", RegistryID: "registry", PackageID: "package", Name: "Package",
 			Description: "Demo", Tags: []string{}, Categories: []SupermarketSkillPackageCategory{}, SkillCount: 2,
 		},
