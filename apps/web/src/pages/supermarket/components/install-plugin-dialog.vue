@@ -38,27 +38,27 @@
             {{ plugin.description }}
           </p>
           <div
-            v-if="pluginSkills.length"
+            v-if="pluginPackages.length"
             class="mt-3 grid gap-1.5"
           >
             <div
-              v-for="skill in pluginSkills"
-              :key="skillKey(skill)"
+              v-for="pkg in pluginPackages"
+              :key="packageKey(pkg)"
               class="flex min-w-0 items-start gap-2 rounded border border-border-soft bg-muted/20 px-2 py-1.5"
             >
               <Boxes class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <div class="min-w-0 flex-1">
                 <p
                   class="truncate text-caption font-medium"
-                  :title="skillName(skill)"
+                  :title="pkg.package_id"
                 >
-                  {{ skillName(skill) }}
+                  {{ pkg.package_id }}
                 </p>
                 <p
                   class="truncate text-[10px] text-muted-foreground"
-                  :title="skillSource(skill)"
+                  :title="pkg.registry_id"
                 >
-                  {{ skillSource(skill) }}
+                  {{ pkg.registry_id }}
                 </p>
               </div>
             </div>
@@ -129,7 +129,7 @@ import {
   type HandlersSupermarketPluginEntry,
   type PluginsConfigVar,
   type PluginsInstallation,
-  type PluginsSkillReference,
+  type HandlersSupermarketPluginResolvedPackage,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import { FieldStack } from '@felinic/ui'
@@ -155,7 +155,7 @@ const installing = ref(false)
 const variableValues = reactive<Record<string, string>>({})
 
 const variables = computed<PluginsConfigVar[]>(() => props.plugin?.variables ?? [])
-const pluginSkills = computed<PluginsSkillReference[]>(() => props.plugin?.skills ?? [])
+const pluginPackages = computed<HandlersSupermarketPluginResolvedPackage[]>(() => props.plugin?.release.packages ?? [])
 
 const requiresManagedOAuth = computed(() => {
   return (props.plugin?.auth_requirements ?? []).some(item => item.type === 'managed_oauth')
@@ -165,17 +165,8 @@ const canInstall = computed(() => {
   return variables.value.every(item => !item.required || !!variableValues[item.key || '']?.trim())
 })
 
-function skillKey(skill: PluginsSkillReference): string {
-  return `${skill.registry_id || ''}/${skill.package_id || ''}/${skill.skill_id || ''}`
-}
-
-function skillName(skill: PluginsSkillReference): string {
-  return skill.skill_id || t('supermarket.unnamedSkill')
-}
-
-function skillSource(skill: PluginsSkillReference): string {
-  const source = [skill.registry_id, skill.package_id].filter(Boolean).join(' / ')
-  return source || t('supermarket.noDescription')
+function packageKey(pkg: HandlersSupermarketPluginResolvedPackage): string {
+  return `${pkg.registry_id}/${pkg.package_id}`
 }
 
 watch(() => props.open, (open) => {

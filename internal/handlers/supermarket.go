@@ -27,6 +27,7 @@ type SupermarketHandler struct {
 	upstream       *supermarketclient.Client
 	installer      *supermarketclient.Installer
 	packages       *skillpackages.Service
+	workspaces     *workspace.Manager
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
@@ -47,6 +48,7 @@ func NewSupermarketHandler(
 		upstream:       upstream,
 		installer:      supermarketclient.NewInstaller(upstream, pluginService, packageService, containers, workspaces, log),
 		packages:       packageService,
+		workspaces:     workspaces,
 		botService:     botService,
 		accountService: accountService,
 		logger:         log.With(slog.String("handler", "supermarket")),
@@ -63,6 +65,7 @@ func (h *SupermarketHandler) Register(e *echo.Echo) {
 	g.GET("/registries/:registry_id/categories", h.ListRegistryCategories)
 	g.GET("/registries/:registry_id/packages", h.ListRegistryPackages)
 	g.GET("/registries/:registry_id/packages/:package_id", h.GetRegistryPackage)
+	g.GET("/registries/:registry_id/packages/:package_id/releases/:revision", h.GetRegistryPackageRelease)
 	g.GET("/registries/:registry_id/packages/:package_id/skills/:skill_id", h.GetRegistrySkill)
 	g.GET("/artifacts/icon/:digest", h.GetRegistrySkillIcon)
 
@@ -290,7 +293,14 @@ func (h *SupermarketHandler) ListInstalledPackages(c echo.Context) error {
 	if h.packages == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Skill Package service is not configured")
 	}
-	items, err := h.packages.List(c.Request().Context(), botID)
+	targetID := workspace.WorkspaceTargetNative
+	if h.workspaces != nil {
+		targetID, err = h.workspaces.CurrentWorkspaceTargetID(c.Request().Context(), botID)
+		if err != nil {
+			return workspaceTargetHTTPError(h.logger, err)
+		}
+	}
+	items, err := h.packages.ListForTarget(c.Request().Context(), botID, targetID)
 	if err != nil {
 		return err
 	}

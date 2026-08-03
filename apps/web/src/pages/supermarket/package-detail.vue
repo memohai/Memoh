@@ -103,6 +103,7 @@ import { Button, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@
 import {
   getSupermarketRegistries,
   getSupermarketRegistriesByRegistryIdPackagesByPackageId,
+  getSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevision,
   type HandlersSupermarketSkillPackageDescriptor,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -120,29 +121,41 @@ const loading = ref(false)
 const installDialogOpen = ref(false)
 const registryId = computed(() => String(route.params.registryId || ''))
 const packageId = computed(() => String(route.params.packageId || ''))
-const packageIdentity = computed(() => `${registryId.value}/${packageId.value}`)
+const revision = computed(() => String(route.query.revision || ''))
+const packageIdentity = computed(() => `${registryId.value}/${packageId.value}/${revision.value}`)
 const categoryNames = computed(() => pkg.value?.categories.map(category => category.name).join(', ') || '')
+let loadSequence = 0
 
 async function loadPackage() {
   if (!registryId.value || !packageId.value) return
+  const sequence = ++loadSequence
   loading.value = true
+  pkg.value = null
   try {
+    const packageRequest = revision.value
+      ? getSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevision({
+          path: { registry_id: registryId.value, package_id: packageId.value, revision: revision.value },
+          throwOnError: true,
+        })
+      : getSupermarketRegistriesByRegistryIdPackagesByPackageId({
+          path: { registry_id: registryId.value, package_id: packageId.value },
+          throwOnError: true,
+        })
     const [{ data }, registryResponse] = await Promise.all([
-      getSupermarketRegistriesByRegistryIdPackagesByPackageId({
-        path: { registry_id: registryId.value, package_id: packageId.value },
-        throwOnError: true,
-      }),
+      packageRequest,
       getSupermarketRegistries({ throwOnError: true }).catch(() => null),
     ])
+    if (sequence !== loadSequence) return
     pkg.value = data
     registryName.value = registryResponse?.data.data
       ?.find(registry => registry.id === registryId.value)?.name || registryId.value
   } catch (error) {
+    if (sequence !== loadSequence) return
     pkg.value = null
     registryName.value = registryId.value
     toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 

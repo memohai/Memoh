@@ -29,6 +29,25 @@
         <Plus class="size-4" />
         {{ $t('bots.skills.addSkill') }}
       </Button>
+      <ConfirmPopover
+        v-if="selectedPackage?.directlyInstalled"
+        :message="$t('bots.skills.uninstallPackageConfirm')"
+        :cancel-text="$t('common.cancel')"
+        :confirm-text="$t('common.confirm')"
+        :loading="isUninstallingPackage"
+        @confirm="handleUninstallPackage"
+      >
+        <template #trigger>
+          <Button
+            variant="destructive"
+            size="sm"
+            :disabled="isUninstallingPackage"
+          >
+            <Trash2 class="size-4" />
+            {{ $t('bots.skills.uninstallPackage') }}
+          </Button>
+        </template>
+      </ConfirmPopover>
     </template>
 
     <Button
@@ -55,7 +74,16 @@
       </InlineLoadingRow>
 
       <Empty
-        v-else-if="!skills.length"
+        v-else-if="packageLoadFailed"
+        class="py-12"
+      >
+        <EmptyHeader>
+          <EmptyTitle>{{ $t('bots.skills.loadFailed') }}</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
+
+      <Empty
+        v-else-if="!skills.length && !skillPackages.length"
         class="py-12"
       >
         <EmptyHeader>
@@ -85,6 +113,14 @@
 
       <template v-else>
         <template v-if="selectedPackage">
+          <Empty
+            v-if="!selectedPackage.skills.length"
+            class="py-12"
+          >
+            <EmptyHeader>
+              <EmptyTitle>{{ $t('bots.skills.packageSkillsUnavailable') }}</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
           <SettingsRow
             v-for="skill in selectedPackage.skills"
             :key="skillKey(skill)"
@@ -448,11 +484,14 @@ import MonacoEditor from '@/components/monaco-editor/index.vue'
 import {
   getBotsById,
   getBotsByBotIdContainerSkills,
+  getBotsByBotIdSupermarketPackages,
   postBotsByBotIdContainerSkills,
   postBotsByBotIdContainerSkillsActions,
   deleteBotsByBotIdContainerSkills,
+  deleteBotsByBotIdSupermarketPackagesByInstallationId,
   putBotsById,
   type HandlersSkillItem,
+  type SkillpackagesInstallation,
 } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { safeSkillCatalogQueryKey } from '@/composables/api/useChat'
@@ -472,8 +511,13 @@ type SkillItem = HandlersSkillItem & {
 
 type SkillPackage = {
   key: string
+  installationId: string
   registryId: string
   packageId: string
+  workspaceTargetId: string
+  revision: string
+  directlyInstalled: boolean
+  pluginReferenceCount: number
   skills: SkillItem[]
 }
 
@@ -497,11 +541,14 @@ const SKILL_DISCOVERY_ROOTS_METADATA_KEY = 'skill_discovery_roots'
 const isLoading = ref(false)
 const isSaving = ref(false)
 const isDeleting = ref(false)
+const isUninstallingPackage = ref(false)
 const deletingPath = ref('')
 const isActioning = ref(false)
 const actionTargetPath = ref('')
 const actionName = ref('')
 const skills = ref<SkillItem[]>([])
+const installedPackages = ref<SkillpackagesInstallation[]>([])
+const packageLoadFailed = ref(false)
 const isSavingDiscoveryRoots = ref(false)
 const isDiscoveryDialogOpen = ref(false)
 const discoveryRootsDraft = ref(DEFAULT_DISCOVERY_ROOTS.join('\n'))
@@ -527,22 +574,41 @@ const canSave = computed(() => {
 })
 
 const skillPackages = computed<SkillPackage[]>(() => {
-  const grouped = new Map<string, SkillPackage>()
+  const skillsByPackage = new Map<string, SkillItem[]>()
   for (const skill of skills.value) {
     if (!skill.registry_id || !skill.package_id) continue
     const key = `${skill.registry_id}/${skill.package_id}`
-    const pkg = grouped.get(key) || {
-      key,
-      registryId: skill.registry_id,
-      packageId: skill.package_id,
-      skills: [],
-    }
-    pkg.skills.push(skill)
-    grouped.set(key, pkg)
+    const members = skillsByPackage.get(key) || []
+    members.push(skill)
+    skillsByPackage.set(key, members)
   }
-  return [...grouped.values()].sort((left, right) => left.packageId.localeCompare(right.packageId))
+  return installedPackages.value
+    .map(item => {
+      const identity = `${item.registry_id}/${item.package_id}`
+      const workspaceTargetId = item.workspace_target_id
+      return {
+        key: `${workspaceTargetId}:${identity}`,
+        installationId: item.id,
+        registryId: item.registry_id,
+        packageId: item.package_id,
+        workspaceTargetId,
+        revision: item.revision,
+        directlyInstalled: item.directly_installed,
+        pluginReferenceCount: item.plugin_reference_count,
+        skills: skillsByPackage.get(identity) || [],
+      }
+    })
+    .sort((left, right) => left.packageId.localeCompare(right.packageId))
 })
-const standaloneSkills = computed(() => skills.value.filter(skill => !skill.registry_id || !skill.package_id))
+const installedPackageIdentities = computed(() => new Set(
+  installedPackages.value
+    .map(item => `${item.registry_id}/${item.package_id}`),
+))
+const standaloneSkills = computed(() => skills.value.filter((skill) => {
+  if (!skill.registry_id || !skill.package_id) return true
+  if (packageLoadFailed.value) return false
+  return !installedPackageIdentities.value.has(`${skill.registry_id}/${skill.package_id}`)
+}))
 const selectedPackage = computed(() => skillPackages.value.find(pkg => pkg.key === selectedPackageKey.value) || null)
 
 const { data: bot, refetch: refetchBot } = useQuery({
@@ -570,17 +636,48 @@ const canSaveDiscoveryRoots = computed(() => {
 
 async function fetchSkills() {
   if (!props.botId) return
-  isLoading.value = true
+  const botID = props.botId
   try {
     const { data } = await getBotsByBotIdContainerSkills({
-      path: { bot_id: props.botId },
+      path: { bot_id: botID },
       throwOnError: true,
     })
+    if (props.botId !== botID) return
     skills.value = data.skills || []
   } catch (error) {
+    if (props.botId !== botID) return
+    skills.value = []
     toast.error(resolveApiErrorMessage(error, t('bots.skills.loadFailed')))
+  }
+}
+
+async function fetchInstalledPackages() {
+  if (!props.botId) return
+  const botID = props.botId
+  try {
+    const { data } = await getBotsByBotIdSupermarketPackages({
+      path: { bot_id: botID },
+      throwOnError: true,
+    })
+    if (props.botId !== botID) return
+    installedPackages.value = data || []
+    packageLoadFailed.value = false
+  } catch (error) {
+    if (props.botId !== botID) return
+    installedPackages.value = []
+    packageLoadFailed.value = true
+    toast.error(resolveApiErrorMessage(error, t('bots.skills.loadFailed')))
+  }
+}
+
+async function fetchSkillLibrary() {
+  if (!props.botId) return
+  const botID = props.botId
+  isLoading.value = true
+  try {
+    await Promise.all([fetchSkills(), fetchInstalledPackages()])
   } finally {
-    isLoading.value = false
+    if (props.botId === botID) isLoading.value = false
   }
 }
 
@@ -736,6 +833,28 @@ function openPackage(key: string) {
 
 function closePackage() {
   selectedPackageKey.value = ''
+}
+
+async function handleUninstallPackage() {
+  const pkg = selectedPackage.value
+  if (!pkg?.directlyInstalled) return
+  isUninstallingPackage.value = true
+  try {
+    const { data } = await deleteBotsByBotIdSupermarketPackagesByInstallationId({
+      path: { bot_id: props.botId, installation_id: pkg.installationId },
+      throwOnError: true,
+    })
+    toast.success(t(data.removed_files
+      ? 'bots.skills.uninstallPackageSuccess'
+      : 'bots.skills.uninstallPackageReferenceRemoved'))
+    closePackage()
+    await fetchSkillLibrary()
+    invalidateSafeSkillCatalog()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.skills.uninstallPackageFailed')))
+  } finally {
+    isUninstallingPackage.value = false
+  }
 }
 
 function skillKey(skill: SkillItem) {
@@ -908,8 +1027,12 @@ async function handleDelete(skill: SkillItem) {
 watch(() => props.botId, () => {
   if (!props.botId) return
   isDiscoveryDialogOpen.value = false
+  selectedPackageKey.value = ''
+  skills.value = []
+  installedPackages.value = []
+  packageLoadFailed.value = false
   syncDiscoveryRoots(DEFAULT_DISCOVERY_ROOTS)
-  void fetchSkills()
+  void fetchSkillLibrary()
 }, { immediate: true })
 
 let hasActivated = false
@@ -918,7 +1041,7 @@ onActivated(() => {
     hasActivated = true
     return
   }
-  if (props.botId) void fetchSkills()
+  if (props.botId) void fetchSkillLibrary()
 })
 
 // Refresh this editor if another surface invalidates the shared runtime catalog.

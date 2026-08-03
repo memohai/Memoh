@@ -96,16 +96,16 @@
       </section>
 
       <section
-        v-if="pluginSkills.length"
+        v-if="pluginPackages.length"
         class="mt-8"
       >
         <h2 class="mb-4 text-lg font-semibold">
-          {{ $t('supermarket.skillsSection') }}
+          {{ $t('supermarket.packagesSection') }}
         </h2>
         <SettingsSection>
           <SettingsRow
-            v-for="skill in pluginSkills"
-            :key="skillKey(skill)"
+            v-for="pkg in pluginPackages"
+            :key="packageKey(pkg)"
             align="start"
           >
             <template #leading>
@@ -118,23 +118,24 @@
                 :to="{
                   name: 'supermarket-package-detail',
                   params: {
-                    registryId: skill.registry_id,
-                    packageId: skill.package_id,
+                    registryId: pkg.registry_id,
+                    packageId: pkg.package_id,
                   },
+                  query: { revision: pkg.revision },
                 }"
                 class="block rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <p
                   class="min-w-0 truncate text-sm font-medium text-foreground hover:text-primary"
-                  :title="skill.skill_id"
+                  :title="pkg.package_id"
                 >
-                  {{ skill.skill_id }}
+                  {{ pkg.package_id }}
                 </p>
                 <p
                   class="mt-0.5 truncate text-xs text-muted-foreground"
-                  :title="`${skill.registry_id} / ${skill.package_id}`"
+                  :title="pkg.registry_id"
                 >
-                  {{ skill.registry_id }} / {{ skill.package_id }}
+                  {{ pkg.registry_id }}
                 </p>
               </RouterLink>
             </template>
@@ -200,15 +201,13 @@ import { Badge, Button, InlineLoadingRow, SettingsRow, SettingsSection, toast } 
 import {
   getSupermarketPluginsById,
   type HandlersSupermarketPluginEntry,
-  type PluginsSkillReference,
+  type HandlersSupermarketPluginResolvedPackage,
 } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
 import InfoItem from './components/info-item.vue'
 import MarketDetailHeader from './components/market-detail-header.vue'
-
-type CompleteSkillReference = Required<PluginsSkillReference>
 
 const route = useRoute()
 const router = useRouter()
@@ -228,14 +227,10 @@ const iconValue = computed(() => {
   return ''
 })
 
-const pluginSkills = computed<CompleteSkillReference[]>(() =>
-  (plugin.value?.skills ?? []).filter((skill): skill is CompleteSkillReference =>
-    Boolean(skill.registry_id && skill.package_id && skill.skill_id),
-  ),
-)
+const pluginPackages = computed<HandlersSupermarketPluginResolvedPackage[]>(() => plugin.value?.release.packages ?? [])
 
-function skillKey(skill: CompleteSkillReference) {
-  return `${skill.registry_id}/${skill.package_id}/${skill.skill_id}`
+function packageKey(pkg: HandlersSupermarketPluginResolvedPackage) {
+  return `${pkg.registry_id}/${pkg.package_id}`
 }
 
 function authTypeForMcp(key?: string) {

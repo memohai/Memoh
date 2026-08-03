@@ -97,6 +97,42 @@ func TestSupermarketPackageRoutesUsePackageCatalog(t *testing.T) {
 	}
 }
 
+func TestGetRegistryPackageReleaseReturnsPinnedDescriptor(t *testing.T) {
+	pkg := validRegistryPackageDescriptor()
+	release := registryPackageReleaseBytes(t, pkg)
+	digest := sha256.Sum256(release)
+	revision := hex.EncodeToString(digest[:])
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		want := "/api/registries/registry/packages/package/releases/" + revision
+		if r.URL.Path != want {
+			t.Fatalf("upstream path = %q, want %q", r.URL.Path, want)
+		}
+		w.Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		_, _ = w.Write(release)
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler := &SupermarketHandler{
+		upstream: supermarketclient.NewClient(upstream.URL, upstream.Client()),
+		logger:   slog.New(slog.DiscardHandler),
+	}
+	e := echo.New()
+	handler.Register(e)
+	req := httptest.NewRequest(http.MethodGet, "/supermarket/registries/registry/packages/package/releases/"+revision, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("release status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var got SupermarketSkillPackageDescriptor
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Revision != revision || len(got.Skills) != len(pkg.Skills) {
+		t.Fatalf("release = %+v, want revision %s with %d Skills", got, revision, len(pkg.Skills))
+	}
+}
+
 func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	manager := workspace.NewManager(

@@ -102,6 +102,7 @@ async function handleInstall() {
     toast.success(t('supermarket.installSuccess'))
     void queryCache.invalidateQueries({ key: safeSkillCatalogQueryKey(botID) })
     emit('installed')
+    emit('update:open', false)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('supermarket.installFailed')))
   } finally {

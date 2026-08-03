@@ -161,6 +161,56 @@ func (h *SupermarketHandler) GetRegistryPackage(c echo.Context) error {
 	return h.proxy(c, registryPackageUpstreamPath(registryID, packageID))
 }
 
+// GetRegistryPackageRelease godoc
+// @Summary Get an immutable Skill Package release
+// @Tags supermarket
+// @Param registry_id path string true "Registry ID"
+// @Param package_id path string true "Package ID"
+// @Param revision path string true "Package revision"
+// @Success 200 {object} SupermarketSkillPackageDescriptor
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 502 {object} ErrorResponse
+// @Router /supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision} [get].
+func (h *SupermarketHandler) GetRegistryPackageRelease(c echo.Context) error {
+	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
+	if err != nil {
+		return err
+	}
+	packageID, err := requireRegistryComponent(c.Param("package_id"), "package_id")
+	if err != nil {
+		return err
+	}
+	revision := strings.TrimSpace(c.Param("revision"))
+	if !isCanonicalDigest(revision) {
+		return echo.NewHTTPError(http.StatusBadRequest, "revision is invalid")
+	}
+	pkg, err := h.upstream.FetchPackageRelease(c.Request().Context(), registryID, packageID, revision)
+	if err != nil {
+		if supermarketclient.ErrorKindOf(err) == supermarketclient.ErrorNotFound {
+			return echo.NewHTTPError(http.StatusNotFound, "Skill Package release not found")
+		}
+		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+	}
+	pkg.Categories = packageCategories(pkg.Skills)
+	return c.JSON(http.StatusOK, pkg)
+}
+
+func packageCategories(skills []supermarketclient.CatalogSkill) []supermarketclient.SkillPackageCategory {
+	result := make([]supermarketclient.SkillPackageCategory, 0)
+	indexes := make(map[string]int)
+	for _, skill := range skills {
+		index, ok := indexes[skill.Category]
+		if !ok {
+			indexes[skill.Category] = len(result)
+			result = append(result, supermarketclient.SkillPackageCategory{ID: skill.Category, Name: skill.CategoryName})
+			index = len(result) - 1
+		}
+		result[index].SkillCount++
+	}
+	return result
+}
+
 // GetRegistrySkill godoc
 // @Summary Get a namespaced Registry Skill
 // @Tags supermarket
@@ -263,6 +313,14 @@ func requireRegistryComponent(value, field string) (string, error) {
 		return "", echo.NewHTTPError(http.StatusBadRequest, field+" is invalid")
 	}
 	return value, nil
+}
+
+func isCanonicalDigest(value string) bool {
+	if len(value) != sha256.Size*2 || strings.ToLower(value) != value {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func requireRegistryID(value, field string) (string, error) {

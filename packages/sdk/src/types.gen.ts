@@ -2666,6 +2666,7 @@ export type PluginsInstallation = {
     status?: string;
     updated_at?: string;
     version?: string;
+    workspace_target_id?: string;
 };
 
 export type PluginsListResponse = {
@@ -3114,16 +3115,16 @@ export type SettingsUpsertRequest = {
 };
 
 export type SkillpackagesInstallation = {
-    bot_id?: string;
-    directly_installed?: boolean;
-    id?: string;
-    installed_at?: string;
-    package_id?: string;
-    plugin_reference_count?: number;
-    registry_id?: string;
-    revision?: string;
-    updated_at?: string;
-    workspace_target_id?: string;
+    bot_id: string;
+    directly_installed: boolean;
+    id: string;
+    installed_at: string;
+    package_id: string;
+    plugin_reference_count: number;
+    registry_id: string;
+    revision: string;
+    updated_at: string;
+    workspace_target_id: string;
 };
 
 export type SkillsSafeCatalogItem = {
@@ -14005,6 +14006,52 @@ export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses = {
 };
 
 export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionData = {
+    body?: never;
+    path: {
+        /**
+         * Registry ID
+         */
+        registry_id: string;
+        /**
+         * Package ID
+         */
+        package_id: string;
+        /**
+         * Package revision
+         */
+        revision: string;
+    };
+    query?: never;
+    url: '/supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}';
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionError = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionErrors];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillPackageDescriptor;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponses];
 
 export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdData = {
     body?: never;

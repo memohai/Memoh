@@ -13265,6 +13265,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Get an immutable Skill Package release",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package revision",
+                        "name": "revision",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageDescriptor"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}": {
             "get": {
                 "tags": [
@@ -21693,6 +21750,9 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
                 }
             }
         },
@@ -22867,6 +22927,18 @@ const docTemplate = `{
         },
         "skillpackages.Installation": {
             "type": "object",
+            "required": [
+                "bot_id",
+                "directly_installed",
+                "id",
+                "installed_at",
+                "package_id",
+                "plugin_reference_count",
+                "registry_id",
+                "revision",
+                "updated_at",
+                "workspace_target_id"
+            ],
             "properties": {
                 "bot_id": {
                     "type": "string"
