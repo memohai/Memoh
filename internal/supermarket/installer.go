@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
+	"github.com/memohai/memoh/internal/skillpackages"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -18,22 +19,21 @@ var packagePreparationTokens = make(chan struct{}, maxConcurrentPackagePreparati
 type PluginInstaller interface {
 	WithBotMutation(context.Context, string, func(context.Context) error) error
 	Install(context.Context, string, pluginspkg.InstallRequest) (pluginspkg.Installation, error)
-	List(context.Context, string) ([]pluginspkg.Installation, error)
 	InstalledPluginState(context.Context, string, string) (pluginspkg.InstalledPluginState, bool, error)
-	CheckSkillArtifactConflicts(context.Context, string, string, string, map[string]string) error
 }
 
 type Installer struct {
 	client     *Client
 	plugins    PluginInstaller
+	packages   *skillpackages.Service
 	containers bridge.Provider
 	workspaces *workspace.Manager
 	logger     *slog.Logger
 }
 
-func NewInstaller(client *Client, plugins PluginInstaller, containers bridge.Provider, workspaces *workspace.Manager, logger *slog.Logger) *Installer {
+func NewInstaller(client *Client, plugins PluginInstaller, packages *skillpackages.Service, containers bridge.Provider, workspaces *workspace.Manager, logger *slog.Logger) *Installer {
 	return &Installer{
-		client: client, plugins: plugins, containers: containers, workspaces: workspaces, logger: logger,
+		client: client, plugins: plugins, packages: packages, containers: containers, workspaces: workspaces, logger: logger,
 	}
 }
 

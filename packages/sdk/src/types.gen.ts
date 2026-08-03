@@ -1782,6 +1782,7 @@ export type HandlersInstallPluginRequest = {
 };
 
 export type HandlersInstallRegistryPackageResponse = {
+    installation: SkillpackagesInstallation;
     ok: boolean;
     package_id: string;
     registry_id: string;
@@ -3112,12 +3113,31 @@ export type SettingsUpsertRequest = {
     video_model_id?: string;
 };
 
+export type SkillpackagesInstallation = {
+    bot_id?: string;
+    directly_installed?: boolean;
+    id?: string;
+    installed_at?: string;
+    package_id?: string;
+    plugin_reference_count?: number;
+    registry_id?: string;
+    revision?: string;
+    updated_at?: string;
+    workspace_target_id?: string;
+};
+
 export type SkillsSafeCatalogItem = {
     description?: string;
     display_name?: string;
     name?: string;
     source_kind?: string;
     state?: string;
+};
+
+export type SupermarketUninstallPackageResponse = {
+    installation: SkillpackagesInstallation;
+    ok: boolean;
+    removed_files: boolean;
 };
 
 export type UserinputUiOption = {
@@ -9778,6 +9798,74 @@ export type PostBotsByBotIdSupermarketInstallPluginResponses = {
 };
 
 export type PostBotsByBotIdSupermarketInstallPluginResponse = PostBotsByBotIdSupermarketInstallPluginResponses[keyof PostBotsByBotIdSupermarketInstallPluginResponses];
+
+export type GetBotsByBotIdSupermarketPackagesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/supermarket/packages';
+};
+
+export type GetBotsByBotIdSupermarketPackagesErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSupermarketPackagesError = GetBotsByBotIdSupermarketPackagesErrors[keyof GetBotsByBotIdSupermarketPackagesErrors];
+
+export type GetBotsByBotIdSupermarketPackagesResponses = {
+    /**
+     * OK
+     */
+    200: Array<SkillpackagesInstallation>;
+};
+
+export type GetBotsByBotIdSupermarketPackagesResponse = GetBotsByBotIdSupermarketPackagesResponses[keyof GetBotsByBotIdSupermarketPackagesResponses];
+
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Package installation ID
+         */
+        installation_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/supermarket/packages/{installation_id}';
+};
+
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdError = DeleteBotsByBotIdSupermarketPackagesByInstallationIdErrors[keyof DeleteBotsByBotIdSupermarketPackagesByInstallationIdErrors];
+
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdResponses = {
+    /**
+     * OK
+     */
+    200: SupermarketUninstallPackageResponse;
+};
+
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdResponse = DeleteBotsByBotIdSupermarketPackagesByInstallationIdResponses[keyof DeleteBotsByBotIdSupermarketPackagesByInstallationIdResponses];
 
 export type GetBotsByBotIdTokenUsageData = {
     body?: never;

@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/skillpackages"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -128,11 +129,21 @@ func (s *Service) InstalledPluginState(
 func (s *Service) Install(ctx context.Context, botID string, req InstallRequest) (Installation, error) {
 	var result Installation
 	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		return scoped.inTransaction(scopedCtx, func(txService *Service) error {
+		removals, err := scoped.prepareObsoletePackageRemovals(scopedCtx, botID, req)
+		if err != nil {
+			return err
+		}
+		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
 			var installErr error
 			result, installErr = txService.install(scopedCtx, botID, req)
 			return installErr
-		})
+		}); err != nil {
+			return errors.Join(err, removals.rollback(scopedCtx))
+		}
+		if err := removals.commit(scopedCtx); err != nil {
+			scoped.logger.Warn("cleanup obsolete Plugin Packages failed", slog.String("bot_id", botID), slog.String("plugin_id", req.Manifest.ID), slog.Any("error", err))
+		}
+		return nil
 	})
 	return result, err
 }
@@ -159,10 +170,10 @@ func (s *Service) install(
 	if err := validateInstalledSkills(manifest.Packages, req.InstalledSkills); err != nil {
 		return Installation{}, err
 	}
-	if err := validateReleaseMetadata(req.Release); err != nil {
+	if err := validateInstalledPackages(manifest.Packages, req.InstalledPackages); err != nil {
 		return Installation{}, err
 	}
-	if err := validateSkillArtifacts(req.InstalledSkills, req.SkillArtifacts); err != nil {
+	if err := validateReleaseMetadata(req.Release); err != nil {
 		return Installation{}, err
 	}
 	if manifest.Name == "" {
@@ -216,6 +227,17 @@ func (s *Service) install(
 	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
 		return Installation{}, err
 	}
+	if req.ReplacePackages {
+		packageRequirements := make([]skillpackages.Requirement, 0, len(req.InstalledPackages))
+		for _, pkg := range req.InstalledPackages {
+			packageRequirements = append(packageRequirements, skillpackages.Requirement{
+				RegistryID: pkg.RegistryID, PackageID: pkg.PackageID, Revision: pkg.Revision,
+			})
+		}
+		if _, err := skillpackages.ReplacePluginReferences(ctx, s.queries, botUUID, row.ID, req.WorkspaceTargetID, packageRequirements); err != nil {
+			return Installation{}, err
+		}
+	}
 
 	for _, resource := range manifest.MCPs {
 		authReq := manifestAuthForResource(manifest, resource)
@@ -256,12 +278,6 @@ func (s *Service) install(
 		}
 		if workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID); workspaceTargetID != "" {
 			metadata["workspace_target_id"] = workspaceTargetID
-		}
-		if artifact, ok := req.SkillArtifacts[identity]; ok {
-			metadata["package_revision"] = artifact.PackageRevision
-			metadata["install_id"] = artifact.InstallID
-			metadata["artifact_digest"] = artifact.ArtifactDigest
-			metadata["files_written"] = artifact.FilesWritten
 		}
 		if _, err := s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
 			InstallationID: row.ID,
@@ -343,11 +359,15 @@ func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (
 		if err != nil {
 			return err
 		}
+		packageRemovals, err := scoped.prepareUnownedPackageRemovals(scopedCtx, botID, row)
+		if err != nil {
+			return err
+		}
 		var bundleRemoval *pluginBundleRemoval
 		if row.Status != StatusUninstalled {
 			bundleRemoval, err = scoped.preparePluginBundleRemoval(scopedCtx, botID, row)
 			if err != nil {
-				return err
+				return errors.Join(err, packageRemovals.rollback(scopedCtx))
 			}
 		}
 		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
@@ -355,10 +375,19 @@ func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (
 			result, uninstallErr = txService.uninstall(scopedCtx, botID, installationID)
 			return uninstallErr
 		}); err != nil {
-			if rollbackErr := bundleRemoval.rollback(scopedCtx); rollbackErr != nil {
-				return errors.Join(err, fmt.Errorf("roll back Plugin bundle removal: %w", rollbackErr))
-			}
-			return err
+			return errors.Join(
+				err,
+				packageRemovals.rollback(scopedCtx),
+				bundleRemoval.rollback(scopedCtx),
+			)
+		}
+		if err := packageRemovals.commit(scopedCtx); err != nil {
+			scoped.logger.Warn(
+				"cleanup unowned Plugin Packages failed",
+				slog.String("bot_id", botID),
+				slog.String("plugin_id", row.PluginID),
+				slog.Any("error", err),
+			)
 		}
 		if err := bundleRemoval.commit(scopedCtx); err != nil {
 			scoped.logger.Warn(
@@ -387,6 +416,13 @@ func (s *Service) uninstall(
 	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
 		return Installation{}, err
 	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return Installation{}, err
+	}
+	if _, err := skillpackages.ReplacePluginReferences(ctx, s.queries, botUUID, row.ID, "", nil); err != nil {
+		return Installation{}, err
+	}
 	updated, err := s.updateStatus(ctx, botID, installationID, StatusUninstalled, false)
 	if err != nil {
 		return Installation{}, err
@@ -400,20 +436,33 @@ func (s *Service) Purge(ctx context.Context, botID, installationID string) error
 		if err != nil {
 			return err
 		}
+		packageRemovals, err := scoped.prepareUnownedPackageRemovals(scopedCtx, botID, row)
+		if err != nil {
+			return err
+		}
 		var bundleRemoval *pluginBundleRemoval
 		if row.Status != StatusUninstalled {
 			bundleRemoval, err = scoped.preparePluginBundleRemoval(scopedCtx, botID, row)
 			if err != nil {
-				return err
+				return errors.Join(err, packageRemovals.rollback(scopedCtx))
 			}
 		}
 		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
 			return txService.purge(scopedCtx, botID, installationID)
 		}); err != nil {
-			if rollbackErr := bundleRemoval.rollback(scopedCtx); rollbackErr != nil {
-				return errors.Join(err, fmt.Errorf("roll back Plugin bundle removal: %w", rollbackErr))
-			}
-			return err
+			return errors.Join(
+				err,
+				packageRemovals.rollback(scopedCtx),
+				bundleRemoval.rollback(scopedCtx),
+			)
+		}
+		if err := packageRemovals.commit(scopedCtx); err != nil {
+			scoped.logger.Warn(
+				"cleanup unowned Plugin Packages failed",
+				slog.String("bot_id", botID),
+				slog.String("plugin_id", row.PluginID),
+				slog.Any("error", err),
+			)
 		}
 		if err := bundleRemoval.commit(scopedCtx); err != nil {
 			scoped.logger.Warn(
@@ -443,6 +492,9 @@ func (s *Service) purge(
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
+		return err
+	}
+	if _, err := skillpackages.ReplacePluginReferences(ctx, s.queries, botUUID, row.ID, "", nil); err != nil {
 		return err
 	}
 	installationUUID, err := db.ParseUUID(installationID)
@@ -658,72 +710,6 @@ func OwnsRegistrySkillAtTarget(
 		}
 	}
 	return false
-}
-
-// CheckSkillArtifactConflicts rejects an update when another installed Plugin
-// owns the same Registry Skill identity at a different immutable Artifact.
-func (s *Service) CheckSkillArtifactConflicts(
-	ctx context.Context,
-	botID, targetPluginID, workspaceTargetID string,
-	expected map[string]string,
-) error {
-	if len(expected) == 0 && strings.TrimSpace(targetPluginID) == "" {
-		return nil
-	}
-	installations, err := s.List(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("list Plugin Skill owners: %w", err)
-	}
-	return checkSkillArtifactConflicts(installations, targetPluginID, workspaceTargetID, expected)
-}
-
-func checkSkillArtifactConflicts(
-	installations []Installation,
-	targetPluginID, workspaceTargetID string,
-	expected map[string]string,
-) error {
-	for identity, digest := range expected {
-		if !artifactDigestPattern.MatchString(digest) {
-			return fmt.Errorf("plugin Skill %q expected Artifact digest is invalid", identity)
-		}
-	}
-	for _, installation := range installations {
-		if installation.Status == StatusUninstalled {
-			continue
-		}
-		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
-		installedTarget = strings.TrimSpace(installedTarget)
-		expectedTarget := strings.TrimSpace(workspaceTargetID)
-		if targetPluginID != "" && installation.PluginID == targetPluginID {
-			if installedTarget != expectedTarget {
-				return fmt.Errorf(
-					"plugin %q is installed on workspace target %q; uninstall it before installing on %q",
-					targetPluginID, installedTarget, expectedTarget,
-				)
-			}
-			continue
-		}
-		if installedTarget != expectedTarget {
-			continue
-		}
-		for _, resource := range installation.Resources {
-			if resource.Type != "skill" {
-				continue
-			}
-			expectedDigest, shared := expected[resource.Key]
-			if !shared {
-				continue
-			}
-			actualDigest, ok := resource.Metadata["artifact_digest"].(string)
-			if !ok || !artifactDigestPattern.MatchString(actualDigest) {
-				return fmt.Errorf("plugin Skill %q owner %q has unverifiable Artifact metadata", resource.Key, installation.PluginID)
-			}
-			if actualDigest != expectedDigest {
-				return fmt.Errorf("plugin Skill %q owner %q requires a different Artifact", resource.Key, installation.PluginID)
-			}
-		}
-	}
-	return nil
 }
 
 func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]string) string {
@@ -1229,20 +1215,24 @@ func validateReleaseMetadata(release ReleaseMetadata) error {
 	return nil
 }
 
-func validateSkillArtifacts(skills []InstalledSkill, artifacts map[string]SkillArtifactMetadata) error {
-	for _, skill := range skills {
-		identity := InstalledSkillIdentity(skill)
-		artifact, ok := artifacts[identity]
-		if !ok {
-			return fmt.Errorf("plugin Skill %q was not installed", identity)
+func validateInstalledPackages(references []PackageReference, installed []InstalledPackage) error {
+	if len(references) != len(installed) {
+		return errors.New("installed Plugin Packages do not match the manifest")
+	}
+	expected := make(map[string]struct{}, len(references))
+	for _, reference := range references {
+		expected[PackageReferenceIdentity(reference)] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(installed))
+	for _, pkg := range installed {
+		identity := PackageReferenceIdentity(PackageReference{RegistryID: pkg.RegistryID, PackageID: pkg.PackageID})
+		if _, ok := expected[identity]; !ok || !artifactDigestPattern.MatchString(pkg.Revision) {
+			return fmt.Errorf("installed Plugin Package %q is invalid", identity)
 		}
-		expectedInstallID := strings.Join([]string{skill.RegistryID, skill.PackageID, skill.SkillID}, "+")
-		if !artifactDigestPattern.MatchString(artifact.PackageRevision) ||
-			artifact.InstallID != expectedInstallID ||
-			!artifactDigestPattern.MatchString(artifact.ArtifactDigest) ||
-			artifact.FilesWritten < 1 {
-			return fmt.Errorf("plugin Skill %q installation metadata is invalid", identity)
+		if _, exists := seen[identity]; exists {
+			return fmt.Errorf("installed Plugin Package %q is duplicated", identity)
 		}
+		seen[identity] = struct{}{}
 	}
 	return nil
 }

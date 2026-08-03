@@ -16,10 +16,16 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/db"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/skillpackages"
 	supermarketclient "github.com/memohai/memoh/internal/supermarket"
 	"github.com/memohai/memoh/internal/workspace"
 )
@@ -124,7 +130,8 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 		})}),
 	}
 
-	service := supermarketclient.NewInstaller(handler.upstream, installer, nil, manager, slog.New(slog.DiscardHandler))
+	packageService := skillpackages.NewService(&directPackageStore{})
+	service := supermarketclient.NewInstaller(handler.upstream, installer, packageService, nil, manager, slog.New(slog.DiscardHandler))
 	result, err := service.InstallPackage(context.Background(), env.botID, supermarketclient.InstallPackageRequest{
 		RegistryID: pkg.RegistryID, PackageID: pkg.PackageID, Revision: pkg.Revision,
 	})
@@ -150,6 +157,116 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	stagingEntries, err := os.ReadDir(env.localPath("/data/skills/.staging"))
 	if err != nil || len(stagingEntries) != 0 {
 		t.Fatalf("Package staging was not cleaned: entries=%v error=%v", stagingEntries, err)
+	}
+}
+
+type directPackageStore struct {
+	skillpackages.Store
+}
+
+func (*directPackageStore) UpsertDirectBotSkillPackageInstallation(_ context.Context, arg dbsqlc.UpsertDirectBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error) {
+	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	return dbsqlc.BotSkillPackageInstallation{
+		ID:    pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9, 9, 9, 0x49, 9, 0x89, 9, 9, 9, 9, 9, 9, 9}, Valid: true},
+		BotID: arg.BotID, WorkspaceTargetID: arg.WorkspaceTargetID,
+		RegistryID: arg.RegistryID, PackageID: arg.PackageID, Revision: arg.Revision,
+		DirectlyInstalled: true, InstalledAt: now, UpdatedAt: now,
+	}, nil
+}
+
+func (*directPackageStore) CountBotSkillPackageReferences(context.Context, pgtype.UUID) (int64, error) {
+	return 0, nil
+}
+
+type uninstallPackageStore struct {
+	skillpackages.Store
+	row            dbsqlc.BotSkillPackageInstallation
+	updateErr      error
+	referenceCount int64
+}
+
+func (s *uninstallPackageStore) GetBotSkillPackageInstallationByID(context.Context, dbsqlc.GetBotSkillPackageInstallationByIDParams) (dbsqlc.BotSkillPackageInstallation, error) {
+	return s.row, nil
+}
+
+func (s *uninstallPackageStore) CountBotSkillPackageReferences(context.Context, pgtype.UUID) (int64, error) {
+	return s.referenceCount, nil
+}
+
+func (s *uninstallPackageStore) SetBotSkillPackageDirectlyInstalled(_ context.Context, arg dbsqlc.SetBotSkillPackageDirectlyInstalledParams) (dbsqlc.BotSkillPackageInstallation, error) {
+	if s.updateErr != nil {
+		return dbsqlc.BotSkillPackageInstallation{}, s.updateErr
+	}
+	s.row.DirectlyInstalled = arg.DirectlyInstalled
+	return s.row, nil
+}
+
+func (s *uninstallPackageStore) DeleteBotSkillPackageInstallationIfUnreferenced(context.Context, dbsqlc.DeleteBotSkillPackageInstallationIfUnreferencedParams) (pgtype.UUID, error) {
+	if s.referenceCount > 0 {
+		return pgtype.UUID{}, pgx.ErrNoRows
+	}
+	return s.row.ID, nil
+}
+
+func TestUninstallRegistryPackageRemovesDirectoryAndRollsBackOnDatabaseFailure(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		updateErr      error
+		referenceCount int64
+		wantFile       bool
+		wantRemoved    bool
+	}{
+		{name: "success", wantRemoved: true},
+		{name: "Plugin still references Package", referenceCount: 1, wantFile: true},
+		{name: "database failure", updateErr: errors.New("injected database failure"), wantFile: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env := newSkillsTestEnv(t)
+			manager := workspace.NewManager(
+				slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
+			)
+			packageFile := "/data/skills/openai/documents/pdf/SKILL.md"
+			env.writeSkillFile(t, packageFile, validSkillArtifactContent)
+			botID, err := db.ParseUUID(env.botID)
+			if err != nil {
+				t.Fatalf("parse bot ID: %v", err)
+			}
+			installationID := pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9, 9, 9, 0x49, 9, 0x89, 9, 9, 9, 9, 9, 9, 9}, Valid: true}
+			now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+			store := &uninstallPackageStore{
+				row: dbsqlc.BotSkillPackageInstallation{
+					ID: installationID, BotID: botID, RegistryID: "openai", PackageID: "documents",
+					Revision: strings.Repeat("a", 64), DirectlyInstalled: true, InstalledAt: now, UpdatedAt: now,
+				},
+				updateErr:      test.updateErr,
+				referenceCount: test.referenceCount,
+			}
+			installer := supermarketclient.NewInstaller(
+				nil,
+				&recordingPluginInstaller{},
+				skillpackages.NewService(store),
+				nil,
+				manager,
+				slog.New(slog.DiscardHandler),
+			)
+
+			result, uninstallErr := installer.UninstallPackage(context.Background(), env.botID, installationID.String())
+			if test.updateErr == nil {
+				if uninstallErr != nil || !result.OK || result.RemovedFiles != test.wantRemoved {
+					t.Fatalf("UninstallPackage() result=%+v error=%v", result, uninstallErr)
+				}
+			} else if !errors.Is(uninstallErr, test.updateErr) {
+				t.Fatalf("UninstallPackage() error=%v, want %v", uninstallErr, test.updateErr)
+			}
+			_, statErr := os.Stat(env.localPath(packageFile))
+			if test.wantFile {
+				if statErr != nil {
+					t.Fatalf("Package file was not restored: %v", statErr)
+				}
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("Package file still exists after uninstall: %v", statErr)
+			}
+		})
 	}
 }
 

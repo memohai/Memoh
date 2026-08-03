@@ -146,16 +146,7 @@ func (i *Installer) InstallPlugin(ctx context.Context, botID string, req Install
 		if !matchesExpectedInstallation(req.ExpectedInstalledRevision, req.ExpectedInstallationTime, state, installed) {
 			return &StatusError{Status: http.StatusConflict, Message: "installed Plugin changed; refresh before installing"}
 		}
-		expected := expectedPackageArtifacts(packages)
-		if err := i.checkArtifactConflicts(mutationCtx, botID, manifest.ID, target.TargetID, expected); err != nil {
-			return err
-		}
-		for _, prepared := range packages {
-			if err := i.checkPackageMembers(mutationCtx, botID, target.TargetID, manifest.ID, prepared.descriptor.RegistryID, prepared.descriptor.PackageID, prepared.expectedArtifacts); err != nil {
-				return err
-			}
-		}
-		installedSkills, artifacts, publications, err := publishPluginPackages(mutationCtx, target.Client, target.TargetID, packages, &skillsResult)
+		installedSkills, installedPackages, publications, err := publishPluginPackages(mutationCtx, target.Client, target.TargetID, packages, &skillsResult)
 		if err != nil {
 			return err
 		}
@@ -169,7 +160,7 @@ func (i *Installer) InstallPlugin(ctx context.Context, botID string, req Install
 			return rollbackPluginPublications(mutationCtx, withStatus(http.StatusBadGateway, err), bundlePublication, publications)
 		}
 		installation, err = i.plugins.Install(mutationCtx, botID, pluginspkg.InstallRequest{
-			Manifest: manifest, Variables: req.Variables, InstalledSkills: installedSkills, SkillArtifacts: artifacts,
+			Manifest: manifest, Variables: req.Variables, InstalledSkills: installedSkills, InstalledPackages: installedPackages, ReplacePackages: true,
 			Release:           pluginspkg.ReleaseMetadata{Revision: entry.Release.Revision, ArtifactDigest: entry.Release.Artifact.Digest},
 			WorkspaceTargetID: target.TargetID,
 		})
@@ -311,17 +302,9 @@ func (i *Installer) preparePluginBundle(ctx context.Context, sourceID, targetID 
 	return pluginspkg.ReadBundleArchive(sourceID, targetID, gz, packages)
 }
 
-func expectedPackageArtifacts(packages []preparedPackage) map[string]string {
-	expected := make(map[string]string)
-	for _, pkg := range packages {
-		maps.Copy(expected, pkg.expectedArtifacts)
-	}
-	return expected
-}
-
-func publishPluginPackages(ctx context.Context, client *bridge.Client, targetID string, packages []preparedPackage, result *pluginSkillsResult) ([]pluginspkg.InstalledSkill, map[string]pluginspkg.SkillArtifactMetadata, []*skillset.PackagePublication, error) {
+func publishPluginPackages(ctx context.Context, client *bridge.Client, targetID string, packages []preparedPackage, result *pluginSkillsResult) ([]pluginspkg.InstalledSkill, []pluginspkg.InstalledPackage, []*skillset.PackagePublication, error) {
 	installedSkills := make([]pluginspkg.InstalledSkill, 0)
-	artifacts := make(map[string]pluginspkg.SkillArtifactMetadata)
+	installedPackages := make([]pluginspkg.InstalledPackage, 0, len(packages))
 	publications := make([]*skillset.PackagePublication, 0, len(packages))
 	for _, pkg := range packages {
 		publication, installed, err := publishPackage(ctx, client, pkg, targetID)
@@ -331,14 +314,16 @@ func publishPluginPackages(ctx context.Context, client *bridge.Client, targetID 
 			return nil, nil, publications, errors.Join(err, rollbackPackages(ctx, publications))
 		}
 		publications = append(publications, publication)
+		installedPackages = append(installedPackages, pluginspkg.InstalledPackage{
+			RegistryID: pkg.descriptor.RegistryID, PackageID: pkg.descriptor.PackageID, Revision: pkg.descriptor.Revision,
+		})
 		for _, skill := range installed {
 			member := pluginspkg.InstalledSkill{RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID}
 			installedSkills = append(installedSkills, member)
 			result.Skills = append(result.Skills, pluginSkillResult{RegistryID: skill.RegistryID, PackageID: skill.PackageID, SkillID: skill.SkillID, InstallID: skill.InstallID, ArtifactDigest: skill.ArtifactDigest, FilesWritten: skill.FilesWritten})
-			artifacts[pluginspkg.InstalledSkillIdentity(member)] = pluginspkg.SkillArtifactMetadata{PackageRevision: pkg.descriptor.Revision, InstallID: skill.InstallID, ArtifactDigest: skill.ArtifactDigest, FilesWritten: skill.FilesWritten}
 		}
 	}
-	return installedSkills, artifacts, publications, nil
+	return installedSkills, installedPackages, publications, nil
 }
 
 func rollbackPackages(ctx context.Context, publications []*skillset.PackagePublication) error {

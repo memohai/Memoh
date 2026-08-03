@@ -16,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
+	"github.com/memohai/memoh/internal/skillpackages"
 	skillset "github.com/memohai/memoh/internal/skills"
 	supermarketclient "github.com/memohai/memoh/internal/supermarket"
 	"github.com/memohai/memoh/internal/workspace"
@@ -25,6 +26,7 @@ import (
 type SupermarketHandler struct {
 	upstream       *supermarketclient.Client
 	installer      *supermarketclient.Installer
+	packages       *skillpackages.Service
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
@@ -34,6 +36,7 @@ func NewSupermarketHandler(
 	log *slog.Logger,
 	cfg config.Config,
 	pluginService *pluginspkg.Service,
+	packageService *skillpackages.Service,
 	containers bridge.Provider,
 	workspaces *workspace.Manager,
 	botService *bots.Service,
@@ -42,7 +45,8 @@ func NewSupermarketHandler(
 	upstream := supermarketclient.NewClient(cfg.Supermarket.GetBaseURL(), nil)
 	return &SupermarketHandler{
 		upstream:       upstream,
-		installer:      supermarketclient.NewInstaller(upstream, pluginService, containers, workspaces, log),
+		installer:      supermarketclient.NewInstaller(upstream, pluginService, packageService, containers, workspaces, log),
+		packages:       packageService,
 		botService:     botService,
 		accountService: accountService,
 		logger:         log.With(slog.String("handler", "supermarket")),
@@ -65,6 +69,8 @@ func (h *SupermarketHandler) Register(e *echo.Echo) {
 	ig := e.Group("/bots/:bot_id/supermarket")
 	ig.POST("/install-plugin", h.InstallPlugin)
 	ig.POST("/install-package", h.InstallPackage)
+	ig.GET("/packages", h.ListInstalledPackages)
+	ig.DELETE("/packages/:installation_id", h.UninstallPackage)
 }
 
 func (h *SupermarketHandler) requireBotAccess(c echo.Context) (string, error) {
@@ -263,6 +269,52 @@ func (h *SupermarketHandler) InstallPackage(c echo.Context) error {
 		RegistryID: req.RegistryID, PackageID: req.PackageID, Revision: req.Revision,
 		WorkspaceTargetID: req.WorkspaceTargetID,
 	})
+	if err != nil {
+		return h.installerHTTPError(err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// ListInstalledPackages godoc
+// @Summary List Skill Packages installed for a bot
+// @Tags supermarket
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {array} skillpackages.Installation
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/supermarket/packages [get].
+func (h *SupermarketHandler) ListInstalledPackages(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.packages == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Skill Package service is not configured")
+	}
+	items, err := h.packages.List(c.Request().Context(), botID)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, items)
+}
+
+// UninstallPackage godoc
+// @Summary Remove a directly installed Skill Package from a bot
+// @Tags supermarket
+// @Param bot_id path string true "Bot ID"
+// @Param installation_id path string true "Package installation ID"
+// @Success 200 {object} supermarket.UninstallPackageResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Router /bots/{bot_id}/supermarket/packages/{installation_id} [delete].
+func (h *SupermarketHandler) UninstallPackage(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.installer == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "supermarket installer is not configured")
+	}
+	result, err := h.installer.UninstallPackage(c.Request().Context(), botID, strings.TrimSpace(c.Param("installation_id")))
 	if err != nil {
 		return h.installerHTTPError(err)
 	}

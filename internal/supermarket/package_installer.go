@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/apperror"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
+	"github.com/memohai/memoh/internal/skillpackages"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -35,13 +35,20 @@ type InstallPackageRequest struct {
 }
 
 type InstallPackageResponse struct {
-	OK                bool                   `json:"ok" validate:"required"`
-	RegistryID        string                 `json:"registry_id" validate:"required"`
-	PackageID         string                 `json:"package_id" validate:"required"`
-	Revision          string                 `json:"revision" validate:"required"`
-	WorkspaceTargetID string                 `json:"workspace_target_id" validate:"required"`
-	Skills            []InstallSkillResponse `json:"skills" validate:"required"`
+	OK                bool                       `json:"ok" validate:"required"`
+	RegistryID        string                     `json:"registry_id" validate:"required"`
+	PackageID         string                     `json:"package_id" validate:"required"`
+	Revision          string                     `json:"revision" validate:"required"`
+	WorkspaceTargetID string                     `json:"workspace_target_id" validate:"required"`
+	Skills            []InstallSkillResponse     `json:"skills" validate:"required"`
+	Installation      skillpackages.Installation `json:"installation" validate:"required"`
 } // @name handlers.InstallRegistryPackageResponse
+
+type UninstallPackageResponse struct {
+	OK           bool                       `json:"ok" validate:"required"`
+	RemovedFiles bool                       `json:"removed_files" validate:"required"`
+	Installation skillpackages.Installation `json:"installation" validate:"required"`
+}
 
 type InstallSkillResponse struct {
 	OK                bool   `json:"ok" validate:"required"`
@@ -60,10 +67,9 @@ type preparedSkill struct {
 }
 
 type preparedPackage struct {
-	descriptor        SkillPackageDescriptor
-	skills            []preparedSkill
-	expectedArtifacts map[string]string
-	workspaceOS       string
+	descriptor  SkillPackageDescriptor
+	skills      []preparedSkill
+	workspaceOS string
 }
 
 func (i *Installer) InstallPackage(ctx context.Context, botID string, req InstallPackageRequest) (InstallPackageResponse, error) {
@@ -100,22 +106,24 @@ func (i *Installer) InstallPackage(ctx context.Context, botID string, req Instal
 	if err != nil {
 		return InstallPackageResponse{}, err
 	}
-	if err := i.checkArtifactConflicts(targetCtx, botID, "", target.TargetID, prepared.expectedArtifacts); err != nil {
-		return InstallPackageResponse{}, err
-	}
 	var installed []InstallSkillResponse
+	var installation skillpackages.Installation
 	err = i.withBotMutation(targetCtx, botID, func(mutationCtx context.Context) error {
-		if err := i.checkArtifactConflicts(mutationCtx, botID, "", target.TargetID, prepared.expectedArtifacts); err != nil {
-			return err
-		}
-		if err := i.checkPackageMembers(mutationCtx, botID, target.TargetID, "", registryID, packageID, prepared.expectedArtifacts); err != nil {
-			return err
-		}
 		publication, published, err := publishPackage(mutationCtx, target.Client, prepared, target.TargetID)
 		if err != nil {
 			return err
 		}
 		installed = published
+		if i.packages == nil {
+			_ = publication.Rollback(mutationCtx)
+			return errors.New("skill Package service is not configured")
+		}
+		installation, err = i.packages.RecordDirect(mutationCtx, botID, target.TargetID, skillpackages.Requirement{
+			RegistryID: registryID, PackageID: packageID, Revision: revision,
+		})
+		if err != nil {
+			return errors.Join(err, publication.Rollback(mutationCtx))
+		}
 		if err := publication.Commit(mutationCtx); err != nil && i.logger != nil {
 			i.logger.Warn("cleanup replaced Skill Package failed", slog.Any("error", err))
 		}
@@ -124,7 +132,69 @@ func (i *Installer) InstallPackage(ctx context.Context, botID string, req Instal
 	if err != nil {
 		return InstallPackageResponse{}, err
 	}
-	return InstallPackageResponse{OK: true, RegistryID: registryID, PackageID: packageID, Revision: revision, WorkspaceTargetID: target.TargetID, Skills: installed}, nil
+	return InstallPackageResponse{OK: true, RegistryID: registryID, PackageID: packageID, Revision: revision, WorkspaceTargetID: target.TargetID, Skills: installed, Installation: installation}, nil
+}
+
+func (i *Installer) UninstallPackage(ctx context.Context, botID, installationID string) (UninstallPackageResponse, error) {
+	if i.packages == nil || i.workspaces == nil {
+		return UninstallPackageResponse{}, errors.New("skill Package installer is not configured")
+	}
+	var result UninstallPackageResponse
+	err := i.withBotMutation(ctx, botID, func(mutationCtx context.Context) error {
+		installation, err := i.packages.GetByID(mutationCtx, botID, installationID)
+		if err != nil {
+			return packageLifecycleError(err)
+		}
+		if !installation.DirectlyInstalled {
+			return packageLifecycleError(skillpackages.ErrNotDirect)
+		}
+
+		var removal *skillset.PackageRemoval
+		if installation.PluginReferenceCount == 0 {
+			targetCtx := workspace.WithWorkspaceTarget(mutationCtx, installation.WorkspaceTargetID)
+			target, err := i.workspaces.ResolveWorkspaceTarget(targetCtx, botID, installation.WorkspaceTargetID)
+			if err != nil {
+				return &WorkspaceTargetError{Err: err}
+			}
+			removal, err = skillset.PreparePackageRemoval(
+				targetCtx,
+				target.Client,
+				installation.RegistryID,
+				installation.PackageID,
+			)
+			if err != nil {
+				return err
+			}
+		}
+
+		updated, removed, err := i.packages.ReleaseDirect(mutationCtx, botID, installationID)
+		if err != nil {
+			return errors.Join(packageLifecycleError(err), removal.Rollback(mutationCtx))
+		}
+		if !removed {
+			if err := removal.Rollback(mutationCtx); err != nil {
+				return err
+			}
+		} else if err := removal.Commit(mutationCtx); err != nil && i.logger != nil {
+			i.logger.Warn("cleanup uninstalled Skill Package failed", slog.Any("error", err))
+		}
+		result = UninstallPackageResponse{OK: true, RemovedFiles: removed, Installation: updated}
+		return nil
+	})
+	return result, err
+}
+
+func packageLifecycleError(err error) error {
+	switch {
+	case errors.Is(err, skillpackages.ErrNotInstalled):
+		return &StatusError{Status: http.StatusNotFound, Message: "Skill Package installation was not found", Err: err}
+	case errors.Is(err, skillpackages.ErrNotDirect):
+		return &StatusError{Status: http.StatusConflict, Message: "Skill Package is owned by an installed Plugin", Err: err}
+	case errors.Is(err, skillpackages.ErrRevisionConflict):
+		return &StatusError{Status: http.StatusConflict, Message: "Skill Package revision conflicts with an existing installation", Err: err}
+	default:
+		return err
+	}
 }
 
 func (i *Installer) fetchPackageRelease(ctx context.Context, registryID, packageID, revision string) (SkillPackageDescriptor, error) {
@@ -152,9 +222,8 @@ func (i *Installer) preparePackage(ctx context.Context, workspaceOS string, pkg 
 	if err := validatePackageBudget(pkg.Skills); err != nil {
 		return preparedPackage{}, invalidPackage(err)
 	}
-	prepared := preparedPackage{descriptor: pkg, skills: make([]preparedSkill, 0, len(pkg.Skills)), expectedArtifacts: make(map[string]string, len(pkg.Skills)), workspaceOS: workspaceOS}
+	prepared := preparedPackage{descriptor: pkg, skills: make([]preparedSkill, 0, len(pkg.Skills)), workspaceOS: workspaceOS}
 	for _, skill := range pkg.Skills {
-		prepared.expectedArtifacts[strings.Join([]string{registryID, packageID, skill.SkillID}, "/")] = skill.Artifact.Digest
 		item, err := i.prepareSkill(ctx, skill)
 		if err != nil {
 			return preparedPackage{}, err
@@ -201,45 +270,6 @@ func publishPackage(ctx context.Context, client *bridge.Client, prepared prepare
 		installed = append(installed, InstallSkillResponse{OK: true, RegistryID: item.skill.RegistryID, PackageID: item.skill.PackageID, SkillID: item.skill.SkillID, InstallID: item.skill.InstallID, WorkspaceTargetID: workspaceTargetID, ArtifactDigest: item.skill.Artifact.Digest, FilesWritten: item.archive.FileCount()})
 	}
 	return publication, installed, nil
-}
-
-func (i *Installer) checkArtifactConflicts(ctx context.Context, botID, targetPluginID, targetID string, expected map[string]string) error {
-	if i.plugins == nil {
-		return nil
-	}
-	if err := i.plugins.CheckSkillArtifactConflicts(ctx, botID, targetPluginID, targetID, expected); err != nil {
-		return withStatus(http.StatusConflict, err)
-	}
-	return nil
-}
-
-func (i *Installer) checkPackageMembers(ctx context.Context, botID, targetID, targetPluginID, registryID, packageID string, expected map[string]string) error {
-	if i.plugins == nil {
-		return nil
-	}
-	installations, err := i.plugins.List(ctx, botID)
-	if err != nil {
-		return err
-	}
-	for _, installation := range installations {
-		if installation.Status == pluginspkg.StatusUninstalled || (targetPluginID != "" && installation.PluginID == targetPluginID) {
-			continue
-		}
-		installedTarget, _ := installation.Metadata["workspace_target_id"].(string)
-		if strings.TrimSpace(installedTarget) != targetID {
-			continue
-		}
-		for _, resource := range installation.Resources {
-			resourceRegistry, resourcePackage, resourceSkill, belongs := skillset.RegistrySkillIDs(resource.ResourceID)
-			if resource.Type != "skill" || !belongs || resourceRegistry != registryID || resourcePackage != packageID {
-				continue
-			}
-			if _, included := expected[strings.Join([]string{registryID, packageID, resourceSkill}, "/")]; !included {
-				return &StatusError{Status: http.StatusConflict, Message: "An installed Plugin still uses a Skill removed from this Package release"}
-			}
-		}
-	}
-	return nil
 }
 
 func validatePackage(pkg SkillPackageDescriptor, registryID, packageID string) error {

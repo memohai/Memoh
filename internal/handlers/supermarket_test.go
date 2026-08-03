@@ -90,7 +90,7 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
 	}
-	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, nil, manager, manager, handler.logger)
 
 	recorder, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -101,13 +101,8 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("InstallPlugin() status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	installedSkill := pluginspkg.InstalledSkill{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
-	metadata, ok := installer.request.SkillArtifacts[pluginspkg.InstalledSkillIdentity(installedSkill)]
-	if !ok || metadata.ArtifactDigest != digestText || metadata.FilesWritten != 1 {
-		t.Fatalf("installed Skill metadata = %+v, %v", metadata, ok)
-	}
-	if metadata.PackageRevision != entry.Release.Packages[0].Revision {
-		t.Fatalf("Package revision = %q, want %q", metadata.PackageRevision, entry.Release.Packages[0].Revision)
+	if len(installer.request.InstalledPackages) != 1 || installer.request.InstalledPackages[0].Revision != entry.Release.Packages[0].Revision {
+		t.Fatalf("installed Packages = %+v, want pinned Package revision", installer.request.InstalledPackages)
 	}
 	if installer.request.Release.Revision != entry.Release.Revision ||
 		installer.request.Release.ArtifactDigest != entry.Release.Artifact.Digest {
@@ -181,7 +176,7 @@ func TestInstallPluginRejectsStaleReleaseBeforeWorkspaceMutation(t *testing.T) {
 		botService: env.handler.botService, accountService: env.handler.accountService,
 		logger: slog.New(slog.DiscardHandler),
 	}
-	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, nil, manager, manager, handler.logger)
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: strings.Repeat("0", 64),
@@ -249,7 +244,7 @@ func TestInstallPluginRejectsInstallationChangedWithinSameReleaseWhilePreparing(
 		botService: env.handler.botService, accountService: env.handler.accountService,
 		logger: slog.New(slog.DiscardHandler),
 	}
-	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, nil, manager, manager, handler.logger)
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -322,7 +317,7 @@ func TestInstallPluginRollsBackSkillsWhenBundleInstallFails(t *testing.T) {
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
 	}
-	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, nil, manager, manager, handler.logger)
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -396,7 +391,7 @@ func TestInstallPluginRestoresPreviousWorkspaceWhenDatabaseInstallFails(t *testi
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
 	}
-	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, manager, manager, handler.logger)
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, installer, nil, manager, manager, handler.logger)
 
 	_, installErr := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -486,7 +481,7 @@ func TestInstallPluginRejectsInvalidPluginArtifactBeforeWorkspaceMutation(t *tes
 				accountService: env.handler.accountService,
 				logger:         slog.New(slog.DiscardHandler),
 			}
-			handler.installer = supermarketclient.NewInstaller(handler.upstream, pluginInstaller, manager, manager, handler.logger)
+			handler.installer = supermarketclient.NewInstaller(handler.upstream, pluginInstaller, nil, manager, manager, handler.logger)
 
 			if _, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 				PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -552,7 +547,7 @@ func TestInstallPluginRejectsDeclaredSkillBudgetBeforeArtifactDownload(t *testin
 		accountService: env.handler.accountService,
 		logger:         slog.New(slog.DiscardHandler),
 	}
-	handler.installer = supermarketclient.NewInstaller(handler.upstream, pluginInstaller, manager, manager, handler.logger)
+	handler.installer = supermarketclient.NewInstaller(handler.upstream, pluginInstaller, nil, manager, manager, handler.logger)
 
 	_, err = env.callJSON(t, http.MethodPost, "/bots/:bot_id/supermarket/install-plugin", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: entry.Release.Revision,
@@ -924,9 +919,6 @@ type recordingPluginInstaller struct {
 	installCalls          int
 	installInMutation     bool
 	mutationCalls         int
-	conflictExpected      map[string]string
-	conflictTarget        string
-	conflictErr           error
 	installErr            error
 	installed             bool
 	installedRevision     string
@@ -976,25 +968,6 @@ func (i *recordingPluginInstaller) Install(ctx context.Context, botID string, re
 		Status:     pluginspkg.StatusReady,
 		Enabled:    true,
 	}, nil
-}
-
-func (*recordingPluginInstaller) List(context.Context, string) ([]pluginspkg.Installation, error) {
-	return nil, nil
-}
-
-func (i *recordingPluginInstaller) CheckSkillArtifactConflicts(
-	_ context.Context,
-	_ string,
-	_ string,
-	workspaceTargetID string,
-	expected map[string]string,
-) error {
-	i.conflictTarget = workspaceTargetID
-	i.conflictExpected = make(map[string]string, len(expected))
-	for identity, digest := range expected {
-		i.conflictExpected[identity] = digest
-	}
-	return i.conflictErr
 }
 
 func testHTTPResponse(req *http.Request, status int, content []byte) *http.Response {

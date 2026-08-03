@@ -29,10 +29,11 @@ const pluginBundleTestInstallationID = "22222222-2222-4222-8222-222222222222"
 
 type pluginBundleTestQueries struct {
 	dbstore.Queries
-	row       sqlc.BotPluginInstallation
-	resources []sqlc.BotPluginResource
-	updateErr error
-	deleted   bool
+	row               sqlc.BotPluginInstallation
+	resources         []sqlc.BotPluginResource
+	packageReferences []sqlc.ListBotPluginPackageReferencesRow
+	updateErr         error
+	deleted           bool
 }
 
 func (q *pluginBundleTestQueries) GetBotPluginInstallationByID(
@@ -59,6 +60,32 @@ func (*pluginBundleTestQueries) DeleteMCPConnectionsByPlugin(
 func (q *pluginBundleTestQueries) DeleteBotPluginResources(context.Context, pgtype.UUID) error {
 	q.resources = nil
 	return nil
+}
+
+func (q *pluginBundleTestQueries) ListBotPluginPackageReferences(
+	context.Context,
+	pgtype.UUID,
+) ([]sqlc.ListBotPluginPackageReferencesRow, error) {
+	return q.packageReferences, nil
+}
+
+func (q *pluginBundleTestQueries) DeleteBotPluginPackageReferences(context.Context, pgtype.UUID) error {
+	q.packageReferences = nil
+	return nil
+}
+
+func (q *pluginBundleTestQueries) CountBotSkillPackageReferences(context.Context, pgtype.UUID) (int64, error) {
+	return int64(len(q.packageReferences)), nil
+}
+
+func (q *pluginBundleTestQueries) DeleteBotSkillPackageInstallationIfUnreferenced(
+	context.Context,
+	sqlc.DeleteBotSkillPackageInstallationIfUnreferencedParams,
+) (pgtype.UUID, error) {
+	if len(q.packageReferences) != 0 {
+		return pgtype.UUID{}, errors.New("Package is still referenced")
+	}
+	return pgtype.UUID{Bytes: [16]byte{3}, Valid: true}, nil
 }
 
 func (q *pluginBundleTestQueries) UpdateBotPluginInstallationStatus(
@@ -192,6 +219,13 @@ func TestUninstallRemovesPluginBundleAndRestoresItOnDatabaseFailure(t *testing.T
 				Status:         "installed",
 				Metadata:       []byte(`{"workspace_target_id":"native"}`),
 			}}
+			queries.packageReferences = []sqlc.ListBotPluginPackageReferencesRow{{
+				PluginInstallationID:  installationUUID,
+				PackageInstallationID: pgtype.UUID{Bytes: [16]byte{3}, Valid: true},
+				BotID:                 botUUID, WorkspaceTargetID: "native",
+				RegistryID: "memoh", PackageID: "notion",
+				Revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			}}
 
 			service := NewService(
 				slog.New(slog.DiscardHandler),
@@ -220,11 +254,13 @@ func TestUninstallRemovesPluginBundleAndRestoresItOnDatabaseFailure(t *testing.T
 				t.Fatalf("Plugin bundle still exists after uninstall: %v", readErr)
 			}
 			//nolint:gosec // skillFile is constructed below t.TempDir().
-			if _, err := os.ReadFile(skillFile); err != nil {
-				t.Fatalf("Plugin uninstall removed its Registry Skill: %v", err)
+			if _, err := os.ReadFile(skillFile); test.wantFile && err != nil {
+				t.Fatalf("Plugin uninstall did not restore its Package: %v", err)
+			} else if !test.wantFile && !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("Plugin uninstall retained its unowned Package: %v", err)
 			}
-			if len(provider.targets) != 1 || provider.targets[0] != "native" {
-				t.Fatalf("workspace targets = %v, want [native]", provider.targets)
+			if len(provider.targets) != 2 || provider.targets[0] != "native" || provider.targets[1] != "native" {
+				t.Fatalf("workspace targets = %v, want [native native]", provider.targets)
 			}
 		})
 	}

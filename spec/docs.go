@@ -8038,6 +8038,84 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/supermarket/packages": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Skill Packages installed for a bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/skillpackages.Installation"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/supermarket/packages/{installation_id}": {
+            "delete": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Remove a directly installed Skill Package from a bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/supermarket.UninstallPackageResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/token-usage": {
             "get": {
                 "description": "Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
@@ -19181,6 +19259,7 @@ const docTemplate = `{
         "handlers.InstallRegistryPackageResponse": {
             "type": "object",
             "required": [
+                "installation",
                 "ok",
                 "package_id",
                 "registry_id",
@@ -19189,6 +19268,9 @@ const docTemplate = `{
                 "workspace_target_id"
             ],
             "properties": {
+                "installation": {
+                    "$ref": "#/definitions/skillpackages.Installation"
+                },
                 "ok": {
                     "type": "boolean"
                 },
@@ -22783,6 +22865,41 @@ const docTemplate = `{
                 }
             }
         },
+        "skillpackages.Installation": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "directly_installed": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "installed_at": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "plugin_reference_count": {
+                    "type": "integer"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
         "skills.SafeCatalogItem": {
             "type": "object",
             "properties": {
@@ -22800,6 +22917,25 @@ const docTemplate = `{
                 },
                 "state": {
                     "type": "string"
+                }
+            }
+        },
+        "supermarket.UninstallPackageResponse": {
+            "type": "object",
+            "required": [
+                "installation",
+                "ok",
+                "removed_files"
+            ],
+            "properties": {
+                "installation": {
+                    "$ref": "#/definitions/skillpackages.Installation"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "removed_files": {
+                    "type": "boolean"
                 }
             }
         },

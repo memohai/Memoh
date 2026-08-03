@@ -146,25 +146,18 @@ func TestOwnsRegistrySkillAtTargetKeepsSharedAndDisabledPluginReferences(t *test
 	}
 }
 
-func TestValidateSkillArtifactsRequiresVerifiedInstallResult(t *testing.T) {
-	reference := InstalledSkill{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
-	identity := InstalledSkillIdentity(reference)
-	valid := SkillArtifactMetadata{
-		PackageRevision: strings.Repeat("b", 64),
-		InstallID:       "memoh+notion+meeting",
-		ArtifactDigest:  strings.Repeat("a", 64),
-		FilesWritten:    2,
+func TestValidateInstalledPackagesRequiresPinnedManifestPackages(t *testing.T) {
+	references := []PackageReference{{RegistryID: "memoh", PackageID: "notion"}}
+	installed := []InstalledPackage{{RegistryID: "memoh", PackageID: "notion", Revision: strings.Repeat("b", 64)}}
+	if err := validateInstalledPackages(references, installed); err != nil {
+		t.Fatalf("validateInstalledPackages(valid) error = %v", err)
 	}
-	if err := validateSkillArtifacts([]InstalledSkill{reference}, map[string]SkillArtifactMetadata{identity: valid}); err != nil {
-		t.Fatalf("validateSkillArtifacts(valid) error = %v", err)
+	if err := validateInstalledPackages(references, nil); err == nil {
+		t.Fatal("validateInstalledPackages() accepted a missing Package")
 	}
-	if err := validateSkillArtifacts([]InstalledSkill{reference}, nil); err == nil {
-		t.Fatal("validateSkillArtifacts() accepted missing Artifact metadata")
-	}
-	invalid := valid
-	invalid.ArtifactDigest = "not-a-digest"
-	if err := validateSkillArtifacts([]InstalledSkill{reference}, map[string]SkillArtifactMetadata{identity: invalid}); err == nil {
-		t.Fatal("validateSkillArtifacts() accepted an invalid digest")
+	installed[0].Revision = "not-a-digest"
+	if err := validateInstalledPackages(references, installed); err == nil {
+		t.Fatal("validateInstalledPackages() accepted an invalid revision")
 	}
 }
 
@@ -180,109 +173,5 @@ func TestValidateInstalledSkillsRequiresEveryReferencedPackage(t *testing.T) {
 	skill.PackageID = "other"
 	if err := validateInstalledSkills(packages, []InstalledSkill{skill}); err == nil {
 		t.Fatal("validateInstalledSkills() accepted a Skill outside the referenced Package")
-	}
-}
-
-func TestCheckSkillArtifactConflictsRejectsDifferentSharedDigests(t *testing.T) {
-	identity := "memoh/notion/meeting"
-	installation := Installation{
-		PluginID: "calendar",
-		Status:   StatusReady,
-		Metadata: map[string]any{"workspace_target_id": "native"},
-		Resources: []Resource{{
-			Type: "skill",
-			Key:  identity,
-			Metadata: map[string]any{
-				"artifact_digest": strings.Repeat("a", 64),
-			},
-		}},
-	}
-	if err := checkSkillArtifactConflicts(
-		[]Installation{installation},
-		"notion",
-		"native",
-		map[string]string{identity: strings.Repeat("b", 64)},
-	); err == nil {
-		t.Fatal("checkSkillArtifactConflicts() accepted a different shared Artifact")
-	}
-	if err := checkSkillArtifactConflicts(
-		[]Installation{installation},
-		"notion",
-		"native",
-		map[string]string{identity: strings.Repeat("a", 64)},
-	); err != nil {
-		t.Fatalf("checkSkillArtifactConflicts() rejected the same Artifact: %v", err)
-	}
-	if err := checkSkillArtifactConflicts(
-		[]Installation{installation},
-		"notion",
-		"remote-target",
-		map[string]string{identity: strings.Repeat("b", 64)},
-	); err != nil {
-		t.Fatalf("different workspace target inherited an Artifact conflict: %v", err)
-	}
-}
-
-func TestCheckSkillArtifactConflictsAllowsTargetPluginUpdate(t *testing.T) {
-	identity := "memoh/notion/meeting"
-	installation := Installation{
-		PluginID: "notion",
-		Status:   StatusDisabled,
-		Metadata: map[string]any{"workspace_target_id": "native"},
-		Resources: []Resource{{
-			Type: "skill",
-			Key:  identity,
-			Metadata: map[string]any{
-				"artifact_digest": strings.Repeat("a", 64),
-			},
-		}},
-	}
-	if err := checkSkillArtifactConflicts(
-		[]Installation{installation}, "notion", "native", map[string]string{identity: strings.Repeat("b", 64)},
-	); err != nil {
-		t.Fatalf("target Plugin could not update its own Artifact: %v", err)
-	}
-}
-
-func TestCheckSkillArtifactConflictsRejectsPluginMoveAcrossWorkspaceTargets(t *testing.T) {
-	installation := Installation{
-		PluginID: "notion",
-		Status:   StatusReady,
-		Metadata: map[string]any{"workspace_target_id": "native"},
-	}
-	err := checkSkillArtifactConflicts(
-		[]Installation{installation},
-		"notion",
-		"remote-target",
-		nil,
-	)
-	if err == nil {
-		t.Fatal("cross-target Plugin reinstall was accepted despite bot/plugin uniqueness")
-	}
-}
-
-func TestCheckSkillArtifactConflictsRejectsDirectSkillUpdate(t *testing.T) {
-	identity := "memoh/notion/meeting"
-	installation := Installation{
-		PluginID: "notion",
-		Status:   StatusReady,
-		Metadata: map[string]any{"workspace_target_id": "native"},
-		Resources: []Resource{{
-			Type: "skill",
-			Key:  identity,
-			Metadata: map[string]any{
-				"artifact_digest": strings.Repeat("a", 64),
-			},
-		}},
-	}
-	if err := checkSkillArtifactConflicts(
-		[]Installation{installation}, "", "native", map[string]string{identity: strings.Repeat("b", 64)},
-	); err == nil {
-		t.Fatal("direct Skill update replaced an Artifact locked by an installed Plugin")
-	}
-	if err := checkSkillArtifactConflicts(
-		[]Installation{installation}, "", "native", map[string]string{identity: strings.Repeat("a", 64)},
-	); err != nil {
-		t.Fatalf("direct Skill update rejected the Artifact already used by a Plugin: %v", err)
 	}
 }

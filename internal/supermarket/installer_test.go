@@ -11,7 +11,7 @@ import (
 )
 
 func TestInstallerPreparationLimit(t *testing.T) {
-	installer := NewInstaller(nil, nil, nil, nil, nil)
+	installer := NewInstaller(nil, nil, nil, nil, nil, nil)
 	first, err := installer.acquirePreparation(context.Background())
 	if err != nil {
 		t.Fatalf("acquire first preparation: %v", err)
@@ -126,38 +126,9 @@ func TestValidatePackageRejectsIdentityCountAndDuplicates(t *testing.T) {
 	}
 }
 
-func TestCheckPackageMembersProtectsInstalledPluginSkills(t *testing.T) {
-	plugins := &installerPluginStub{installations: []pluginspkg.Installation{{
-		PluginID: "notion", Status: pluginspkg.StatusReady,
-		Metadata: map[string]any{"workspace_target_id": "native"},
-		Resources: []pluginspkg.Resource{{
-			Type: "skill", ResourceID: "/data/skills/registry/package/removed/SKILL.md",
-		}},
-	}}}
-	installer := NewInstaller(nil, plugins, nil, nil, nil)
-	err := installer.checkPackageMembers(
-		context.Background(), "bot", "native", "", "registry", "package",
-		map[string]string{"registry/package/kept": strings.Repeat("a", 64)},
-	)
-	var statusErr *StatusError
-	if !errors.As(err, &statusErr) || statusErr.Status != 409 {
-		t.Fatalf("removed shared Skill error = %v", err)
-	}
-	if err := installer.checkPackageMembers(
-		context.Background(), "bot", "native", "notion", "registry", "package", map[string]string{},
-	); err != nil {
-		t.Fatalf("target Plugin update was rejected: %v", err)
-	}
-	if err := installer.checkPackageMembers(
-		context.Background(), "bot", "remote", "", "registry", "package", map[string]string{},
-	); err != nil {
-		t.Fatalf("different workspace was rejected: %v", err)
-	}
-}
-
 func TestInstallPluginRejectsPartialExpectedState(t *testing.T) {
 	revision := strings.Repeat("a", 64)
-	installer := NewInstaller(nil, &installerPluginStub{}, nil, nil, nil)
+	installer := NewInstaller(nil, &installerPluginStub{}, nil, nil, nil, nil)
 	_, err := installer.InstallPlugin(context.Background(), "bot", InstallPluginRequest{
 		PluginID: "notion", ReleaseRevision: revision, ExpectedInstalledRevision: &revision,
 	})
@@ -201,9 +172,7 @@ func TestRunPluginScriptsReportsExecutionError(t *testing.T) {
 	}
 }
 
-type installerPluginStub struct {
-	installations []pluginspkg.Installation
-}
+type installerPluginStub struct{}
 
 func (*installerPluginStub) WithBotMutation(context.Context, string, func(context.Context) error) error {
 	return nil
@@ -213,16 +182,8 @@ func (*installerPluginStub) Install(context.Context, string, pluginspkg.InstallR
 	return pluginspkg.Installation{}, nil
 }
 
-func (s *installerPluginStub) List(context.Context, string) ([]pluginspkg.Installation, error) {
-	return s.installations, nil
-}
-
 func (*installerPluginStub) InstalledPluginState(context.Context, string, string) (pluginspkg.InstalledPluginState, bool, error) {
 	return pluginspkg.InstalledPluginState{}, false, nil
-}
-
-func (*installerPluginStub) CheckSkillArtifactConflicts(context.Context, string, string, string, map[string]string) error {
-	return nil
 }
 
 type scriptCall struct {
