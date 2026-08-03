@@ -56,6 +56,7 @@ type Queries interface {
 	CreateBot(ctx context.Context, arg dbsqlc.CreateBotParams) (dbsqlc.CreateBotRow, error)
 	CreateBotACLRule(ctx context.Context, arg dbsqlc.CreateBotACLRuleParams) (dbsqlc.BotAclRule, error)
 	CreateBotPluginInstallation(ctx context.Context, arg dbsqlc.CreateBotPluginInstallationParams) (dbsqlc.BotPluginInstallation, error)
+	CountBotSkillPackageReferences(ctx context.Context, packageInstallationID pgtype.UUID) (int64, error)
 	CreateBotUserGrant(ctx context.Context, arg dbsqlc.CreateBotUserGrantParams) (dbsqlc.BotUserGrant, error)
 	CreateConnector(ctx context.Context, arg dbsqlc.CreateConnectorParams) (dbsqlc.Connector, error)
 	DeleteBotUserGrantByID(ctx context.Context, id pgtype.UUID) error
@@ -113,7 +114,9 @@ type Queries interface {
 	DeleteBotChannelConfig(ctx context.Context, arg dbsqlc.DeleteBotChannelConfigParams) error
 	DeleteBotEmailBinding(ctx context.Context, id pgtype.UUID) error
 	DeleteBotPluginInstallation(ctx context.Context, arg dbsqlc.DeleteBotPluginInstallationParams) error
+	DeleteBotPluginPackageReferences(ctx context.Context, pluginInstallationID pgtype.UUID) error
 	DeleteBotPluginResources(ctx context.Context, installationID pgtype.UUID) error
+	DeleteBotSkillPackageInstallationIfUnreferenced(ctx context.Context, arg dbsqlc.DeleteBotSkillPackageInstallationIfUnreferencedParams) (pgtype.UUID, error)
 	DeleteChatRoute(ctx context.Context, id pgtype.UUID) error
 	DeleteCompactionLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID) error
@@ -159,6 +162,8 @@ type Queries interface {
 	GetBotEmailBindingByID(ctx context.Context, id pgtype.UUID) (dbsqlc.BotEmailBinding, error)
 	GetBotOverlayConfig(ctx context.Context, id pgtype.UUID) (dbsqlc.GetBotOverlayConfigRow, error)
 	GetBotPluginInstallationByID(ctx context.Context, arg dbsqlc.GetBotPluginInstallationByIDParams) (dbsqlc.BotPluginInstallation, error)
+	GetBotSkillPackageInstallation(ctx context.Context, arg dbsqlc.GetBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error)
+	GetBotSkillPackageInstallationByID(ctx context.Context, arg dbsqlc.GetBotSkillPackageInstallationByIDParams) (dbsqlc.BotSkillPackageInstallation, error)
 	GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotStorageBinding, error)
 	GetHistoryTurnByID(ctx context.Context, arg dbsqlc.GetHistoryTurnByIDParams) (HistoryTurn, error)
 	GetVisibleHistoryTurnByMessage(ctx context.Context, arg dbsqlc.GetVisibleHistoryTurnByMessageParams) (HistoryTurn, error)
@@ -263,7 +268,9 @@ type Queries interface {
 	ListHeartbeatEnabledBots(ctx context.Context) ([]dbsqlc.ListHeartbeatEnabledBotsRow, error)
 	ListHeartbeatLogsByBot(ctx context.Context, arg dbsqlc.ListHeartbeatLogsByBotParams) ([]dbsqlc.ListHeartbeatLogsByBotRow, error)
 	ListBotPluginInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotPluginInstallation, error)
+	ListBotPluginPackageReferences(ctx context.Context, pluginInstallationID pgtype.UUID) ([]dbsqlc.ListBotPluginPackageReferencesRow, error)
 	ListBotPluginResources(ctx context.Context, installationID pgtype.UUID) ([]dbsqlc.BotPluginResource, error)
+	ListBotSkillPackageInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotSkillPackageInstallation, error)
 	ListMCPConnectionsByBotID(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.McpConnection, error)
 	ListConnectorsByBotID(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.Connector, error)
 	ListMemoryProviders(ctx context.Context) ([]dbsqlc.MemoryProvider, error)
@@ -390,6 +397,7 @@ type Queries interface {
 	UpdateEmailProviderByIDAndUser(ctx context.Context, arg dbsqlc.UpdateEmailProviderByIDAndUserParams) (dbsqlc.EmailProvider, error)
 	UpdateFetchProvider(ctx context.Context, arg dbsqlc.UpdateFetchProviderParams) (dbsqlc.FetchProvider, error)
 	UpdateBotPluginInstallationStatus(ctx context.Context, arg dbsqlc.UpdateBotPluginInstallationStatusParams) (dbsqlc.BotPluginInstallation, error)
+	SetBotSkillPackageDirectlyInstalled(ctx context.Context, arg dbsqlc.SetBotSkillPackageDirectlyInstalledParams) (dbsqlc.BotSkillPackageInstallation, error)
 	UpdateMCPConnection(ctx context.Context, arg dbsqlc.UpdateMCPConnectionParams) (dbsqlc.McpConnection, error)
 	UpdateMCPConnectionActive(ctx context.Context, arg dbsqlc.UpdateMCPConnectionActiveParams) error
 	UpdateMCPConnectionAuthType(ctx context.Context, arg dbsqlc.UpdateMCPConnectionAuthTypeParams) error
@@ -428,6 +436,9 @@ type Queries interface {
 	UpsertEmailOAuthToken(ctx context.Context, arg dbsqlc.UpsertEmailOAuthTokenParams) (dbsqlc.EmailOauthToken, error)
 	UpsertMCPConnectionByName(ctx context.Context, arg dbsqlc.UpsertMCPConnectionByNameParams) (dbsqlc.McpConnection, error)
 	UpsertBotPluginResource(ctx context.Context, arg dbsqlc.UpsertBotPluginResourceParams) (dbsqlc.BotPluginResource, error)
+	UpsertBotPluginPackageReference(ctx context.Context, arg dbsqlc.UpsertBotPluginPackageReferenceParams) (dbsqlc.BotPluginPackageReference, error)
+	UpsertDirectBotSkillPackageInstallation(ctx context.Context, arg dbsqlc.UpsertDirectBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error)
+	UpsertPluginBotSkillPackageInstallation(ctx context.Context, arg dbsqlc.UpsertPluginBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error)
 	UpsertMCPOAuthDiscovery(ctx context.Context, arg dbsqlc.UpsertMCPOAuthDiscoveryParams) (dbsqlc.McpOauthToken, error)
 	UpsertProviderOAuthToken(ctx context.Context, arg dbsqlc.UpsertProviderOAuthTokenParams) (dbsqlc.ProviderOauthToken, error)
 	UpsertRegistryModel(ctx context.Context, arg dbsqlc.UpsertRegistryModelParams) (dbsqlc.Model, error)
