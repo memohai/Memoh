@@ -196,8 +196,10 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 		ledger = contextfrag.NewMutationLedger()
 	}
 
+	fragsFirst := len(cfg.ContextSourceFrags) > 0
+	var providerSourceFrags []contextfrag.ContextFrag
 	var frags []contextfrag.ContextFrag
-	if len(cfg.ContextSourceFrags) > 0 {
+	if fragsFirst {
 		frags = append([]contextfrag.ContextFrag(nil), cfg.ContextSourceFrags...)
 		if len(cfg.ContextToolUsageFrags) > 0 {
 			filtered := frags[:0]
@@ -210,6 +212,7 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 		} else if usage := strings.TrimSpace(cfg.ContextToolUsage); usage != "" {
 			frags = append(frags, ToolUsageFrag(usage, cfg.ContextScope))
 		}
+		providerSourceFrags = frags
 	} else {
 		cfg = legacyMaterializeQuery(cfg)
 		frags = CollectProviderSourceFrags(ctx, cfg)
@@ -218,8 +221,20 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 		}
 	}
 
+	selector := Selector(&FragmentSelector{})
+	fallbackCfg := cfg
+	if fragsFirst && cfg.ContextToolDefsResolved {
+		gate := newCapabilityGateSelector(selector, cfg.ContextToolDefs)
+		_, gated := filterUnavailableCapabilities(providerSourceFrags, gate.available)
+		if len(gated) > 0 {
+			ledger.Record(contextfrag.MutationCapabilityGate, fmt.Sprintf("dropped=%d", len(gated)))
+			fallbackCfg = capabilitySafeFallbackConfig(cfg, providerSourceFrags, gate.available)
+		}
+		selector = gate
+	}
+
 	registry := NewMapCollectorRegistry(StaticCollector{CollectorName: sourceFragsCollectorName, Frags: frags})
-	builder := NewBuilder(registry, &FragmentSelector{}, StablePrefixPlacer{}, NewMapRendererRegistry(&SDKMessagesRenderer{}))
+	builder := NewBuilder(registry, selector, StablePrefixPlacer{}, NewMapRendererRegistry(&SDKMessagesRenderer{}))
 	view, err := builder.Build(ctx, BuildInput{
 		Scope: cfg.ContextScope, Intent: contextfrag.IntentRunConfigPreProvider,
 		Sources:         []SourceSpec{{Name: sourceFragsCollectorName}},
@@ -228,11 +243,11 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 		DynamicMutators: cfg.ContextDynamicMutators,
 	})
 	if err != nil {
-		return providerViewFallback(logger, cfg, ledger, "build_error", "context view build failed", err)
+		return providerViewFallback(logger, fallbackCfg, ledger, "build_error", "context view build failed", err)
 	}
 	payload, ok := view.Rendered[contextfrag.RenderSDKMessages].Data.(*SDKRenderedPayload)
 	if !ok {
-		return providerViewFallback(logger, cfg, ledger, "unexpected_payload", "context view rendered unexpected payload", nil)
+		return providerViewFallback(logger, fallbackCfg, ledger, "unexpected_payload", "context view rendered unexpected payload", nil)
 	}
 
 	plan := cachePlanFromPlacement(view.Placement)
@@ -246,7 +261,7 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 	cfg.Messages = payload.Messages
 	ordered, err := orderedSelectedFrags(view.Selected, view.Placement)
 	if err != nil {
-		return providerViewFallback(logger, cfg, ledger, "placement_error", "context view placement invalid after render", err)
+		return providerViewFallback(logger, fallbackCfg, ledger, "placement_error", "context view placement invalid after render", err)
 	}
 	currentIndex, memoryIndex := renderedSpecialMessageIndexes(ordered)
 	cfg.ContextMemoryMessageIndex = memoryIndex
@@ -268,10 +283,12 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 
 func providerViewFallback(logger *slog.Logger, cfg agentpkg.RunConfig, ledger *contextfrag.MutationLedger, reason, message string, err error) agentpkg.RunConfig {
 	warnProviderContextView(logger, cfg, message, err)
+	priorManifest := cfg.ContextManifest
 	cfg = legacyMaterializeQuery(cfg)
 	cfg.ContextFrags = nil
 	cfg.ContextSourceFrags = nil
 	cfg = cfg.RefreshContextFrag()
+	mergeCapabilityFallbackAudit(&cfg, priorManifest)
 	ledger.Record(contextfrag.MutationContextViewFallback, reason)
 	plan := contextfrag.CachePlan{}
 	manifest := cfg.ContextManifest
@@ -282,6 +299,36 @@ func providerViewFallback(logger *slog.Logger, cfg agentpkg.RunConfig, ledger *c
 	cfg.ContextCachePlan = plan
 	cfg.ContextMutations = ledger
 	return cfg
+}
+
+func mergeCapabilityFallbackAudit(out *agentpkg.RunConfig, prior contextfrag.Manifest) {
+	if out == nil || prior.Selection == nil ||
+		prior.Selection.DropReasons[capabilityGateDropReason] == 0 {
+		return
+	}
+	gated := make([]contextfrag.SelectionDecision, 0, prior.Selection.Dropped)
+	for _, decision := range prior.SelectionDecisions {
+		if decision.Decision == contextfrag.DecisionDropped &&
+			decision.Reason == capabilityGateDropReason {
+			gated = append(gated, decision)
+		}
+	}
+	if len(gated) == 0 {
+		return
+	}
+	decisions := make([]contextfrag.SelectionDecision, 0, len(out.ContextFrags)+len(gated))
+	for _, frag := range out.ContextFrags {
+		decisions = append(decisions, selectionDecisionForFrag(frag, contextfrag.DecisionSelected, ""))
+	}
+	decisions = append(decisions, gated...)
+	out.ContextManifest.Selection = &contextfrag.SelectionTrace{
+		Selected: len(out.ContextFrags),
+		Dropped:  len(gated),
+		DropReasons: map[string]int{
+			capabilityGateDropReason: len(gated),
+		},
+	}
+	out.ContextManifest.SelectionDecisions = decisions
 }
 
 func legacyMaterializeQuery(cfg agentpkg.RunConfig) agentpkg.RunConfig {

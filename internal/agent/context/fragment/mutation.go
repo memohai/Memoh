@@ -18,6 +18,7 @@ const (
 	MutationMidTaskPrune        MutationKind = "mid_task_prune"
 	MutationInjectedMessage     MutationKind = "injected_message"
 	MutationContextViewFallback MutationKind = "context_view_fallback"
+	MutationCapabilityGate      MutationKind = "capability_gate"
 	MutationReadMedia           MutationKind = "read_media"
 )
 
