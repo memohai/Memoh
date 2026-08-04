@@ -183,8 +183,8 @@ func singleSDKMessage(frag contextfrag.ContextFrag) (sdk.Message, bool) {
 func ToolUsageFrag(usage string, scope contextfrag.Scope) contextfrag.ContextFrag {
 	return contextfrag.TextFrag(contextfrag.TextFragInput{
 		ID: "system.tool_usage", Kind: contextfrag.KindToolUsage, Role: sdk.MessageRoleSystem,
-		Slot: contextfrag.SlotSystem, Text: usage, Priority: 45, CacheClass: contextfrag.CacheStable,
-		Trust: contextfrag.TrustSystem, Scope: scope, Source: contextfrag.SourceAgentToolUsage,
+		Slot: contextfrag.SlotSystem, Text: usage, Priority: 45, RetentionTier: contextfrag.RetentionPreferred,
+		CacheClass: contextfrag.CacheStable, Trust: contextfrag.TrustSystem, Scope: scope, Source: contextfrag.SourceAgentToolUsage,
 		Collector: sourceFragsCollectorName, Render: contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown},
 		ConflictKey: toolUsageConflictKey,
 	})

@@ -5,14 +5,25 @@ import contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 type FragmentSelector struct{}
 
 func (*FragmentSelector) ProfileFor(intent contextfrag.Intent) IntentProfile {
-	if intent != contextfrag.IntentRunConfigPreProvider {
+	switch intent {
+	case contextfrag.IntentRunConfigPreProvider, contextfrag.IntentDiscussReply:
+		return IntentProfile{
+			Intent:          intent,
+			MustKeepSlots:   []contextfrag.Slot{contextfrag.SlotCurrentUser},
+			MustKeepFrag:    mustKeepProviderSystemFrag,
+			SlotTrustFloors: map[contextfrag.Slot]contextfrag.TrustLevel{contextfrag.SlotSystem: contextfrag.TrustWorkspace},
+		}
+	default:
 		return IntentProfile{Intent: intent}
 	}
-	return IntentProfile{
-		Intent:          intent,
-		MustKeepSlots:   []contextfrag.Slot{contextfrag.SlotSystem, contextfrag.SlotCurrentUser},
-		SlotTrustFloors: map[contextfrag.Slot]contextfrag.TrustLevel{contextfrag.SlotSystem: contextfrag.TrustWorkspace},
-	}
+}
+
+// mustKeepProviderSystemFrag keeps history-budget selection from claiming
+// authority over system fragments. A later system-budget pass may apply the
+// retention tier, but every system fragment surviving that pass remains
+// protected here.
+func mustKeepProviderSystemFrag(frag contextfrag.ContextFrag) bool {
+	return frag.Slot == contextfrag.SlotSystem
 }
 
 func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentProfile, budget BudgetEnvelope) SelectionResult {
@@ -116,6 +127,9 @@ func conflictBeats(challenger, incumbent contextfrag.ContextFrag) bool {
 
 func isMustKeepFrag(frag contextfrag.ContextFrag, profile IntentProfile) bool {
 	if frag.Budget.Overflow == contextfrag.OverflowKeep {
+		return true
+	}
+	if profile.MustKeepFrag != nil && profile.MustKeepFrag(frag) {
 		return true
 	}
 	for _, slot := range profile.MustKeepSlots {
