@@ -328,6 +328,7 @@ type Manifest struct {
 	TrustBreakdown     []TrustBreakdown    `json:"trust_breakdown,omitempty"`
 	ToolDefs           []ToolDefAccounting `json:"tool_defs,omitempty"`
 	Items              []ManifestItem      `json:"items,omitempty"`
+	SelectionDecisions []SelectionDecision `json:"selection_decisions,omitempty"`
 	Selection          *SelectionTrace     `json:"selection,omitempty"`
 	CachePlan          *CachePlan          `json:"cache_plan,omitempty"`
 	Mutations          *MutationLedger     `json:"mutations,omitempty"`
@@ -396,6 +397,31 @@ type SelectionTrace struct {
 	Selected    int            `json:"selected"`
 	Dropped     int            `json:"dropped"`
 	DropReasons map[string]int `json:"drop_reasons,omitempty"`
+}
+
+type SelectionDecisionKind string
+
+const (
+	DecisionSelected SelectionDecisionKind = "selected"
+	DecisionTrimmed  SelectionDecisionKind = "trimmed"
+	DecisionDropped  SelectionDecisionKind = "dropped"
+)
+
+// SelectionDecision is the content-light per-fragment audit trail for
+// selection. It identifies sources and costs without retaining prompt text.
+type SelectionDecision struct {
+	ID            string                `json:"id"`
+	Ref           ContextRef            `json:"ref,omitempty"`
+	Slot          Slot                  `json:"slot"`
+	Source        string                `json:"source,omitempty"`
+	SourceID      string                `json:"source_id,omitempty"`
+	Decision      SelectionDecisionKind `json:"decision"`
+	Reason        string                `json:"reason,omitempty"`
+	TokenEstimate int                   `json:"token_estimate,omitempty"`
+	TextBytes     int                   `json:"text_bytes,omitempty"`
+	ImageCount    int                   `json:"image_count,omitempty"`
+	CacheClass    CacheClass            `json:"cache_class,omitempty"`
+	RetentionTier RetentionTier         `json:"retention_tier,omitempty"`
 }
 
 // ManifestItem is one non-sensitive fragment entry.
