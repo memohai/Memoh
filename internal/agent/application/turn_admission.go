@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,6 +129,7 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 		return nil
 	}
 	handle := admission.Handle
+	runCtx := ctx
 	// The run's context is already canceled by the time the terminal write runs,
 	// so this detaches from its cancellation while keeping its values: the write
 	// still needs whatever scoping the caller's context carries.
@@ -141,7 +143,26 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 		defer cancel()
 		err := s.sessionRuntime.FinishRun(ctx, handle, status, message)
 		switch {
-		case err == nil || s.logger == nil:
+		case err == nil:
+			if status == "" && cause == nil {
+				return
+			}
+			lifecycleCause := cause
+			switch {
+			case lifecycleCause == nil && status == sessionruntime.RunStatusAborted:
+				lifecycleCause = context.Canceled
+			case lifecycleCause == nil && status == sessionruntime.RunStatusErrored:
+				lifecycleCause = errors.New("run finished with an unspecified error")
+			}
+			s.EnsureTerminalContextLifecycle(
+				runCtx,
+				handle.RunID,
+				handle.BotID,
+				handle.SessionID,
+				lifecycleCause,
+			)
+		case s.logger == nil:
+			return
 		case errors.Is(err, sessionruntime.ErrRunOwnershipLost):
 			// Expected, not a failure: this process was superseded mid-run, so the
 			// terminal write was refused and the reaper names the outcome instead.
@@ -238,7 +259,11 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 // have several agents working at once, and each of those threads still runs one
 // turn at a time. Busy therefore means *this agent* is already working — a fact
 // the parent model can act on — rather than a failure to report.
-func (s *Service) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, tools.SubagentAdmission, func(error), error) {
+func (s *Service) AdmitSubagentRun(
+	ctx context.Context,
+	botID, threadID, invocationID string,
+	submission []byte,
+) (context.Context, tools.SubagentAdmission, func(tools.SubagentTerminal), error) {
 	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission)
 	switch {
 	case errors.Is(err, sessionruntime.ErrSessionBusy):
@@ -261,11 +286,31 @@ func (s *Service) AdmitSubagentRun(ctx context.Context, botID, threadID, invocat
 		Token:     admission.Handle.FencingToken,
 	})
 	runCtx = withSubagentRunHandle(runCtx, admission.Handle)
-	return runCtx, tools.SubagentAdmission{
+	toolAdmission := tools.SubagentAdmission{
 		RunID:        admission.RunID,
 		TurnID:       admission.TurnID,
 		TurnPosition: admission.TurnPosition,
-	}, finish, nil
+	}
+	var once sync.Once
+	terminal := func(result tools.SubagentTerminal) {
+		once.Do(func() {
+			lifecycleCause := result.Cause
+			if lifecycleCause == nil && runCtx.Err() != nil {
+				lifecycleCause = context.Cause(runCtx)
+			}
+			s.persistContextLifecycleSnapshot(
+				runCtx,
+				admission.RunID,
+				botID,
+				threadID,
+				result.ContextLifecycle,
+				lifecycleCause,
+				true,
+			)
+			finish(result.Cause)
+		})
+	}
+	return runCtx, toolAdmission, terminal, nil
 }
 
 // turnInvocationID resolves the command's retry identity.

@@ -13,6 +13,8 @@ import (
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	tools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
@@ -45,10 +47,36 @@ func (s *recordingContextLifecycleStore) CreateContextLifecycle(
 	if s.createErr != nil {
 		return sqlc.ContextLifecycle{}, s.createErr
 	}
-	return sqlc.ContextLifecycle{
+	created := sqlc.ContextLifecycle{
 		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
 		Status: arg.Status, ErrorCode: arg.ErrorCode, Snapshot: arg.Snapshot,
-	}, nil
+	}
+	s.existing = &created
+	return created, nil
+}
+
+type lifecycleTurnAdmitter struct {
+	admission sessionruntime.Admission
+	cancel    context.CancelFunc
+	finishes  []recordedFinish
+	finishErr error
+}
+
+func (a *lifecycleTurnAdmitter) Admit(
+	_ context.Context,
+	input sessionruntime.AdmitInput,
+) (sessionruntime.Admission, error) {
+	a.cancel = input.Execution.Cancel
+	return a.admission, nil
+}
+
+func (a *lifecycleTurnAdmitter) FinishRun(
+	_ context.Context,
+	handle sessionruntime.RunHandle,
+	status, message string,
+) error {
+	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: message})
+	return a.finishErr
 }
 
 func (s *recordingContextLifecycleStore) GetContextLifecycleByRunID(
@@ -264,5 +292,147 @@ func TestAuthoritativeSnapshotReplacesOnlyRecoveredAbortedFallback(t *testing.T)
 
 	if len(store.updates) != 1 {
 		t.Fatalf("aborted snapshot updates = %d, want 1", len(store.updates))
+	}
+}
+
+func TestTurnRunFinisherCreatesFallbackOnlyAfterFencedTerminalFinish(t *testing.T) {
+	abortedCtx, cancel := context.WithCancelCause(context.Background())
+	cancel(context.Canceled)
+	tests := []struct {
+		name        string
+		ctx         context.Context
+		status      string
+		cause       error
+		finishErr   error
+		wantCreates int
+		wantStatus  string
+	}{
+		{
+			name:        "pre-context failure",
+			ctx:         context.Background(),
+			status:      sessionruntime.RunStatusErrored,
+			cause:       apperror.New(apperror.CodeWorkspaceUnreachable, nil),
+			wantCreates: 1,
+			wantStatus:  contextLifecycleStatusFailedProvider,
+		},
+		{name: "decision pause", ctx: context.Background()},
+		{
+			name:        "explicit abort",
+			ctx:         abortedCtx,
+			status:      sessionruntime.RunStatusAborted,
+			wantCreates: 1,
+			wantStatus:  contextLifecycleStatusAborted,
+		},
+		{
+			name:      "lost fence",
+			ctx:       context.Background(),
+			status:    sessionruntime.RunStatusErrored,
+			cause:     errors.New("late failure"),
+			finishErr: sessionruntime.ErrRunOwnershipLost,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			admitter := &lifecycleTurnAdmitter{finishErr: tt.finishErr}
+			store := &recordingContextLifecycleStore{}
+			service := &Service{sessionRuntime: admitter, contextLifecycles: store}
+			admission := lifecycleTestAdmission()
+
+			service.turnRunFinisher(tt.ctx, admission)(tt.status, tt.cause)
+
+			if len(admitter.finishes) != 1 {
+				t.Fatalf("FinishRun calls = %d, want 1", len(admitter.finishes))
+			}
+			if len(store.creates) != tt.wantCreates {
+				t.Fatalf("lifecycle creates = %d, want %d", len(store.creates), tt.wantCreates)
+			}
+			if tt.wantCreates > 0 && store.creates[0].Status != tt.wantStatus {
+				t.Fatalf("lifecycle status = %q, want %q", store.creates[0].Status, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestSubagentTerminalPersistsSnapshotAndPreContextFallbackExactlyOnce(t *testing.T) {
+	tests := []struct {
+		name         string
+		terminal     func() tools.SubagentTerminal
+		wantStatus   string
+		wantFinish   string
+		wantSnapshot contextfrag.LifecycleSnapshot
+	}{
+		{
+			name: "final snapshot",
+			terminal: func() tools.SubagentTerminal {
+				snapshot, ok := lifecycleTestRunConfig().ContextLifecycle.Snapshot()
+				if !ok {
+					t.Fatal("test lifecycle snapshot is unavailable")
+				}
+				return tools.SubagentTerminal{ContextLifecycle: &snapshot}
+			},
+			wantStatus:   contextLifecycleStatusCompleted,
+			wantFinish:   sessionruntime.RunStatusCompleted,
+			wantSnapshot: contextfrag.LifecycleSnapshot{Version: 1},
+		},
+		{
+			name: "failure before context",
+			terminal: func() tools.SubagentTerminal {
+				return tools.SubagentTerminal{Cause: apperror.New(apperror.CodeWorkspaceUnreachable, nil)}
+			},
+			wantStatus:   contextLifecycleStatusFailedProvider,
+			wantFinish:   sessionruntime.RunStatusErrored,
+			wantSnapshot: contextfrag.LifecycleSnapshot{Version: 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			admission := lifecycleTestAdmission()
+			admitter := &lifecycleTurnAdmitter{admission: admission}
+			store := &recordingContextLifecycleStore{}
+			service := &Service{sessionRuntime: admitter, contextLifecycles: store}
+
+			_, subagentAdmission, terminal, err := service.AdmitSubagentRun(
+				context.Background(),
+				lifecycleTestBotID,
+				lifecycleTestSessionID,
+				"subagent:test",
+				[]byte(`{"message":"work"}`),
+			)
+			if err != nil {
+				t.Fatalf("AdmitSubagentRun() error = %v", err)
+			}
+			if subagentAdmission.RunID != lifecycleTestRunID {
+				t.Fatalf("run ID = %q, want %q", subagentAdmission.RunID, lifecycleTestRunID)
+			}
+			terminal(tt.terminal())
+			terminal(tools.SubagentTerminal{Cause: errors.New("late duplicate")})
+
+			if len(store.creates) != 1 || store.creates[0].Status != tt.wantStatus {
+				t.Fatalf("lifecycle creates = %#v, want one %s", store.creates, tt.wantStatus)
+			}
+			var snapshot contextfrag.LifecycleSnapshot
+			if err := json.Unmarshal(store.creates[0].Snapshot, &snapshot); err != nil {
+				t.Fatalf("decode snapshot: %v", err)
+			}
+			if snapshot.Version != tt.wantSnapshot.Version {
+				t.Fatalf("snapshot = %#v, want version %d", snapshot, tt.wantSnapshot.Version)
+			}
+			if len(admitter.finishes) != 1 || admitter.finishes[0].status != tt.wantFinish {
+				t.Fatalf("runtime finishes = %#v, want one %s", admitter.finishes, tt.wantFinish)
+			}
+		})
+	}
+}
+
+func lifecycleTestAdmission() sessionruntime.Admission {
+	return sessionruntime.Admission{
+		RunID:   lifecycleTestRunID,
+		Started: true,
+		Handle: sessionruntime.RunHandle{
+			RunID:        lifecycleTestRunID,
+			BotID:        lifecycleTestBotID,
+			SessionID:    lifecycleTestSessionID,
+			FencingToken: 1,
+		},
 	}
 }

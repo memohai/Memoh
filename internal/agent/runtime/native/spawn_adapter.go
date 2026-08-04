@@ -69,15 +69,19 @@ func (s *SpawnAdapter) Generate(ctx context.Context, cfg tools.SpawnRunConfig) (
 
 	result, err := s.agent.Generate(ctx, rc)
 	if err != nil {
-		return nil, err
+		return spawnFailureResult(rc), err
 	}
 
-	return &tools.SpawnResult{
+	spawnResult := &tools.SpawnResult{
 		Messages:  result.Messages,
 		Text:      result.Text,
 		Usage:     result.Usage,
 		Persisted: persisted,
-	}, nil
+	}
+	if snapshot, ok := rc.ContextLifecycle.Snapshot(); ok {
+		spawnResult.ContextLifecycle = &snapshot
+	}
+	return spawnResult, nil
 }
 
 func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
@@ -153,6 +157,7 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 		LoopDetection: LoopDetectionConfig{
 			Enabled: cfg.LoopDetection.Enabled,
 		},
+		ContextLifecycle: contextfrag.NewLifecycleHolder(),
 	}
 	rc.ContextSourceFrags = SpawnContextSourceFrags(rc)
 	return rc
@@ -235,11 +240,10 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	// Check if context was cancelled (watchdog fired or parent cancelled).
 	if ctx.Err() != nil {
 		if cause := context.Cause(ctx); cause != nil {
-			return nil, cause
+			return spawnFailureResult(rc), cause
 		}
-		return nil, ctx.Err()
+		return spawnFailureResult(rc), ctx.Err()
 	}
-
 	// A stream that errored without reaching a clean end is a failed attempt,
 	// not a short answer. Surfacing the provider's own error text is what lets
 	// the caller's retry patterns (429 / 5xx / connection reset) match; the
@@ -247,15 +251,30 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	// the run recovered from (mid-stream retry reached EventAgentEnd) stays
 	// invisible here, exactly like the main chat path.
 	if !completed && lastError != "" {
-		return nil, errors.New(lastError)
+		return spawnFailureResult(rc), errors.New(lastError)
 	}
 
-	return &tools.SpawnResult{
+	spawnResult := &tools.SpawnResult{
 		Messages:  finalMessages,
 		Text:      allText.String(),
 		Usage:     &totalUsage,
 		Persisted: persisted,
-	}, nil
+	}
+	if snapshot, ok := rc.ContextLifecycle.Snapshot(); ok {
+		spawnResult.ContextLifecycle = &snapshot
+	}
+	return spawnResult, nil
+}
+
+func spawnFailureResult(rc RunConfig) *tools.SpawnResult {
+	if rc.ContextLifecycle == nil {
+		return nil
+	}
+	snapshot, ok := rc.ContextLifecycle.Snapshot()
+	if !ok {
+		return nil
+	}
+	return &tools.SpawnResult{ContextLifecycle: &snapshot}
 }
 
 // SpawnSystemPrompt returns the system prompt for a given session type.

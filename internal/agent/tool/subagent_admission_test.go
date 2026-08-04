@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/turn"
 )
 
@@ -38,11 +40,12 @@ type subagentAdmissionRecord struct {
 }
 
 type subagentTerminalRecord struct {
-	threadID string
-	cause    string
+	threadID         string
+	cause            string
+	contextLifecycle *contextfrag.LifecycleSnapshot
 }
 
-func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, SubagentAdmission, func(error), error) {
+func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, SubagentAdmission, func(SubagentTerminal), error) {
 	f.mu.Lock()
 	if f.reject != nil {
 		err := f.reject
@@ -73,14 +76,17 @@ func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, thre
 		TurnID:       "turn-" + invocationID,
 		TurnPosition: 1,
 	}
-	return runCtx, admission, func(cause error) {
+	return runCtx, admission, func(terminal SubagentTerminal) {
 		defer cancel()
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		delete(f.active, threadID)
-		record := subagentTerminalRecord{threadID: threadID}
-		if cause != nil {
-			record.cause = cause.Error()
+		record := subagentTerminalRecord{
+			threadID:         threadID,
+			contextLifecycle: terminal.ContextLifecycle,
+		}
+		if terminal.Cause != nil {
+			record.cause = terminal.Cause.Error()
 		}
 		f.finishes = append(f.finishes, record)
 	}, nil
@@ -136,8 +142,10 @@ func TestSpawnedTurnIsAdmittedOnTheAgentsOwnThread(t *testing.T) {
 }
 
 type retryingIdentitySpawnAgent struct {
-	mu    sync.Mutex
-	calls []SpawnRunConfig
+	mu       sync.Mutex
+	calls    []SpawnRunConfig
+	first    *contextfrag.LifecycleSnapshot
+	terminal *contextfrag.LifecycleSnapshot
 }
 
 func (a *retryingIdentitySpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
@@ -149,9 +157,16 @@ func (a *retryingIdentitySpawnAgent) GenerateWithWatchdog(_ context.Context, cfg
 	defer a.mu.Unlock()
 	a.calls = append(a.calls, cfg)
 	if len(a.calls) == 1 {
-		return nil, errors.New("provider returned 429")
+		return &SpawnResult{ContextLifecycle: a.first}, errors.New("provider returned 429")
 	}
-	return &SpawnResult{Text: "done"}, nil
+	return &SpawnResult{
+		Text: "done",
+		Messages: []sdk.Message{{
+			Role:    sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "done"}},
+		}},
+		ContextLifecycle: a.terminal,
+	}, nil
 }
 
 func (a *retryingIdentitySpawnAgent) configs() []SpawnRunConfig {
@@ -161,7 +176,15 @@ func (a *retryingIdentitySpawnAgent) configs() []SpawnRunConfig {
 }
 
 func TestSpawnedTurnReusesAdmittedRunIDAcrossRetries(t *testing.T) {
-	agent := &retryingIdentitySpawnAgent{}
+	first := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 1},
+	}
+	final := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 2},
+	}
+	agent := &retryingIdentitySpawnAgent{first: first, terminal: final}
 	admitter := &fakeSubagentAdmitter{}
 	p := newSubagentAdmissionTestProvider(t, agent, admitter)
 
@@ -189,8 +212,54 @@ func TestSpawnedTurnReusesAdmittedRunIDAcrossRetries(t *testing.T) {
 			t.Errorf("call %d RunID = %q, want admitted RunID %q", i, call.RunID, admissions[0].runID)
 		}
 	}
-	if terminals := admitter.terminals(); len(terminals) != 1 {
+	terminals := admitter.terminals()
+	if len(terminals) != 1 {
 		t.Fatalf("terminal calls = %d, want 1", len(terminals))
+	}
+	if got := terminals[0].contextLifecycle; got == nil || got.Counts.Fragments != 2 || got.AssistantMessageID != "msg_2" {
+		t.Fatalf("terminal snapshot = %#v, want final retry snapshot associated with msg_2", got)
+	}
+}
+
+type failedLifecycleSpawnAgent struct {
+	snapshot *contextfrag.LifecycleSnapshot
+}
+
+func (a *failedLifecycleSpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
+	return a.GenerateWithWatchdog(ctx, cfg, func() {})
+}
+
+func (a *failedLifecycleSpawnAgent) GenerateWithWatchdog(context.Context, SpawnRunConfig, func()) (*SpawnResult, error) {
+	return &SpawnResult{ContextLifecycle: a.snapshot}, errors.New("provider unavailable")
+}
+
+func TestSpawnedTurnRetainsLifecycleSnapshotOnGenerationFailure(t *testing.T) {
+	snapshot := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 3, Messages: 2},
+	}
+	admitter := &fakeSubagentAdmitter{}
+	p := newSubagentAdmissionTestProvider(t, &failedLifecycleSpawnAgent{snapshot: snapshot}, admitter)
+
+	result := asMap(t, mustExecuteAgentTool(t, p, SessionContext{
+		BotID:     "bot1",
+		SessionID: "parent1",
+	}, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "fail after assembly",
+	}))
+	if result["status"] != string(background.TaskFailed) {
+		t.Fatalf("status = %v, want %q", result["status"], background.TaskFailed)
+	}
+	terminals := admitter.terminals()
+	if len(terminals) != 1 {
+		t.Fatalf("terminal calls = %d, want 1", len(terminals))
+	}
+	if !reflect.DeepEqual(terminals[0].contextLifecycle, snapshot) {
+		t.Fatalf("terminal snapshot = %#v, want %#v", terminals[0].contextLifecycle, snapshot)
+	}
+	if terminals[0].cause != "provider unavailable" {
+		t.Fatalf("terminal cause = %q, want provider failure", terminals[0].cause)
 	}
 }
 

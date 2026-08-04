@@ -217,7 +217,7 @@ func newAbortableSubagentAdmitter() *abortableSubagentAdmitter {
 	}
 }
 
-func (f *abortableSubagentAdmitter) AdmitSubagentRun(ctx context.Context, _, threadID, invocationID string, _ []byte) (context.Context, SubagentAdmission, func(error), error) {
+func (f *abortableSubagentAdmitter) AdmitSubagentRun(ctx context.Context, _, threadID, invocationID string, _ []byte) (context.Context, SubagentAdmission, func(SubagentTerminal), error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	f.mu.Lock()
 	f.cancels[threadID] = cancel
@@ -227,7 +227,7 @@ func (f *abortableSubagentAdmitter) AdmitSubagentRun(ctx context.Context, _, thr
 		RunID:        "run-" + invocationID,
 		TurnID:       "turn-" + invocationID,
 		TurnPosition: 1,
-	}, func(error) {}, nil
+	}, func(SubagentTerminal) {}, nil
 }
 
 func (f *abortableSubagentAdmitter) abortRun(threadID string) bool {
