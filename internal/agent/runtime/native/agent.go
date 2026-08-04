@@ -171,6 +171,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	var sdkTools []sdk.Tool
+	cfg.ContextToolDefsResolved = true
 	if cfg.SupportsToolCall {
 		var toolUsage string
 		var toolUsageFrags []contextfrag.ContextFrag
@@ -758,6 +759,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	}
 
 	var sdkTools []sdk.Tool
+	cfg.ContextToolDefsResolved = true
 	if cfg.SupportsToolCall {
 		var toolUsage string
 		var toolUsageFrags []contextfrag.ContextFrag

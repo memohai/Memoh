@@ -55,6 +55,7 @@ func fragsFirstFixture() agentpkg.RunConfig {
 			{Provider: "native", Name: "zeta_tool", TokenEstimate: 5},
 			{Provider: "native", Name: "alpha_tool"},
 		},
+		ContextToolDefsResolved: true,
 	}
 }
 

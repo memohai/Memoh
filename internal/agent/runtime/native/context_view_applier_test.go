@@ -30,6 +30,9 @@ func TestGenerateAppliesContextViewBeforeProviderOptions(t *testing.T) {
 			cfg.ContextToolUsageFrags[1].ID != "system.tool_usage.fake_tool" {
 			t.Fatalf("applier structured tool usage = %#v, want header and provider item", cfg.ContextToolUsageFrags)
 		}
+		if !cfg.ContextToolDefsResolved {
+			t.Fatal("applier must see an authoritative tool capability roster")
+		}
 		cfg.System = "compiled system"
 		cfg.Messages = []sdk.Message{sdk.UserMessage("compiled message")}
 		cfg.ContextMutations = ledger
