@@ -107,7 +107,8 @@ func TestGenerateSystemSectionsShape(t *testing.T) {
 		Bot:                       BotInfo{ID: "bot-1", Name: "research-bot"},
 		Skills:                    []SkillEntry{{Name: "foo", Description: "does foo"}},
 		Files:                     []SystemFile{{Filename: "AGENTS.md", Content: "Be nice."}},
-		PlatformIdentitiesSection: "platform identity",
+		PlatformIdentitiesSection: "platform header\nplatform identity",
+		PlatformIdentities:        []SystemPromptItem{{ID: "telegram-1", Text: "platform identity"}},
 	})
 	want := []struct {
 		id                 string
@@ -120,9 +121,11 @@ func TestGenerateSystemSectionsShape(t *testing.T) {
 		{sectionIDBotIdentity, contextfrag.KindBotIdentity, priorityBotIdentity, contextfrag.RetentionPreferred, ""},
 		{sectionIDBody, contextfrag.KindSystemPrompt, priorityBody, contextfrag.RetentionRequired, ""},
 		{sectionIDTail, contextfrag.KindSystemPrompt, priorityTail, contextfrag.RetentionRequired, ""},
-		{sectionIDPlatformIdentity, contextfrag.KindPlatformIdentity, priorityPlatformIdentity, contextfrag.RetentionPreferred, ""},
-		{sectionIDSkills, contextfrag.KindSkillsCatalog, prioritySkills, contextfrag.RetentionOptional, "use_skill"},
-		{sectionIDWorkspaceInstructions, contextfrag.KindWorkspaceInstruction, priorityWorkspaceInstructions, contextfrag.RetentionPreferred, ""},
+		{sectionIDPlatformIdentity + ".header", contextfrag.KindPlatformIdentity, priorityPlatformIdentity, contextfrag.RetentionPreferred, ""},
+		{sectionIDPlatformIdentity + ".telegram-1", contextfrag.KindPlatformIdentity, priorityPlatformIdentity, contextfrag.RetentionPreferred, ""},
+		{sectionIDSkills + ".header", contextfrag.KindSkillsCatalog, prioritySkills, contextfrag.RetentionOptional, "use_skill"},
+		{sectionIDSkill + ".foo", contextfrag.KindSkillsCatalog, prioritySkills, contextfrag.RetentionOptional, "use_skill"},
+		{sectionIDWorkspaceFile + ".AGENTS.md", contextfrag.KindWorkspaceInstruction, priorityWorkspaceInstructions, contextfrag.RetentionPreferred, ""},
 	}
 	if len(sections) != len(want) {
 		t.Fatalf("sections = %#v", sections)
@@ -132,6 +135,87 @@ func TestGenerateSystemSectionsShape(t *testing.T) {
 			sections[i].RetentionTier != want[i].retention || sections[i].RequiredCapability != want[i].requiredCapability {
 			t.Fatalf("section[%d] = %#v, want %#v", i, sections[i], want[i])
 		}
+	}
+}
+
+func TestGenerateSystemSectionsGranularDynamicItemsRemainByteEquivalent(t *testing.T) {
+	t.Parallel()
+
+	platformItems := []SystemPromptItem{
+		{ID: "telegram-1", Text: `<identity channel="telegram" username="@memoh"/>`},
+		{ID: "微信-2", Text: `<identity channel="weixin" username="小明"/>`},
+	}
+	platformSection := "## Platform Identities\n\nKnown identities.\n\n" +
+		platformItems[0].Text + "\n" + platformItems[1].Text
+	skills := []SkillEntry{
+		{Name: "技能", Description: "第二"},
+		{Name: "alpha", Description: "first"},
+	}
+	files := []SystemFile{
+		{Filename: "ZETA.md", Content: "zeta"},
+		{Filename: "AGENTS.md", Content: "agents"},
+		{Filename: "MEMORY.md", Content: "still included on the accepted PR1 path"},
+	}
+	params := SystemPromptParams{
+		SessionType:               sessionmode.Chat,
+		Timezone:                  "UTC",
+		Skills:                    skills,
+		Files:                     files,
+		PlatformIdentitiesSection: platformSection,
+		PlatformIdentities:        platformItems,
+	}
+
+	sections := GenerateSystemSections(params)
+	wantIDs := []string{
+		"system.prompt.intro",
+		"system.bot_identity",
+		"system.prompt.body",
+		"system.prompt.tail",
+		"system.platform_identity.header",
+		"system.platform_identity.telegram-1",
+		"system.platform_identity.微信-2",
+		"system.skills.header",
+		"system.skill.alpha",
+		"system.skill.技能",
+		"system.workspace_file.ZETA.md",
+		"system.workspace_file.AGENTS.md",
+		"system.workspace_file.MEMORY.md",
+	}
+	gotIDs := make([]string, 0, len(sections))
+	for _, section := range sections {
+		gotIDs = append(gotIDs, section.ID)
+	}
+	if strings.Join(gotIDs, "\n") != strings.Join(wantIDs, "\n") {
+		t.Fatalf("section IDs = %v, want %v", gotIDs, wantIDs)
+	}
+
+	wantSuffix := platformSection + "\n\n" +
+		buildSkillsSection(skills) + "\n\n" +
+		buildFileSections(files, DefaultSystemFilesMaxBytes)
+	if got := GenerateSystemPrompt(params); !strings.HasSuffix(got, wantSuffix) {
+		t.Fatalf("granular prompt suffix mismatch\ngot:  %q\nwant suffix: %q", got, wantSuffix)
+	}
+}
+
+func TestGenerateSystemSectionsSkillsRequireUseSkillCapability(t *testing.T) {
+	t.Parallel()
+
+	sections := GenerateSystemSections(SystemPromptParams{
+		SessionType: sessionmode.Chat,
+		Skills:      []SkillEntry{{Name: "alpha", Description: "first"}},
+	})
+	found := 0
+	for _, section := range sections {
+		if section.Kind != contextfrag.KindSkillsCatalog {
+			continue
+		}
+		found++
+		if section.RequiredCapability != skillRequiredCapability {
+			t.Fatalf("%s required capability = %q, want %q", section.ID, section.RequiredCapability, skillRequiredCapability)
+		}
+	}
+	if found != 2 {
+		t.Fatalf("skill sections = %d, want header plus item", found)
 	}
 }
 

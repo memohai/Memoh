@@ -117,6 +117,12 @@ type SystemPromptParams struct {
 	MaxFilesBytes             int
 	Timezone                  string
 	PlatformIdentitiesSection string
+	PlatformIdentities        []SystemPromptItem
+}
+
+type SystemPromptItem struct {
+	ID   string
+	Text string
 }
 
 func buildBotInfoSection(bot BotInfo) string {
@@ -168,31 +174,60 @@ func GenerateHeartbeatPrompt(interval int, checklist string, now time.Time, last
 }
 
 func buildSkillsSection(skills []SkillEntry) string {
-	if len(skills) == 0 {
+	items := buildSkillPromptItems(skills)
+	if len(items) == 0 {
 		return ""
 	}
+	var sb strings.Builder
+	sb.WriteString(buildSkillsHeader(len(items)))
+	for _, item := range items {
+		sb.WriteByte('\n')
+		sb.WriteString(item.Text)
+	}
+	return sb.String()
+}
+
+func buildSkillPromptItems(skills []SkillEntry) []SystemPromptItem {
 	sorted := make([]SkillEntry, len(skills))
 	copy(sorted, skills)
 	slices.SortFunc(sorted, func(a, b SkillEntry) int {
 		return strings.Compare(a.Name, b.Name)
 	})
+	items := make([]SystemPromptItem, 0, len(sorted))
+	for _, skill := range sorted {
+		items = append(items, SystemPromptItem{
+			ID:   skill.Name,
+			Text: "- **" + skill.Name + "**: " + skill.Description,
+		})
+	}
+	return items
+}
+
+func buildSkillsHeader(count int) string {
 	var sb strings.Builder
 	sb.WriteString("## Skills\n\n")
 	sb.WriteString("Memoh-managed skills are stored in `" + skillset.ManagedDir() + "/`. ")
 	sb.WriteString("Compatible external skill directories inside the bot workspace may also be discovered automatically. ")
 	sb.WriteString("Each skill is a `SKILL.md` file inside a named subdirectory. ")
 	sb.WriteString("Only activate a skill when it is relevant to the current task and a skill-loading capability is available.\n\n")
-	sb.WriteString(strconv.Itoa(len(sorted)))
-	sb.WriteString(" skill(s) available:\n")
-	for _, s := range sorted {
-		sb.WriteString("- **" + s.Name + "**: " + s.Description + "\n")
-	}
+	sb.WriteString(strconv.Itoa(count))
+	sb.WriteString(" skill(s) available:")
 	return sb.String()
 }
 
 func buildFileSections(files []SystemFile, maxBytes int) string {
+	items := buildFilePromptItems(files, maxBytes)
+	texts := make([]string, 0, len(items))
+	for _, item := range items {
+		texts = append(texts, item.Text)
+	}
+	return strings.Join(texts, "\n\n")
+}
+
+func buildFilePromptItems(files []SystemFile, maxBytes int) []SystemPromptItem {
 	maxBytes = normalizeSystemFilesMaxBytes(maxBytes)
-	var sb strings.Builder
+	var items []SystemPromptItem
+	totalBytes := 0
 	lineCount := 0
 	for _, f := range files {
 		if f.Content == "" {
@@ -200,11 +235,11 @@ func buildFileSections(files []SystemFile, maxBytes int) string {
 		}
 		separator := ""
 		separatorLines := 0
-		if sb.Len() > 0 {
+		if len(items) > 0 {
 			separator = "\n\n"
 			separatorLines = 2
 		}
-		remaining := maxBytes - sb.Len() - len(separator)
+		remaining := maxBytes - totalBytes - len(separator)
 		remainingLines := textprune.DefaultMaxLines - lineCount - separatorLines
 		if remaining <= 0 || remainingLines <= 0 {
 			break
@@ -217,16 +252,14 @@ func buildFileSections(files []SystemFile, maxBytes int) string {
 			}
 			section = truncated
 		}
-		if separator != "" {
-			sb.WriteString(separator)
-		}
-		sb.WriteString(section)
+		items = append(items, SystemPromptItem{ID: f.Filename, Text: section})
+		totalBytes += len(separator) + len(section)
 		lineCount += separatorLines + textprune.CountLines(section)
 		if len(section) == remaining {
 			break
 		}
 	}
-	return sb.String()
+	return items
 }
 
 func normalizeSystemFilesMaxBytes(maxBytes int) int {

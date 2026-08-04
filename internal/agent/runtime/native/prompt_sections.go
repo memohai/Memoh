@@ -28,14 +28,15 @@ type SystemSection struct {
 }
 
 const (
-	sectionIDIntro                 = "system.prompt.intro"
-	sectionIDBotIdentity           = "system.bot_identity"
-	sectionIDBody                  = "system.prompt.body"
-	sectionIDTail                  = "system.prompt.tail"
-	sectionIDPlatformIdentity      = "system.platform_identity"
-	sectionIDSkills                = "system.skills"
-	sectionIDWorkspaceInstructions = "system.workspace_instructions"
-	sectionIDFallback              = "system.prompt.fallback"
+	sectionIDIntro            = "system.prompt.intro"
+	sectionIDBotIdentity      = "system.bot_identity"
+	sectionIDBody             = "system.prompt.body"
+	sectionIDTail             = "system.prompt.tail"
+	sectionIDPlatformIdentity = "system.platform_identity"
+	sectionIDSkills           = "system.skills"
+	sectionIDSkill            = "system.skill"
+	sectionIDWorkspaceFile    = "system.workspace_file"
+	sectionIDFallback         = "system.prompt.fallback"
 )
 
 var skillRequiredCapability = tools.ToolUseSkill().String()
@@ -93,31 +94,81 @@ func GenerateSystemSections(params SystemPromptParams) []SystemSection {
 		{ID: sectionIDTail, Kind: contextfrag.KindSystemPrompt, Priority: priorityTail, RetentionTier: contextfrag.RetentionRequired, Text: tail},
 	}
 
-	if text := strings.TrimSpace(params.PlatformIdentitiesSection); text != "" {
-		sections = append(sections, SystemSection{
-			ID: sectionIDPlatformIdentity, Kind: contextfrag.KindPlatformIdentity, Priority: priorityPlatformIdentity,
-			RetentionTier: contextfrag.RetentionPreferred, Text: text,
-		})
-	}
+	sections = append(sections, buildPlatformIdentitySections(params)...)
 
 	if isSubagent {
 		return sections
 	}
 
-	if text := strings.TrimSpace(buildSkillsSection(params.Skills)); text != "" {
+	if items := buildSkillPromptItems(params.Skills); len(items) > 0 {
 		sections = append(sections, SystemSection{
-			ID: sectionIDSkills, Kind: contextfrag.KindSkillsCatalog, Priority: prioritySkills,
-			RetentionTier: contextfrag.RetentionOptional, RequiredCapability: skillRequiredCapability, Text: text,
+			ID: sectionIDSkills + ".header", Kind: contextfrag.KindSkillsCatalog, Priority: prioritySkills,
+			RetentionTier: contextfrag.RetentionOptional, RequiredCapability: skillRequiredCapability,
+			Text: buildSkillsHeader(len(items)), Render: groupedSystemRender(sectionIDSkills, "\n"),
 		})
+		for _, item := range items {
+			sections = append(sections, SystemSection{
+				ID: sectionIDSkill + "." + item.ID, Kind: contextfrag.KindSkillsCatalog, Priority: prioritySkills,
+				RetentionTier: contextfrag.RetentionOptional, RequiredCapability: skillRequiredCapability,
+				Text: item.Text, Render: groupedSystemRender(sectionIDSkills, "\n"),
+			})
+		}
 	}
-	if text := strings.TrimSpace(buildFileSections(params.Files, params.MaxFilesBytes)); text != "" {
+	for _, item := range buildFilePromptItems(params.Files, params.MaxFilesBytes) {
 		sections = append(sections, SystemSection{
-			ID: sectionIDWorkspaceInstructions, Kind: contextfrag.KindWorkspaceInstruction, Priority: priorityWorkspaceInstructions,
-			RetentionTier: contextfrag.RetentionPreferred, Text: text,
+			ID: sectionIDWorkspaceFile + "." + item.ID, Kind: contextfrag.KindWorkspaceInstruction,
+			Priority: priorityWorkspaceInstructions, RetentionTier: contextfrag.RetentionPreferred, Text: item.Text,
 		})
 	}
 
 	return sections
+}
+
+func buildPlatformIdentitySections(params SystemPromptParams) []SystemSection {
+	text := strings.TrimSpace(params.PlatformIdentitiesSection)
+	if text == "" {
+		return nil
+	}
+	items := make([]SystemPromptItem, 0, len(params.PlatformIdentities))
+	itemTexts := make([]string, 0, len(params.PlatformIdentities))
+	for _, item := range params.PlatformIdentities {
+		item.ID = strings.TrimSpace(item.ID)
+		item.Text = strings.TrimSpace(item.Text)
+		if item.ID == "" || item.Text == "" {
+			continue
+		}
+		items = append(items, item)
+		itemTexts = append(itemTexts, item.Text)
+	}
+	itemBlock := strings.Join(itemTexts, "\n")
+	if len(items) == 0 || !strings.HasSuffix(text, itemBlock) {
+		return []SystemSection{{
+			ID: sectionIDPlatformIdentity, Kind: contextfrag.KindPlatformIdentity, Priority: priorityPlatformIdentity,
+			RetentionTier: contextfrag.RetentionPreferred, Text: text,
+		}}
+	}
+	header := strings.TrimSuffix(strings.TrimSuffix(text, itemBlock), "\n")
+	sections := []SystemSection{{
+		ID: sectionIDPlatformIdentity + ".header", Kind: contextfrag.KindPlatformIdentity, Priority: priorityPlatformIdentity,
+		RetentionTier: contextfrag.RetentionPreferred, Text: header,
+		Render: groupedSystemRender(sectionIDPlatformIdentity, "\n"),
+	}}
+	for _, item := range items {
+		sections = append(sections, SystemSection{
+			ID: sectionIDPlatformIdentity + "." + item.ID, Kind: contextfrag.KindPlatformIdentity,
+			Priority: priorityPlatformIdentity, RetentionTier: contextfrag.RetentionPreferred, Text: item.Text,
+			Render: groupedSystemRender(sectionIDPlatformIdentity, "\n"),
+		})
+	}
+	return sections
+}
+
+func groupedSystemRender(groupID, joiner string) contextfrag.RenderPolicy {
+	return contextfrag.RenderPolicy{
+		Format:      contextfrag.RenderMarkdown,
+		GroupID:     groupID,
+		GroupJoiner: joiner,
+	}
 }
 
 // degradedSystemSections is the panic-free fallback for when the embedded
