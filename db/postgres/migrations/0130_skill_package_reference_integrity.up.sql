@@ -1,6 +1,16 @@
 -- 0130_skill_package_reference_integrity
 -- Make Plugin target and Package ownership relationships queryable and enforceable.
 
+-- Existing installations are protected by FORCE ROW LEVEL SECURITY, but this
+-- migration must backfill rows without a request-scoped team context. Restore
+-- the policies after the data changes, matching the existing migration pattern.
+ALTER TABLE public.bot_plugin_installations NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_plugin_installations DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_skill_package_installations NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_skill_package_installations DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_plugin_package_references NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_plugin_package_references DISABLE ROW LEVEL SECURITY;
+
 ALTER TABLE public.bot_plugin_installations
     ADD COLUMN workspace_target_id TEXT NOT NULL DEFAULT 'native',
     ADD CONSTRAINT bot_plugin_installations_workspace_target_id_check
@@ -50,3 +60,10 @@ ALTER TABLE public.bot_plugin_package_references
     ADD CONSTRAINT bot_plugin_package_references_revision_fkey
         FOREIGN KEY (team_id, package_installation_id, required_revision)
         REFERENCES public.bot_skill_package_installations(team_id, id, revision) ON DELETE CASCADE;
+
+ALTER TABLE public.bot_plugin_installations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_plugin_installations FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_skill_package_installations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_skill_package_installations FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_plugin_package_references ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_plugin_package_references FORCE ROW LEVEL SECURITY;

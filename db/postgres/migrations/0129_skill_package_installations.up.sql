@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.bot_skill_package_installations (
     directly_installed BOOLEAN     NOT NULL DEFAULT false,
     installed_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT bot_skill_package_installations_team_id_key UNIQUE (team_id, id),
+    CONSTRAINT memoh_team_key_2571b9adb696 UNIQUE (team_id, id),
     CONSTRAINT bot_skill_package_installations_identity_key
         UNIQUE (team_id, bot_id, workspace_target_id, registry_id, package_id),
     CONSTRAINT bot_skill_package_installations_bot_id_fkey
