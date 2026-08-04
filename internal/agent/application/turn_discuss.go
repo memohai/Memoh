@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
@@ -24,7 +25,7 @@ type turnRuntimeHooks struct {
 	streamAgent      func(context.Context, native.RunConfig) <-chan native.StreamEvent
 	resolveRunConfig func(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
 	inlineImages     func(context.Context, string, []timeline.ImageAttachmentRef) []sdk.ImagePart
-	storeRound       func(context.Context, string, string, string, string, string, []sdk.Message, string) error
+	storeRound       func(context.Context, string, string, string, string, string, []sdk.Message, string, *contextfrag.LifecycleHolder) error
 }
 
 // startDiscussTurn orchestrates one discuss turn: resolve the run config,
@@ -138,7 +139,9 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 
 	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
 		if !cmd.DiscussAddressed {
-			h.emit(turn.DiscussEventSkipped, nil)
+			if h.emit(turn.DiscussEventSkipped, nil) && ctx.Err() == nil {
+				s.EnsureTerminalContextLifecycle(ctx, h.id, cmd.BotID, cmd.ThreadID, nil)
+			}
 			return
 		}
 		s.pumpDiscussACP(ctx, cmd, h)
@@ -156,6 +159,9 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	runConfig.ContextCurrentUserMessageIndex = nil
 	runConfig.ContextMemoryMessageIndex = nil
 	runConfig.ContextSourceFrags = nil
+	if runConfig.ContextLifecycle == nil {
+		runConfig.ContextLifecycle = contextfrag.NewLifecycleHolder()
+	}
 
 	// Inline image attachments from new RC segments so the model receives
 	// them as native vision input (ImagePart) on the first encounter.
@@ -168,6 +174,14 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
 	}
 	runConfig = runConfig.RefreshContextFrag()
+	terminal := s.contextLifecycleTerminal(ctx, runConfig)
+	var lifecycleCause error
+	var lifecycleDeferred bool
+	defer func() {
+		if !lifecycleDeferred {
+			terminal(lifecycleCause)
+		}
+	}()
 
 	eventCh := s.streamDiscussAgent(ctx, runConfig)
 
@@ -176,16 +190,32 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	var terminalPayload []byte
 	var hasTerminalEvent bool
 	for event := range eventCh {
+		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
+			lifecycleCause = eventErr
+		}
 		terminal := event.Type == native.EventAgentEnd || event.Type == native.EventAgentAbort
 		if terminal {
 			finalMessages = event.Messages
 			terminalEvent = event
 			terminalPayload, _ = json.Marshal(event)
 			hasTerminalEvent = true
+			lifecycleDeferred = strings.TrimSpace(event.ApprovalID) != ""
+			if !lifecycleDeferred {
+				switch event.Type {
+				case native.EventAgentEnd:
+					lifecycleCause = nil
+				case native.EventAgentAbort:
+					if context.Cause(ctx) != nil || lifecycleCause == nil {
+						lifecycleCause = agentAbortCause(ctx)
+					}
+				}
+			}
 			continue
 		}
 		if h.publishAgentEvent != nil {
 			if publishErr := h.publishAgentEvent(ctx, event); publishErr != nil {
+				lifecycleCause = publishErr
+				lifecycleDeferred = false
 				h.emitErr(publishErr)
 				return
 			}
@@ -195,8 +225,14 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			continue
 		}
 		if !h.emit(string(event.Type), payload) {
+			if lifecycleCause == nil {
+				lifecycleCause = context.Cause(ctx)
+			}
 			return
 		}
+	}
+	if !hasTerminalEvent && lifecycleCause == nil && ctx.Err() != nil {
+		lifecycleCause = context.Cause(ctx)
 	}
 
 	if len(finalMessages) > 0 {
@@ -206,14 +242,20 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 				runConfig.RunID,
 				cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
 				sdkMsgs, resolved.ModelID,
+				runConfig.ContextLifecycle,
 			); storeErr != nil {
-				h.emitErr(runtimeHistoryError(storeErr))
+				historyErr := runtimeHistoryError(storeErr)
+				lifecycleCause = historyErr
+				lifecycleDeferred = false
+				h.emitErr(historyErr)
 				return
 			}
 		}
 	}
 	if hasTerminalEvent && h.publishAgentEvent != nil {
 		if publishErr := h.publishAgentEvent(ctx, terminalEvent); publishErr != nil {
+			lifecycleCause = publishErr
+			lifecycleDeferred = false
 			h.emitErr(publishErr)
 			return
 		}
@@ -274,12 +316,16 @@ func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 	if strings.TrimSpace(prompt) == "" {
 		// No composable context: end without a skip marker so the caller
 		// does not advance its consumed cursor (pre-port semantics).
+		if ctx.Err() == nil {
+			s.EnsureTerminalContextLifecycle(ctx, h.id, cmd.BotID, cmd.ThreadID, nil)
+		}
 		return
 	}
 	chunks, errs := s.streamTurnChat(ctx, ChatRequest{
 		BotID:                   cmd.BotID,
 		ChatID:                  cmd.BotID,
 		ThreadID:                cmd.ThreadID,
+		RunID:                   h.id,
 		RouteID:                 cmd.RouteID,
 		SourceChannelIdentityID: cmd.SourceChannelIdentityID,
 		CurrentChannel:          cmd.CurrentChannel,
@@ -379,6 +425,7 @@ func (s *Service) storeDiscussRound(
 	botID, sessionID, channelIdentityID, currentPlatform string,
 	messages []sdk.Message,
 	modelID string,
+	lifecycle *contextfrag.LifecycleHolder,
 ) error {
 	if s.turnHooks != nil && s.turnHooks.storeRound != nil {
 		return s.turnHooks.storeRound(
@@ -390,9 +437,10 @@ func (s *Service) storeDiscussRound(
 			currentPlatform,
 			messages,
 			modelID,
+			lifecycle,
 		)
 	}
-	return s.storeRound(ctx, ChatRequest{
+	return s.storeRoundWithOptions(ctx, ChatRequest{
 		RunID:                   runID,
 		BotID:                   botID,
 		ChatID:                  botID,
@@ -400,7 +448,7 @@ func (s *Service) storeDiscussRound(
 		SourceChannelIdentityID: channelIdentityID,
 		CurrentChannel:          currentPlatform,
 		UserMessagePersisted:    true,
-	}, sdkMessagesToModelMessages(messages), modelID)
+	}, sdkMessagesToModelMessages(messages), modelID, storeRoundOptions{ContextLifecycle: lifecycle})
 }
 
 // discussMessagesToSDK converts composed context messages into SDK
