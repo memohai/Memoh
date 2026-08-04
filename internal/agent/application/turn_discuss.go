@@ -149,6 +149,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 
 func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved ResolveRunConfigResult) {
 	runConfig := resolved.RunConfig
+	runConfig.RunID = h.id
 	runConfig.Messages = discussMessagesToSDK(cmd.DiscussMessages)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/accounts"
@@ -315,6 +316,13 @@ type resolvedContext struct {
 	contextTokenBudget          int // token budget used to clamp compaction triggers
 }
 
+func runIDForChatRequest(admittedRunID string) string {
+	if runID := strings.TrimSpace(admittedRunID); runID != "" {
+		return runID
+	}
+	return uuid.NewString()
+}
+
 // resolve builds the run context for one turn and returns the effective
 // request alongside it. Resolution fills in defaults the caller's copy does not
 // have — a direct turn on a subagent thread learns its session type, pinned
@@ -367,6 +375,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		// surface (no nested spawns), same prompt mode.
 		runCfg.Identity.IsSubagent = true
 	}
+	runCfg.RunID = runIDForChatRequest(req.RunID)
 	memoryMsg := s.loadMemoryContextMessage(ctx, req)
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
 	if memoryMsg != nil {

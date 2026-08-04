@@ -231,6 +231,7 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			runCancel()
 			return err
 		}
+		committed.runID = command.RunID
 		s.publishCommittedRuntimeDecision(runCtx, command, native.StreamEvent{
 			Type:        native.EventUserInputRequest,
 			ToolName:    committed.request.ToolName,
@@ -273,6 +274,7 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			runCancel()
 			return err
 		}
+		committed.runID = command.RunID
 		s.publishCommittedRuntimeDecision(runCtx, command, native.StreamEvent{
 			Type:       native.EventToolApprovalRequest,
 			ToolName:   committed.request.ToolName,

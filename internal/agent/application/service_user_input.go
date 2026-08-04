@@ -67,6 +67,7 @@ func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseI
 type CommittedUserInputResponse struct {
 	request      userinput.Request
 	input        UserInputResponseInput
+	runID        string
 	activePrompt *acpActivePromptSubscription
 	ackOnly      bool
 }
@@ -174,17 +175,17 @@ func (s *Service) ContinueCommittedUserInputResponse(ctx context.Context, commit
 		return emitApprovalAck(ctx, eventCh)
 	}
 
+	runID := runIDForChatRequest(committed.runID)
 	toolResult := sdk.ToolResultPart{
 		ToolCallID: resolved.ToolCallID,
 		ToolName:   resolved.ToolName,
 		Result:     s.limitToolResultValue(resolved.Result, resolved.ToolName),
 		IsError:    false,
 	}
-	continueFn := s.continueUserInputFn
-	if continueFn == nil {
-		continueFn = s.storeUserInputResultAndContinue
+	if s.continueUserInputFn != nil {
+		return s.continueUserInputFn(ctx, resolved, committed.input, toolResult, eventCh)
 	}
-	return continueFn(ctx, resolved, committed.input, toolResult, eventCh)
+	return s.storeUserInputResultAndContinue(ctx, resolved, committed.input, toolResult, runID, eventCh)
 }
 
 func (s *Service) authorizeACPUserInputResponse(ctx context.Context, target userinput.Request, input UserInputResponseInput) error {
@@ -301,7 +302,7 @@ func splitUserInputAnswerText(text string) []string {
 	return parts
 }
 
-func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, runID string, eventCh chan<- WSStreamEvent) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	target, err := s.resolveWorkspaceTargetSnapshot(ctx, input.BotID, req.WorkspaceTargetID)
@@ -310,6 +311,7 @@ func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req useri
 	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := ChatRequest{
+		RunID:                   runID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                req.SessionID,
@@ -324,10 +326,10 @@ func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req useri
 	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
-	return s.continueUserInputSession(ctx, req, input, eventCh)
+	return s.continueUserInputSession(ctx, req, input, runID, eventCh)
 }
 
-func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
+func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, runID string, eventCh chan<- WSStreamEvent) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	resolved, err := s.ResolveRunConfig(ctx,
@@ -342,6 +344,7 @@ func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Re
 	if err != nil {
 		return err
 	}
+	resolved.RunConfig.RunID = runIDForChatRequest(runID)
 
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
@@ -355,6 +358,7 @@ func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Re
 	}
 
 	chatReq := ChatRequest{
+		RunID:                   cfg.RunID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                req.SessionID,

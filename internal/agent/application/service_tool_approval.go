@@ -36,6 +36,7 @@ type ToolApprovalResponseInput struct {
 type CommittedToolApprovalResponse struct {
 	request      toolapproval.Request
 	input        ToolApprovalResponseInput
+	runID        string
 	isACP        bool
 	activePrompt *acpActivePromptSubscription
 	ackOnly      bool
@@ -129,10 +130,11 @@ func (s *Service) ContinueCommittedToolApprovalResponse(ctx context.Context, com
 	}
 
 	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
+	runID := runIDForChatRequest(committed.runID)
 	var toolResult sdk.ToolResultPart
 	switch target.Status {
 	case toolapproval.StatusApproved:
-		result, err := s.executeApprovedTool(ctx, target, committed.input)
+		result, err := s.executeApprovedTool(ctx, target, committed.input, runID)
 		if err != nil {
 			return err
 		}
@@ -147,7 +149,7 @@ func (s *Service) ContinueCommittedToolApprovalResponse(ctx context.Context, com
 	default:
 		return fmt.Errorf("committed tool approval has unexpected status %q", target.Status)
 	}
-	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, eventCh)
+	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, runID, eventCh)
 }
 
 func (s *Service) toolOutputLimit() contextlimit.ToolOutputLimit {
@@ -266,7 +268,7 @@ func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 	return nil
 }
 
-func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput) (sdk.ToolResultPart, error) {
+func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput, runID string) (sdk.ToolResultPart, error) {
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	req = withLocalWebReplyTarget(req)
 	resolved, err := s.ResolveRunConfig(ctx,
@@ -281,6 +283,7 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 	if err != nil {
 		return sdk.ToolResultPart{}, err
 	}
+	resolved.RunConfig.RunID = runIDForChatRequest(runID)
 	return s.agent.ExecuteTool(ctx, resolved.RunConfig, sdk.ToolCall{
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
@@ -288,7 +291,7 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 	})
 }
 
-func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, result sdk.ToolResultPart, runID string, eventCh chan<- WSStreamEvent) error {
 	approval = withLocalWebReplyTarget(approval)
 	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
 	target, err := s.resolveWorkspaceTargetSnapshot(ctx, input.BotID, approval.WorkspaceTargetID)
@@ -297,6 +300,7 @@ func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toola
 	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := ChatRequest{
+		RunID:                   runID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                approval.SessionID,
@@ -311,10 +315,10 @@ func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toola
 	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
-	return s.continueToolApprovalSession(ctx, approval, input, eventCh)
+	return s.continueToolApprovalSession(ctx, approval, input, runID, eventCh)
 }
 
-func (s *Service) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+func (s *Service) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, runID string, eventCh chan<- WSStreamEvent) error {
 	approval = withLocalWebReplyTarget(approval)
 	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
 	resolved, err := s.ResolveRunConfig(ctx,
@@ -329,6 +333,7 @@ func (s *Service) continueToolApprovalSession(ctx context.Context, approval tool
 	if err != nil {
 		return err
 	}
+	resolved.RunConfig.RunID = runIDForChatRequest(runID)
 
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
@@ -342,6 +347,7 @@ func (s *Service) continueToolApprovalSession(ctx context.Context, approval tool
 	}
 
 	req := ChatRequest{
+		RunID:                   cfg.RunID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                approval.SessionID,

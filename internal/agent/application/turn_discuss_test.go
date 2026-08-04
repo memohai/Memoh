@@ -156,6 +156,30 @@ func TestDiscussInlinesImages(t *testing.T) {
 	}
 }
 
+func TestDiscussUsesAdmittedRunIDInNativeConfig(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: native.RunConfig{},
+			ModelID:   "model-1",
+		},
+	}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+
+	h, err := a.StartTurn(context.Background(), discussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	if agent.lastConfig == nil {
+		t.Fatal("expected agent to be called")
+	}
+	if got := agent.lastConfig.RunID; got != h.RunID() {
+		t.Fatalf("native RunID = %q, want admitted run ID %q", got, h.RunID())
+	}
+}
+
 func TestDiscussNoInlineWhenNoVision(t *testing.T) {
 	agent := &fakeAgentStreamer{}
 	resolver := &fakeDiscussService{
