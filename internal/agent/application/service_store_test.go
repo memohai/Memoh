@@ -1,10 +1,14 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
 
@@ -149,6 +153,20 @@ type batchRecordingMessageService struct {
 	batchInputs []messagepkg.PersistInput
 }
 
+type lifecycleRecordingMessageService struct {
+	recordingMessageService
+	messageIDs []string
+}
+
+func (s *lifecycleRecordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	s.persisted = append(s.persisted, input)
+	return messagepkg.Message{
+		ID:       s.messageIDs[len(s.persisted)-1],
+		Role:     input.Role,
+		Metadata: input.Metadata,
+	}, nil
+}
+
 func (s *batchRecordingMessageService) PersistToolTailRound(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, bool, error) {
 	s.batchInputs = append(s.batchInputs, inputs...)
 	return recordedMessages(inputs), true, nil
@@ -185,6 +203,140 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 	if len(persisted) != 4 {
 		t.Fatalf("persisted messages = %d, want 4", len(persisted))
 	}
+}
+
+func TestStoreRoundPersistsLifecycleMetadataOnLastAssistant(t *testing.T) {
+	t.Parallel()
+
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetManifest(contextfrag.Manifest{
+		View: contextfrag.ViewRunConfigPreProvider,
+		Counts: contextfrag.ManifestCounts{
+			Fragments: 3,
+			Messages:  2,
+			TextBytes: 96,
+		},
+		Items: []contextfrag.ManifestItem{{ID: "private-content-marker"}},
+	})
+	messages := &lifecycleRecordingMessageService{
+		messageIDs: []string{"user-id", "first-assistant-id", " final-assistant-id "},
+	}
+	service := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := service.storeRoundWithOptions(context.Background(), ChatRequest{
+		BotID:    "bot-1",
+		ThreadID: "session-1",
+		Query:    "hello",
+	}, []ModelMessage{
+		{Role: "user", Content: newTextContent("hello")},
+		{Role: "assistant", Content: newTextContent("first")},
+		{Role: "assistant", Content: newTextContent("final")},
+	}, "model-1", storeRoundOptions{
+		SkipMemory:       true,
+		ContextLifecycle: holder,
+		MessageMetadataByIndex: map[int]map[string]any{
+			2: {"existing": "kept"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("storeRoundWithOptions() error = %v", err)
+	}
+	if len(messages.persisted) != 3 {
+		t.Fatalf("persisted messages = %d, want 3", len(messages.persisted))
+	}
+	if _, ok := messages.persisted[1].Metadata[contextfrag.MetadataContextLifecycleKey]; ok {
+		t.Fatalf("first assistant received lifecycle metadata: %#v", messages.persisted[1].Metadata)
+	}
+	finalMeta := messages.persisted[2].Metadata
+	if finalMeta["existing"] != "kept" {
+		t.Fatalf("existing metadata was not preserved: %#v", finalMeta)
+	}
+	metadataSnapshot, ok := finalMeta[contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot)
+	if !ok {
+		t.Fatalf("lifecycle metadata = %#v, want LifecycleSnapshot", finalMeta[contextfrag.MetadataContextLifecycleKey])
+	}
+	if metadataSnapshot.Version != 1 || metadataSnapshot.Counts.Messages != 2 {
+		t.Fatalf("lifecycle metadata snapshot = %#v", metadataSnapshot)
+	}
+	raw, err := json.Marshal(metadataSnapshot)
+	if err != nil {
+		t.Fatalf("marshal lifecycle metadata: %v", err)
+	}
+	if strings.Contains(string(raw), "private-content-marker") || strings.Contains(string(raw), `"items"`) {
+		t.Fatalf("lifecycle metadata leaked manifest items: %s", raw)
+	}
+
+	snapshot, ok := holder.Snapshot()
+	if !ok {
+		t.Fatal("expected lifecycle snapshot after persistence")
+	}
+	if snapshot.AssistantMessageID != "final-assistant-id" {
+		t.Fatalf("assistant message ID = %q, want final-assistant-id", snapshot.AssistantMessageID)
+	}
+}
+
+func TestStoreRoundLogsSkippedLifecycleMetadataReason(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		holder     *contextfrag.LifecycleHolder
+		messages   []ModelMessage
+		wantReason string
+	}{
+		{
+			name:       "missing lifecycle",
+			messages:   []ModelMessage{{Role: "assistant", Content: newTextContent("done")}},
+			wantReason: "missing_lifecycle",
+		},
+		{
+			name:       "missing snapshot",
+			holder:     contextfrag.NewLifecycleHolder(),
+			messages:   []ModelMessage{{Role: "assistant", Content: newTextContent("done")}},
+			wantReason: "missing_snapshot",
+		},
+		{
+			name:       "missing assistant",
+			holder:     lifecycleHolderWithManifest(),
+			messages:   []ModelMessage{{Role: "user", Content: newTextContent("hello")}},
+			wantReason: "missing_assistant",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			messages := &recordingMessageService{}
+			service := &Service{
+				messageService: messages,
+				logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+					Level: slog.LevelDebug,
+				})),
+			}
+
+			err := service.storeRoundWithOptions(context.Background(), ChatRequest{
+				BotID:    "bot-1",
+				ThreadID: "session-1",
+			}, tt.messages, "model-1", storeRoundOptions{
+				SkipMemory:       true,
+				ContextLifecycle: tt.holder,
+			})
+			if err != nil {
+				t.Fatalf("storeRoundWithOptions() error = %v", err)
+			}
+			if got := logs.String(); !strings.Contains(got, "context lifecycle metadata not persisted") || !strings.Contains(got, tt.wantReason) {
+				t.Fatalf("debug log = %q, want reason %q", got, tt.wantReason)
+			}
+		})
+	}
+}
+
+func lifecycleHolderWithManifest() *contextfrag.LifecycleHolder {
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetManifest(contextfrag.Manifest{View: contextfrag.ViewRunConfigPreProvider})
+	return holder
 }
 
 func TestFindAssistantMessageForToolCall(t *testing.T) {

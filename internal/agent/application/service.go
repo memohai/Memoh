@@ -650,7 +650,8 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	} else {
 		roundMessages := prependTurnUserMessage(storeReq, outputMessages)
 		if err := s.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
-			SkipMemory: storeReq.SkipMemoryExtraction,
+			SkipMemory:       storeReq.SkipMemoryExtraction,
+			ContextLifecycle: cfg.ContextLifecycle,
 		}); err != nil {
 			return ChatResponse{}, err
 		}
@@ -791,6 +792,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		Skills:            agentSkills,
 		LoopDetection:     native.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: s.bgManager,
+		ContextLifecycle:  contextfrag.NewLifecycleHolder(),
 		ContextScope: contextfrag.Scope{
 			BotID:             p.BotID,
 			ChatID:            chatID,

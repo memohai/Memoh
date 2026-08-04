@@ -98,7 +98,10 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	// Outbound assets are linked once after the stream closes; including the
 	// collector in every step would attach the same accumulated assets again.
 	storeReq.OutboundAssetCollector = nil
-	opts := storeRoundOptions{AllowPendingToolCalls: step.DeferredToolApproval != nil}
+	opts := storeRoundOptions{
+		AllowPendingToolCalls: step.DeferredToolApproval != nil,
+		ContextLifecycle:      c.rc.runConfig.ContextLifecycle,
+	}
 	if interrupted {
 		opts.MessageMetadataByIndex = make(map[int]map[string]any)
 		for i, message := range messages {
@@ -107,6 +110,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 			}
 		}
 	}
+	opts = opts.withContextLifecycleMetadata(c.service.logger, storeReq, messages)
 	inputs, err := c.service.buildPersistInputs(context.WithoutCancel(ctx), storeReq, messages, c.rc.model.ID, opts)
 	if err != nil {
 		return fail(err)
@@ -120,6 +124,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	if err != nil {
 		return fail(err)
 	}
+	c.rc.runConfig.ContextLifecycle.SetAssistantMessageID(lastPersistedAssistantMessageID(persisted))
 	c.nextStep++
 	for _, message := range persisted {
 		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
