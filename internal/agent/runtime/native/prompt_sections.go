@@ -22,7 +22,6 @@ type SystemSection struct {
 	RetentionTier      contextfrag.RetentionTier
 	DropPriority       contextfrag.DropPriority
 	RequiredCapability string
-	Budget             contextfrag.BudgetPolicy
 	Render             contextfrag.RenderPolicy
 	Text               string
 }
@@ -230,7 +229,6 @@ func SystemSectionFrags(sections []SystemSection, scope contextfrag.Scope) []con
 			Source:             contextfrag.SourceRunConfig,
 			Collector:          "system_sections",
 			Render:             renderPolicy,
-			Budget:             section.Budget,
 		}))
 	}
 	return frags

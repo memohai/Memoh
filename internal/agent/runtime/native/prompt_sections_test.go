@@ -245,7 +245,6 @@ func TestSystemSectionFragsPreserveTypedShape(t *testing.T) {
 		{
 			ID: "a", Kind: contextfrag.KindSystemPrompt, Priority: 10, Text: " first ",
 			RetentionTier: contextfrag.RetentionPreferred, DropPriority: 40, RequiredCapability: "read",
-			Budget: contextfrag.BudgetPolicy{MaxChars: 128, Overflow: contextfrag.OverflowTrim},
 			Render: contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown, GroupID: "group", GroupJoiner: "\n"},
 		},
 		{ID: "b", Kind: contextfrag.KindBotIdentity, Priority: 20},
@@ -259,7 +258,7 @@ func TestSystemSectionFragsPreserveTypedShape(t *testing.T) {
 			frag.Role != sdk.MessageRoleSystem || frag.Slot != contextfrag.SlotSystem || frag.Scope.BotID != "bot-1" ||
 			frag.Parts[0].Text != contextfrag.RenderText(sections[i].Text, sections[i].Render) ||
 			frag.RetentionTier != sections[i].RetentionTier || frag.DropPriority != sections[i].DropPriority ||
-			frag.RequiredCapability != sections[i].RequiredCapability || frag.Budget != sections[i].Budget {
+			frag.RequiredCapability != sections[i].RequiredCapability {
 			t.Fatalf("frag[%d] = %#v", i, frag)
 		}
 		wantRender := sections[i].Render
