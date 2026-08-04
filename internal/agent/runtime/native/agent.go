@@ -94,7 +94,7 @@ func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, e
 }
 
 func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCall) (sdk.ToolResultPart, error) {
-	sdkTools, _, _, err := a.assembleTools(ctx, cfg, nil, false)
+	sdkTools, _, _, _, err := a.assembleTools(ctx, cfg, nil, false)
 	if err != nil {
 		return sdk.ToolResultPart{}, fmt.Errorf("assemble tools: %w", err)
 	}
@@ -173,9 +173,10 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
 		var toolUsage string
+		var toolUsageFrags []contextfrag.ContextFrag
 		var toolDefs []contextfrag.ToolDefAccounting
 		var err error
-		sdkTools, toolUsage, toolDefs, err = a.assembleTools(streamCtx, cfg, streamEmitter, cfg.LiveToolStream)
+		sdkTools, toolUsage, toolUsageFrags, toolDefs, err = a.assembleTools(streamCtx, cfg, streamEmitter, cfg.LiveToolStream)
 		if err != nil {
 			turnError = fmt.Sprintf("assemble tools: %v", err)
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
@@ -187,6 +188,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			// background task summaries see the usage-augmented text.
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
 			cfg.ContextToolUsage = toolUsage
+			cfg.ContextToolUsageFrags = toolUsageFrags
 		}
 	}
 	limit := a.Limits().ToolOutputLimit()
@@ -758,9 +760,10 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
 		var toolUsage string
+		var toolUsageFrags []contextfrag.ContextFrag
 		var toolDefs []contextfrag.ToolDefAccounting
 		var err error
-		sdkTools, toolUsage, toolDefs, err = a.assembleTools(genCtx, cfg, collectEmitter, false)
+		sdkTools, toolUsage, toolUsageFrags, toolDefs, err = a.assembleTools(genCtx, cfg, collectEmitter, false)
 		if err != nil {
 			return nil, fmt.Errorf("assemble tools: %w", err)
 		}
@@ -770,6 +773,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 			// background task summaries see the usage-augmented text.
 			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
 			cfg.ContextToolUsage = toolUsage
+			cfg.ContextToolUsageFrags = toolUsageFrags
 		}
 	}
 	limit := a.Limits().ToolOutputLimit()
@@ -953,9 +957,14 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 // (see tools.ToolUsage). emitter is injected into the session context so that
 // tools targeting the current conversation can push side-effect events
 // (attachments, reactions, speech) directly into the agent stream.
-func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.StreamEmitter, liveStream bool) ([]sdk.Tool, string, []contextfrag.ToolDefAccounting, error) {
+func (a *Agent) assembleTools(
+	ctx context.Context,
+	cfg RunConfig,
+	emitter tools.StreamEmitter,
+	liveStream bool,
+) ([]sdk.Tool, string, []contextfrag.ContextFrag, []contextfrag.ToolDefAccounting, error) {
 	if len(a.toolProviders) == 0 {
-		return nil, "", nil, nil
+		return nil, "", nil, nil, nil
 	}
 	skillsMap := make(map[string]tools.SkillDetail, len(cfg.Skills))
 	for _, s := range cfg.Skills {
@@ -997,10 +1006,10 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 	var allTools []sdk.Tool
 	var toolDefs []contextfrag.ToolDefAccounting
 	type usageRegistration struct {
-		provider tools.ToolUsage
+		provider   tools.ToolUsage
+		capability string
 	}
 	var usageRegistrations []usageRegistration
-	var usageSections []string
 	seenToolNames := make(map[string]struct{})
 	for _, provider := range a.toolProviders {
 		providerTools, err := provider.Tools(ctx, session)
@@ -1043,23 +1052,34 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		// contributed tools this session, so guidance and registration share
 		// one gating decision and cannot drift apart.
 		if usageProvider, ok := provider.(tools.ToolUsage); ok {
-			usageRegistrations = append(usageRegistrations, usageRegistration{provider: usageProvider})
+			usageRegistrations = append(usageRegistrations, usageRegistration{
+				provider:   usageProvider,
+				capability: firstToolName(providerTools),
+			})
 		}
 	}
 	if cfg.ToolApprovalHandler != nil || a.hookService != nil {
 		allTools = markApprovalTools(allTools)
 	}
 	availableTools := tools.NewAvailableTools(allTools)
+	var usageSections []toolUsageSection
 	for _, registration := range usageRegistrations {
 		if text := strings.TrimSpace(registration.provider.Usage(ctx, session, availableTools)); text != "" {
-			usageSections = append(usageSections, text)
+			usageSections = append(usageSections, toolUsageSection{
+				capability: registration.capability,
+				text:       text,
+			})
 		}
 	}
 	usage := ""
 	if len(usageSections) > 0 {
-		usage = "## Tool usage\n\n" + strings.Join(usageSections, "\n\n")
+		texts := make([]string, 0, len(usageSections))
+		for _, section := range usageSections {
+			texts = append(texts, section.text)
+		}
+		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
 	}
-	return allTools, usage, toolDefs, nil
+	return allTools, usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
 }
 
 func appendToolUsageToSystem(system, toolUsage string) string {
