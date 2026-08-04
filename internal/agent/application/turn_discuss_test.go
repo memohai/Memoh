@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -33,11 +34,12 @@ func (f *fakeAgentStreamer) Stream(_ context.Context, cfg native.RunConfig) <-ch
 }
 
 type fakeDiscussService struct {
-	resolveResult ResolveRunConfigResult
-	inlineFn      func(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart
-	storeCalls    int
-	storeErr      error
-	storeFn       func() error
+	resolveResult  ResolveRunConfigResult
+	inlineFn       func(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart
+	storeCalls     int
+	lastStoreRunID string
+	storeErr       error
+	storeFn        func() error
 }
 
 func (f *fakeDiscussService) ResolveRunConfig(_ context.Context, _, _, _, _, _, _, _ string) (ResolveRunConfigResult, error) {
@@ -51,8 +53,9 @@ func (f *fakeDiscussService) InlineImageAttachments(ctx context.Context, botID s
 	return nil
 }
 
-func (f *fakeDiscussService) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
+func (f *fakeDiscussService) StoreRound(_ context.Context, runID, _, _, _, _ string, _ []sdk.Message, _ string) error {
 	f.storeCalls++
+	f.lastStoreRunID = runID
 	if f.storeFn != nil {
 		return f.storeFn()
 	}
@@ -66,7 +69,7 @@ type testAgentStreamer interface {
 type testDiscussService interface {
 	ResolveRunConfig(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
 	InlineImageAttachments(context.Context, string, []timeline.ImageAttachmentRef) []sdk.ImagePart
-	StoreRound(context.Context, string, string, string, string, []sdk.Message, string) error
+	StoreRound(context.Context, string, string, string, string, string, []sdk.Message, string) error
 }
 
 func newDiscussTestService(streamer testChatStreamer, agent testAgentStreamer, resolver testDiscussService) *Service {
@@ -177,6 +180,38 @@ func TestDiscussUsesAdmittedRunIDInNativeConfig(t *testing.T) {
 	}
 	if got := agent.lastConfig.RunID; got != h.RunID() {
 		t.Fatalf("native RunID = %q, want admitted run ID %q", got, h.RunID())
+	}
+	if got := resolver.lastStoreRunID; got != h.RunID() {
+		t.Fatalf("persisted RunID = %q, want admitted run ID %q", got, h.RunID())
+	}
+}
+
+func TestStoreDiscussRoundPersistsAdmittedRunID(t *testing.T) {
+	const admittedRunID = "77777777-7777-4777-8777-777777777777"
+	messages := &recordingMessageService{}
+	service := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := service.storeDiscussRound(
+		context.Background(),
+		admittedRunID,
+		"bot-1",
+		"session-1",
+		"",
+		"local",
+		[]sdk.Message{sdk.AssistantMessage("done")},
+		"model-id",
+	)
+	if err != nil {
+		t.Fatalf("storeDiscussRound() error = %v", err)
+	}
+	if len(messages.persisted) != 1 {
+		t.Fatalf("persisted messages = %d, want 1", len(messages.persisted))
+	}
+	if got := messages.persisted[0].RunID; got != admittedRunID {
+		t.Fatalf("persisted discuss RunID = %q, want admitted ID %q", got, admittedRunID)
 	}
 }
 

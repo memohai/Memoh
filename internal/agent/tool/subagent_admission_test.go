@@ -2,11 +2,14 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/agent/turn"
@@ -29,6 +32,7 @@ type fakeSubagentAdmitter struct {
 type subagentAdmissionRecord struct {
 	botID        string
 	threadID     string
+	runID        string
 	invocationID string
 	submission   string
 }
@@ -52,10 +56,12 @@ func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, thre
 	if f.active == nil {
 		f.active = make(map[string]bool)
 	}
+	runID := fmt.Sprintf("00000000-0000-4000-8000-%012d", len(f.starts)+1)
 	f.active[threadID] = true
 	f.starts = append(f.starts, subagentAdmissionRecord{
 		botID:        botID,
 		threadID:     threadID,
+		runID:        runID,
 		invocationID: invocationID,
 		submission:   string(submission),
 	})
@@ -63,7 +69,7 @@ func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, thre
 
 	runCtx, cancel := context.WithCancel(ctx)
 	admission := SubagentAdmission{
-		RunID:        "run-" + invocationID,
+		RunID:        runID,
 		TurnID:       "turn-" + invocationID,
 		TurnPosition: 1,
 	}
@@ -127,6 +133,84 @@ func TestSpawnedTurnIsAdmittedOnTheAgentsOwnThread(t *testing.T) {
 	if len(terminals) != 1 || terminals[0].threadID != childSessionID || terminals[0].cause != "" {
 		t.Errorf("terminals = %#v, want one clean release of %q", terminals, childSessionID)
 	}
+}
+
+type retryingIdentitySpawnAgent struct {
+	mu    sync.Mutex
+	calls []SpawnRunConfig
+}
+
+func (a *retryingIdentitySpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
+	return a.GenerateWithWatchdog(ctx, cfg, func() {})
+}
+
+func (a *retryingIdentitySpawnAgent) GenerateWithWatchdog(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.calls = append(a.calls, cfg)
+	if len(a.calls) == 1 {
+		return nil, errors.New("provider returned 429")
+	}
+	return &SpawnResult{Text: "done"}, nil
+}
+
+func (a *retryingIdentitySpawnAgent) configs() []SpawnRunConfig {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]SpawnRunConfig(nil), a.calls...)
+}
+
+func TestSpawnedTurnReusesAdmittedRunIDAcrossRetries(t *testing.T) {
+	agent := &retryingIdentitySpawnAgent{}
+	admitter := &fakeSubagentAdmitter{}
+	p := newSubagentAdmissionTestProvider(t, agent, admitter)
+
+	result := asMap(t, mustExecuteAgentTool(t, p, SessionContext{
+		BotID:     "bot1",
+		SessionID: "parent1",
+	}, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "retry once",
+	}))
+	if result["status"] != string(background.TaskCompleted) {
+		t.Fatalf("status = %v, want %q", result["status"], background.TaskCompleted)
+	}
+
+	admissions := admitter.admissions()
+	if len(admissions) != 1 {
+		t.Fatalf("admissions = %d, want 1", len(admissions))
+	}
+	calls := agent.configs()
+	if len(calls) != 2 {
+		t.Fatalf("agent calls = %d, want 2", len(calls))
+	}
+	for i, call := range calls {
+		if call.RunID != admissions[0].runID {
+			t.Errorf("call %d RunID = %q, want admitted RunID %q", i, call.RunID, admissions[0].runID)
+		}
+	}
+	if terminals := admitter.terminals(); len(terminals) != 1 {
+		t.Fatalf("terminal calls = %d, want 1", len(terminals))
+	}
+}
+
+func newSubagentAdmissionTestProvider(t *testing.T, agent SpawnAgent, admitter SubagentAdmitter) *SpawnProvider {
+	t.Helper()
+	p := NewSpawnProvider(nil, nil, nil, nil, nil, background.New(nil))
+	p.sessionService = &fakeAgentSessionService{}
+	p.SetAgent(agent)
+	p.SetMessageService(newFakeAgentMessageService())
+	p.SetSubagentAdmitter(admitter)
+	p.modelResolver = func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+		return resolvedSubagentModel{
+			Model:            &sdk.Model{},
+			UUID:             "00000000-0000-0000-0000-000000000123",
+			ModelID:          "test-model",
+			ProviderName:     "test-provider",
+			SupportsToolCall: true,
+		}, nil
+	}
+	return p
 }
 
 func TestBusyAgentThreadIsReportedToTheParentAndRunsNothing(t *testing.T) {
