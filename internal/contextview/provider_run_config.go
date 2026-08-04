@@ -208,7 +208,8 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 					filtered = append(filtered, frag)
 				}
 			}
-			frags = append(filtered, cfg.ContextToolUsageFrags...)
+			filtered = append(filtered, cfg.ContextToolUsageFrags...)
+			frags = filtered
 		} else if usage := strings.TrimSpace(cfg.ContextToolUsage); usage != "" {
 			frags = append(frags, ToolUsageFrag(usage, cfg.ContextScope))
 		}
