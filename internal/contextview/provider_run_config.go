@@ -199,7 +199,15 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 	var frags []contextfrag.ContextFrag
 	if len(cfg.ContextSourceFrags) > 0 {
 		frags = append([]contextfrag.ContextFrag(nil), cfg.ContextSourceFrags...)
-		if usage := strings.TrimSpace(cfg.ContextToolUsage); usage != "" {
+		if len(cfg.ContextToolUsageFrags) > 0 {
+			filtered := frags[:0]
+			for _, frag := range frags {
+				if frag.Kind != contextfrag.KindToolUsage {
+					filtered = append(filtered, frag)
+				}
+			}
+			frags = append(filtered, cfg.ContextToolUsageFrags...)
+		} else if usage := strings.TrimSpace(cfg.ContextToolUsage); usage != "" {
 			frags = append(frags, ToolUsageFrag(usage, cfg.ContextScope))
 		}
 	} else {
