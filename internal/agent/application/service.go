@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -130,18 +131,20 @@ type Service struct {
 	acpPromptHubs      map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
-	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
-	sessionCompactionMu sync.Mutex
-	sessionCompactions  map[string]*sessionCompactionGate
-	timeout             time.Duration
-	memorySearchTimeout time.Duration
-	clockLocation       *time.Location
-	logger              *slog.Logger
-	allowedTeam         string
-	sessionRuntime      turnAdmitter
-	decisionRuntime     *sessionruntime.Manager
-	publishTurnEvent    func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
-	turnHooks           *turnRuntimeHooks
+	continueUserInputFn               func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
+	sessionCompactionMu               sync.Mutex
+	sessionCompactions                map[string]*sessionCompactionGate
+	timeout                           time.Duration
+	memorySearchTimeout               time.Duration
+	clockLocation                     *time.Location
+	logger                            *slog.Logger
+	allowedTeam                       string
+	sessionRuntime                    turnAdmitter
+	decisionRuntime                   *sessionruntime.Manager
+	contextLifecycles                 contextLifecycleStore
+	contextLifecyclePersistenceErrors atomic.Uint64
+	publishTurnEvent                  func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
+	turnHooks                         *turnRuntimeHooks
 }
 
 // NewService creates an application service backed by the native agent.
@@ -185,6 +188,7 @@ func NewService(
 		agent:               a,
 		modelsService:       modelsService,
 		queries:             queries,
+		contextLifecycles:   queries,
 		messageService:      messageService,
 		settingsService:     settingsService,
 		accountService:      accountService,
