@@ -424,6 +424,37 @@ func TestSubagentTerminalPersistsSnapshotAndPreContextFallbackExactlyOnce(t *tes
 	}
 }
 
+func TestCanceledSubagentUsesOwningContextToPersistAborted(t *testing.T) {
+	admitter := &lifecycleTurnAdmitter{admission: lifecycleTestAdmission()}
+	store := &recordingContextLifecycleStore{}
+	service := &Service{sessionRuntime: admitter, contextLifecycles: store}
+	runCtx, _, terminal, err := service.AdmitSubagentRun(
+		context.Background(),
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		"subagent:abort",
+		[]byte(`{"message":"work"}`),
+	)
+	if err != nil {
+		t.Fatalf("AdmitSubagentRun() error = %v", err)
+	}
+	snapshot, ok := lifecycleTestRunConfig().ContextLifecycle.Snapshot()
+	if !ok {
+		t.Fatal("test lifecycle snapshot is unavailable")
+	}
+
+	admitter.cancel()
+	<-runCtx.Done()
+	terminal(tools.SubagentTerminal{Cause: context.Canceled, ContextLifecycle: &snapshot})
+
+	if len(store.creates) != 1 || store.creates[0].Status != contextLifecycleStatusAborted {
+		t.Fatalf("lifecycle creates = %#v, want one aborted row", store.creates)
+	}
+	if len(admitter.finishes) != 1 || admitter.finishes[0].status != sessionruntime.RunStatusAborted {
+		t.Fatalf("runtime finishes = %#v, want one aborted finish", admitter.finishes)
+	}
+}
+
 func lifecycleTestAdmission() sessionruntime.Admission {
 	return sessionruntime.Admission{
 		RunID:   lifecycleTestRunID,

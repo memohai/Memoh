@@ -84,18 +84,20 @@ func (p *SpawnProvider) admitAgentRun(ctx context.Context, req *agentRequest) (c
 	}
 	req.admission = admission
 	return runCtx, func(result agentRunResult) {
-		terminal := SubagentTerminal{ContextLifecycle: result.ContextLifecycle}
+		terminal := SubagentTerminal{
+			Cause:            result.Cause,
+			ContextLifecycle: result.ContextLifecycle,
+		}
 		if result.Status == string(background.TaskKilled) {
-			// A kill cancels the run's context, which is what the terminal write
-			// reads to record an abort. Passing the cancellation as an error
-			// instead would file a deliberate stop as a failure.
+			// A kill is named by the admitted context cancellation, not by a
+			// provider error that may have raced it. The application boundary reads
+			// that owning context before it records the abort.
+			terminal.Cause = nil
 			finish(terminal)
 			return
 		}
-		if strings.TrimSpace(result.Error) != "" {
+		if terminal.Cause == nil && strings.TrimSpace(result.Error) != "" {
 			terminal.Cause = errors.New(result.Error)
-			finish(terminal)
-			return
 		}
 		finish(terminal)
 	}, nil

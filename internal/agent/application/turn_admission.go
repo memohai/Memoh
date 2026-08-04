@@ -239,8 +239,15 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 		if finishRun == nil {
 			return
 		}
+		failureCause := cause
+		if privateCause := apperror.CauseOf(cause); privateCause != nil {
+			failureCause = privateCause
+		}
+		explicitlyCanceled := cause != nil &&
+			errors.Is(failureCause, context.Canceled) &&
+			errors.Is(context.Cause(runCtx), context.Canceled)
 		switch {
-		case cause != nil:
+		case cause != nil && !explicitlyCanceled:
 			finishRun(sessionruntime.RunStatusErrored, cause)
 		case runCtx.Err() != nil:
 			finishRun(sessionruntime.RunStatusAborted, nil)

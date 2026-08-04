@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -260,6 +261,44 @@ func TestSpawnedTurnRetainsLifecycleSnapshotOnGenerationFailure(t *testing.T) {
 	}
 	if terminals[0].cause != "provider unavailable" {
 		t.Fatalf("terminal cause = %q, want provider failure", terminals[0].cause)
+	}
+}
+
+type canceledSubagentSpawnAgent struct{}
+
+func (*canceledSubagentSpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
+	return (&canceledSubagentSpawnAgent{}).GenerateWithWatchdog(ctx, cfg, func() {})
+}
+
+func (*canceledSubagentSpawnAgent) GenerateWithWatchdog(
+	ctx context.Context,
+	_ SpawnRunConfig,
+	_ func(),
+) (*SpawnResult, error) {
+	return nil, context.Cause(ctx)
+}
+
+func TestRunSubagentTaskPreservesOwningCancellationCause(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(context.Canceled)
+	p := &SpawnProvider{
+		agent:  &canceledSubagentSpawnAgent{},
+		logger: slog.New(slog.DiscardHandler),
+		modelResolver: func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+			return resolvedSubagentModel{}, nil
+		},
+	}
+
+	result := p.runSubagentTask(ctx, &agentRequest{
+		taskID:         "task-aborted",
+		agentID:        "worker",
+		agentSessionID: "session-aborted",
+		message:        "work",
+		parentSession:  SessionContext{BotID: "bot-1"},
+	})
+
+	if !errors.Is(result.Cause, context.Canceled) {
+		t.Fatalf("terminal cause = %v, want owning context cancellation", result.Cause)
 	}
 }
 

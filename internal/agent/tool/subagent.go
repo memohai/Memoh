@@ -434,6 +434,7 @@ type agentRunResult struct {
 	QueueRemaining   int                            `json:"queue_remaining,omitempty"`
 	TimedOut         bool                           `json:"timed_out,omitempty"`
 	ContextLifecycle *contextfrag.LifecycleSnapshot `json:"-"`
+	Cause            error                          `json:"-"`
 }
 
 type agentRequest struct {
@@ -903,12 +904,14 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	)
 	if err != nil {
 		res.Error = fmt.Sprintf("resolve pinned subagent model: %v", err)
+		res.Cause = err
 		res.Status = string(background.TaskFailed)
 		return res
 	}
 	req.runtime = runtime
 	if err := p.runSubagentHook(ctx, hooks.EventSubagentStart, req, res); err != nil {
 		res.Error = err.Error()
+		res.Cause = err
 		res.Status = string(background.TaskFailed)
 		return res
 	}
@@ -929,6 +932,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		parentMessages, loadErr := p.loadAgentForkContext(context.WithoutCancel(ctx), req.agentSessionID)
 		if loadErr != nil {
 			res.Error = fmt.Sprintf("load fork context: %v", loadErr)
+			res.Cause = loadErr
 			res.Status = string(background.TaskFailed)
 			return res
 		}
@@ -992,6 +996,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			case <-ctx.Done():
 				timer.Stop()
 				res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+				res.Cause = context.Cause(ctx)
 				return res
 			}
 		}
@@ -1015,6 +1020,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		lastErr = err
 		if ctx.Err() != nil && !errors.Is(err, ErrWatchdogTimedOut) {
 			res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+			res.Cause = context.Cause(ctx)
 			return res
 		}
 		if stepPersisted.Load() {
@@ -1025,9 +1031,11 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			continue
 		}
 		res.Error = err.Error()
+		res.Cause = err
 		return res
 	}
 	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
+	res.Cause = lastErr
 	return res
 }
 
