@@ -432,6 +432,17 @@ type ContainerVersion struct {
 	TeamID      pgtype.UUID        `json:"team_id"`
 }
 
+type ContextLifecycle struct {
+	RunID     pgtype.UUID        `json:"run_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	Status    string             `json:"status"`
+	ErrorCode pgtype.Text        `json:"error_code"`
+	Snapshot  []byte             `json:"snapshot"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type EmailOauthToken struct {
 	ID              pgtype.UUID        `json:"id"`
 	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
