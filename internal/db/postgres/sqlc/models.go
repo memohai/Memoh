@@ -233,12 +233,13 @@ type BotPluginInstallation struct {
 
 type BotPluginPackageReference struct {
 	TeamID                pgtype.UUID        `json:"team_id"`
-	BotID                 pgtype.UUID        `json:"bot_id"`
 	PluginInstallationID  pgtype.UUID        `json:"plugin_installation_id"`
 	PackageInstallationID pgtype.UUID        `json:"package_installation_id"`
 	RequiredRevision      string             `json:"required_revision"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	BotID                 pgtype.UUID        `json:"bot_id"`
+	WorkspaceTargetID     string             `json:"workspace_target_id"`
 }
 
 type BotPluginResource struct {

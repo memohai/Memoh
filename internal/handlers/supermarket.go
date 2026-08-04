@@ -282,6 +282,7 @@ func (h *SupermarketHandler) InstallPackage(c echo.Context) error {
 // @Summary List Skill Packages installed for a bot
 // @Tags supermarket
 // @Param bot_id path string true "Bot ID"
+// @Param workspace_target_id query string false "Workspace target ID"
 // @Success 200 {array} skillpackages.Installation
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/supermarket/packages [get].
@@ -293,12 +294,16 @@ func (h *SupermarketHandler) ListInstalledPackages(c echo.Context) error {
 	if h.packages == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Skill Package service is not configured")
 	}
-	targetID := workspace.WorkspaceTargetNative
+	targetID := strings.TrimSpace(c.QueryParam("workspace_target_id"))
 	if h.workspaces != nil {
-		targetID, err = h.workspaces.CurrentWorkspaceTargetID(c.Request().Context(), botID)
+		target, resolveErr := h.workspaces.ResolveWorkspaceTarget(c.Request().Context(), botID, targetID)
+		err = resolveErr
 		if err != nil {
 			return workspaceTargetHTTPError(h.logger, err)
 		}
+		targetID = target.TargetID
+	} else if targetID == "" {
+		targetID = workspace.WorkspaceTargetNative
 	}
 	items, err := h.packages.ListForTarget(c.Request().Context(), botID, targetID)
 	if err != nil {

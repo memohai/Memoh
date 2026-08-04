@@ -17,19 +17,21 @@ type packageStoreStub struct {
 	Store
 	row                dbsqlc.BotSkillPackageInstallation
 	referenceCount     int64
+	countCalls         int
 	directUpsertErr    error
 	pluginUpsertErr    error
 	previousReferences []dbsqlc.ListBotPluginPackageReferencesRow
-	rows               []dbsqlc.BotSkillPackageInstallation
+	rows               []dbsqlc.ListBotSkillPackageInstallationsRow
 	deletedReferences  bool
 	deleteUnreferenced bool
 }
 
-func (s *packageStoreStub) ListBotSkillPackageInstallations(context.Context, pgtype.UUID) ([]dbsqlc.BotSkillPackageInstallation, error) {
+func (s *packageStoreStub) ListBotSkillPackageInstallations(context.Context, pgtype.UUID) ([]dbsqlc.ListBotSkillPackageInstallationsRow, error) {
 	return s.rows, nil
 }
 
 func (s *packageStoreStub) CountBotSkillPackageReferences(context.Context, pgtype.UUID) (int64, error) {
+	s.countCalls++
 	return s.referenceCount, nil
 }
 
@@ -93,14 +95,28 @@ func TestListForTargetExcludesOtherWorkspaceTargets(t *testing.T) {
 	remote := packageRow(false)
 	remote.ID = packageUUID(4)
 	remote.WorkspaceTargetID = "remote"
-	store := &packageStoreStub{rows: []dbsqlc.BotSkillPackageInstallation{native, remote}}
+	store := &packageStoreStub{rows: []dbsqlc.ListBotSkillPackageInstallationsRow{
+		listPackageRow(native, 2), listPackageRow(remote, 1),
+	}}
 
 	items, err := NewService(store).ListForTarget(context.Background(), native.BotID.String(), "native")
 	if err != nil {
 		t.Fatalf("ListForTarget() error = %v", err)
 	}
-	if len(items) != 1 || items[0].WorkspaceTargetID != "native" {
+	if len(items) != 1 || items[0].WorkspaceTargetID != "native" || items[0].PluginReferenceCount != 2 {
 		t.Fatalf("ListForTarget() = %+v, want only native", items)
+	}
+	if store.countCalls != 0 {
+		t.Fatalf("ListForTarget() issued %d per-Package reference count queries", store.countCalls)
+	}
+}
+
+func listPackageRow(row dbsqlc.BotSkillPackageInstallation, referenceCount int64) dbsqlc.ListBotSkillPackageInstallationsRow {
+	return dbsqlc.ListBotSkillPackageInstallationsRow{
+		ID: row.ID, TeamID: row.TeamID, BotID: row.BotID, WorkspaceTargetID: row.WorkspaceTargetID,
+		RegistryID: row.RegistryID, PackageID: row.PackageID, Revision: row.Revision,
+		DirectlyInstalled: row.DirectlyInstalled, InstalledAt: row.InstalledAt, UpdatedAt: row.UpdatedAt,
+		PluginReferenceCount: referenceCount,
 	}
 }
 

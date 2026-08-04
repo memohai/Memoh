@@ -5,6 +5,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
+	"strings"
+	"sync"
 
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/skillpackages"
@@ -16,8 +19,17 @@ const maxConcurrentPackagePreparations = 2
 
 var packagePreparationTokens = make(chan struct{}, maxConcurrentPackagePreparations)
 
+type resourceLock struct {
+	token chan struct{}
+	refs  int
+}
+
+var installationResourceLocks = struct {
+	sync.Mutex
+	items map[string]*resourceLock
+}{items: make(map[string]*resourceLock)}
+
 type PluginInstaller interface {
-	WithBotMutation(context.Context, string, func(context.Context) error) error
 	Install(context.Context, string, pluginspkg.InstallRequest) (pluginspkg.Installation, error)
 	InstalledPluginState(context.Context, string, string) (pluginspkg.InstalledPluginState, bool, error)
 }
@@ -62,13 +74,6 @@ func (e *WorkspaceTargetError) Unwrap() error { return e.Err }
 
 func withStatus(status int, err error) error { return &StatusError{Status: status, Err: err} }
 
-func (i *Installer) withBotMutation(ctx context.Context, botID string, fn func(context.Context) error) error {
-	if i.plugins == nil {
-		return fn(ctx)
-	}
-	return i.plugins.WithBotMutation(ctx, botID, fn)
-}
-
 func (i *Installer) acquirePreparation(ctx context.Context) (func(), error) {
 	if i == nil {
 		return nil, errors.New("supermarket installer is not configured")
@@ -79,4 +84,88 @@ func (i *Installer) acquirePreparation(ctx context.Context) (func(), error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+func acquireInstallationResources(ctx context.Context, keys ...string) (func(), error) {
+	keys = uniqueSortedStrings(keys)
+	releases := make([]func(), 0, len(keys))
+	for _, key := range keys {
+		release, err := acquireInstallationResource(ctx, key)
+		if err != nil {
+			for index := len(releases) - 1; index >= 0; index-- {
+				releases[index]()
+			}
+			return nil, err
+		}
+		releases = append(releases, release)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			for index := len(releases) - 1; index >= 0; index-- {
+				releases[index]()
+			}
+		})
+	}, nil
+}
+
+func acquireInstallationResource(ctx context.Context, key string) (func(), error) {
+	installationResourceLocks.Lock()
+	item := installationResourceLocks.items[key]
+	if item == nil {
+		item = &resourceLock{token: make(chan struct{}, 1)}
+		item.token <- struct{}{}
+		installationResourceLocks.items[key] = item
+	}
+	item.refs++
+	installationResourceLocks.Unlock()
+
+	select {
+	case <-ctx.Done():
+		releaseInstallationResourceRef(key, item)
+		return nil, ctx.Err()
+	case <-item.token:
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			item.token <- struct{}{}
+			releaseInstallationResourceRef(key, item)
+		})
+	}, nil
+}
+
+func releaseInstallationResourceRef(key string, item *resourceLock) {
+	installationResourceLocks.Lock()
+	defer installationResourceLocks.Unlock()
+	item.refs--
+	if item.refs == 0 && installationResourceLocks.items[key] == item {
+		delete(installationResourceLocks.items, key)
+	}
+}
+
+func uniqueSortedStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func packageInstallationLockKey(botID, targetID, registryID, packageID string) string {
+	return strings.Join([]string{"package", botID, targetID, registryID, packageID}, "\x00")
+}
+
+func pluginInstallationLockKey(botID, targetID, pluginID string) string {
+	return strings.Join([]string{"plugin", botID, targetID, pluginID}, "\x00")
 }

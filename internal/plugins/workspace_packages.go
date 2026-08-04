@@ -27,7 +27,7 @@ func (s *Service) prepareObsoletePackageRemovals(ctx context.Context, botID stri
 	}
 	keep := make(map[string]struct{}, len(req.InstalledPackages))
 	for _, pkg := range req.InstalledPackages {
-		keep[packageTargetIdentity(req.WorkspaceTargetID, pkg.RegistryID, pkg.PackageID)] = struct{}{}
+		keep[packageTargetIdentity(skillpackages.NormalizeWorkspaceTargetID(req.WorkspaceTargetID), pkg.RegistryID, pkg.PackageID)] = struct{}{}
 	}
 	return s.preparePackageRemovals(ctx, botID, row, func(item skillpackages.Installation) bool {
 		_, retained := keep[packageTargetIdentity(item.WorkspaceTargetID, item.RegistryID, item.PackageID)]

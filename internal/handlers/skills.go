@@ -67,18 +67,11 @@ type skillsOpResponse struct {
 	OK bool `json:"ok"`
 }
 
-type PluginInstallationLister interface {
-	botMutationCoordinator
-}
-
-func (h *ContainerdHandler) SetPluginService(service PluginInstallationLister) {
-	h.pluginService = service
-}
-
 // ListSkills godoc
 // @Summary List skills from the bot workspace
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
+// @Param workspace_target_id query string false "Workspace target ID"
 // @Success 200 {object} SkillsResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -91,9 +84,13 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 		return err
 	}
 
-	skills, err := h.listSkillsFromContainer(c.Request().Context(), botID)
+	ctx := c.Request().Context()
+	if targetID := strings.TrimSpace(c.QueryParam("workspace_target_id")); targetID != "" {
+		ctx = bridge.WithWorkspaceTarget(ctx, targetID)
+	}
+	skills, err := h.listSkillsFromContainer(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return workspaceTargetHTTPError(h.logger, err)
 	}
 	return c.JSON(http.StatusOK, SkillsResponse{Skills: skills})
 }
@@ -150,14 +147,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "source_path requires exactly one skill")
 	}
 
-	if err := withBotMutation(
-		c.Request().Context(),
-		botID,
-		h.pluginService,
-		func(mutationCtx context.Context) error {
-			return h.upsertSkills(mutationCtx, botID, sourcePath, req.Skills)
-		},
-	); err != nil {
+	if err := h.upsertSkills(c.Request().Context(), botID, sourcePath, req.Skills); err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
@@ -267,14 +257,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "source_paths is required")
 	}
 
-	if err := withBotMutation(
-		c.Request().Context(),
-		botID,
-		h.pluginService,
-		func(mutationCtx context.Context) error {
-			return h.deleteSkills(mutationCtx, botID, req.SourcePaths)
-		},
-	); err != nil {
+	if err := h.deleteSkills(c.Request().Context(), botID, req.SourcePaths); err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
@@ -328,11 +311,11 @@ type currentWorkspaceTargetResolver interface {
 }
 
 func (h *ContainerdHandler) currentWorkspaceTargetID(ctx context.Context, botID string) (string, error) {
+	if targetID := bridge.WorkspaceTargetFromContext(ctx); targetID != "" {
+		return targetID, nil
+	}
 	resolver, ok := h.manager.(currentWorkspaceTargetResolver)
 	if !ok {
-		if targetID := bridge.WorkspaceTargetFromContext(ctx); targetID != "" {
-			return targetID, nil
-		}
 		return workspace.WorkspaceTargetNative, nil
 	}
 	return resolver.CurrentWorkspaceTargetID(ctx, botID)
@@ -387,14 +370,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	if err := withBotMutation(
-		c.Request().Context(),
-		botID,
-		h.pluginService,
-		func(mutationCtx context.Context) error {
-			return h.applySkillAction(mutationCtx, botID, req)
-		},
-	); err != nil {
+	if err := h.applySkillAction(c.Request().Context(), botID, req); err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})

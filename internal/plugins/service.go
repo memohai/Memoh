@@ -51,9 +51,6 @@ func NewService(log *slog.Logger, queries dbstore.Queries, mcpService *mcp.Conne
 }
 
 func (s *Service) List(ctx context.Context, botID string) ([]Installation, error) {
-	if scoped := s.scopedService(ctx, botID); scoped != nil && scoped != s {
-		return scoped.List(ctx, botID)
-	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return nil, err
@@ -74,9 +71,6 @@ func (s *Service) List(ctx context.Context, botID string) ([]Installation, error
 }
 
 func (s *Service) Get(ctx context.Context, botID, installationID string) (Installation, error) {
-	if scoped := s.scopedService(ctx, botID); scoped != nil && scoped != s {
-		return scoped.Get(ctx, botID, installationID)
-	}
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
 		return Installation{}, err
@@ -98,9 +92,6 @@ func (s *Service) InstalledPluginState(
 	ctx context.Context,
 	botID, pluginID string,
 ) (InstalledPluginState, bool, error) {
-	if scoped := s.scopedService(ctx, botID); scoped != nil && scoped != s {
-		return scoped.InstalledPluginState(ctx, botID, pluginID)
-	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return InstalledPluginState{}, false, err
@@ -128,31 +119,28 @@ func (s *Service) InstalledPluginState(
 
 func (s *Service) Install(ctx context.Context, botID string, req InstallRequest) (Installation, error) {
 	var result Installation
-	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		removals, err := scoped.prepareObsoletePackageRemovals(scopedCtx, botID, req)
-		if err != nil {
-			return err
-		}
-		bundleRemoval, err := scoped.prepareObsoleteBundleRemoval(scopedCtx, botID, req)
-		if err != nil {
-			return errors.Join(err, removals.rollback(scopedCtx))
-		}
-		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
-			var installErr error
-			result, installErr = txService.install(scopedCtx, botID, req)
-			return installErr
-		}); err != nil {
-			return errors.Join(err, removals.rollback(scopedCtx), bundleRemoval.rollback(scopedCtx))
-		}
-		if err := removals.commit(scopedCtx); err != nil {
-			scoped.logger.Warn("cleanup obsolete Plugin Packages failed", slog.String("bot_id", botID), slog.String("plugin_id", req.Manifest.ID), slog.Any("error", err))
-		}
-		if err := bundleRemoval.commit(scopedCtx); err != nil {
-			scoped.logger.Warn("cleanup obsolete Plugin bundle failed", slog.String("bot_id", botID), slog.String("plugin_id", req.Manifest.ID), slog.Any("error", err))
-		}
-		return nil
-	})
-	return result, err
+	removals, err := s.prepareObsoletePackageRemovals(ctx, botID, req)
+	if err != nil {
+		return Installation{}, err
+	}
+	bundleRemoval, err := s.prepareObsoleteBundleRemoval(ctx, botID, req)
+	if err != nil {
+		return Installation{}, errors.Join(err, removals.rollback(ctx))
+	}
+	if err := s.inTransaction(ctx, func(txService *Service) error {
+		var installErr error
+		result, installErr = txService.install(ctx, botID, req)
+		return installErr
+	}); err != nil {
+		return Installation{}, errors.Join(err, removals.rollback(ctx), bundleRemoval.rollback(ctx))
+	}
+	if err := removals.commit(ctx); err != nil {
+		s.logger.Warn("cleanup obsolete Plugin Packages failed", slog.String("bot_id", botID), slog.String("plugin_id", req.Manifest.ID), slog.Any("error", err))
+	}
+	if err := bundleRemoval.commit(ctx); err != nil {
+		s.logger.Warn("cleanup obsolete Plugin bundle failed", slog.String("bot_id", botID), slog.String("plugin_id", req.Manifest.ID), slog.Any("error", err))
+	}
+	return result, nil
 }
 
 func (s *Service) install(
@@ -304,12 +292,10 @@ func (s *Service) install(
 
 func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, enabled bool) (Installation, error) {
 	var result Installation
-	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		return scoped.inTransaction(scopedCtx, func(txService *Service) error {
-			var updateErr error
-			result, updateErr = txService.setEnabled(scopedCtx, botID, installationID, enabled)
-			return updateErr
-		})
+	err := s.inTransaction(ctx, func(txService *Service) error {
+		var updateErr error
+		result, updateErr = txService.setEnabled(ctx, botID, installationID, enabled)
+		return updateErr
 	})
 	return result, err
 }
@@ -363,52 +349,49 @@ func (s *Service) setEnabled(ctx context.Context, botID, installationID string, 
 
 func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (Installation, error) {
 	var result Installation
-	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		row, err := scoped.getRow(scopedCtx, botID, installationID)
+	row, err := s.getRow(ctx, botID, installationID)
+	if err != nil {
+		return Installation{}, err
+	}
+	packageRemovals, err := s.prepareUnownedPackageRemovals(ctx, botID, row)
+	if err != nil {
+		return Installation{}, err
+	}
+	var bundleRemoval *pluginBundleRemoval
+	if row.Status != StatusUninstalled {
+		bundleRemoval, err = s.preparePluginBundleRemoval(ctx, botID, row)
 		if err != nil {
-			return err
+			return Installation{}, errors.Join(err, packageRemovals.rollback(ctx))
 		}
-		packageRemovals, err := scoped.prepareUnownedPackageRemovals(scopedCtx, botID, row)
-		if err != nil {
-			return err
-		}
-		var bundleRemoval *pluginBundleRemoval
-		if row.Status != StatusUninstalled {
-			bundleRemoval, err = scoped.preparePluginBundleRemoval(scopedCtx, botID, row)
-			if err != nil {
-				return errors.Join(err, packageRemovals.rollback(scopedCtx))
-			}
-		}
-		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
-			var uninstallErr error
-			result, uninstallErr = txService.uninstall(scopedCtx, botID, installationID)
-			return uninstallErr
-		}); err != nil {
-			return errors.Join(
-				err,
-				packageRemovals.rollback(scopedCtx),
-				bundleRemoval.rollback(scopedCtx),
-			)
-		}
-		if err := packageRemovals.commit(scopedCtx); err != nil {
-			scoped.logger.Warn(
-				"cleanup unowned Plugin Packages failed",
-				slog.String("bot_id", botID),
-				slog.String("plugin_id", row.PluginID),
-				slog.Any("error", err),
-			)
-		}
-		if err := bundleRemoval.commit(scopedCtx); err != nil {
-			scoped.logger.Warn(
-				"cleanup removed Plugin bundle failed",
-				slog.String("bot_id", botID),
-				slog.String("plugin_id", row.PluginID),
-				slog.Any("error", err),
-			)
-		}
-		return nil
-	})
-	return result, err
+	}
+	if err := s.inTransaction(ctx, func(txService *Service) error {
+		var uninstallErr error
+		result, uninstallErr = txService.uninstall(ctx, botID, installationID)
+		return uninstallErr
+	}); err != nil {
+		return Installation{}, errors.Join(
+			err,
+			packageRemovals.rollback(ctx),
+			bundleRemoval.rollback(ctx),
+		)
+	}
+	if err := packageRemovals.commit(ctx); err != nil {
+		s.logger.Warn(
+			"cleanup unowned Plugin Packages failed",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", row.PluginID),
+			slog.Any("error", err),
+		)
+	}
+	if err := bundleRemoval.commit(ctx); err != nil {
+		s.logger.Warn(
+			"cleanup removed Plugin bundle failed",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", row.PluginID),
+			slog.Any("error", err),
+		)
+	}
+	return result, nil
 }
 
 func (s *Service) uninstall(
@@ -440,49 +423,47 @@ func (s *Service) uninstall(
 }
 
 func (s *Service) Purge(ctx context.Context, botID, installationID string) error {
-	return s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		row, err := scoped.getRow(scopedCtx, botID, installationID)
+	row, err := s.getRow(ctx, botID, installationID)
+	if err != nil {
+		return err
+	}
+	packageRemovals, err := s.prepareUnownedPackageRemovals(ctx, botID, row)
+	if err != nil {
+		return err
+	}
+	var bundleRemoval *pluginBundleRemoval
+	if row.Status != StatusUninstalled {
+		bundleRemoval, err = s.preparePluginBundleRemoval(ctx, botID, row)
 		if err != nil {
-			return err
+			return errors.Join(err, packageRemovals.rollback(ctx))
 		}
-		packageRemovals, err := scoped.prepareUnownedPackageRemovals(scopedCtx, botID, row)
-		if err != nil {
-			return err
-		}
-		var bundleRemoval *pluginBundleRemoval
-		if row.Status != StatusUninstalled {
-			bundleRemoval, err = scoped.preparePluginBundleRemoval(scopedCtx, botID, row)
-			if err != nil {
-				return errors.Join(err, packageRemovals.rollback(scopedCtx))
-			}
-		}
-		if err := scoped.inTransaction(scopedCtx, func(txService *Service) error {
-			return txService.purge(scopedCtx, botID, installationID)
-		}); err != nil {
-			return errors.Join(
-				err,
-				packageRemovals.rollback(scopedCtx),
-				bundleRemoval.rollback(scopedCtx),
-			)
-		}
-		if err := packageRemovals.commit(scopedCtx); err != nil {
-			scoped.logger.Warn(
-				"cleanup unowned Plugin Packages failed",
-				slog.String("bot_id", botID),
-				slog.String("plugin_id", row.PluginID),
-				slog.Any("error", err),
-			)
-		}
-		if err := bundleRemoval.commit(scopedCtx); err != nil {
-			scoped.logger.Warn(
-				"cleanup purged Plugin bundle failed",
-				slog.String("bot_id", botID),
-				slog.String("plugin_id", row.PluginID),
-				slog.Any("error", err),
-			)
-		}
-		return nil
-	})
+	}
+	if err := s.inTransaction(ctx, func(txService *Service) error {
+		return txService.purge(ctx, botID, installationID)
+	}); err != nil {
+		return errors.Join(
+			err,
+			packageRemovals.rollback(ctx),
+			bundleRemoval.rollback(ctx),
+		)
+	}
+	if err := packageRemovals.commit(ctx); err != nil {
+		s.logger.Warn(
+			"cleanup unowned Plugin Packages failed",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", row.PluginID),
+			slog.Any("error", err),
+		)
+	}
+	if err := bundleRemoval.commit(ctx); err != nil {
+		s.logger.Warn(
+			"cleanup purged Plugin bundle failed",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", row.PluginID),
+			slog.Any("error", err),
+		)
+	}
+	return nil
 }
 
 func (s *Service) purge(
@@ -585,12 +566,10 @@ func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbac
 
 func (s *Service) RefreshOAuthStatus(ctx context.Context, botID, installationID string) (Installation, error) {
 	var result Installation
-	err := s.withBotMutation(ctx, botID, func(scopedCtx context.Context, scoped *Service) error {
-		return scoped.inTransaction(scopedCtx, func(txService *Service) error {
-			var refreshErr error
-			result, refreshErr = txService.refreshOAuthStatusAndInstallation(scopedCtx, botID, installationID)
-			return refreshErr
-		})
+	err := s.inTransaction(ctx, func(txService *Service) error {
+		var refreshErr error
+		result, refreshErr = txService.refreshOAuthStatusAndInstallation(ctx, botID, installationID)
+		return refreshErr
 	})
 	return result, err
 }

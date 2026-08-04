@@ -132,58 +132,64 @@ func (i *Installer) InstallPlugin(ctx context.Context, botID string, req Install
 	if err != nil {
 		return pluginspkg.Installation{}, err
 	}
+	lockKeys := make([]string, 0, len(entry.Release.Packages)+1)
+	lockKeys = append(lockKeys, pluginInstallationLockKey(botID, target.TargetID, manifest.ID))
+	for _, pkg := range entry.Release.Packages {
+		lockKeys = append(lockKeys, packageInstallationLockKey(
+			botID, target.TargetID, pkg.RegistryID, pkg.PackageID,
+		))
+	}
+	releaseInstall, err := acquireInstallationResources(ctx, lockKeys...)
+	if err != nil {
+		return pluginspkg.Installation{}, err
+	}
+	defer releaseInstall()
 
 	var (
 		installation  pluginspkg.Installation
 		bundleResult  pluginspkg.BundleInstallResult
-		scriptsResult = pluginScriptsResult{OK: true}
+		scriptsResult pluginScriptsResult
 		skillsResult  = pluginSkillsResult{OK: true}
 	)
-	err = i.withBotMutation(ctx, botID, func(mutationCtx context.Context) error {
-		state, installed, err := i.plugins.InstalledPluginState(mutationCtx, botID, manifest.ID)
-		if err != nil {
-			return withStatus(http.StatusInternalServerError, err)
-		}
-		if !matchesExpectedInstallation(req.ExpectedInstalledRevision, req.ExpectedInstallationTime, state, installed) {
-			return &StatusError{Status: http.StatusConflict, Message: "installed Plugin changed; refresh before installing"}
-		}
-		installedSkills, installedPackages, publications, err := publishPluginPackages(mutationCtx, target.Client, target.TargetID, packages, &skillsResult)
-		if err != nil {
-			return err
-		}
-		bundlePublication, err := pluginspkg.PublishBundleArchive(mutationCtx, target.Client, target.Info.OS, manifest.ID, bundle)
-		if err != nil {
-			return rollbackPluginPublications(mutationCtx, withStatus(http.StatusBadGateway, err), nil, publications)
-		}
-		bundleResult = bundlePublication.Result()
-		scriptsResult, err = runPluginScripts(mutationCtx, target.Client, botID, manifest.ID, manifest.Install)
-		if err != nil {
-			return rollbackPluginPublications(mutationCtx, withStatus(http.StatusBadGateway, err), bundlePublication, publications)
-		}
-		installation, err = i.plugins.Install(mutationCtx, botID, pluginspkg.InstallRequest{
-			Manifest: manifest, Variables: req.Variables, InstalledSkills: installedSkills, InstalledPackages: installedPackages, ReplacePackages: true,
-			Release:           pluginspkg.ReleaseMetadata{Revision: entry.Release.Revision, ArtifactDigest: entry.Release.Artifact.Digest},
-			WorkspaceTargetID: target.TargetID,
-		})
-		if err != nil {
-			status := http.StatusBadRequest
-			if errors.Is(err, skillpackages.ErrRevisionConflict) {
-				status = http.StatusConflict
-			}
-			return rollbackPluginPublications(mutationCtx, withStatus(status, err), bundlePublication, publications)
-		}
-		if err := bundlePublication.Commit(mutationCtx); err != nil && i.logger != nil {
-			i.logger.Warn("cleanup Plugin bundle backup failed", slog.Any("error", err))
-		}
-		for _, publication := range publications {
-			if err := publication.Commit(mutationCtx); err != nil && i.logger != nil {
-				i.logger.Warn("cleanup Plugin Package backup failed", slog.Any("error", err))
-			}
-		}
-		return nil
-	})
+	state, installed, err := i.plugins.InstalledPluginState(ctx, botID, manifest.ID)
+	if err != nil {
+		return pluginspkg.Installation{}, withStatus(http.StatusInternalServerError, err)
+	}
+	if !matchesExpectedInstallation(req.ExpectedInstalledRevision, req.ExpectedInstallationTime, state, installed) {
+		return pluginspkg.Installation{}, &StatusError{Status: http.StatusConflict, Message: "installed Plugin changed; refresh before installing"}
+	}
+	installedSkills, installedPackages, publications, err := publishPluginPackages(ctx, target.Client, target.TargetID, packages, &skillsResult)
 	if err != nil {
 		return pluginspkg.Installation{}, err
+	}
+	bundlePublication, err := pluginspkg.PublishBundleArchive(ctx, target.Client, target.Info.OS, manifest.ID, bundle)
+	if err != nil {
+		return pluginspkg.Installation{}, rollbackPluginPublications(ctx, withStatus(http.StatusBadGateway, err), nil, publications)
+	}
+	bundleResult = bundlePublication.Result()
+	scriptsResult, err = runPluginScripts(ctx, target.Client, botID, manifest.ID, manifest.Install)
+	if err != nil {
+		return pluginspkg.Installation{}, rollbackPluginPublications(ctx, withStatus(http.StatusBadGateway, err), bundlePublication, publications)
+	}
+	installation, err = i.plugins.Install(ctx, botID, pluginspkg.InstallRequest{
+		Manifest: manifest, Variables: req.Variables, InstalledSkills: installedSkills, InstalledPackages: installedPackages, ReplacePackages: true,
+		Release:           pluginspkg.ReleaseMetadata{Revision: entry.Release.Revision, ArtifactDigest: entry.Release.Artifact.Digest},
+		WorkspaceTargetID: target.TargetID,
+	})
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, skillpackages.ErrRevisionConflict) {
+			status = http.StatusConflict
+		}
+		return pluginspkg.Installation{}, rollbackPluginPublications(ctx, withStatus(status, err), bundlePublication, publications)
+	}
+	if err := bundlePublication.Commit(ctx); err != nil && i.logger != nil {
+		i.logger.Warn("cleanup Plugin bundle backup failed", slog.Any("error", err))
+	}
+	for _, publication := range publications {
+		if err := publication.Commit(ctx); err != nil && i.logger != nil {
+			i.logger.Warn("cleanup Plugin Package backup failed", slog.Any("error", err))
+		}
 	}
 	installation = withInstallMetadata(installation, "hooks_install", bundleResult.Hooks)
 	installation = withInstallMetadata(installation, "scripts_install", bundleResult.Scripts)

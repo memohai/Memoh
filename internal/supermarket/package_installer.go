@@ -106,31 +106,32 @@ func (i *Installer) InstallPackage(ctx context.Context, botID string, req Instal
 	if err != nil {
 		return InstallPackageResponse{}, err
 	}
-	var installed []InstallSkillResponse
-	var installation skillpackages.Installation
-	err = i.withBotMutation(targetCtx, botID, func(mutationCtx context.Context) error {
-		publication, published, err := publishPackage(mutationCtx, target.Client, prepared, target.TargetID)
-		if err != nil {
-			return err
-		}
-		installed = published
-		if i.packages == nil {
-			_ = publication.Rollback(mutationCtx)
-			return errors.New("skill Package service is not configured")
-		}
-		installation, err = i.packages.RecordDirect(mutationCtx, botID, target.TargetID, skillpackages.Requirement{
-			RegistryID: registryID, PackageID: packageID, Revision: revision,
-		})
-		if err != nil {
-			return errors.Join(packageLifecycleError(err), publication.Rollback(mutationCtx))
-		}
-		if err := publication.Commit(mutationCtx); err != nil && i.logger != nil {
-			i.logger.Warn("cleanup replaced Skill Package failed", slog.Any("error", err))
-		}
-		return nil
-	})
+	releaseInstall, err := acquireInstallationResources(targetCtx, packageInstallationLockKey(
+		botID, target.TargetID, registryID, packageID,
+	))
 	if err != nil {
 		return InstallPackageResponse{}, err
+	}
+	defer releaseInstall()
+	var installed []InstallSkillResponse
+	var installation skillpackages.Installation
+	publication, published, err := publishPackage(targetCtx, target.Client, prepared, target.TargetID)
+	if err != nil {
+		return InstallPackageResponse{}, err
+	}
+	installed = published
+	if i.packages == nil {
+		_ = publication.Rollback(targetCtx)
+		return InstallPackageResponse{}, errors.New("skill Package service is not configured")
+	}
+	installation, err = i.packages.RecordDirect(targetCtx, botID, target.TargetID, skillpackages.Requirement{
+		RegistryID: registryID, PackageID: packageID, Revision: revision,
+	})
+	if err != nil {
+		return InstallPackageResponse{}, errors.Join(packageLifecycleError(err), publication.Rollback(targetCtx))
+	}
+	if err := publication.Commit(targetCtx); err != nil && i.logger != nil {
+		i.logger.Warn("cleanup replaced Skill Package failed", slog.Any("error", err))
 	}
 	return InstallPackageResponse{OK: true, RegistryID: registryID, PackageID: packageID, Revision: revision, WorkspaceTargetID: target.TargetID, Skills: installed, Installation: installation}, nil
 }
@@ -140,48 +141,59 @@ func (i *Installer) UninstallPackage(ctx context.Context, botID, installationID 
 		return UninstallPackageResponse{}, errors.New("skill Package installer is not configured")
 	}
 	var result UninstallPackageResponse
-	err := i.withBotMutation(ctx, botID, func(mutationCtx context.Context) error {
-		installation, err := i.packages.GetByID(mutationCtx, botID, installationID)
-		if err != nil {
-			return packageLifecycleError(err)
-		}
-		if !installation.DirectlyInstalled {
-			return packageLifecycleError(skillpackages.ErrNotDirect)
-		}
+	installation, err := i.packages.GetByID(ctx, botID, installationID)
+	if err != nil {
+		return UninstallPackageResponse{}, packageLifecycleError(err)
+	}
+	if !installation.DirectlyInstalled {
+		return UninstallPackageResponse{}, packageLifecycleError(skillpackages.ErrNotDirect)
+	}
+	releaseInstall, err := acquireInstallationResources(ctx, packageInstallationLockKey(
+		botID, installation.WorkspaceTargetID, installation.RegistryID, installation.PackageID,
+	))
+	if err != nil {
+		return UninstallPackageResponse{}, err
+	}
+	defer releaseInstall()
+	installation, err = i.packages.GetByID(ctx, botID, installationID)
+	if err != nil {
+		return UninstallPackageResponse{}, packageLifecycleError(err)
+	}
+	if !installation.DirectlyInstalled {
+		return UninstallPackageResponse{}, packageLifecycleError(skillpackages.ErrNotDirect)
+	}
 
-		var removal *skillset.PackageRemoval
-		if installation.PluginReferenceCount == 0 {
-			targetCtx := workspace.WithWorkspaceTarget(mutationCtx, installation.WorkspaceTargetID)
-			target, err := i.workspaces.ResolveWorkspaceTarget(targetCtx, botID, installation.WorkspaceTargetID)
-			if err != nil {
-				return &WorkspaceTargetError{Err: err}
-			}
-			removal, err = skillset.PreparePackageRemoval(
-				targetCtx,
-				target.Client,
-				installation.RegistryID,
-				installation.PackageID,
-			)
-			if err != nil {
-				return err
-			}
-		}
-
-		updated, removed, err := i.packages.ReleaseDirect(mutationCtx, botID, installationID)
+	var removal *skillset.PackageRemoval
+	if installation.PluginReferenceCount == 0 {
+		targetCtx := workspace.WithWorkspaceTarget(ctx, installation.WorkspaceTargetID)
+		target, err := i.workspaces.ResolveWorkspaceTarget(targetCtx, botID, installation.WorkspaceTargetID)
 		if err != nil {
-			return errors.Join(packageLifecycleError(err), removal.Rollback(mutationCtx))
+			return UninstallPackageResponse{}, &WorkspaceTargetError{Err: err}
 		}
-		if !removed {
-			if err := removal.Rollback(mutationCtx); err != nil {
-				return err
-			}
-		} else if err := removal.Commit(mutationCtx); err != nil && i.logger != nil {
-			i.logger.Warn("cleanup uninstalled Skill Package failed", slog.Any("error", err))
+		removal, err = skillset.PreparePackageRemoval(
+			targetCtx,
+			target.Client,
+			installation.RegistryID,
+			installation.PackageID,
+		)
+		if err != nil {
+			return UninstallPackageResponse{}, err
 		}
-		result = UninstallPackageResponse{OK: true, RemovedFiles: removed, Installation: updated}
-		return nil
-	})
-	return result, err
+	}
+
+	updated, removed, err := i.packages.ReleaseDirect(ctx, botID, installationID)
+	if err != nil {
+		return UninstallPackageResponse{}, errors.Join(packageLifecycleError(err), removal.Rollback(ctx))
+	}
+	if !removed {
+		if err := removal.Rollback(ctx); err != nil {
+			return UninstallPackageResponse{}, err
+		}
+	} else if err := removal.Commit(ctx); err != nil && i.logger != nil {
+		i.logger.Warn("cleanup uninstalled Skill Package failed", slog.Any("error", err))
+	}
+	result = UninstallPackageResponse{OK: true, RemovedFiles: removed, Installation: updated}
+	return result, nil
 }
 
 func packageLifecycleError(err error) error {

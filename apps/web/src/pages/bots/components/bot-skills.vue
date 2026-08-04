@@ -485,6 +485,7 @@ import {
   getBotsById,
   getBotsByBotIdContainerSkills,
   getBotsByBotIdSupermarketPackages,
+  getBotsByBotIdWorkspaceTargets,
   postBotsByBotIdContainerSkills,
   postBotsByBotIdContainerSkillsActions,
   deleteBotsByBotIdContainerSkills,
@@ -560,6 +561,9 @@ const isViewing = ref(false)
 const draftRaw = ref('')
 const editingSourcePath = ref('')
 const selectedPackageKey = ref('')
+let skillsLoadSequence = 0
+let packagesLoadSequence = 0
+let libraryLoadSequence = 0
 
 const SKILL_TEMPLATE = `---
 name: my-skill
@@ -634,36 +638,40 @@ const canSaveDiscoveryRoots = computed(() => {
   return !!bot.value && isDiscoveryRootsDirty.value && !hasDiscoveryRootErrors.value && !isSavingDiscoveryRoots.value
 })
 
-async function fetchSkills() {
+async function fetchSkills(workspaceTargetId = '') {
   if (!props.botId) return
   const botID = props.botId
+  const sequence = ++skillsLoadSequence
   try {
     const { data } = await getBotsByBotIdContainerSkills({
       path: { bot_id: botID },
+      query: workspaceTargetId ? { workspace_target_id: workspaceTargetId } : undefined,
       throwOnError: true,
     })
-    if (props.botId !== botID) return
+    if (props.botId !== botID || sequence !== skillsLoadSequence) return
     skills.value = data.skills || []
   } catch (error) {
-    if (props.botId !== botID) return
+    if (props.botId !== botID || sequence !== skillsLoadSequence) return
     skills.value = []
     toast.error(resolveApiErrorMessage(error, t('bots.skills.loadFailed')))
   }
 }
 
-async function fetchInstalledPackages() {
+async function fetchInstalledPackages(workspaceTargetId = '') {
   if (!props.botId) return
   const botID = props.botId
+  const sequence = ++packagesLoadSequence
   try {
     const { data } = await getBotsByBotIdSupermarketPackages({
       path: { bot_id: botID },
+      query: workspaceTargetId ? { workspace_target_id: workspaceTargetId } : undefined,
       throwOnError: true,
     })
-    if (props.botId !== botID) return
+    if (props.botId !== botID || sequence !== packagesLoadSequence) return
     installedPackages.value = data || []
     packageLoadFailed.value = false
   } catch (error) {
-    if (props.botId !== botID) return
+    if (props.botId !== botID || sequence !== packagesLoadSequence) return
     installedPackages.value = []
     packageLoadFailed.value = true
     toast.error(resolveApiErrorMessage(error, t('bots.skills.loadFailed')))
@@ -673,11 +681,27 @@ async function fetchInstalledPackages() {
 async function fetchSkillLibrary() {
   if (!props.botId) return
   const botID = props.botId
+  const sequence = ++libraryLoadSequence
   isLoading.value = true
   try {
-    await Promise.all([fetchSkills(), fetchInstalledPackages()])
+    const { data } = await getBotsByBotIdWorkspaceTargets({
+      path: { bot_id: botID },
+      throwOnError: true,
+    })
+    if (props.botId !== botID || sequence !== libraryLoadSequence) return
+    const workspaceTargetId = data.targets?.find(target => target.primary)?.target_id || 'native'
+    await Promise.all([
+      fetchSkills(workspaceTargetId),
+      fetchInstalledPackages(workspaceTargetId),
+    ])
+  } catch (error) {
+    if (props.botId !== botID || sequence !== libraryLoadSequence) return
+    skills.value = []
+    installedPackages.value = []
+    packageLoadFailed.value = true
+    toast.error(resolveApiErrorMessage(error, t('bots.skills.loadFailed')))
   } finally {
-    if (props.botId === botID) isLoading.value = false
+    if (props.botId === botID && sequence === libraryLoadSequence) isLoading.value = false
   }
 }
 

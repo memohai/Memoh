@@ -25,7 +25,10 @@ import (
 	"github.com/memohai/memoh/internal/workspace/bridgesvc"
 )
 
-const pluginBundleTestInstallationID = "22222222-2222-4222-8222-222222222222"
+const (
+	pluginBundleTestInstallationID = "22222222-2222-4222-8222-222222222222"
+	pluginBundleTestBotID          = "11111111-1111-4111-8111-111111111111"
+)
 
 func TestPluginTargetChanged(t *testing.T) {
 	row := sqlc.BotPluginInstallation{Status: StatusReady, WorkspaceTargetID: "target-a"}
@@ -137,7 +140,7 @@ func (p *pluginBundleTestBridgeProvider) MCPClient(ctx context.Context, _ string
 }
 
 func TestPurgeUninstalledPluginDoesNotRequireOriginalWorkspace(t *testing.T) {
-	botUUID, err := db.ParseUUID(mutationTestBotID)
+	botUUID, err := db.ParseUUID(pluginBundleTestBotID)
 	if err != nil {
 		t.Fatalf("parse bot ID: %v", err)
 	}
@@ -161,7 +164,7 @@ func TestPurgeUninstalledPluginDoesNotRequireOriginalWorkspace(t *testing.T) {
 		BridgeProvider{Provider: provider},
 	)
 
-	if err := service.Purge(context.Background(), mutationTestBotID, pluginBundleTestInstallationID); err != nil {
+	if err := service.Purge(context.Background(), pluginBundleTestBotID, pluginBundleTestInstallationID); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
 	if !queries.deleted {
@@ -185,7 +188,7 @@ func TestUninstallRemovesPluginBundleAndRestoresItOnDatabaseFailure(t *testing.T
 			root := t.TempDir()
 			client := newPluginBundleTestClient(t, root)
 			provider := &pluginBundleTestBridgeProvider{client: client}
-			botUUID, err := db.ParseUUID(mutationTestBotID)
+			botUUID, err := db.ParseUUID(pluginBundleTestBotID)
 			if err != nil {
 				t.Fatalf("parse bot ID: %v", err)
 			}
@@ -250,7 +253,7 @@ func TestUninstallRemovesPluginBundleAndRestoresItOnDatabaseFailure(t *testing.T
 				BridgeProvider{Provider: provider},
 			)
 			_, uninstallErr := service.Uninstall(
-				context.Background(), mutationTestBotID, pluginBundleTestInstallationID,
+				context.Background(), pluginBundleTestBotID, pluginBundleTestInstallationID,
 			)
 			if test.updateErr == nil && uninstallErr != nil {
 				t.Fatalf("Uninstall: %v", uninstallErr)

@@ -36,8 +36,46 @@ import (
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
+
+type targetResolvingContainerWorkspace struct {
+	containerWorkspace
+	targetID string
+	err      error
+}
+
+func (w targetResolvingContainerWorkspace) CurrentWorkspaceTargetID(context.Context, string) (string, error) {
+	return w.targetID, w.err
+}
+
+func TestCurrentWorkspaceTargetIDPrefersRequestTarget(t *testing.T) {
+	handler := &ContainerdHandler{manager: targetResolvingContainerWorkspace{targetID: "persisted-target"}}
+	ctx := bridge.WithWorkspaceTarget(context.Background(), "request-target")
+
+	targetID, err := handler.currentWorkspaceTargetID(ctx, "bot-id")
+	if err != nil {
+		t.Fatalf("currentWorkspaceTargetID() error = %v", err)
+	}
+	if targetID != "request-target" {
+		t.Fatalf("currentWorkspaceTargetID() = %q, want request-target", targetID)
+	}
+}
+
+func TestListSkillsMapsMissingWorkspaceTargetToNotFound(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	env.handler.manager = targetResolvingContainerWorkspace{
+		containerWorkspace: env.handler.manager,
+		err:                workspace.ErrWorkspaceTargetNotFound,
+	}
+
+	_, err := env.callJSON(t, http.MethodGet, "/bots/:bot_id/container/skills", nil, env.handler.ListSkills)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
+		t.Fatalf("ListSkills() error = %v, want HTTP 404", err)
+	}
+}
 
 func TestListSkillsAPIReportsEffectiveShadowedAndSourceMetadata(t *testing.T) {
 	env := newSkillsTestEnv(t)

@@ -180,25 +180,11 @@ func provideNetworkService(log *slog.Logger, queries dbstore.Queries, registry *
 	return netctl.NewService(log, queries, registry, service, rc.ContainerBackend, cfg.Workspace.CNIBinaryDir, cfg.Workspace.CNIConfigDir, cfg.Workspace.DataRoot)
 }
 
-func provideDBQueries(lc fx.Lifecycle, cfg config.Config, postgresStore *postgresstore.Store) (dbstore.Queries, error) {
+func provideDBQueries(postgresStore *postgresstore.Store) (dbstore.Queries, error) {
 	if postgresStore == nil {
 		return nil, errors.New("postgres store not configured")
 	}
-	pool := postgresStore.Pool()
-	lockPoolConfig := pool.Config().Copy()
-	lockPoolConfig.MinConns = 0
-	lockPoolConfig.MaxConns = cfg.Postgres.EffectiveMutationLockMaxConnections()
-	lockPool, err := pgxpool.NewWithConfig(context.Background(), lockPoolConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create bot mutation lock pool: %w", err)
-	}
-	lc.Append(fx.Hook{
-		OnStop: func(_ context.Context) error {
-			lockPool.Close()
-			return nil
-		},
-	})
-	return postgresstore.NewQueriesWithPools(pool, lockPool, postgresStore.SQLC()), nil
+	return postgresstore.NewQueriesWithPool(postgresStore.Pool(), postgresStore.SQLC()), nil
 }
 
 func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountStore, error) {
@@ -553,10 +539,9 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
-	h.SetPluginService(pluginService)
 	return h
 }
 

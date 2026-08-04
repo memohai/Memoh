@@ -98,11 +98,11 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup
 - **Built-in memory**: Long-term memory across sessions and platforms, out of the box. Also supports [Mem0](https://mem0.ai), OpenViking.
 - **10+ channels**: Telegram, Discord, Lark, WeChat, QQ, Email, and more.
 - **MCP**: Connect external tool servers. Each bot manages its own connections.
-- **Plugins**: Install tools and integrations with pinned Skill Package dependencies.
+- **Plugins**: Install packaged skills, tools, and integrations to extend what bots can do.
 - **Agent Hosting**: Host external agents inside Memoh workspaces via ACP. Currently supports Codex and Claude Code, configured per bot.
 - **Browser Use**: Drive a browser inside the workspace.
 - **Computer Use**: Operate the workspace desktop for GUI workflows.
-- **Skills & Supermarket**: Install modular Skill Packages from configured registries, delegate to sub-agents.
+- **Skills & Supermarket**: Modular skills, install curated templates from Supermarket, delegate to sub-agents.
 - **Automation**: Scheduled tasks and periodic heartbeat.
 
 ## Sub-projects

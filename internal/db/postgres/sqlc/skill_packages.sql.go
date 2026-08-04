@@ -137,9 +137,8 @@ func (q *Queries) GetBotSkillPackageInstallationByID(ctx context.Context, arg Ge
 }
 
 const listBotPluginPackageReferences = `-- name: ListBotPluginPackageReferences :many
-SELECT ref.team_id, ref.bot_id, ref.plugin_installation_id, ref.package_installation_id,
+SELECT ref.team_id, ref.bot_id, ref.workspace_target_id, ref.plugin_installation_id, ref.package_installation_id,
        ref.required_revision, ref.created_at, ref.updated_at,
-       installation.workspace_target_id,
        installation.registry_id, installation.package_id,
        installation.revision, installation.directly_installed
 FROM bot_plugin_package_references AS ref
@@ -153,12 +152,12 @@ ORDER BY installation.registry_id, installation.package_id
 type ListBotPluginPackageReferencesRow struct {
 	TeamID                pgtype.UUID        `json:"team_id"`
 	BotID                 pgtype.UUID        `json:"bot_id"`
+	WorkspaceTargetID     string             `json:"workspace_target_id"`
 	PluginInstallationID  pgtype.UUID        `json:"plugin_installation_id"`
 	PackageInstallationID pgtype.UUID        `json:"package_installation_id"`
 	RequiredRevision      string             `json:"required_revision"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
-	WorkspaceTargetID     string             `json:"workspace_target_id"`
 	RegistryID            string             `json:"registry_id"`
 	PackageID             string             `json:"package_id"`
 	Revision              string             `json:"revision"`
@@ -177,12 +176,12 @@ func (q *Queries) ListBotPluginPackageReferences(ctx context.Context, pluginInst
 		if err := rows.Scan(
 			&i.TeamID,
 			&i.BotID,
+			&i.WorkspaceTargetID,
 			&i.PluginInstallationID,
 			&i.PackageInstallationID,
 			&i.RequiredRevision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.WorkspaceTargetID,
 			&i.RegistryID,
 			&i.PackageID,
 			&i.Revision,
@@ -200,21 +199,41 @@ func (q *Queries) ListBotPluginPackageReferences(ctx context.Context, pluginInst
 
 const listBotSkillPackageInstallations = `-- name: ListBotSkillPackageInstallations :many
 SELECT id, team_id, bot_id, workspace_target_id, registry_id, package_id,
-       revision, directly_installed, installed_at, updated_at
-FROM bot_skill_package_installations
-WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
-ORDER BY registry_id, package_id, workspace_target_id
+       revision, directly_installed, installed_at, updated_at,
+       (
+         SELECT count(*)
+         FROM bot_plugin_package_references AS ref
+         WHERE ref.team_id = public.memoh_current_team_id()
+           AND ref.package_installation_id = installation.id
+       ) AS plugin_reference_count
+FROM bot_skill_package_installations AS installation
+WHERE installation.team_id = public.memoh_current_team_id() AND installation.bot_id = $1
+ORDER BY installation.registry_id, installation.package_id, installation.workspace_target_id
 `
 
-func (q *Queries) ListBotSkillPackageInstallations(ctx context.Context, botID pgtype.UUID) ([]BotSkillPackageInstallation, error) {
+type ListBotSkillPackageInstallationsRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	TeamID               pgtype.UUID        `json:"team_id"`
+	BotID                pgtype.UUID        `json:"bot_id"`
+	WorkspaceTargetID    string             `json:"workspace_target_id"`
+	RegistryID           string             `json:"registry_id"`
+	PackageID            string             `json:"package_id"`
+	Revision             string             `json:"revision"`
+	DirectlyInstalled    bool               `json:"directly_installed"`
+	InstalledAt          pgtype.Timestamptz `json:"installed_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	PluginReferenceCount int64              `json:"plugin_reference_count"`
+}
+
+func (q *Queries) ListBotSkillPackageInstallations(ctx context.Context, botID pgtype.UUID) ([]ListBotSkillPackageInstallationsRow, error) {
 	rows, err := q.db.Query(ctx, listBotSkillPackageInstallations, botID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BotSkillPackageInstallation
+	var items []ListBotSkillPackageInstallationsRow
 	for rows.Next() {
-		var i BotSkillPackageInstallation
+		var i ListBotSkillPackageInstallationsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TeamID,
@@ -226,6 +245,7 @@ func (q *Queries) ListBotSkillPackageInstallations(ctx context.Context, botID pg
 			&i.DirectlyInstalled,
 			&i.InstalledAt,
 			&i.UpdatedAt,
+			&i.PluginReferenceCount,
 		); err != nil {
 			return nil, err
 		}
@@ -272,18 +292,18 @@ func (q *Queries) SetBotSkillPackageDirectlyInstalled(ctx context.Context, arg S
 
 const upsertBotPluginPackageReference = `-- name: UpsertBotPluginPackageReference :one
 INSERT INTO bot_plugin_package_references (
-  bot_id, plugin_installation_id, package_installation_id, required_revision
+  bot_id, workspace_target_id, plugin_installation_id, package_installation_id, required_revision
 )
-VALUES ($1, $2, $3, $4)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (team_id, plugin_installation_id, package_installation_id)
 DO UPDATE SET required_revision = EXCLUDED.required_revision,
               updated_at = now()
-RETURNING team_id, bot_id, plugin_installation_id, package_installation_id,
-          required_revision, created_at, updated_at
+RETURNING team_id, plugin_installation_id, package_installation_id, required_revision, created_at, updated_at, bot_id, workspace_target_id
 `
 
 type UpsertBotPluginPackageReferenceParams struct {
 	BotID                 pgtype.UUID `json:"bot_id"`
+	WorkspaceTargetID     string      `json:"workspace_target_id"`
 	PluginInstallationID  pgtype.UUID `json:"plugin_installation_id"`
 	PackageInstallationID pgtype.UUID `json:"package_installation_id"`
 	RequiredRevision      string      `json:"required_revision"`
@@ -292,6 +312,7 @@ type UpsertBotPluginPackageReferenceParams struct {
 func (q *Queries) UpsertBotPluginPackageReference(ctx context.Context, arg UpsertBotPluginPackageReferenceParams) (BotPluginPackageReference, error) {
 	row := q.db.QueryRow(ctx, upsertBotPluginPackageReference,
 		arg.BotID,
+		arg.WorkspaceTargetID,
 		arg.PluginInstallationID,
 		arg.PackageInstallationID,
 		arg.RequiredRevision,
@@ -299,12 +320,13 @@ func (q *Queries) UpsertBotPluginPackageReference(ctx context.Context, arg Upser
 	var i BotPluginPackageReference
 	err := row.Scan(
 		&i.TeamID,
-		&i.BotID,
 		&i.PluginInstallationID,
 		&i.PackageInstallationID,
 		&i.RequiredRevision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BotID,
+		&i.WorkspaceTargetID,
 	)
 	return i, err
 }

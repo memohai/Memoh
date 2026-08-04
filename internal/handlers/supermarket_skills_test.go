@@ -149,13 +149,11 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	revision := sha256.Sum256(release)
 	pkg.Revision = hex.EncodeToString(revision[:])
 	installer := &recordingPluginInstaller{}
-	artifactRequestedDuringMutation := false
 	obsoletePath := "/data/skills/registry/package/obsolete/SKILL.md"
 	env.writeSkillFile(t, obsoletePath, managedSkillRaw("obsolete", "Obsolete"))
 	handler := &SupermarketHandler{
 		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if strings.HasPrefix(req.URL.Path, "/api/artifacts/skill/") {
-				artifactRequestedDuringMutation = artifactRequestedDuringMutation || installer.mutationCalls > 0
 				return testHTTPResponse(req, http.StatusOK, artifact), nil
 			}
 			wantReleasePath := "/api/registries/registry/packages/package/releases/" + pkg.Revision
@@ -173,12 +171,6 @@ func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
 	})
 	if err != nil || !result.OK || len(result.Skills) != len(pkg.Skills) {
 		t.Fatalf("installRegistryPackage() result=%+v error=%v", result, err)
-	}
-	if artifactRequestedDuringMutation || installer.mutationCalls != 1 {
-		t.Fatalf(
-			"Package preflight state: artifact_in_lock=%v mutations=%d",
-			artifactRequestedDuringMutation, installer.mutationCalls,
-		)
 	}
 	if _, err := os.Stat(env.localPath(obsoletePath)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("obsolete Package member survived replacement: %v", err)

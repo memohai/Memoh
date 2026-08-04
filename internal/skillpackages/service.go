@@ -41,6 +41,14 @@ type Requirement struct {
 	Revision   string
 }
 
+func NormalizeWorkspaceTargetID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "native"
+	}
+	return value
+}
+
 type Store interface {
 	CountBotSkillPackageReferences(context.Context, pgtype.UUID) (int64, error)
 	DeleteBotPluginPackageReferences(context.Context, pgtype.UUID) error
@@ -48,7 +56,7 @@ type Store interface {
 	GetBotSkillPackageInstallation(context.Context, dbsqlc.GetBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error)
 	GetBotSkillPackageInstallationByID(context.Context, dbsqlc.GetBotSkillPackageInstallationByIDParams) (dbsqlc.BotSkillPackageInstallation, error)
 	ListBotPluginPackageReferences(context.Context, pgtype.UUID) ([]dbsqlc.ListBotPluginPackageReferencesRow, error)
-	ListBotSkillPackageInstallations(context.Context, pgtype.UUID) ([]dbsqlc.BotSkillPackageInstallation, error)
+	ListBotSkillPackageInstallations(context.Context, pgtype.UUID) ([]dbsqlc.ListBotSkillPackageInstallationsRow, error)
 	SetBotSkillPackageDirectlyInstalled(context.Context, dbsqlc.SetBotSkillPackageDirectlyInstalledParams) (dbsqlc.BotSkillPackageInstallation, error)
 	UpsertBotPluginPackageReference(context.Context, dbsqlc.UpsertBotPluginPackageReferenceParams) (dbsqlc.BotPluginPackageReference, error)
 	UpsertDirectBotSkillPackageInstallation(context.Context, dbsqlc.UpsertDirectBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error)
@@ -78,11 +86,12 @@ func (s *Service) List(ctx context.Context, botID string) ([]Installation, error
 	}
 	result := make([]Installation, 0, len(rows))
 	for _, row := range rows {
-		item, err := installationWithReferences(ctx, s.queries, row)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
+		result = append(result, Installation{
+			ID: row.ID.String(), BotID: row.BotID.String(), WorkspaceTargetID: row.WorkspaceTargetID,
+			RegistryID: row.RegistryID, PackageID: row.PackageID, Revision: row.Revision,
+			DirectlyInstalled: row.DirectlyInstalled, PluginReferenceCount: row.PluginReferenceCount,
+			InstalledAt: row.InstalledAt.Time, UpdatedAt: row.UpdatedAt.Time,
+		})
 	}
 	return result, nil
 }
@@ -253,7 +262,8 @@ func ReplacePluginReferences(ctx context.Context, q Store, botID, pluginInstalla
 			return nil, err
 		}
 		if _, err := q.UpsertBotPluginPackageReference(ctx, dbsqlc.UpsertBotPluginPackageReferenceParams{
-			BotID: botID, PluginInstallationID: pluginInstallationID, PackageInstallationID: row.ID,
+			BotID: botID, WorkspaceTargetID: NormalizeWorkspaceTargetID(workspaceTargetID),
+			PluginInstallationID: pluginInstallationID, PackageInstallationID: row.ID,
 			RequiredRevision: requirement.Revision,
 		}); err != nil {
 			return nil, err

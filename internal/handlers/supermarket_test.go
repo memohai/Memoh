@@ -61,7 +61,6 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	}
 	installer := &recordingPluginInstaller{}
 	requestedPaths := make([]string, 0, 3)
-	artifactRequestedDuringMutation := false
 	handler := &SupermarketHandler{
 		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			requestedPaths = append(requestedPaths, req.URL.Path)
@@ -75,10 +74,8 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 			case registryPackageReleaseUpstreamPath(reference.RegistryID, reference.PackageID, entry.Release.Packages[0].Revision):
 				content = packageJSON
 			case "/api/artifacts/skill/" + digestText:
-				artifactRequestedDuringMutation = installer.mutationCalls > 0
 				content = artifact
 			case "/api/artifacts/plugin/" + entry.Release.Artifact.Digest:
-				artifactRequestedDuringMutation = artifactRequestedDuringMutation || installer.mutationCalls > 0
 				content = bundle
 			default:
 				status = http.StatusNotFound
@@ -111,9 +108,6 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	if installer.request.WorkspaceTargetID != workspace.WorkspaceTargetNative {
 		t.Fatalf("workspace target = %q, want native", installer.request.WorkspaceTargetID)
 	}
-	if artifactRequestedDuringMutation {
-		t.Fatal("Plugin installation downloaded an Artifact while holding the bot mutation lock")
-	}
 	if slices.Contains(requestedPaths, "/api/registries/memoh/packages/notion/skills/meeting") {
 		t.Fatalf("Plugin installation queried the mutable Skill endpoint: %+v", requestedPaths)
 	}
@@ -129,12 +123,6 @@ func TestInstallPluginDownloadsReferencedRegistrySkills(t *testing.T) {
 	sourcePath := path.Join(skillset.ManagedDir(), "memoh", "notion", "meeting", "SKILL.md")
 	if _, err := os.ReadFile(env.localPath(sourcePath)); err != nil {
 		t.Fatalf("read installed Plugin Skill: %v", err)
-	}
-	if installer.mutationCalls != 1 {
-		t.Fatalf("bot mutation scopes = %d, want 1", installer.mutationCalls)
-	}
-	if !installer.installInMutation {
-		t.Fatal("Plugin ownership was recorded outside the bot mutation scope")
 	}
 	var installation pluginspkg.Installation
 	if err := json.Unmarshal(recorder.Body.Bytes(), &installation); err != nil {
@@ -185,8 +173,8 @@ func TestInstallPluginRejectsStaleReleaseBeforeWorkspaceMutation(t *testing.T) {
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
 		t.Fatalf("InstallPlugin() error = %v, want HTTP 409", err)
 	}
-	if artifactRequested || installer.mutationCalls != 0 {
-		t.Fatalf("stale release touched installation state: artifact=%v mutations=%d", artifactRequested, installer.mutationCalls)
+	if artifactRequested {
+		t.Fatalf("stale release downloaded an Artifact")
 	}
 }
 
@@ -225,9 +213,7 @@ func TestInstallPluginRejectsInstallationChangedWithinSameReleaseWhilePreparing(
 	installer := &recordingPluginInstaller{
 		installed: true, installedRevision: oldRevision, installedUpdatedAt: installedAt,
 	}
-	installer.beforeMutation = func() {
-		installer.installedUpdatedAt = installedAt.Add(time.Second)
-	}
+	installer.installedUpdatedAt = installedAt.Add(time.Second)
 	handler := &SupermarketHandler{
 		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.URL.Path {
@@ -254,8 +240,8 @@ func TestInstallPluginRejectsInstallationChangedWithinSameReleaseWhilePreparing(
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
 		t.Fatalf("InstallPlugin() error = %v, want HTTP 409", err)
 	}
-	if installer.installCalls != 0 || !installer.releaseReadInMutation {
-		t.Fatalf("stale install state: calls=%d release_read_in_mutation=%v", installer.installCalls, installer.releaseReadInMutation)
+	if installer.installCalls != 0 {
+		t.Fatalf("stale install calls = %d, want 0", installer.installCalls)
 	}
 	pluginPath := path.Join(skillset.PluginDirPath, "notion", "plugin.yaml")
 	if _, statErr := os.Stat(env.localPath(pluginPath)); !errors.Is(statErr, os.ErrNotExist) {
@@ -915,46 +901,26 @@ func extractPluginBundleArchiveForTest(
 }
 
 type recordingPluginInstaller struct {
-	request               pluginspkg.InstallRequest
-	installCalls          int
-	installInMutation     bool
-	mutationCalls         int
-	installErr            error
-	installed             bool
-	installedRevision     string
-	installedUpdatedAt    time.Time
-	releaseReadInMutation bool
-	beforeMutation        func()
-}
-
-type recordingPluginMutationKey struct{}
-
-func (i *recordingPluginInstaller) WithBotMutation(
-	ctx context.Context,
-	_ string,
-	fn func(context.Context) error,
-) error {
-	i.mutationCalls++
-	if i.beforeMutation != nil {
-		i.beforeMutation()
-	}
-	return fn(context.WithValue(ctx, recordingPluginMutationKey{}, true))
+	request            pluginspkg.InstallRequest
+	installCalls       int
+	installErr         error
+	installed          bool
+	installedRevision  string
+	installedUpdatedAt time.Time
 }
 
 func (i *recordingPluginInstaller) InstalledPluginState(
-	ctx context.Context,
+	_ context.Context,
 	_, _ string,
 ) (pluginspkg.InstalledPluginState, bool, error) {
-	i.releaseReadInMutation, _ = ctx.Value(recordingPluginMutationKey{}).(bool)
 	return pluginspkg.InstalledPluginState{
 		ReleaseRevision: i.installedRevision,
 		UpdatedAt:       i.installedUpdatedAt,
 	}, i.installed, nil
 }
 
-func (i *recordingPluginInstaller) Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error) {
+func (i *recordingPluginInstaller) Install(_ context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error) {
 	i.installCalls++
-	i.installInMutation, _ = ctx.Value(recordingPluginMutationKey{}).(bool)
 	i.request = req
 	if i.installErr != nil {
 		return pluginspkg.Installation{}, i.installErr

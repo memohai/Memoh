@@ -270,7 +270,7 @@ type Queries interface {
 	ListBotPluginInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotPluginInstallation, error)
 	ListBotPluginPackageReferences(ctx context.Context, pluginInstallationID pgtype.UUID) ([]dbsqlc.ListBotPluginPackageReferencesRow, error)
 	ListBotPluginResources(ctx context.Context, installationID pgtype.UUID) ([]dbsqlc.BotPluginResource, error)
-	ListBotSkillPackageInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotSkillPackageInstallation, error)
+	ListBotSkillPackageInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListBotSkillPackageInstallationsRow, error)
 	ListMCPConnectionsByBotID(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.McpConnection, error)
 	ListConnectorsByBotID(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.Connector, error)
 	ListMemoryProviders(ctx context.Context) ([]dbsqlc.MemoryProvider, error)

@@ -34,6 +34,48 @@ func TestInstallerPreparationLimit(t *testing.T) {
 	}
 }
 
+func TestInstallationResourceLocksSerializeOnlyMatchingResources(t *testing.T) {
+	ctx := context.Background()
+	first, err := acquireInstallationResources(ctx, "package\x00bot\x00native\x00openai\x00documents")
+	if err != nil {
+		t.Fatalf("acquire first resource: %v", err)
+	}
+	defer first()
+
+	otherCtx, cancelOther := context.WithCancel(ctx)
+	defer cancelOther()
+	other, err := acquireInstallationResources(otherCtx, "package\x00bot\x00native\x00openai\x00spreadsheets")
+	if err != nil {
+		t.Fatalf("different resource was blocked: %v", err)
+	}
+	other()
+
+	waitCtx, cancelWait := context.WithCancel(ctx)
+	cancelWait()
+	blocked, err := acquireInstallationResources(waitCtx, "package\x00bot\x00native\x00openai\x00documents")
+	if blocked != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("matching resource acquire = (%v, %v), want canceled", blocked != nil, err)
+	}
+
+	first()
+	reacquired, err := acquireInstallationResources(ctx, "package\x00bot\x00native\x00openai\x00documents")
+	if err != nil {
+		t.Fatalf("reacquire released resource: %v", err)
+	}
+	reacquired()
+}
+
+func TestInstallationResourceLocksSortAndDeduplicateKeys(t *testing.T) {
+	release, err := acquireInstallationResources(context.Background(), "b", "a", "b", " ")
+	if err != nil {
+		t.Fatalf("acquire resources: %v", err)
+	}
+	release()
+	if len(installationResourceLocks.items) != 0 {
+		t.Fatalf("resource locks leaked: %+v", installationResourceLocks.items)
+	}
+}
+
 func TestValidatePluginEntryRejectsPackageLockMismatch(t *testing.T) {
 	manifest := pluginspkg.Manifest{
 		ID:       "notion",
@@ -183,10 +225,6 @@ func TestRunPluginScriptsReportsExecutionError(t *testing.T) {
 }
 
 type installerPluginStub struct{}
-
-func (*installerPluginStub) WithBotMutation(context.Context, string, func(context.Context) error) error {
-	return nil
-}
 
 func (*installerPluginStub) Install(context.Context, string, pluginspkg.InstallRequest) (pluginspkg.Installation, error) {
 	return pluginspkg.Installation{}, nil

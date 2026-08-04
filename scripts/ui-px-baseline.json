@@ -45,6 +45,5 @@
   "apps/web/src/pages/people/index.vue": 3,
   "apps/web/src/pages/providers/components/model-item.vue": 1,
   "apps/web/src/pages/supermarket/components/install-plugin-dialog.vue": 1,
-  "apps/web/src/pages/supermarket/components/install-skill-dialog.vue": 2,
   "apps/web/src/pages/usage/index.vue": 3
 }
