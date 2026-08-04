@@ -11,14 +11,20 @@ import (
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	tools "github.com/memohai/memoh/internal/agent/tool"
 )
 
 // SystemSection is one typed, priority-ordered piece of the system prompt.
 type SystemSection struct {
-	ID       string
-	Kind     contextfrag.Kind
-	Priority int
-	Text     string
+	ID                 string
+	Kind               contextfrag.Kind
+	Priority           int
+	RetentionTier      contextfrag.RetentionTier
+	DropPriority       contextfrag.DropPriority
+	RequiredCapability string
+	Budget             contextfrag.BudgetPolicy
+	Render             contextfrag.RenderPolicy
+	Text               string
 }
 
 const (
@@ -31,6 +37,8 @@ const (
 	sectionIDWorkspaceInstructions = "system.workspace_instructions"
 	sectionIDFallback              = "system.prompt.fallback"
 )
+
+var skillRequiredCapability = tools.ToolUseSkill().String()
 
 const (
 	priorityIntro                 = 10
@@ -74,20 +82,21 @@ func GenerateSystemSections(params SystemPromptParams) []SystemSection {
 
 	sections := []SystemSection{
 		{
-			ID: sectionIDIntro, Kind: contextfrag.KindSystemPrompt, Priority: priorityIntro,
+			ID: sectionIDIntro, Kind: contextfrag.KindSystemPrompt, Priority: priorityIntro, RetentionTier: contextfrag.RetentionRequired,
 			Text: render(intro, map[string]string{"home": home, "timezone": timezone}),
 		},
 		{
-			ID: sectionIDBotIdentity, Kind: contextfrag.KindBotIdentity, Priority: priorityBotIdentity,
+			ID: sectionIDBotIdentity, Kind: contextfrag.KindBotIdentity, Priority: priorityBotIdentity, RetentionTier: contextfrag.RetentionPreferred,
 			Text: buildBotInfoSection(params.Bot),
 		},
-		{ID: sectionIDBody, Kind: contextfrag.KindSystemPrompt, Priority: priorityBody, Text: body},
-		{ID: sectionIDTail, Kind: contextfrag.KindSystemPrompt, Priority: priorityTail, Text: tail},
+		{ID: sectionIDBody, Kind: contextfrag.KindSystemPrompt, Priority: priorityBody, RetentionTier: contextfrag.RetentionRequired, Text: body},
+		{ID: sectionIDTail, Kind: contextfrag.KindSystemPrompt, Priority: priorityTail, RetentionTier: contextfrag.RetentionRequired, Text: tail},
 	}
 
 	if text := strings.TrimSpace(params.PlatformIdentitiesSection); text != "" {
 		sections = append(sections, SystemSection{
-			ID: sectionIDPlatformIdentity, Kind: contextfrag.KindPlatformIdentity, Priority: priorityPlatformIdentity, Text: text,
+			ID: sectionIDPlatformIdentity, Kind: contextfrag.KindPlatformIdentity, Priority: priorityPlatformIdentity,
+			RetentionTier: contextfrag.RetentionPreferred, Text: text,
 		})
 	}
 
@@ -97,12 +106,14 @@ func GenerateSystemSections(params SystemPromptParams) []SystemSection {
 
 	if text := strings.TrimSpace(buildSkillsSection(params.Skills)); text != "" {
 		sections = append(sections, SystemSection{
-			ID: sectionIDSkills, Kind: contextfrag.KindSkillsCatalog, Priority: prioritySkills, Text: text,
+			ID: sectionIDSkills, Kind: contextfrag.KindSkillsCatalog, Priority: prioritySkills,
+			RetentionTier: contextfrag.RetentionOptional, RequiredCapability: skillRequiredCapability, Text: text,
 		})
 	}
 	if text := strings.TrimSpace(buildFileSections(params.Files, params.MaxFilesBytes)); text != "" {
 		sections = append(sections, SystemSection{
-			ID: sectionIDWorkspaceInstructions, Kind: contextfrag.KindWorkspaceInstruction, Priority: priorityWorkspaceInstructions, Text: text,
+			ID: sectionIDWorkspaceInstructions, Kind: contextfrag.KindWorkspaceInstruction, Priority: priorityWorkspaceInstructions,
+			RetentionTier: contextfrag.RetentionPreferred, Text: text,
 		})
 	}
 
@@ -133,10 +144,11 @@ func degradedSystemSections(params SystemPromptParams, home, timezone string, ca
 		text += "\n\n" + strings.TrimSpace(includes["_memory"])
 	}
 	return []SystemSection{{
-		ID:       sectionIDFallback,
-		Kind:     contextfrag.KindSystemPrompt,
-		Priority: priorityBody,
-		Text:     text,
+		ID:            sectionIDFallback,
+		Kind:          contextfrag.KindSystemPrompt,
+		Priority:      priorityBody,
+		RetentionTier: contextfrag.RetentionRequired,
+		Text:          text,
 	}}
 }
 
@@ -147,19 +159,27 @@ func degradedSystemSections(params SystemPromptParams, home, timezone string, ca
 func SystemSectionFrags(sections []SystemSection, scope contextfrag.Scope) []contextfrag.ContextFrag {
 	frags := make([]contextfrag.ContextFrag, 0, len(sections))
 	for _, section := range sections {
+		renderPolicy := section.Render
+		if renderPolicy.Format == "" {
+			renderPolicy.Format = contextfrag.RenderMarkdown
+		}
 		frags = append(frags, contextfrag.TextFrag(contextfrag.TextFragInput{
-			ID:         section.ID,
-			Kind:       section.Kind,
-			Role:       sdk.MessageRoleSystem,
-			Slot:       contextfrag.SlotSystem,
-			Text:       section.Text,
-			Priority:   section.Priority,
-			CacheClass: contextfrag.CacheStable,
-			Trust:      contextfrag.TrustSystem,
-			Scope:      scope,
-			Source:     contextfrag.SourceRunConfig,
-			Collector:  "system_sections",
-			Render:     contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown},
+			ID:                 section.ID,
+			Kind:               section.Kind,
+			Role:               sdk.MessageRoleSystem,
+			Slot:               contextfrag.SlotSystem,
+			Text:               section.Text,
+			Priority:           section.Priority,
+			RetentionTier:      section.RetentionTier,
+			DropPriority:       section.DropPriority,
+			RequiredCapability: section.RequiredCapability,
+			CacheClass:         contextfrag.CacheStable,
+			Trust:              contextfrag.TrustSystem,
+			Scope:              scope,
+			Source:             contextfrag.SourceRunConfig,
+			Collector:          "system_sections",
+			Render:             renderPolicy,
+			Budget:             section.Budget,
 		}))
 	}
 	return frags
@@ -171,15 +191,15 @@ func SystemSectionFrags(sections []SystemSection, scope contextfrag.Scope) []con
 // was appended at all), so the join never special-cases an empty Text.
 func renderSystemSections(sections []SystemSection) string {
 	sorted := slices.Clone(sections)
-	slices.SortFunc(sorted, func(a, b SystemSection) int {
+	slices.SortStableFunc(sorted, func(a, b SystemSection) int {
 		return a.Priority - b.Priority
 	})
 	var sb strings.Builder
 	for i, s := range sorted {
 		if i > 0 {
-			sb.WriteString("\n\n")
+			sb.WriteString(contextfrag.RenderSeparator(sorted[i-1].Render, s.Render))
 		}
-		sb.WriteString(s.Text)
+		sb.WriteString(contextfrag.RenderText(s.Text, s.Render))
 	}
 	return sb.String()
 }
