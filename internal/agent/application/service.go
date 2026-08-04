@@ -141,6 +141,7 @@ type Service struct {
 	allowedTeam                       string
 	sessionRuntime                    turnAdmitter
 	decisionRuntime                   *sessionruntime.Manager
+	abortRuntime                      runtimeAbortController
 	contextLifecycles                 contextLifecycleStore
 	contextLifecyclePersistenceErrors atomic.Uint64
 	publishTurnEvent                  func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
