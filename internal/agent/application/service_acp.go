@@ -299,10 +299,13 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 			emit(native.StreamEvent{Type: native.EventTextDelta, Delta: failureDelta})
 		}
 		if persistErr := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err, contextLifecycle); persistErr != nil {
-			lifecycleCause = persistErr
+			lifecycleCause = runtimeHistoryError(persistErr)
 			s.logger.Error("ACP failure persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 		} else {
 			cleanupProjections()
+		}
+		if status, _ := classifyContextLifecycleTerminal(streamCtx, lifecycleCause); status != contextLifecycleStatusAborted {
+			emit(acpRuntimeFailureEvent(lifecycleCause))
 		}
 		emit(native.StreamEvent{Type: native.EventTextEnd})
 		emit(acpTerminalStreamEvent(native.EventAbort, failedResult))
@@ -312,13 +315,23 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	emit(native.StreamEvent{Type: native.EventTextEnd})
 	result = ensureACPPromptOutput(result)
 	if persistErr := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil, contextLifecycle); persistErr != nil {
-		lifecycleCause = persistErr
+		lifecycleCause = runtimeHistoryError(persistErr)
 		s.logger.Error("ACP persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
-	} else {
-		cleanupProjections()
+		emit(acpRuntimeFailureEvent(lifecycleCause))
+		emit(acpTerminalStreamEvent(native.EventAbort, result))
+		return nil
 	}
+	cleanupProjections()
 	emit(acpTerminalStreamEvent(native.EventEnd, result))
 	return nil
+}
+
+func acpRuntimeFailureEvent(cause error) native.StreamEvent {
+	code := string(apperror.CodeOf(cause))
+	if strings.TrimSpace(code) == "" {
+		code = "acp_runtime_prompt_failed"
+	}
+	return native.StreamEvent{Type: native.EventError, Error: code}
 }
 
 func (s *Service) prepareACPAttachments(ctx context.Context, req ChatRequest) (acpPreparedAttachments, error) {
@@ -757,13 +770,16 @@ func (s *Service) persistACPRound(
 		}
 	}
 	skipMemory := promptErr != nil || req.UserMessagePersisted || req.SkipMemoryExtraction
-	err := s.storeRoundWithOptions(ctx, req, round, "", storeRoundOptions{
+	persisted, err := s.storeRoundWithOptionsResult(ctx, req, round, "", storeRoundOptions{
 		SkipMemory:              skipMemory,
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex:  metadataByIndex,
 		RequireCompletePersist:  true,
 		ContextLifecycle:        contextLifecycle,
 	})
+	if err == nil && lastPersistedAssistantMessageID(persisted) == "" {
+		err = errors.New("ACP assistant output was not persisted")
+	}
 	if err == nil && promptErr == nil && req.UserMessagePersisted && !req.SkipMemoryExtraction {
 		go s.storeMemory(context.WithoutCancel(ctx), req, round)
 	}

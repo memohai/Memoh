@@ -73,9 +73,10 @@ func (*discussHandle) Inject(context.Context, turn.InjectMessage) error {
 // discussHandle reuses runHandle's channel pair with manual event emission.
 type discussHandle struct {
 	runHandle
-	teamID    string
-	sessionID string
-	seq       int64
+	teamID               string
+	sessionID            string
+	seq                  int64
+	contentLightTerminal bool
 }
 
 // emit delivers one event, giving up when the run context is canceled so
@@ -115,6 +116,15 @@ func (h *discussHandle) emitErr(err error) bool {
 func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
 	defer close(h.events)
 	defer close(h.errs)
+	defer func() {
+		// Passive and empty discuss turns have no provider terminal event or
+		// assembled holder. Persist their content-light completion only after
+		// the fenced runtime finish. A concurrent cancellation is handled by the
+		// finisher's aborted fallback instead, so the two rows cannot disagree.
+		if h.contentLightTerminal && !h.failed.Load() && h.streamErr == nil {
+			s.EnsureTerminalContextLifecycle(ctx, h.id, cmd.BotID, cmd.ThreadID, nil)
+		}
+	}()
 	defer h.finish()
 	defer func() {
 		// External cancellation can surface as a cleanly closed agent
@@ -139,8 +149,8 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 
 	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
 		if !cmd.DiscussAddressed {
-			if h.emit(turn.DiscussEventSkipped, nil) && ctx.Err() == nil {
-				s.EnsureTerminalContextLifecycle(ctx, h.id, cmd.BotID, cmd.ThreadID, nil)
+			if h.emit(turn.DiscussEventSkipped, nil) {
+				h.contentLightTerminal = true
 			}
 			return
 		}
@@ -231,8 +241,18 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			return
 		}
 	}
-	if !hasTerminalEvent && lifecycleCause == nil && ctx.Err() != nil {
-		lifecycleCause = context.Cause(ctx)
+	if !hasTerminalEvent {
+		if lifecycleCause == nil {
+			if ctx.Err() != nil {
+				lifecycleCause = context.Cause(ctx)
+			} else {
+				lifecycleCause = errors.New("native discuss stream ended without a terminal event")
+			}
+		}
+		if ctx.Err() == nil {
+			h.emitErr(lifecycleCause)
+		}
+		return
 	}
 
 	if len(finalMessages) > 0 {
@@ -316,9 +336,7 @@ func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 	if strings.TrimSpace(prompt) == "" {
 		// No composable context: end without a skip marker so the caller
 		// does not advance its consumed cursor (pre-port semantics).
-		if ctx.Err() == nil {
-			s.EnsureTerminalContextLifecycle(ctx, h.id, cmd.BotID, cmd.ThreadID, nil)
-		}
+		h.contentLightTerminal = true
 		return
 	}
 	chunks, errs := s.streamTurnChat(ctx, ChatRequest{
@@ -346,6 +364,10 @@ func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 			if !ok {
 				chunks = nil
 				continue
+			}
+			if err := h.publishChunk(chunk); err != nil {
+				h.emitErr(err)
+				return
 			}
 			if !h.emit(parseKind(chunk), chunk) {
 				return
