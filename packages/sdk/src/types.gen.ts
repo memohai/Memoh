@@ -9340,15 +9340,23 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleError = GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors];
