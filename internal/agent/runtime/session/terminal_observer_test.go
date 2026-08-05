@@ -35,7 +35,7 @@ func TestFinishRunObservesAuthoritativeLedgerTerminal(t *testing.T) {
 	want := TerminalRun{
 		RunID: admission.RunID, BotID: testBotID, SessionID: testSessionID,
 		FencingToken: admission.Handle.FencingToken, State: string(ledger.StateFailed),
-		ErrorCode: "runtime_run_failed", ErrorMessage: "provider.unavailable",
+		ErrorCode: "runtime_run_failed",
 	}
 	if observed[0] != want {
 		t.Fatalf("terminal observation = %+v, want %+v", observed[0], want)

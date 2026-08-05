@@ -116,7 +116,6 @@ type TerminalRun struct {
 	FencingToken int64
 	State        string
 	ErrorCode    string
-	ErrorMessage string
 }
 
 func (h RunHandle) normalized() RunHandle {

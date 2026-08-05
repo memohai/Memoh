@@ -74,7 +74,6 @@ func terminalRunFromLedger(run ledger.Run) TerminalRun {
 		FencingToken: run.FencingToken,
 		State:        string(run.State),
 		ErrorCode:    run.ErrorCode,
-		ErrorMessage: run.ErrorMessage,
 	}
 }
 

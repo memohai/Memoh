@@ -497,10 +497,6 @@ func terminalContextLifecycleErrorCode(
 	if existingReady && existing.Status == status && existing.ErrorCode.Valid {
 		return existing.ErrorCode.String
 	}
-	messageCode := apperror.Code(strings.TrimSpace(run.ErrorMessage))
-	if _, safe := apperror.Lookup(messageCode); safe {
-		return string(messageCode)
-	}
 	return strings.TrimSpace(run.ErrorCode)
 }
 
