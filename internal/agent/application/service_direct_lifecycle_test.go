@@ -180,6 +180,16 @@ func newDirectLifecycleFixture(t *testing.T, mode directLifecycleModelMode) dire
 			<-r.Context().Done()
 			return
 		}
+		if mode == directLifecycleModelSuccess && request.Stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-direct-lifecycle\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":%q},\"finish_reason\":null}]}\n\n", directLifecycleResponse)
+			_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl-direct-lifecycle\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if mode == directLifecycleModelFailure {
 			w.WriteHeader(http.StatusBadRequest)
