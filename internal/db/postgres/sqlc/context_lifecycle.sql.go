@@ -410,7 +410,12 @@ VALUES (
 ON CONFLICT (run_id) DO UPDATE
 SET
   status = EXCLUDED.status,
-  error_code = EXCLUDED.error_code,
+  error_code = CASE
+    WHEN $7::boolean
+      OR context_lifecycles.status IS DISTINCT FROM EXCLUDED.status
+      THEN EXCLUDED.error_code
+    ELSE COALESCE(context_lifecycles.error_code, EXCLUDED.error_code)
+  END,
   snapshot = CASE
     WHEN $7::boolean THEN EXCLUDED.snapshot
     ELSE context_lifecycles.snapshot

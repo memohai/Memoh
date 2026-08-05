@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -68,6 +69,58 @@ func TestSpawnAdapterGenerateWithWatchdogCarriesLifecycleSnapshot(t *testing.T) 
 	}
 	if result.ContextLifecycle.Counts.Fragments == 0 || result.ContextLifecycle.Counts.Messages == 0 {
 		t.Fatalf("lifecycle counts = %+v, want assembled context", result.ContextLifecycle.Counts)
+	}
+}
+
+func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T) {
+	var streamCalls atomic.Int32
+	provider := &atomicMockProvider{
+		stream: func(_ context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+			call := streamCalls.Add(1)
+			parts := make(chan sdk.StreamPart, 8)
+			parts <- &sdk.StartPart{}
+			parts <- &sdk.StartStepPart{}
+			if call == 1 {
+				parts <- &sdk.ErrorPart{Error: errors.New("api error 500")}
+				close(parts)
+				return &sdk.StreamResult{Stream: parts}, nil
+			}
+			parts <- &sdk.TextStartPart{ID: "recovered"}
+			parts <- &sdk.TextDeltaPart{ID: "recovered", Text: "recovered result"}
+			parts <- &sdk.TextEndPart{ID: "recovered"}
+			parts <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
+			parts <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
+			close(parts)
+			return &sdk.StreamResult{Stream: parts}, nil
+		},
+	}
+
+	result, err := NewSpawnAdapter(newTestAgent()).GenerateWithWatchdog(
+		context.Background(),
+		tools.SpawnRunConfig{
+			Model: &sdk.Model{
+				ID:       "spawn-retry-model",
+				Provider: provider,
+				Type:     sdk.ModelTypeChat,
+			},
+			Query:       "recover the task",
+			SessionType: sessionmode.Subagent,
+			Identity: tools.SpawnIdentity{
+				BotID:      "bot-1",
+				SessionID:  "session-1",
+				IsSubagent: true,
+			},
+		},
+		func() {},
+	)
+	if err != nil {
+		t.Fatalf("GenerateWithWatchdog retained recovered error: %v", err)
+	}
+	if got := streamCalls.Load(); got != 2 {
+		t.Fatalf("stream calls = %d, want initial attempt plus one recovery", got)
+	}
+	if result == nil || result.Text != "recovered result" {
+		t.Fatalf("GenerateWithWatchdog result = %#v, want recovered result", result)
 	}
 }
 

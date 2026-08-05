@@ -24,9 +24,9 @@ func TestContextLifecycleMigrationRoundTrip(t *testing.T) {
 	dsn := teamMigrationDSN(t)
 
 	assertContextLifecycleSchema(t, ctx, pool, true)
-	stepDown(t, dsn, countMigrationsFrom(t, "0129_context_lifecycles.up.sql"))
+	stepDown(t, dsn, countMigrationsFrom(t, "0130_context_lifecycles.up.sql"))
 	assertContextLifecycleSchema(t, ctx, pool, false)
-	stepUp(t, dsn, countMigrationsFrom(t, "0129_context_lifecycles.up.sql"))
+	stepUp(t, dsn, countMigrationsFrom(t, "0130_context_lifecycles.up.sql"))
 	assertContextLifecycleSchema(t, ctx, pool, true)
 }
 
@@ -370,6 +370,42 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 	if failed.CreatedAt != created.CreatedAt {
 		t.Fatalf("terminal upsert changed created_at = %#v, want %#v", failed.CreatedAt, created.CreatedAt)
 	}
+
+	staleRepair, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:           parsedRunID,
+		BotID:           parsedBotID,
+		SessionID:       parsedSessionID,
+		Status:          "failed_provider",
+		ErrorCode:       pgtype.Text{String: "runtime.generic", Valid: true},
+		Snapshot:        []byte(`{"version":0,"source":"stale-repair"}`),
+		ReplaceSnapshot: false,
+	})
+	if err != nil {
+		t.Fatalf("apply stale same-status lifecycle repair: %v", err)
+	}
+	if staleRepair.Status != "failed_provider" || !staleRepair.ErrorCode.Valid || staleRepair.ErrorCode.String != "provider.timeout" {
+		t.Fatalf("stale repair lifecycle = (%q, %#v), want richer provider.timeout code", staleRepair.Status, staleRepair.ErrorCode)
+	}
+	assertJSONSemanticallyEqual(t, staleRepair.Snapshot, authoritativeSnapshot)
+
+	reclassifiedSnapshot := []byte(`{"version":3,"source":"authoritative-reclassification"}`)
+	reclassified, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:           parsedRunID,
+		BotID:           parsedBotID,
+		SessionID:       parsedSessionID,
+		Status:          "failed_provider",
+		ErrorCode:       pgtype.Text{String: "provider.reclassified", Valid: true},
+		Snapshot:        reclassifiedSnapshot,
+		ReplaceSnapshot: true,
+	})
+	if err != nil {
+		t.Fatalf("replace same-status lifecycle authoritatively: %v", err)
+	}
+	if !reclassified.ErrorCode.Valid || reclassified.ErrorCode.String != "provider.reclassified" {
+		t.Fatalf("authoritative lifecycle code = %#v, want provider.reclassified", reclassified.ErrorCode)
+	}
+	assertJSONSemanticallyEqual(t, reclassified.Snapshot, reclassifiedSnapshot)
+	authoritativeSnapshot = reclassifiedSnapshot
 
 	staleSnapshot := []byte(`{"version":0,"source":"stale"}`)
 	preserveArgs := sqlc.UpsertTerminalContextLifecycleParams{
