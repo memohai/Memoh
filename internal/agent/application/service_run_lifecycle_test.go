@@ -33,6 +33,7 @@ type recordingContextLifecycleStore struct {
 	getCalls    int
 	updates     []sqlc.UpdateAbortedContextLifecycleSnapshotParams
 	updateErr   error
+	assistantID pgtype.UUID
 	metadata    []byte
 	metadataErr error
 	upserts     []sqlc.UpsertAbortedContextLifecycleParams
@@ -98,6 +99,22 @@ func (s *recordingContextLifecycleStore) GetLatestAssistantContextLifecycleMetad
 	_ pgtype.UUID,
 ) ([]byte, error) {
 	return s.metadata, s.metadataErr
+}
+
+func (s *recordingContextLifecycleStore) GetLatestAssistantContextLifecycleByRunID(
+	_ context.Context,
+	_ pgtype.UUID,
+) (sqlc.GetLatestAssistantContextLifecycleByRunIDRow, error) {
+	if s.metadataErr != nil {
+		return sqlc.GetLatestAssistantContextLifecycleByRunIDRow{}, s.metadataErr
+	}
+	if s.metadata == nil {
+		return sqlc.GetLatestAssistantContextLifecycleByRunIDRow{}, pgx.ErrNoRows
+	}
+	return sqlc.GetLatestAssistantContextLifecycleByRunIDRow{
+		ID:       s.assistantID,
+		Metadata: s.metadata,
+	}, nil
 }
 
 func (s *recordingContextLifecycleStore) UpdateAbortedContextLifecycleSnapshot(
@@ -465,5 +482,116 @@ func lifecycleTestAdmission() sessionruntime.Admission {
 			SessionID:    lifecycleTestSessionID,
 			FencingToken: 1,
 		},
+	}
+}
+
+func TestRecoverContextLifecycleFromAssistantMetadata(t *testing.T) {
+	snapshot, ok := lifecycleTestRunConfig().ContextLifecycle.Snapshot()
+	if !ok {
+		t.Fatal("test lifecycle snapshot is unavailable")
+	}
+	metadata, err := json.Marshal(map[string]any{
+		contextfrag.MetadataContextLifecycleKey: snapshot,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const assistantMessageID = "44444444-4444-4444-8444-444444444444"
+	store := &recordingContextLifecycleStore{
+		assistantID: flowTestUUID(assistantMessageID),
+		metadata:    metadata,
+	}
+	service := &Service{contextLifecycles: store}
+
+	service.recoverContextLifecycleFromAssistantMetadata(
+		context.Background(),
+		lifecycleTestRunID,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		apperror.New(apperror.CodeWorkspaceUnreachable, nil),
+	)
+
+	if len(store.creates) != 1 {
+		t.Fatalf("CreateContextLifecycle calls = %d, want 1", len(store.creates))
+	}
+	row := store.creates[0]
+	if row.Status != contextLifecycleStatusFailedProvider ||
+		!row.ErrorCode.Valid || row.ErrorCode.String != string(apperror.CodeWorkspaceUnreachable) {
+		t.Fatalf("recovered terminal = (%q, %#v), want failed_provider with stable code", row.Status, row.ErrorCode)
+	}
+	var recovered contextfrag.LifecycleSnapshot
+	if err := json.Unmarshal(row.Snapshot, &recovered); err != nil {
+		t.Fatal(err)
+	}
+	if recovered.AssistantMessageID != assistantMessageID {
+		t.Fatalf("assistant message ID = %q, want %q", recovered.AssistantMessageID, assistantMessageID)
+	}
+}
+
+func TestRecoverContextLifecycleFromAssistantMetadataSkipsExistingOrUnavailable(t *testing.T) {
+	runID, botID, sessionID, err := parseContextLifecycleIDs(
+		lifecycleTestRunID,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		store *recordingContextLifecycleStore
+	}{
+		{
+			name: "existing lifecycle",
+			store: &recordingContextLifecycleStore{existing: &sqlc.ContextLifecycle{
+				RunID: runID, BotID: botID, SessionID: sessionID,
+			}},
+		},
+		{name: "missing assistant metadata", store: &recordingContextLifecycleStore{}},
+		{name: "malformed assistant metadata", store: &recordingContextLifecycleStore{metadata: []byte(`{"context_lifecycle":"invalid"}`)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &Service{contextLifecycles: tt.store}
+			service.recoverContextLifecycleFromAssistantMetadata(
+				context.Background(),
+				lifecycleTestRunID,
+				lifecycleTestBotID,
+				lifecycleTestSessionID,
+				errors.New("continuation failed"),
+			)
+			if len(tt.store.creates) != 0 || service.contextLifecyclePersistenceErrors.Load() != 0 {
+				t.Fatalf("recovery writes = %d, failures = %d; want no-op", len(tt.store.creates), service.contextLifecyclePersistenceErrors.Load())
+			}
+		})
+	}
+}
+
+func TestRecoverContextLifecycleFromAssistantMetadataCountsStoreErrorsAndSkipsOwnershipLoss(t *testing.T) {
+	metadataErr := errors.New("metadata unavailable")
+	store := &recordingContextLifecycleStore{metadataErr: metadataErr}
+	service := &Service{contextLifecycles: store}
+	service.recoverContextLifecycleFromAssistantMetadata(
+		context.Background(),
+		lifecycleTestRunID,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		errors.New("continuation failed"),
+	)
+	if got := service.contextLifecyclePersistenceErrors.Load(); got != 1 {
+		t.Fatalf("persistence failure count = %d, want 1", got)
+	}
+
+	ownershipStore := &recordingContextLifecycleStore{}
+	service = &Service{contextLifecycles: ownershipStore}
+	service.recoverContextLifecycleFromAssistantMetadata(
+		context.Background(),
+		lifecycleTestRunID,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		sessionruntime.ErrRunOwnershipLost,
+	)
+	if ownershipStore.getCalls != 0 || len(ownershipStore.creates) != 0 {
+		t.Fatalf("ownership-lost recovery touched store: gets=%d creates=%d", ownershipStore.getCalls, len(ownershipStore.creates))
 	}
 }

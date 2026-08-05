@@ -107,6 +107,45 @@ func (s *Service) persistRunContextLifecycle(ctx context.Context, cfg native.Run
 	)
 }
 
+func (s *Service) recoverContextLifecycleFromAssistantMetadata(
+	ctx context.Context,
+	runID, botID, sessionID string,
+	cause error,
+) {
+	if s == nil || s.contextLifecycles == nil || contextLifecycleOwnershipLost(ctx, cause) {
+		return
+	}
+	ctx = nonNilContext(ctx)
+	status, _ := classifyContextLifecycleTerminal(ctx, cause)
+	runUUID, _, _, err := parseContextLifecycleIDs(runID, botID, sessionID)
+	if err != nil {
+		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
+		return
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), contextLifecycleWriteTimeout)
+	defer cancel()
+	if _, err = s.contextLifecycles.GetContextLifecycleByRunID(readCtx, runUUID); err == nil {
+		return
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
+		return
+	}
+	raw, ready, err := s.assistantContextLifecycleSnapshot(readCtx, runUUID)
+	if err != nil {
+		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
+		return
+	}
+	if !ready {
+		return
+	}
+	var snapshot contextfrag.LifecycleSnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
+		return
+	}
+	s.persistContextLifecycleSnapshot(ctx, runID, botID, sessionID, &snapshot, cause, false)
+}
+
 func (s *Service) persistContextLifecycleSnapshot(
 	ctx context.Context,
 	runID, botID, sessionID string,
