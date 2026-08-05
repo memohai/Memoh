@@ -33,7 +33,7 @@
       >
         <AvatarImage
           v-if="bot.avatar_url"
-          :src="bot.avatar_url"
+          :src="resolveAvatarUrl(bot.avatar_url)"
           :alt="bot.display_name"
         />
         <AvatarFallback class="text-base">
@@ -58,6 +58,7 @@ import type { BotsBot } from '@memohai/sdk'
 import { PersonaTile } from '@felinic/ui'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 
 const router = useRouter()
 const { t } = useI18n()

@@ -158,7 +158,7 @@ func safeRequestLogURI(u *neturl.URL, fallback string) string {
 		return fallback
 	}
 	escapedPath := u.EscapedPath()
-	if isPublicChannelMediaPath(escapedPath) {
+	if isPublicChannelMediaPath(escapedPath) || strings.HasPrefix(escapedPath, "/avatars/") {
 		return escapedPath
 	}
 	if fallback != "" {

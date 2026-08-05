@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
+	"github.com/memohai/memoh/internal/storage"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -55,7 +56,11 @@ func (p *Provider) Open(ctx context.Context, key string) (io.ReadCloser, error) 
 		return nil, fmt.Errorf("get client: %w", err)
 	}
 	containerPath := filepath.Join(containerMediaRoot, sub)
-	return client.ReadRaw(ctx, containerPath)
+	rc, err := client.ReadRaw(ctx, containerPath)
+	if errors.Is(err, bridge.ErrNotFound) {
+		return nil, fmt.Errorf("read file %q: %w", containerPath, storage.ErrNotFound)
+	}
+	return rc, err
 }
 
 // Delete removes a file from the bot container.

@@ -68,7 +68,7 @@
                   <Avatar class="size-9 shrink-0">
                     <AvatarImage
                       v-if="user.avatar_url"
-                      :src="user.avatar_url"
+                      :src="resolveAvatarUrl(user.avatar_url)"
                       :alt="memberName(user)"
                     />
                     <AvatarFallback>{{ memberInitials(user) }}</AvatarFallback>
@@ -312,6 +312,7 @@ import {
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 import {
   deleteUsersById,
   getUsers,

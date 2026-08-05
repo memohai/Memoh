@@ -82,6 +82,39 @@ description = "Start development environment"
 depends = ["//:dev:workspace-image"]
 run = "scripts/dev-compose.sh devenv/docker-compose.yml"
 
+[tasks."dev:s3"]
+description = "Start SeaweedFS-backed media storage and backfill existing dev media"
+depends = ["//:dev:workspace-image"]
+run = """
+#!/bin/bash
+set -euo pipefail
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f devenv/docker-compose.s3.yml \
+  up --build
+"""
+
+[tasks."test:storage:s3"]
+description = "Run the S3 storage provider smoke test against dev SeaweedFS"
+env = { MEMOH_S3_INTEGRATION = "1" }
+run = """
+#!/bin/bash
+set -euo pipefail
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f devenv/docker-compose.s3.yml \
+  up -d --wait seaweedfs
+go test \
+  -tags=integration \
+  -count=1 \
+  -run '^TestProviderAgainstS3CompatibleService$' \
+  ./internal/storage/providers/s3
+"""
+
+[tasks."dev:s3:down"]
+description = "Stop the SeaweedFS-backed development environment"
+run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.s3.yml down --remove-orphans"
+
 [tasks."dev:webhook-tunnel"]
 description = "Start development environment with Cloudflare Quick Tunnel for webhooks"
 depends = ["//:dev:workspace-image"]

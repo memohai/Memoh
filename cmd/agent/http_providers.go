@@ -19,6 +19,7 @@ import (
 	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	audiopkg "github.com/memohai/memoh/internal/audio"
+	avatarpkg "github.com/memohai/memoh/internal/avatar"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
@@ -84,9 +85,10 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 	return handler
 }
 
-func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool) *handlers.UsersHandler {
+func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool, avatarService *avatarpkg.Service) *handlers.UsersHandler {
 	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaceManager)
 	handler.SetACPRuntimeCloser(acpPool)
+	handler.SetAvatarService(avatarService)
 	return handler
 }
 

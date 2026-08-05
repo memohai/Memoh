@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"log/slog"
 	"net"
 	"strings"
 	"testing"
@@ -13,6 +15,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/memohai/memoh/internal/media"
+	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -97,6 +101,72 @@ func TestReadImageFromContainerSuccess(t *testing.T) {
 	}
 	if result.ImageMediaType != "image/png" {
 		t.Fatalf("unexpected image media type: %q", result.ImageMediaType)
+	}
+}
+
+func TestContainerReadByContentHash(t *testing.T) {
+	t.Parallel()
+
+	pngBytes := []byte("\x89PNG\r\n\x1a\npayload")
+	service := media.NewService(slog.Default(), localfs.New(t.TempDir()))
+	asset, err := service.Ingest(context.Background(), media.IngestInput{
+		BotID:  "bot-1",
+		Mime:   "image/png",
+		Reader: bytes.NewReader(pngBytes),
+	})
+	if err != nil {
+		t.Fatalf("Ingest() error = %v", err)
+	}
+
+	provider := NewContainerProvider(nil, nil, nil, "")
+	provider.SetMediaService(service)
+	result, err := provider.execRead(context.Background(), SessionContext{
+		BotID:              "bot-1",
+		SupportsImageInput: true,
+	}, map[string]any{"content_hash": strings.ToUpper(asset.ContentHash)})
+	if err != nil {
+		t.Fatalf("execRead() error = %v", err)
+	}
+	output, ok := result.(ReadMediaToolOutput)
+	if !ok {
+		t.Fatalf("execRead() result = %T, want ReadMediaToolOutput", result)
+	}
+	if !output.Public.OK || output.Public.ContentHash != asset.ContentHash {
+		t.Fatalf("execRead() public result = %+v", output.Public)
+	}
+	if output.Public.Path != "" {
+		t.Fatalf("execRead() path = %q, want empty", output.Public.Path)
+	}
+	if got := output.ImageBase64; got != base64.StdEncoding.EncodeToString(pngBytes) {
+		t.Fatalf("execRead() image = %q", got)
+	}
+}
+
+func TestContainerReadByContentHashRejectsPathAndCrossBotLookup(t *testing.T) {
+	t.Parallel()
+
+	service := media.NewService(slog.Default(), localfs.New(t.TempDir()))
+	provider := NewContainerProvider(nil, nil, nil, "")
+	provider.SetMediaService(service)
+	hash := strings.Repeat("a", 64)
+
+	if _, err := provider.execRead(context.Background(), SessionContext{
+		BotID:              "bot-1",
+		SupportsImageInput: true,
+	}, map[string]any{"path": "/data/a.png", "content_hash": hash}); err == nil {
+		t.Fatal("execRead() with path and content_hash unexpectedly succeeded")
+	}
+
+	result, err := provider.execRead(context.Background(), SessionContext{
+		BotID:              "bot-2",
+		SupportsImageInput: true,
+	}, map[string]any{"content_hash": hash})
+	if err != nil {
+		t.Fatalf("execRead() missing asset error = %v, want public result", err)
+	}
+	output, ok := result.(ReadMediaToolOutput)
+	if !ok || output.Public.OK {
+		t.Fatalf("execRead() missing asset result = %#v", result)
 	}
 }
 

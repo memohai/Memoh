@@ -12,7 +12,7 @@
           <Avatar class="size-5 shrink-0">
             <AvatarImage
               v-if="selectedBot.avatar_url"
-              :src="selectedBot.avatar_url"
+              :src="resolveAvatarUrl(selectedBot.avatar_url)"
               :alt="selectedBot.display_name"
             />
             <AvatarFallback class="text-[9px]">
@@ -33,7 +33,7 @@
           <Avatar class="size-5 shrink-0">
             <AvatarImage
               v-if="bot.avatar_url"
-              :src="bot.avatar_url"
+              :src="resolveAvatarUrl(bot.avatar_url)"
               :alt="bot.display_name"
             />
             <AvatarFallback class="text-[9px]">
@@ -56,6 +56,7 @@ import {
 } from '@felinic/ui'
 import { getBotsQuery } from '@memohai/sdk/colada'
 import type { BotsBot } from '@memohai/sdk'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 
 const props = defineProps<{
   modelValue: string

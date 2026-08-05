@@ -4,11 +4,14 @@ package localfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/memohai/memoh/internal/storage"
 )
 
 // Provider stores media assets on the host filesystem.
@@ -38,7 +41,11 @@ func (p *Provider) Put(_ context.Context, key string, reader io.Reader) error {
 }
 
 func (p *Provider) Open(_ context.Context, key string) (io.ReadCloser, error) {
-	return os.Open(p.resolve(key))
+	rc, err := os.Open(p.resolve(key))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("open %q: %w", key, storage.ErrNotFound)
+	}
+	return rc, err
 }
 
 func (p *Provider) Delete(_ context.Context, key string) error {
@@ -59,6 +66,9 @@ func (p *Provider) ListPrefix(_ context.Context, prefix string) ([]string, error
 	base := filepath.Base(prefix)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, storage.ErrNotFound
+		}
 		return nil, err
 	}
 	var keys []string

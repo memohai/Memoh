@@ -35,6 +35,9 @@ const (
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed              Code = "profile.update_failed"
+	CodeAvatarInvalid                    Code = "avatar.invalid"
+	CodeAvatarTooLarge                   Code = "avatar.too_large"
+	CodeAvatarStoreFailed                Code = "avatar.store_failed"
 	CodeACPRuntimeNotFound               Code = "acp.runtime_not_found"
 	CodeACPTurnReplacementUnsupported    Code = "acp.turn_replacement_unsupported"
 	CodeACPModelSelectionUnsupported     Code = "acp.model_selection_unsupported"
@@ -160,6 +163,18 @@ var catalog = map[Code]Definition{
 	CodeProfileUpdateFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The profile could not be updated.",
+	},
+	CodeAvatarInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "Choose a valid PNG, JPEG, GIF, or WebP image.",
+	},
+	CodeAvatarTooLarge: {
+		HTTPStatus: http.StatusRequestEntityTooLarge,
+		Detail:     "The avatar image must be 5 MB or smaller.",
+	},
+	CodeAvatarStoreFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The avatar could not be saved. Please retry.",
 	},
 	CodeACPRuntimeNotFound: {
 		HTTPStatus: http.StatusNotFound,

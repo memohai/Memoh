@@ -77,6 +77,7 @@ func commonOptions() fx.Option {
 		coremodule.ServerModule(),
 		fx.Provide(
 			provideServerHandler(handlers.NewPingHandler),
+			provideServerHandler(handlers.NewAvatarHandler),
 			provideServerHandler(handlers.NewWebhookTunnelHandler),
 			provideServerHandler(provideAuthHandler),
 			provideServerHandler(provideMemoryHandler),

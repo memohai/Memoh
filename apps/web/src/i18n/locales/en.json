@@ -90,11 +90,20 @@
     "unsaved": "Unsaved",
     "editJson": "Edit JSON",
     "actionRequired": "Action Required",
-    "preview": "Preview"
+    "preview": "Preview",
+    "uploadImage": "Upload image",
+    "avatarInvalidType": "Choose a PNG, JPEG, GIF, or WebP image.",
+    "avatarTooLarge": "Choose an image that is 5 MB or smaller.",
+    "avatarReadFailed": "The image could not be read. Please try another file."
   },
   "errors": {
     "bot": {
       "name_taken": "This name is already taken."
+    },
+    "avatar": {
+      "invalid": "Choose a valid PNG, JPEG, GIF, or WebP image.",
+      "too_large": "Choose an image that is 5 MB or smaller.",
+      "store_failed": "The avatar could not be saved. Please try again."
     },
     "channel": {
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly."
@@ -1813,7 +1822,7 @@
       }
     },
     "editAvatar": "Edit Avatar",
-    "editAvatarDescription": "Set the image URL for the bot avatar.",
+    "editAvatarDescription": "Upload an image or set an image URL for the Bot avatar.",
     "editTimezone": "Edit Timezone",
     "editTimezoneDescription": "Set a timezone override for this bot.",
     "avatarUpdateSuccess": "Avatar updated",

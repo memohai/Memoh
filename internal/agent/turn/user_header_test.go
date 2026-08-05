@@ -18,12 +18,16 @@ func TestFormatUserHeaderIncludesAttachments(t *testing.T) {
 		ConversationType:  "group",
 		ConversationName:  "Team Chat",
 		AttachmentPaths:   []string{"/tmp/a.txt"},
+		AttachmentHashes:  []string{"abc123"},
 		Time:              now,
 		Timezone:          "UTC",
 	}, "hello")
 
 	if !strings.Contains(header, "<attachment path=\"/tmp/a.txt\"/>") {
 		t.Fatalf("expected attachment tag in header: %s", header)
+	}
+	if !strings.Contains(header, "<attachment content_hash=\"abc123\"/>") {
+		t.Fatalf("expected content hash attachment tag in header: %s", header)
 	}
 }
 

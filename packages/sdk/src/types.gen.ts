@@ -2933,6 +2933,10 @@ export type SettingsUpsertRequest = {
     fetch_provider_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
+    /**
+     * HeartbeatModelID joins the pointer group above (nil/""/value) so the
+     * heartbeat tab's autosave can clear a model override.
+     */
     heartbeat_model_id?: string;
     image_model_id?: string;
     /**
@@ -3221,6 +3225,42 @@ export type PostAuthRefreshResponses = {
 
 export type PostAuthRefreshResponse = PostAuthRefreshResponses[keyof PostAuthRefreshResponses];
 
+export type GetAvatarsByContentHashData = {
+    body?: never;
+    path: {
+        /**
+         * SHA-256 content hash
+         */
+        content_hash: string;
+    };
+    query?: never;
+    url: '/avatars/{content_hash}';
+};
+
+export type GetAvatarsByContentHashErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetAvatarsByContentHashError = GetAvatarsByContentHashErrors[keyof GetAvatarsByContentHashErrors];
+
+export type GetAvatarsByContentHashResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetBotsData = {
     body?: never;
     path?: never;
@@ -3282,6 +3322,10 @@ export type PostBotsErrors = {
      * Conflict
      */
     409: ApperrorProblem;
+    /**
+     * Request Entity Too Large
+     */
+    413: ApperrorProblem;
     /**
      * Internal Server Error
      */
@@ -10742,6 +10786,10 @@ export type PutBotsByIdErrors = {
      */
     409: ApperrorProblem;
     /**
+     * Request Entity Too Large
+     */
+    413: ApperrorProblem;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -14141,6 +14189,10 @@ export type PostUsersErrors = {
      */
     403: HandlersErrorResponse;
     /**
+     * Request Entity Too Large
+     */
+    413: ApperrorProblem;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -14205,6 +14257,10 @@ export type PutUsersMeErrors = {
      * Bad Request
      */
     400: ApperrorProblem;
+    /**
+     * Request Entity Too Large
+     */
+    413: ApperrorProblem;
     /**
      * Internal Server Error
      */

@@ -29,11 +29,12 @@ var readMediaSupportedMimeTypes = map[string]struct{}{
 
 // ReadMediaToolResult is the public result returned to the model.
 type ReadMediaToolResult struct {
-	OK    bool   `json:"ok"`
-	Path  string `json:"path,omitempty"`
-	Mime  string `json:"mime,omitempty"`
-	Size  int    `json:"size,omitempty"`
-	Error string `json:"error,omitempty"`
+	OK          bool   `json:"ok"`
+	Path        string `json:"path,omitempty"`
+	ContentHash string `json:"content_hash,omitempty"`
+	Mime        string `json:"mime,omitempty"`
+	Size        int    `json:"size,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // ReadMediaToolOutput is the internal execution result used by the agent to
@@ -55,15 +56,27 @@ const mimeSniffSize = 512
 // It reads only a small header first to sniff the MIME type, avoiding
 // buffering large non-image binaries just to reject them.
 func ReadImageFromContainer(ctx context.Context, client *bridge.Client, path string, maxBytes int64) ReadMediaToolOutput {
-	if maxBytes <= 0 {
-		maxBytes = defaultReadMediaMaxBytes
-	}
-
 	reader, err := client.ReadRaw(ctx, path)
 	if err != nil {
 		return readMediaErrorResult(err.Error())
 	}
 	defer func() { _ = reader.Close() }()
+	return readImageFromReader(reader, ReadMediaToolResult{Path: path}, maxBytes)
+}
+
+// ReadImageFromAsset reads and validates image bytes resolved from the media
+// store by content hash.
+func ReadImageFromAsset(reader io.Reader, contentHash string, maxBytes int64) ReadMediaToolOutput {
+	return readImageFromReader(reader, ReadMediaToolResult{ContentHash: contentHash}, maxBytes)
+}
+
+func readImageFromReader(reader io.Reader, public ReadMediaToolResult, maxBytes int64) ReadMediaToolOutput {
+	if reader == nil {
+		return readMediaErrorResult("failed to load image: reader is unavailable")
+	}
+	if maxBytes <= 0 {
+		maxBytes = defaultReadMediaMaxBytes
+	}
 
 	// Read only the sniff header first so non-image binaries fail fast.
 	header := make([]byte, mimeSniffSize)
@@ -91,13 +104,11 @@ func ReadImageFromContainer(ctx context.Context, client *bridge.Client, path str
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
+	public.OK = true
+	public.Mime = mimeType
+	public.Size = len(data)
 	return ReadMediaToolOutput{
-		Public: ReadMediaToolResult{
-			OK:   true,
-			Path: path,
-			Mime: mimeType,
-			Size: len(data),
-		},
+		Public:         public,
 		ImageBase64:    encoded,
 		ImageMediaType: mimeType,
 	}

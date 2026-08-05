@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -11,6 +12,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/memohai/memoh/internal/media"
+	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -200,8 +203,9 @@ func TestBrowserSchemasAreStrict(t *testing.T) {
 }
 
 func TestBuildScreenshotResultDropsShareMetadata(t *testing.T) {
-	p := &BrowserProvider{dataRoot: "/data"}
-	result := p.buildScreenshotBytesResult(t.Context(), "", []byte("png-bytes"), "image/png", "/data/computer-screenshots", nil)
+	service := media.NewService(slog.Default(), localfs.New(t.TempDir()))
+	p := &BrowserProvider{media: service}
+	result := p.buildScreenshotBytesResult(t.Context(), "bot-1", []byte("png-bytes"), "image/png", nil)
 	asMap, ok := result.(map[string]any)
 	if !ok {
 		t.Fatalf("expected map result, got %T", result)
@@ -209,13 +213,39 @@ func TestBuildScreenshotResultDropsShareMetadata(t *testing.T) {
 	if _, exists := asMap["shared"]; exists {
 		t.Fatalf("expected shared field to be removed, got %#v", asMap)
 	}
+	if _, exists := asMap["path"]; exists {
+		t.Fatalf("expected screenshot path to be removed, got %#v", asMap)
+	}
+	contentHash, _ := asMap["content_hash"].(string)
+	if !media.IsContentHash(contentHash) {
+		t.Fatalf("expected content_hash, got %#v", asMap)
+	}
 	content, ok := asMap["content"].([]map[string]any)
 	if !ok || len(content) == 0 {
 		t.Fatalf("expected text content, got %#v", asMap["content"])
 	}
 	text, _ := content[0]["text"].(string)
-	if !strings.HasPrefix(text, "Screenshot saved to ") && !strings.HasPrefix(text, "Screenshot captured") {
+	if !strings.HasPrefix(text, "Screenshot stored with content_hash ") {
 		t.Fatalf("unexpected screenshot text: %q", text)
+	}
+}
+
+func TestBuildScreenshotResultDoesNotExposeStorageError(t *testing.T) {
+	p := &BrowserProvider{}
+	result := p.buildScreenshotBytesResult(t.Context(), "bot-1", []byte("png-bytes"), "image/png", nil)
+	asMap, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map result, got %T", result)
+	}
+	if got := asMap["save_error"]; got != "screenshot storage failed" {
+		t.Fatalf("save_error = %#v", got)
+	}
+	content, ok := asMap["content"].([]map[string]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("expected text content, got %#v", asMap["content"])
+	}
+	if got := content[0]["text"]; got != "Screenshot captured but could not be stored" {
+		t.Fatalf("unexpected screenshot text: %#v", got)
 	}
 }
 

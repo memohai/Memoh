@@ -15,7 +15,7 @@
             <Avatar class="size-14">
               <AvatarImage
                 v-if="avatarUrl"
-                :src="avatarUrl"
+                :src="resolveAvatarUrl(avatarUrl)"
                 :alt="fallback"
               />
               <AvatarFallback>
@@ -36,19 +36,35 @@
             <Avatar class="size-14 shrink-0">
               <AvatarImage
                 v-if="avatarDraft"
-                :src="avatarDraft"
+                :src="resolveAvatarUrl(avatarDraft)"
                 :alt="fallback"
               />
               <AvatarFallback>
                 {{ fallback }}
               </AvatarFallback>
             </Avatar>
-            <Input
-              v-model="avatarDraft"
-              type="url"
-              class="flex-1"
-              :aria-label="$t('settings.avatarUrl')"
-            />
+            <div class="flex flex-1 flex-col gap-2">
+              <input
+                ref="avatarFileInput"
+                type="file"
+                class="hidden"
+                :accept="AVATAR_ACCEPT"
+                @change="onAvatarFileSelected"
+              >
+              <Button
+                type="button"
+                variant="outline"
+                @click="avatarFileInput?.click()"
+              >
+                <ImageUp class="size-4" />
+                {{ $t('common.uploadImage') }}
+              </Button>
+              <Input
+                v-model="avatarDraft"
+                type="url"
+                :aria-label="$t('settings.avatarUrl')"
+              />
+            </div>
           </div>
           <DialogFooter>
             <DialogClose as-child>
@@ -133,9 +149,13 @@ import {
   DialogTitle,
   DialogTrigger,
   Input,
+  toast,
 } from '@felinic/ui'
-import { Check, Pencil, X } from 'lucide-vue-next'
+import { Check, ImageUp, Pencil, X } from 'lucide-vue-next'
 import { SettingsRow } from '@felinic/ui'
+import { useI18n } from 'vue-i18n'
+import { AVATAR_ACCEPT, avatarUploadErrorKey, readAvatarFile } from '@/lib/avatar-upload'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 
 const props = defineProps<{
   avatarUrl: string
@@ -149,6 +169,8 @@ const emit = defineEmits<{
   'update:displayName': [value: string]
   save: []
 }>()
+
+const { t } = useI18n()
 
 // ── Name inline editor ──
 const editing = ref(false)
@@ -180,6 +202,7 @@ function cancelName() {
 // ── Avatar editor (dialog) ──
 const avatarOpen = ref(false)
 const avatarDraft = ref('')
+const avatarFileInput = ref<HTMLInputElement | null>(null)
 
 function onAvatarOpenChange(value: boolean) {
   if (value) avatarDraft.value = props.avatarUrl
@@ -189,5 +212,17 @@ function applyAvatar() {
   emit('update:avatarUrl', avatarDraft.value.trim())
   avatarOpen.value = false
   emit('save')
+}
+
+async function onAvatarFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    avatarDraft.value = await readAvatarFile(file)
+  } catch (error) {
+    toast.error(t(avatarUploadErrorKey(error)))
+  }
 }
 </script>

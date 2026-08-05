@@ -55,7 +55,7 @@
                   <Avatar class="size-12 rounded-full">
                     <AvatarImage
                       v-if="bot?.avatar_url"
-                      :src="bot.avatar_url"
+                      :src="resolveAvatarUrl(bot.avatar_url)"
                       :alt="bot.display_name"
                     />
                     <AvatarFallback class="text-lg">
@@ -304,6 +304,7 @@ import BotAcp from './components/bot-acp.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBackAffordance } from '@/composables/useBackOr'
 import { registerBotBreadcrumbName } from '@/lib/bot-breadcrumb'

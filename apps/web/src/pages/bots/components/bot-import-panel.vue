@@ -21,6 +21,7 @@ import {
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatFileSize } from '@/components/file-manager/utils'
 import { uploadWithProgress } from '@/lib/upload-with-progress'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 import BackupSectionCards from './backup-section-cards.vue'
 
 type SectionState = 'skip' | 'merge' | 'replace'
@@ -375,7 +376,7 @@ async function handleImport() {
             <Avatar class="size-9 shrink-0">
               <AvatarImage
                 v-if="profile?.avatar_url"
-                :src="profile.avatar_url"
+                :src="resolveAvatarUrl(profile.avatar_url)"
                 :alt="profile?.display_name"
               />
               <AvatarFallback class="text-xs">

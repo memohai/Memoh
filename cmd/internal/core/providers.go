@@ -85,7 +85,9 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
+	storagefactory "github.com/memohai/memoh/internal/storage/factory"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
+	"github.com/memohai/memoh/internal/storage/providers/cutover"
 	"github.com/memohai/memoh/internal/storage/providers/fallback"
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	"github.com/memohai/memoh/internal/team"
@@ -652,6 +654,10 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
+	containerProvider := agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService)
+	containerProvider.SetMediaService(mediaService)
+	browserProvider := agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, manager)
+	browserProvider.SetMediaService(mediaService)
 	channelMessaging := channelmessagingadapter.New(channelRuntime, registry, assetResolver)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
 	return []agenttools.ToolProvider{
@@ -661,9 +667,9 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewScheduleProvider(log, scheduleService),
 		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
-		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
+		containerProvider,
 		agenttools.NewBackgroundProvider(log, bgManager),
-		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, manager, config.DefaultDataMount),
+		browserProvider,
 		agenttools.NewEmailProvider(log, emailService, emailRuntime),
 		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
@@ -678,15 +684,33 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 	}
 }
 
-func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) *media.Service {
-	primary := containerfs.New(provider)
+func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) (*media.Service, error) {
+	containerProvider := containerfs.New(provider)
 	dataRoot := cfg.Workspace.DataRoot
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
 	}
-	secondary := localfs.New(filepath.Join(dataRoot, "media"))
-	storageProvider := fallback.New(primary, secondary)
-	return media.NewService(log, storageProvider)
+	hostProvider := localfs.New(filepath.Join(dataRoot, "media"))
+	legacyProvider := fallback.New(containerProvider, hostProvider)
+	if cfg.Storage.ProviderOrDefault() == config.StorageProviderS3 {
+		objectProvider, err := storagefactory.NewS3(cfg.Storage.S3)
+		if err != nil {
+			return nil, fmt.Errorf("configure media storage: %w", err)
+		}
+		storageProvider, err := cutover.New(objectProvider, legacyProvider)
+		if err != nil {
+			return nil, fmt.Errorf("configure media storage cutover: %w", err)
+		}
+		service := media.NewService(log, storageProvider)
+		service.SetContainerFileOpener(containerProvider)
+		log.Info(
+			"media storage configured",
+			slog.String("provider", config.StorageProviderS3),
+			slog.String("bucket", strings.TrimSpace(cfg.Storage.S3.Bucket)),
+		)
+		return service, nil
+	}
+	return media.NewService(log, legacyProvider), nil
 }
 
 func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPCodexOAuthHandler {
@@ -800,11 +824,34 @@ func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service)
 	})
 }
 
-func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
+func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, backfill *mediaBackfill, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
+	var (
+		cancel context.CancelFunc
+		done   chan struct{}
+	)
 	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			go manager.ReconcileContainers(ctx)
+		OnStart: func(startCtx context.Context) error {
+			workCtx, workCancel := context.WithCancel(context.WithoutCancel(startCtx))
+			cancel = workCancel
+			done = make(chan struct{})
+			go func() {
+				defer close(done)
+				manager.ReconcileContainers(workCtx)
+				backfill.Run(workCtx)
+			}()
 			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			if cancel == nil || done == nil {
+				return nil
+			}
+			cancel()
+			select {
+			case <-done:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		},
 	})
 }

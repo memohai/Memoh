@@ -506,7 +506,7 @@ func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {
 		WorkspaceTargetName: "Office PC",
 	}, availableToolsForTest(ToolRead(), ToolExec(), ToolListExecutionLocations(), ToolBrowserObserve(), ToolComputerObserve()))
 	assertUsageItemsAreBulleted(t, got)
-	for _, want := range []string{"request-selected connected computer", "Office PC", "explicit `target_id` still takes precedence", "request-selected default for this turn", "Browser Use and Computer Use", "native Server Workspace", "`browser_observe`", "`computer_observe`", "`target_id` `native`"} {
+	for _, want := range []string{"request-selected connected computer", "Office PC", "explicit `target_id` still takes precedence", "request-selected default for this turn", "Browser Use and Computer Use", "native Server Workspace", "`browser_observe`", "`computer_observe`", "`content_hash`", "does not apply to stored media"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with a request target should contain %q, got:\n%s", want, got)
 		}
@@ -877,7 +877,7 @@ func TestContactsProviderUsageGatesGetContacts(t *testing.T) {
 func TestBrowserProviderUsageGatesRegisteredTools(t *testing.T) {
 	t.Parallel()
 
-	provider := NewBrowserProvider(nil, nil, nil, nil, "")
+	provider := NewBrowserProvider(nil, nil, nil, nil)
 	if got := provider.Usage(context.Background(), SessionContext{}, AvailableTools{}); got != "" {
 		t.Fatalf("Usage without browser tools = %q, want empty", got)
 	}

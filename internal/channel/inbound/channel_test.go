@@ -2727,8 +2727,8 @@ func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 	if gotAttachment.Base64 != "" {
 		t.Fatalf("expected base64 to be cleared after ingest, got %q", gotAttachment.Base64)
 	}
-	if !strings.HasPrefix(gotAttachment.Path, "/data/media/") {
-		t.Fatalf("expected attachment path under /data/media/, got %q", gotAttachment.Path)
+	if gotAttachment.Path != "" || gotAttachment.URL != "" {
+		t.Fatalf("expected hash-only stored attachment, got path=%q url=%q", gotAttachment.Path, gotAttachment.URL)
 	}
 	if len(chatSvc.persistedIn) != 0 {
 		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
@@ -2868,11 +2868,11 @@ func TestChannelInboundProcessorPipelineUsesResolvedAttachments(t *testing.T) {
 	if len(atts) != 1 {
 		t.Fatalf("expected one pipeline attachment, got %d", len(atts))
 	}
-	if got := atts[0].FilePath; got != "/data/media/test/asset-pipeline-photo" {
-		t.Fatalf("expected pipeline attachment path to use media store, got %q", got)
+	if got := atts[0].FilePath; got != "" {
+		t.Fatalf("expected hash-only pipeline attachment, got path %q", got)
 	}
-	if strings.Contains(atts[0].FilePath, "api.telegram.org") {
-		t.Fatalf("expected pipeline attachment path to avoid telegram url, got %q", atts[0].FilePath)
+	if got := atts[0].ContentHash; got != "asset-pipeline-photo" {
+		t.Fatalf("expected pipeline attachment hash, got %q", got)
 	}
 }
 

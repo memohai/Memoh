@@ -220,6 +220,31 @@ func TestLoadAppliesConnectItEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesS3StorageEnvOverrides(t *testing.T) {
+	t.Setenv("MEMOH_STORAGE_PROVIDER", StorageProviderS3)
+	t.Setenv("MEMOH_STORAGE_S3_ENDPOINT", "http://seaweedfs:8333")
+	t.Setenv("MEMOH_STORAGE_S3_BUCKET", "memoh-media")
+	t.Setenv("MEMOH_STORAGE_S3_ACCESS_KEY_ID", "memoh")
+	t.Setenv("MEMOH_STORAGE_S3_SECRET_ACCESS_KEY", "development-secret")
+	t.Setenv("MEMOH_STORAGE_S3_REGION", "test-region-1")
+	t.Setenv("MEMOH_STORAGE_S3_PREFIX", "test-prefix")
+	t.Setenv("MEMOH_STORAGE_S3_BACKFILL_ON_START", "true")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Storage.ProviderOrDefault() != StorageProviderS3 ||
+		cfg.Storage.S3.Endpoint != "http://seaweedfs:8333" ||
+		cfg.Storage.S3.Bucket != "memoh-media" ||
+		cfg.Storage.S3.RegionOrDefault() != "test-region-1" ||
+		cfg.Storage.S3.Prefix != "test-prefix" ||
+		!cfg.Storage.S3.BackfillOnStart ||
+		!cfg.Storage.S3.PathStyle {
+		t.Fatal("S3 storage environment overrides were not applied")
+	}
+}
+
 func TestConnectItConfigValidationRequiresCompletePair(t *testing.T) {
 	t.Parallel()
 

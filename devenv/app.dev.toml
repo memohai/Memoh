@@ -29,6 +29,11 @@ jwt_expires_in = "168h"
 
 timezone = "UTC"
 
+[storage]
+# `mise run dev:s3` overrides this to S3 for both services and enables the
+# idempotent legacy-media backfill on Server.
+provider = "filesystem"
+
 [database]
 # Memoh now supports PostgreSQL only.
 driver = "postgres"

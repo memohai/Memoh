@@ -18,6 +18,7 @@ type UserMessageMeta struct {
 	Time              string   `json:"time"`
 	Timezone          string   `json:"timezone,omitempty"`
 	AttachmentPaths   []string `json:"attachments"`
+	AttachmentHashes  []string `json:"attachment-hashes"`
 }
 
 // UserMessageHeaderInput is the unified input for building user message headers.
@@ -32,6 +33,7 @@ type UserMessageHeaderInput struct {
 	ConversationName  string
 	Target            string
 	AttachmentPaths   []string
+	AttachmentHashes  []string
 	Time              time.Time
 	Timezone          string
 }
@@ -41,6 +43,10 @@ func BuildUserMessageMetaFromInput(input UserMessageHeaderInput) UserMessageMeta
 	attachmentPaths := input.AttachmentPaths
 	if attachmentPaths == nil {
 		attachmentPaths = []string{}
+	}
+	attachmentHashes := input.AttachmentHashes
+	if attachmentHashes == nil {
+		attachmentHashes = []string{}
 	}
 	meta := UserMessageMeta{
 		MessageID:         input.MessageID,
@@ -53,6 +59,7 @@ func BuildUserMessageMetaFromInput(input UserMessageHeaderInput) UserMessageMeta
 		Time:              time.Now().UTC().Format(time.RFC3339),
 		Timezone:          strings.TrimSpace(input.Timezone),
 		AttachmentPaths:   attachmentPaths,
+		AttachmentHashes:  attachmentHashes,
 	}
 	if !input.Time.IsZero() {
 		meta.Time = input.Time.Format(time.RFC3339)
@@ -91,6 +98,7 @@ func (m UserMessageMeta) ToMap() map[string]any {
 		"conversation-type":   m.ConversationType,
 		"time":                m.Time,
 		"attachments":         m.AttachmentPaths,
+		"attachment-hashes":   m.AttachmentHashes,
 	}
 	if m.MessageID != "" {
 		result["message-id"] = m.MessageID
@@ -143,6 +151,13 @@ func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 		for _, p := range meta.AttachmentPaths {
 			sb.WriteString("<attachment path=\"")
 			sb.WriteString(escapeXMLAttr(p))
+			sb.WriteString("\"/>\n")
+		}
+	}
+	if len(meta.AttachmentHashes) > 0 {
+		for _, contentHash := range meta.AttachmentHashes {
+			sb.WriteString("<attachment content_hash=\"")
+			sb.WriteString(escapeXMLAttr(contentHash))
 			sb.WriteString("\"/>\n")
 		}
 	}

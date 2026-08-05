@@ -70,6 +70,8 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
+	storagefactory "github.com/memohai/memoh/internal/storage/factory"
+	"github.com/memohai/memoh/internal/storage/providers/cutover"
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	"github.com/memohai/memoh/internal/team"
 	"github.com/memohai/memoh/internal/webhooktunnel"
@@ -80,12 +82,29 @@ func providePipeline() *timeline.Pipeline {
 	return timeline.NewPipeline(timeline.RenderParams{})
 }
 
-func provideLocalMediaService(log *slog.Logger, cfg config.Config) *media.Service {
+func provideChannelMediaService(log *slog.Logger, cfg config.Config) (*media.Service, error) {
 	dataRoot := cfg.Workspace.DataRoot
 	if strings.TrimSpace(dataRoot) == "" {
 		dataRoot = config.DefaultDataRoot
 	}
-	return media.NewService(log, localfs.New(filepath.Join(dataRoot, "media")))
+	legacyProvider := localfs.New(filepath.Join(dataRoot, "media"))
+	if cfg.Storage.ProviderOrDefault() == config.StorageProviderS3 {
+		provider, err := storagefactory.NewS3(cfg.Storage.S3)
+		if err != nil {
+			return nil, fmt.Errorf("configure channel media storage: %w", err)
+		}
+		storageProvider, err := cutover.New(provider, legacyProvider)
+		if err != nil {
+			return nil, fmt.Errorf("configure channel media storage cutover: %w", err)
+		}
+		log.Info(
+			"media storage configured",
+			slog.String("provider", config.StorageProviderS3),
+			slog.String("bucket", strings.TrimSpace(cfg.Storage.S3.Bucket)),
+		)
+		return media.NewService(log, storageProvider), nil
+	}
+	return media.NewService(log, legacyProvider), nil
 }
 
 func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.EventStore {

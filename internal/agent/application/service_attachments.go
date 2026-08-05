@@ -14,6 +14,7 @@ import (
 
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/storage"
 )
 
 const (
@@ -31,10 +32,22 @@ func (s *Service) routeAndMergeAttachments(ctx context.Context, model models.Get
 	routed := routeAttachmentsByCapability(model.Config.Compatibilities, typed)
 	for i := range routed.Fallback {
 		fallbackPath := strings.TrimSpace(routed.Fallback[i].FallbackPath)
-		if fallbackPath == "" {
+		contentHash := strings.TrimSpace(routed.Fallback[i].ContentHash)
+		switch {
+		case fallbackPath != "":
+			routed.Fallback[i].Type = "file"
+			routed.Fallback[i].Transport = gatewayTransportToolFileRef
+			routed.Fallback[i].Payload = fallbackPath
+		case contentHash != "":
+			// Private/object storage does not expose a container path. Keep the
+			// content-addressed reference in the turn so the model can read it
+			// explicitly with read(content_hash=...).
+			routed.Fallback[i].Transport = gatewayTransportContentHash
+			routed.Fallback[i].Payload = contentHash
+		default:
 			if s != nil && s.logger != nil {
 				s.logger.Warn(
-					"drop attachment without fallback path",
+					"drop attachment without fallback reference",
 					slog.String("type", strings.TrimSpace(routed.Fallback[i].Type)),
 					slog.String("transport", strings.TrimSpace(routed.Fallback[i].Transport)),
 					slog.String("content_hash", strings.TrimSpace(routed.Fallback[i].ContentHash)),
@@ -42,11 +55,7 @@ func (s *Service) routeAndMergeAttachments(ctx context.Context, model models.Get
 				)
 			}
 			routed.Fallback[i] = gatewayAttachment{}
-			continue
 		}
-		routed.Fallback[i].Type = "file"
-		routed.Fallback[i].Transport = gatewayTransportToolFileRef
-		routed.Fallback[i].Payload = fallbackPath
 	}
 	merged := make([]any, 0, len(routed.Native)+len(routed.Fallback))
 	merged = append(merged, attachmentsToAny(routed.Native)...)
@@ -112,7 +121,10 @@ func (s *Service) prepareGatewayAttachments(ctx context.Context, req ChatRequest
 		}
 		if item.ContentHash != "" && strings.TrimSpace(item.FallbackPath) == "" {
 			if accessPath, err := s.assetAccessPath(ctx, strings.TrimSpace(req.BotID), item.ContentHash); err != nil {
-				if s != nil && s.logger != nil {
+				// Private object stores intentionally have no consumer-visible
+				// path. The content hash and, for images, inline bytes are the
+				// expected transport in that case.
+				if !errors.Is(err, storage.ErrAccessPathUnavailable) && s != nil && s.logger != nil {
 					s.logger.Warn(
 						"resolve gateway attachment access path failed",
 						slog.Any("error", err),

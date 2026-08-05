@@ -112,6 +112,56 @@ const docTemplate = `{
                 ]
             }
         },
+        "/avatars/{content_hash}": {
+            "get": {
+                "description": "Stream an immutable content-addressed avatar through the authenticated Memoh API",
+                "produces": [
+                    "image/png",
+                    "image/jpeg",
+                    "image/gif",
+                    "image/webp"
+                ],
+                "tags": [
+                    "avatars"
+                ],
+                "summary": "Read an avatar image",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SHA-256 content hash",
+                        "name": "content_hash",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots": {
             "get": {
                 "description": "List bots accessible to current user (admin can specify owner_id)",
@@ -192,6 +242,12 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -9395,6 +9451,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/apperror.Problem"
                         }
                     },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -13631,6 +13693,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -13700,6 +13768,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -21950,6 +22024,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "heartbeat_model_id": {
+                    "description": "HeartbeatModelID joins the pointer group above (nil/\"\"/value) so the\nheartbeat tab's autosave can clear a model override.",
                     "type": "string"
                 },
                 "image_model_id": {

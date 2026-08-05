@@ -16,10 +16,11 @@ import (
 )
 
 // Service provides content-addressed media asset persistence.
-// All metadata is derived from the filesystem — no database, no sidecar files.
+// All metadata is derived from object keys — no database or sidecar files.
 type Service struct {
-	provider storage.Provider
-	logger   *slog.Logger
+	provider       storage.Provider
+	containerFiles storage.ContainerFileOpener
+	logger         *slog.Logger
 }
 
 // NewService creates a media service with the given storage provider.
@@ -27,20 +28,52 @@ func NewService(log *slog.Logger, provider storage.Provider) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{
+	service := &Service{
 		provider: provider,
 		logger:   log.With(slog.String("service", "media")),
+	}
+	if opener, ok := provider.(storage.ContainerFileOpener); ok {
+		service.containerFiles = opener
+	}
+	return service
+}
+
+// SetContainerFileOpener keeps workspace source-file access independent from
+// the object storage backend. S3 persists the resulting asset while the
+// container bridge only reads the original workspace file.
+func (s *Service) SetContainerFileOpener(opener storage.ContainerFileOpener) {
+	if s != nil {
+		s.containerFiles = opener
 	}
 }
 
 // Ingest persists a new media asset. It hashes the content, deduplicates by
-// checking the filesystem, and stores the bytes. Returns a derived Asset.
+// checking object storage, and stores the bytes. Returns a derived Asset.
 func (s *Service) Ingest(ctx context.Context, input IngestInput) (Asset, error) {
+	botID := strings.TrimSpace(input.BotID)
+	if botID == "" {
+		return Asset{}, errors.New("bot id is required")
+	}
+	return s.ingest(ctx, botID, botID, "", ScopedIngestInput{
+		Mime:        input.Mime,
+		Reader:      input.Reader,
+		MaxBytes:    input.MaxBytes,
+		OriginalExt: input.OriginalExt,
+	})
+}
+
+// IngestScoped persists media in a validated non-bot storage namespace.
+func (s *Service) IngestScoped(ctx context.Context, namespace string, input ScopedIngestInput) (Asset, error) {
+	namespace, err := normalizeStorageNamespace(namespace)
+	if err != nil {
+		return Asset{}, err
+	}
+	return s.ingest(ctx, namespace, "", namespace, input)
+}
+
+func (s *Service) ingest(ctx context.Context, routingNamespace, botID, assetNamespace string, input ScopedIngestInput) (Asset, error) {
 	if s.provider == nil {
 		return Asset{}, ErrProviderUnavailable
-	}
-	if strings.TrimSpace(input.BotID) == "" {
-		return Asset{}, errors.New("bot id is required")
 	}
 	if input.Reader == nil {
 		return Asset{}, errors.New("reader is required")
@@ -65,16 +98,20 @@ func (s *Service) Ingest(ctx context.Context, input IngestInput) (Asset, error) 
 		ext = input.OriginalExt
 	}
 	storageKey := path.Join(contentHash[:2], contentHash+ext)
-	routingKey := path.Join(input.BotID, storageKey)
+	routingKey := path.Join(routingNamespace, storageKey)
 
-	// Filesystem dedup: if the file already exists, skip write.
-	if _, openErr := s.provider.Open(ctx, routingKey); openErr == nil {
+	// Content-addressed dedup: if the object already exists, skip the write.
+	if existing, openErr := s.provider.Open(ctx, routingKey); openErr == nil {
+		if existing != nil {
+			_ = existing.Close()
+		}
 		return Asset{
 			ContentHash: contentHash,
-			BotID:       input.BotID,
+			BotID:       botID,
 			Mime:        mime,
 			SizeBytes:   sizeBytes,
 			StorageKey:  storageKey,
+			Namespace:   assetNamespace,
 		}, nil
 	}
 
@@ -84,10 +121,11 @@ func (s *Service) Ingest(ctx context.Context, input IngestInput) (Asset, error) 
 
 	return Asset{
 		ContentHash: contentHash,
-		BotID:       input.BotID,
+		BotID:       botID,
 		Mime:        mime,
 		SizeBytes:   sizeBytes,
 		StorageKey:  storageKey,
+		Namespace:   assetNamespace,
 	}, nil
 }
 
@@ -96,7 +134,19 @@ func (s *Service) Resolve(ctx context.Context, botID, contentHash string) (Asset
 	if s.provider == nil {
 		return Asset{}, ErrProviderUnavailable
 	}
-	return s.resolveByContentHash(ctx, botID, contentHash)
+	return s.resolveByContentHash(ctx, botID, botID, "", contentHash)
+}
+
+// ResolveScoped finds an asset in a non-bot storage namespace.
+func (s *Service) ResolveScoped(ctx context.Context, namespace, contentHash string) (Asset, error) {
+	if s.provider == nil {
+		return Asset{}, ErrProviderUnavailable
+	}
+	namespace, err := normalizeStorageNamespace(namespace)
+	if err != nil {
+		return Asset{}, err
+	}
+	return s.resolveByContentHash(ctx, namespace, "", namespace, contentHash)
 }
 
 // Stat returns asset metadata for the given content hash without opening the file.
@@ -111,12 +161,32 @@ func (s *Service) Open(ctx context.Context, botID, contentHash string) (io.ReadC
 	if s.provider == nil {
 		return nil, Asset{}, ErrProviderUnavailable
 	}
-	asset, err := s.resolveByContentHash(ctx, botID, contentHash)
+	asset, err := s.resolveByContentHash(ctx, botID, botID, "", contentHash)
 	if err != nil {
 		return nil, Asset{}, err
 	}
 	routingKey := path.Join(botID, asset.StorageKey)
 	reader, err := s.provider.Open(ctx, routingKey)
+	if err != nil {
+		return nil, Asset{}, fmt.Errorf("open storage: %w", err)
+	}
+	return reader, asset, nil
+}
+
+// OpenScoped opens an asset from a non-bot storage namespace.
+func (s *Service) OpenScoped(ctx context.Context, namespace, contentHash string) (io.ReadCloser, Asset, error) {
+	if s.provider == nil {
+		return nil, Asset{}, ErrProviderUnavailable
+	}
+	namespace, err := normalizeStorageNamespace(namespace)
+	if err != nil {
+		return nil, Asset{}, err
+	}
+	asset, err := s.resolveByContentHash(ctx, namespace, "", namespace, contentHash)
+	if err != nil {
+		return nil, Asset{}, err
+	}
+	reader, err := s.provider.Open(ctx, path.Join(namespace, asset.StorageKey))
 	if err != nil {
 		return nil, Asset{}, fmt.Errorf("open storage: %w", err)
 	}
@@ -131,10 +201,13 @@ func (s *Service) GetByStorageKey(ctx context.Context, botID, storageKey string)
 	routingKey := path.Join(botID, storageKey)
 	rc, err := s.provider.Open(ctx, routingKey)
 	if err != nil {
+		if !errors.Is(err, storage.ErrNotFound) {
+			return Asset{}, fmt.Errorf("open storage: %w", err)
+		}
 		return Asset{}, ErrAssetNotFound
 	}
 	_ = rc.Close()
-	return deriveAssetFromKey(botID, storageKey), nil
+	return deriveAssetFromKey(botID, "", storageKey), nil
 }
 
 // AccessPath returns a reachable consumer reference for a persisted asset.
@@ -152,7 +225,14 @@ func (s *Service) EnsureAccessPath(ctx context.Context, asset Asset) (string, er
 	if s.provider == nil {
 		return "", ErrProviderUnavailable
 	}
-	routingKey := path.Join(asset.BotID, asset.StorageKey)
+	routingNamespace := strings.TrimSpace(asset.Namespace)
+	if routingNamespace == "" {
+		routingNamespace = strings.TrimSpace(asset.BotID)
+	}
+	if routingNamespace == "" {
+		return "", errors.New("media storage namespace is required")
+	}
+	routingKey := path.Join(routingNamespace, asset.StorageKey)
 	if ensurer, ok := s.provider.(storage.AccessPathEnsurer); ok {
 		accessPath, err := ensurer.EnsureAccessPath(ctx, routingKey)
 		if err != nil {
@@ -177,8 +257,8 @@ func (s *Service) IngestContainerFile(ctx context.Context, botID, containerPath 
 	if s.provider == nil {
 		return Asset{}, ErrProviderUnavailable
 	}
-	opener, ok := s.provider.(storage.ContainerFileOpener)
-	if !ok {
+	opener := s.containerFiles
+	if opener == nil {
 		return Asset{}, storage.ErrContainerFileNotSupported
 	}
 	f, err := opener.OpenContainerFile(ctx, botID, containerPath)
@@ -191,52 +271,60 @@ func (s *Service) IngestContainerFile(ctx context.Context, botID, containerPath 
 	return s.Ingest(ctx, IngestInput{BotID: botID, Mime: mime, Reader: f, OriginalExt: ext})
 }
 
-// resolveByContentHash scans hash-prefix directory by extension to find the file.
-// It first tries known extensions (fast path), then falls back to a directory
-// listing if the provider supports it, so arbitrary file types are found.
-func (s *Service) resolveByContentHash(ctx context.Context, botID, contentHash string) (Asset, error) {
-	if strings.TrimSpace(contentHash) == "" || len(contentHash) < 2 {
+// resolveByContentHash scans the hash prefix to find the stored object. Providers
+// with prefix listing use one lookup; providers without an authoritative list
+// fall back to probing known extensions.
+func (s *Service) resolveByContentHash(ctx context.Context, routingNamespace, botID, assetNamespace, contentHash string) (Asset, error) {
+	contentHash = NormalizeContentHash(contentHash)
+	if !IsContentHash(contentHash) {
 		return Asset{}, ErrAssetNotFound
 	}
 	prefix := contentHash[:2]
 
-	for _, ext := range knownExtensions {
-		storageKey := path.Join(prefix, contentHash+ext)
-		routingKey := path.Join(botID, storageKey)
-		rc, err := s.provider.Open(ctx, routingKey)
-		if err != nil {
-			continue
-		}
-		_ = rc.Close()
-		return deriveAssetFromKey(botID, storageKey), nil
-	}
-
 	if lister, ok := s.provider.(storage.PrefixLister); ok {
-		keyPrefix := path.Join(botID, prefix, contentHash)
+		keyPrefix := path.Join(routingNamespace, prefix, contentHash)
 		keys, err := lister.ListPrefix(ctx, keyPrefix)
 		if err == nil {
-			for _, k := range keys {
-				_, storageKey := splitFirst(k, '/')
-				if storageKey != "" {
-					return deriveAssetFromKey(botID, storageKey), nil
+			namespacePrefix := strings.TrimSuffix(routingNamespace, "/") + "/"
+			for _, key := range keys {
+				key = strings.TrimSpace(strings.ReplaceAll(key, "\\", "/"))
+				if !strings.HasPrefix(key, namespacePrefix) {
+					continue
 				}
+				storageKey := strings.TrimPrefix(key, namespacePrefix)
+				base := path.Base(storageKey)
+				if strings.TrimSuffix(base, path.Ext(base)) != contentHash {
+					continue
+				}
+				return deriveAssetFromKey(botID, assetNamespace, storageKey), nil
 			}
+			if _, authoritative := s.provider.(storage.AuthoritativePrefixLister); authoritative {
+				return Asset{}, ErrAssetNotFound
+			}
+		} else if !errors.Is(err, storage.ErrNotFound) {
+			return Asset{}, fmt.Errorf("list storage: %w", err)
 		}
+	}
+
+	for _, ext := range knownExtensions {
+		storageKey := path.Join(prefix, contentHash+ext)
+		routingKey := path.Join(routingNamespace, storageKey)
+		rc, err := s.provider.Open(ctx, routingKey)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				continue
+			}
+			return Asset{}, fmt.Errorf("probe storage: %w", err)
+		}
+		_ = rc.Close()
+		return deriveAssetFromKey(botID, assetNamespace, storageKey), nil
 	}
 
 	return Asset{}, ErrAssetNotFound
 }
 
-func splitFirst(s string, sep byte) (string, string) {
-	i := strings.IndexByte(s, sep)
-	if i < 0 {
-		return s, ""
-	}
-	return s[:i], s[i+1:]
-}
-
 // deriveAssetFromKey builds an Asset from the storage key (hash_2char_prefix/hash.ext).
-func deriveAssetFromKey(botID, storageKey string) Asset {
+func deriveAssetFromKey(botID, namespace, storageKey string) Asset {
 	base := path.Base(storageKey)
 	ext := path.Ext(base)
 	hash := strings.TrimSuffix(base, ext)
@@ -245,7 +333,20 @@ func deriveAssetFromKey(botID, storageKey string) Asset {
 		BotID:       botID,
 		Mime:        mimeFromExtension(ext),
 		StorageKey:  storageKey,
+		Namespace:   namespace,
 	}
+}
+
+func normalizeStorageNamespace(value string) (string, error) {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if value == "" || path.IsAbs(value) {
+		return "", errors.New("media storage namespace is required")
+	}
+	cleaned := path.Clean(value)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", ErrPathTraversal
+	}
+	return cleaned, nil
 }
 
 var extToMime = map[string]string{

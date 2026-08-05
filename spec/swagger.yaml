@@ -4966,6 +4966,9 @@ definitions:
       heartbeat_interval:
         type: integer
       heartbeat_model_id:
+        description: |-
+          HeartbeatModelID joins the pointer group above (nil/""/value) so the
+          heartbeat tab's autosave can clear a model override.
         type: string
       image_model_id:
         type: string
@@ -5380,6 +5383,41 @@ paths:
       summary: Refresh Token
       tags:
       - auth
+  /avatars/{content_hash}:
+    get:
+      description: Stream an immutable content-addressed avatar through the authenticated
+        Memoh API
+      parameters:
+      - description: SHA-256 content hash
+        in: path
+        name: content_hash
+        required: true
+        type: string
+      produces:
+      - image/png
+      - image/jpeg
+      - image/gif
+      - image/webp
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Read an avatar image
+      tags:
+      - avatars
   /bots:
     get:
       description: List bots accessible to current user (admin can specify owner_id)
@@ -5432,6 +5470,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "409":
           description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "413":
+          description: Request Entity Too Large
           schema:
             $ref: '#/definitions/apperror.Problem'
         "500":
@@ -11493,6 +11535,10 @@ paths:
           description: Conflict
           schema:
             $ref: '#/definitions/apperror.Problem'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -14387,6 +14433,10 @@ paths:
           description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -14543,6 +14593,10 @@ paths:
             $ref: '#/definitions/accounts.Account'
         "400":
           description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "413":
+          description: Request Entity Too Large
           schema:
             $ref: '#/definitions/apperror.Problem'
         "500":

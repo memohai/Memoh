@@ -20,6 +20,7 @@ import (
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/auth"
+	avatarpkg "github.com/memohai/memoh/internal/avatar"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/route"
@@ -60,6 +61,7 @@ type UsersHandler struct {
 	registry       *channel.Registry
 	acpWorkspace   botCreateWorkspace
 	acpRuntimes    acpRuntimeCloser
+	avatarService  *avatarpkg.Service
 	logger         *slog.Logger
 }
 
@@ -82,6 +84,10 @@ func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bo
 
 func (h *UsersHandler) SetACPRuntimeCloser(closer acpRuntimeCloser) {
 	h.acpRuntimes = closer
+}
+
+func (h *UsersHandler) SetAvatarService(service *avatarpkg.Service) {
+	h.avatarService = service
 }
 
 func (h *UsersHandler) Register(e *echo.Echo) {
@@ -144,6 +150,7 @@ func (h *UsersHandler) GetMe(c echo.Context) error {
 // @Param payload body accounts.UpdateProfileRequest true "Profile payload"
 // @Success 200 {object} accounts.Account
 // @Failure 400 {object} apperror.Problem
+// @Failure 413 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Router /users/me [put].
 func (h *UsersHandler) UpdateMe(c echo.Context) error {
@@ -154,6 +161,13 @@ func (h *UsersHandler) UpdateMe(c echo.Context) error {
 	var req accounts.UpdateProfileRequest
 	if err := c.Bind(&req); err != nil {
 		return apperror.Wrap(apperror.CodeProfileRequestInvalid, err, nil)
+	}
+	if req.AvatarURL != nil {
+		avatarURL, err := h.storeAvatarURL(c.Request().Context(), *req.AvatarURL)
+		if err != nil {
+			return err
+		}
+		req.AvatarURL = &avatarURL
 	}
 	resp, err := h.service.UpdateProfile(c.Request().Context(), channelIdentityID, req)
 	if err != nil {
@@ -320,6 +334,7 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 // @Success 201 {object} accounts.Account
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
+// @Failure 413 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /users [post].
 func (h *UsersHandler) CreateUser(c echo.Context) error {
@@ -337,6 +352,13 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 	var req accounts.CreateAccountRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if req.AvatarURL != "" {
+		avatarURL, err := h.storeAvatarURL(c.Request().Context(), req.AvatarURL)
+		if err != nil {
+			return err
+		}
+		req.AvatarURL = avatarURL
 	}
 	//nolint:staticcheck // Keep backward-compatible behavior: CreateHuman creates backing user when owner id is empty.
 	resp, err := h.service.CreateHuman(c.Request().Context(), "", req)
@@ -404,6 +426,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 409 {object} apperror.Problem
+// @Failure 413 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots [post].
 func (h *UsersHandler) CreateBot(c echo.Context) error {
@@ -414,6 +437,13 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	var req bots.CreateBotRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if req.AvatarURL != "" {
+		avatarURL, err := h.storeAvatarURL(c.Request().Context(), req.AvatarURL)
+		if err != nil {
+			return err
+		}
+		req.AvatarURL = avatarURL
 	}
 	ownerID := channelIdentityID
 	ownerFromToken := true
@@ -802,6 +832,7 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 409 {object} apperror.Problem
+// @Failure 413 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{id} [put].
 func (h *UsersHandler) UpdateBot(c echo.Context) error {
@@ -820,6 +851,13 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	var req bots.UpdateBotRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if req.AvatarURL != nil {
+		avatarURL, err := h.storeAvatarURL(c.Request().Context(), *req.AvatarURL)
+		if err != nil {
+			return err
+		}
+		req.AvatarURL = &avatarURL
 	}
 	needsACPWorkspaceConfigWrite := false
 	shouldCloseACPRuntimes := false
@@ -1516,6 +1554,32 @@ func (h *UsersHandler) attachCurrentUserPermissionsList(ctx context.Context, cha
 		items[i].CurrentUserPermissions = perms
 	}
 	return nil
+}
+
+func (h *UsersHandler) storeAvatarURL(ctx context.Context, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(strings.ToLower(raw), "data:") {
+		return raw, nil
+	}
+	if h.avatarService == nil {
+		return "", apperror.Wrap(
+			apperror.CodeAvatarStoreFailed,
+			errors.New("avatar service not configured"),
+			nil,
+		)
+	}
+	storedURL, _, err := h.avatarService.StoreIfInline(ctx, raw)
+	if err == nil {
+		return storedURL, nil
+	}
+	switch {
+	case errors.Is(err, avatarpkg.ErrInvalidImage):
+		return "", apperror.New(apperror.CodeAvatarInvalid, nil)
+	case errors.Is(err, avatarpkg.ErrTooLarge):
+		return "", apperror.New(apperror.CodeAvatarTooLarge, nil)
+	default:
+		return "", apperror.Wrap(apperror.CodeAvatarStoreFailed, err, nil)
+	}
 }
 
 func (*UsersHandler) requireChannelIdentityID(c echo.Context) (string, error) {

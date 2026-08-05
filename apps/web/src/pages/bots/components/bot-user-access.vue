@@ -126,7 +126,7 @@
           <Avatar class="size-7 shrink-0">
             <AvatarImage
               v-if="grant.subject_type === 'user' && grant.user_avatar_url"
-              :src="grant.user_avatar_url"
+              :src="resolveAvatarUrl(grant.user_avatar_url)"
             />
             <AvatarFallback class="bg-muted text-muted-foreground">
               <Globe
@@ -226,6 +226,7 @@ import SearchableSelectPopover from '@/components/searchable-select-popover/inde
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { BOT_PERMISSION_ORDER, expandBotPermissions, type BotPermission } from '@/utils/bot-permissions'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 import {
   getBotsByBotIdUserAccess,
   getBotsByBotIdUserAccessCandidates,

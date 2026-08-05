@@ -10,6 +10,7 @@ const (
 	gatewayTransportInlineDataURL = "inline_data_url"
 	gatewayTransportPublicURL     = "public_url"
 	gatewayTransportToolFileRef   = "tool_file_ref"
+	gatewayTransportContentHash   = "content_hash"
 )
 
 // gatewayAttachment is the strict server-to-gateway attachment contract.

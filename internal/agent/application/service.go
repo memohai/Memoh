@@ -494,6 +494,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		ConversationName:  strings.TrimSpace(req.ConversationName),
 		Target:            strings.TrimSpace(req.ReplyTarget),
 		AttachmentPaths:   extractAttachmentPaths(mergedAttachments),
+		AttachmentHashes:  extractAttachmentHashes(mergedAttachments),
 		Time:              time.Now().In(tz),
 		Timezone:          runCfg.Identity.Timezone,
 	}
@@ -1531,9 +1532,9 @@ func userQueryNeedsHeader(req ChatRequest, attachmentCount int) bool {
 
 // extractAttachmentPaths collects container file paths from ALL gateway
 // attachments — both tool_file_ref (fallback) and native images that carry a
-// FallbackPath. This ensures the YAML user header always lists every
+// FallbackPath. This ensures the XML user header always lists every legacy
 // attachment the user sent, regardless of whether the model consumes the
-// image natively or via the read_media tool.
+// image natively or via the read tool.
 func extractAttachmentPaths(attachments []any) []string {
 	var paths []string
 	for _, att := range attachments {
@@ -1548,6 +1549,30 @@ func extractAttachmentPaths(attachments []any) []string {
 		}
 	}
 	return paths
+}
+
+// extractAttachmentHashes collects and de-duplicates content-addressed media
+// references. Hashes are useful for both native image inputs and private-store
+// fallbacks because read can resolve them without exposing a storage URL.
+func extractAttachmentHashes(attachments []any) []string {
+	var hashes []string
+	seen := make(map[string]struct{})
+	for _, att := range attachments {
+		ga, ok := att.(gatewayAttachment)
+		if !ok {
+			continue
+		}
+		contentHash := strings.TrimSpace(ga.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		if _, ok := seen[contentHash]; ok {
+			continue
+		}
+		seen[contentHash] = struct{}{}
+		hashes = append(hashes, contentHash)
+	}
+	return hashes
 }
 
 // extractNativeImageParts returns sdk.ImagePart entries for attachments that

@@ -194,6 +194,42 @@ func TestRouteAndMergeAttachments_ImagePathOnlyFallsBackToFile(t *testing.T) {
 	}
 }
 
+func TestRouteAndMergeAttachments_PrivateAssetFallsBackToContentHash(t *testing.T) {
+	t.Parallel()
+
+	contentHash := strings.Repeat("a", 64)
+	resolver := &Service{
+		logger: slog.Default(),
+		assetLoader: &fakeGatewayAssetLoader{
+			accessPathFn: func(context.Context, string, string) (string, error) {
+				return "", errors.New("private storage has no access path")
+			},
+		},
+	}
+	merged := resolver.routeAndMergeAttachments(context.Background(), models.GetResponse{}, ChatRequest{
+		BotID: "bot-1",
+		Attachments: []ChatAttachment{{
+			Type:        "file",
+			ContentHash: contentHash,
+			Mime:        "application/pdf",
+		}},
+	})
+	if len(merged) != 1 {
+		t.Fatalf("merged attachment count = %d, want 1", len(merged))
+	}
+	item, ok := merged[0].(gatewayAttachment)
+	if !ok {
+		t.Fatalf("merged attachment type = %T", merged[0])
+	}
+	if item.Transport != gatewayTransportContentHash || item.Payload != contentHash {
+		t.Fatalf("merged attachment = %#v, want content hash fallback", item)
+	}
+	hashes := extractAttachmentHashes(merged)
+	if len(hashes) != 1 || hashes[0] != contentHash {
+		t.Fatalf("attachment hashes = %#v", hashes)
+	}
+}
+
 func TestPrepareGatewayAttachments_IncludesReplyAttachments(t *testing.T) {
 	resolver := &Service{logger: slog.Default()}
 	req := ChatRequest{

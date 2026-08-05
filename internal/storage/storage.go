@@ -8,6 +8,11 @@ import (
 )
 
 var (
+	// ErrNotFound means the requested object is definitively absent. Providers
+	// must not use it for transient transport, authentication, or service
+	// failures because cutover readers rely on this distinction before falling
+	// back to legacy storage.
+	ErrNotFound = errors.New("storage object not found")
 	// ErrContainerFileNotSupported is returned when no underlying provider
 	// implements ContainerFileOpener.
 	ErrContainerFileNotSupported = errors.New("provider does not support workspace file reading")
@@ -47,4 +52,12 @@ type ContainerFileOpener interface {
 // sharing a common prefix (e.g. directory listing on a filesystem backend).
 type PrefixLister interface {
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)
+}
+
+// AuthoritativePrefixLister marks providers whose successful prefix listing is
+// complete. Callers may treat an empty successful result as definitive instead
+// of probing candidate object keys one by one.
+type AuthoritativePrefixLister interface {
+	PrefixLister
+	PrefixListingAuthoritative()
 }

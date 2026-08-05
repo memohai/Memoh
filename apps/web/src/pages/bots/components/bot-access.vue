@@ -64,7 +64,7 @@
                   <div class="flex min-w-0 items-center gap-2 py-0.5 text-left">
                     <Avatar class="size-6 shrink-0">
                       <AvatarImage
-                        :src="optionMeta(option.meta).avatarUrl || ''"
+                        :src="resolveAvatarUrl(optionMeta(option.meta).avatarUrl)"
                         :alt="option.label"
                       />
                       <AvatarFallback class="text-caption">
@@ -114,7 +114,7 @@
               <template #leading>
                 <Avatar class="size-7 shrink-0">
                   <AvatarImage
-                    :src="member.avatarUrl || ''"
+                    :src="resolveAvatarUrl(member.avatarUrl)"
                     :alt="member.label"
                   />
                   <AvatarFallback class="text-caption">
@@ -359,7 +359,7 @@
                       class="size-8 shrink-0"
                     >
                       <AvatarImage
-                        :src="rule.channel_identity_avatar_url || ''"
+                        :src="resolveAvatarUrl(rule.channel_identity_avatar_url)"
                         :alt="describeRuleTarget(rule)"
                       />
                       <AvatarFallback class="text-caption">
@@ -667,6 +667,7 @@ import SearchableSelectPopover from '@/components/searchable-select-popover/inde
 import BotUserAccess from './bot-user-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 import type { AclObservedConversationCandidate, AclRule, AclSourceScope, ChannelaccessManager, HandlersChannelMeta } from '@memohai/sdk'
 import {
   getChannels,

@@ -90,11 +90,20 @@
     "unsaved": "未保存",
     "editJson": "编辑 JSON",
     "actionRequired": "需要操作",
-    "preview": "预览"
+    "preview": "预览",
+    "uploadImage": "上传图片",
+    "avatarInvalidType": "请选择 PNG、JPEG、GIF 或 WebP 图片。",
+    "avatarTooLarge": "请选择不超过 5 MB 的图片。",
+    "avatarReadFailed": "无法读取图片，请换一个文件重试。"
   },
   "errors": {
     "bot": {
       "name_taken": "该名称已被占用。"
+    },
+    "avatar": {
+      "invalid": "请选择有效的 PNG、JPEG、GIF 或 WebP 图片。",
+      "too_large": "请选择不超过 5 MB 的图片。",
+      "store_failed": "头像保存失败，请重试。"
     },
     "channel": {
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。"
@@ -1813,7 +1822,7 @@
       }
     },
     "editAvatar": "编辑头像",
-    "editAvatarDescription": "设置 Bot 头像图片的链接地址",
+    "editAvatarDescription": "上传图片，或填写 Bot 头像图片链接。",
     "editTimezone": "编辑时区",
     "editTimezoneDescription": "为这个 Bot 设置独立时区。",
     "avatarUpdateSuccess": "头像已更新",

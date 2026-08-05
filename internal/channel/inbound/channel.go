@@ -958,6 +958,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				ConversationName:  strings.TrimSpace(msg.Conversation.Name),
 				Target:            strings.TrimSpace(msg.ReplyTarget),
 				AttachmentPaths:   collectAttachmentPaths(attachments),
+				AttachmentHashes:  collectAttachmentHashes(attachments),
 				Time:              time.Now().UTC(),
 			}, text)
 
@@ -1590,6 +1591,26 @@ func collectAttachmentPaths(attachments []turn.Attachment) []string {
 	return paths
 }
 
+func collectAttachmentHashes(attachments []turn.Attachment) []string {
+	if len(attachments) == 0 {
+		return nil
+	}
+	hashes := make([]string, 0, len(attachments))
+	seen := make(map[string]struct{}, len(attachments))
+	for _, att := range attachments {
+		contentHash := strings.TrimSpace(att.ContentHash)
+		if contentHash == "" {
+			continue
+		}
+		if _, ok := seen[contentHash]; ok {
+			continue
+		}
+		seen[contentHash] = struct{}{}
+		hashes = append(hashes, contentHash)
+	}
+	return hashes
+}
+
 func shouldTriggerAssistantResponse(msg channel.InboundMessage) bool {
 	if isDirectConversationType(msg.Conversation.Type) {
 		return true
@@ -2002,13 +2023,6 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		return
 	}
 
-	var attachmentPaths []string
-	for _, att := range attachments {
-		if ap := strings.TrimSpace(att.Path); ap != "" {
-			attachmentPaths = append(attachmentPaths, ap)
-		}
-	}
-
 	headerifiedText := turn.FormatUserHeader(turn.UserMessageHeaderInput{
 		MessageID:         strings.TrimSpace(msg.Message.ID),
 		ChannelIdentityID: strings.TrimSpace(ident.ChannelIdentityID),
@@ -2017,7 +2031,8 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 		ConversationName:  strings.TrimSpace(msg.Conversation.Name),
 		Target:            strings.TrimSpace(msg.ReplyTarget),
-		AttachmentPaths:   attachmentPaths,
+		AttachmentPaths:   collectAttachmentPaths(attachments),
+		AttachmentHashes:  collectAttachmentHashes(attachments),
 		Time:              time.Now().UTC(),
 	}, trimmedText)
 
@@ -2831,11 +2846,22 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 			result = append(result, item)
 			continue
 		}
-		item = channel.AttachmentFromBundle(channel.BundleFromAttachment(item).WithAssetAccess(
-			botID,
-			asset,
-			p.mediaService.AccessPath(ctx, asset),
-		))
+		bundle := channel.BundleFromAttachment(item)
+		if item.Type == channel.AttachmentImage || item.Type == channel.AttachmentGIF ||
+			strings.HasPrefix(strings.ToLower(strings.TrimSpace(item.Mime)), "image/") {
+			// Images use only the stable content hash, independent of whether the
+			// configured storage happens to expose a local path.
+			item = channel.AttachmentFromBundle(bundle.WithAsset(botID, asset))
+		} else {
+			// Preserve the existing readable path for non-image attachments when
+			// the active provider can expose one. Private object stores naturally
+			// fall back to the content hash.
+			item = channel.AttachmentFromBundle(bundle.WithAssetAccess(
+				botID,
+				asset,
+				p.mediaService.AccessPath(ctx, asset),
+			))
+		}
 		result = append(result, item)
 	}
 	return result

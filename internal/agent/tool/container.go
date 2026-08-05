@@ -19,6 +19,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/hooks"
+	"github.com/memohai/memoh/internal/media"
 	workspacepkg "github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
@@ -46,6 +47,7 @@ type ContainerProvider struct {
 	clients     bridge.Provider
 	bgManager   *background.Manager
 	hookService workspaceHookService
+	media       *media.Service
 	execWorkDir string
 	logger      *slog.Logger
 }
@@ -71,6 +73,12 @@ func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *
 
 func (p *ContainerProvider) SetHookService(h *hooks.Service) {
 	p.hookService = h
+}
+
+// SetMediaService enables content-addressed image reads without exposing the
+// underlying storage backend through the tool contract.
+func (p *ContainerProvider) SetMediaService(service *media.Service) {
+	p.media = service
 }
 
 func (*ContainerProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
@@ -105,7 +113,7 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 	if ref, ok := available.Ref(ToolRead()); ok {
 		text := ref + ": read file content"
 		if session.SupportsImageInput {
-			text += " (also supports images: PNG, JPEG, GIF, WebP)"
+			text += " (also supports images: PNG, JPEG, GIF, WebP, from a file path or stored `content_hash`)"
 		}
 		parts = append(parts, text)
 	}
@@ -140,7 +148,7 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 		if len(displayRefs) > 0 {
 			text := "The request-selected connected computer is the default only for file and command tools. Browser Use and Computer Use (" + strings.Join(displayRefs, ", ") + ") remain on the native Server Workspace and do not follow that default."
 			if readRef, ok := available.Ref(ToolRead()); ok {
-				text += " Use " + readRef + " with `target_id` `native` to read screenshots or other files those tools create there."
+				text += " Use " + readRef + " with the returned `content_hash` to read screenshots; `target_id` does not apply to stored media."
 			}
 			parts = append(parts, text)
 		}
@@ -161,7 +169,7 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 
 	readDesc := fmt.Sprintf("Read file content %s. Reads the full file by default; use line_offset and n_lines for pagination. Files up to ~16 MB are supported.", workspace.locationDescription)
 	if sess.SupportsImageInput {
-		readDesc += " Also supports reading image files (PNG, JPEG, GIF, WebP) — binary images are loaded into model context automatically."
+		readDesc += " Also supports reading image files (PNG, JPEG, GIF, WebP) and stored images by content_hash; image bytes are loaded into model context automatically. Pass exactly one of path or content_hash."
 	}
 
 	toolList := []sdk.Tool{
@@ -171,12 +179,12 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"target_id":   targetParameter,
-					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"line_offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed). Default: 1.", "minimum": 1, "default": 1},
-					"n_lines":     map[string]any{"type": "integer", "description": "Number of lines to read. Default: read entire file.", "minimum": 1},
+					"target_id":    targetParameter,
+					"path":         map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s). Mutually exclusive with content_hash.", wd, workspace.absolutePathDescription)},
+					"content_hash": map[string]any{"type": "string", "description": "SHA-256 content hash returned by a media, browser, or computer tool. Mutually exclusive with path."},
+					"line_offset":  map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed). Default: 1.", "minimum": 1, "default": 1},
+					"n_lines":      map[string]any{"type": "integer", "description": "Number of lines to read. Default: read entire file.", "minimum": 1},
 				},
-				"required": []string{"path"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execRead(ctx.Context, sess, inputAsMap(input))
@@ -749,14 +757,47 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
+	contentHash := media.NormalizeContentHash(StringArg(args, "content_hash"))
+	rawPath := strings.TrimSpace(StringArg(args, "path"))
+	if contentHash != "" {
+		if rawPath != "" {
+			return nil, errors.New("path and content_hash are mutually exclusive")
+		}
+		if StringArg(args, "target_id") != "" {
+			return nil, errors.New("target_id cannot be used with content_hash")
+		}
+		if !session.SupportsImageInput {
+			return nil, errors.New("content_hash image reading is not available for this model")
+		}
+		if !media.IsContentHash(contentHash) {
+			return nil, errors.New("content_hash must be a 64-character SHA-256 hex digest")
+		}
+		if p.media == nil {
+			return nil, errors.New("media service is not configured")
+		}
+		botID := strings.TrimSpace(session.BotID)
+		if botID == "" {
+			return nil, errors.New("bot_id is required to read stored media")
+		}
+		reader, _, err := p.media.Open(opCtx, botID, contentHash)
+		if err != nil {
+			return readMediaErrorResult(err.Error()), nil
+		}
+		defer func() { _ = reader.Close() }()
+		return ReadImageFromAsset(reader, contentHash, defaultReadMediaMaxBytes), nil
+	}
+	if rawPath == "" {
+		return nil, errors.New("path or content_hash is required")
+	}
+
 	target, err := p.resolveToolTarget(opCtx, session, args)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
+	filePath := target.workspace.resolveToolPath(rawPath)
 	if filePath == "" {
-		return nil, errors.New("path is required")
+		return nil, errors.New("path or content_hash is required")
 	}
 
 	lineOffset := 1

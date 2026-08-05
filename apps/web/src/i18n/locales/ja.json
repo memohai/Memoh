@@ -87,11 +87,20 @@
     "preview": "プレビュー",
     "hide": "非表示",
     "show": "表示",
-    "saveChanges": "変更を保存"
+    "saveChanges": "変更を保存",
+    "uploadImage": "画像をアップロード",
+    "avatarInvalidType": "PNG、JPEG、GIF、または WebP 画像を選択してください。",
+    "avatarTooLarge": "5 MB 以下の画像を選択してください。",
+    "avatarReadFailed": "画像を読み込めませんでした。別のファイルをお試しください。"
   },
   "errors": {
     "bot": {
       "name_taken": "この名前はすでに使用されています。"
+    },
+    "avatar": {
+      "invalid": "有効な PNG、JPEG、GIF、または WebP 画像を選択してください。",
+      "too_large": "5 MB 以下の画像を選択してください。",
+      "store_failed": "アバターを保存できませんでした。もう一度お試しください。"
     },
     "channel": {
       "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。"
@@ -1797,7 +1806,7 @@
       }
     },
     "editAvatar": "アバターの編集",
-    "editAvatarDescription": "画像を設定するURLBotアバターの場合。",
+    "editAvatarDescription": "Bot のアバター画像をアップロードするか、画像 URL を設定します。",
     "editTimezone": "タイムゾーンの編集",
     "editTimezoneDescription": "このBotのタイムゾーン オーバーライドを設定します。",
     "avatarUpdateSuccess": "アバターが更新されました",

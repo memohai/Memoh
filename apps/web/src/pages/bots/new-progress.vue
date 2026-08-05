@@ -4,7 +4,7 @@
       <Avatar class="size-12 rounded-full">
         <AvatarImage
           v-if="display?.avatar_url?.trim()"
-          :src="display.avatar_url.trim()"
+          :src="resolveAvatarUrl(display.avatar_url)"
           :alt="displayName"
         />
         <AvatarFallback class="text-base">
@@ -56,6 +56,7 @@ import { useQueryCache } from '@pinia/colada'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 import BotCreateTerminal from './components/bot-create-terminal.vue'
 
 const router = useRouter()

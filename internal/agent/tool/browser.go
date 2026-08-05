@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -21,6 +22,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	displaypkg "github.com/memohai/memoh/internal/display"
+	"github.com/memohai/memoh/internal/media"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -31,8 +33,6 @@ const (
 	browserToolTimeout                  = 45 * time.Second
 	browserStartupTimeout               = 12 * time.Second
 	computerDisplayStartupTimeout int32 = 1200
-	browserScreenshotSubdir             = "browser-screenshots"
-	computerScreenshotSubdir            = "computer-screenshots"
 	defaultComputerWidth                = 1280
 	defaultComputerHeight               = 800
 	rfbButtonLeft                 byte  = 1
@@ -49,15 +49,12 @@ type BrowserProvider struct {
 	settings   *settings.Service
 	containers bridge.Provider
 	display    *displaypkg.Service
-	dataRoot   string
+	media      *media.Service
 }
 
-func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, containers bridge.Provider, displayWorkspace displaypkg.Workspace, dataRoot string) *BrowserProvider {
+func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, containers bridge.Provider, displayWorkspace displaypkg.Workspace) *BrowserProvider {
 	if log == nil {
 		log = slog.Default()
-	}
-	if strings.TrimSpace(dataRoot) == "" {
-		dataRoot = "/data"
 	}
 	var displaySvc *displaypkg.Service
 	if displayWorkspace != nil {
@@ -68,8 +65,12 @@ func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, contain
 		settings:   settingsSvc,
 		containers: containers,
 		display:    displaySvc,
-		dataRoot:   dataRoot,
 	}
+}
+
+// SetMediaService configures content-addressed screenshot persistence.
+func (p *BrowserProvider) SetMediaService(service *media.Service) {
+	p.media = service
 }
 
 // Usage frames the workspace browser/desktop tool group. Injected only when
@@ -107,13 +108,13 @@ func (*BrowserProvider) Usage(_ context.Context, session SessionContext, availab
 	}
 	hasObserve := available.Has(ToolBrowserObserve()) || available.Has(ToolComputerObserve())
 	if hasObserve {
-		readHint := "the returned path can be used by later workspace actions when needed."
+		readHint := "the returned content_hash is a stable reference to the captured image."
 		if session.SupportsImageInput {
 			if readRef, ok := available.Ref(ToolRead()); ok {
-				readHint = "Read the returned path with " + readRef + " when you need the image."
+				readHint = "Read the returned content_hash with " + readRef + " when you need the image."
 			}
 		}
-		parts = append(parts, "**Screenshots**: Observe tools save screenshots to a workspace path; they are not attached to the conversation. "+readHint)
+		parts = append(parts, "**Screenshots**: Observe tools store screenshots as media assets; they are not attached to the conversation. "+readHint)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -165,7 +166,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        ToolBrowserObserve().String(),
-			Description: "Inspect the current workspace browser without changing page state. Prefer snapshot for interactive elements and get_content for readable text. Use screenshot_annotate only when visual layout matters or you need rendered-page refs. Use evaluate only for small DOM queries or page-state checks. Screenshots are saved to a workspace path and are not attached automatically.",
+			Description: "Inspect the current workspace browser without changing page state. Prefer snapshot for interactive elements and get_content for readable text. Use screenshot_annotate only when visual layout matters or you need rendered-page refs. Use evaluate only for small DOM queries or page-state checks. Screenshots are stored as media assets and return a content_hash; they are not attached automatically.",
 			Parameters: browserObjectSchema(map[string]any{
 				"observe":   map[string]any{"type": "string", "enum": []string{"snapshot", "get_content", "screenshot_annotate", "screenshot", "get_html", "evaluate", "get_url", "get_title", "pdf", "tab_list"}, "description": "What to observe from the page."},
 				"ref":       map[string]any{"type": "string", "description": "Element ref from snapshot or screenshot_annotate. Scopes get_content/get_html and evaluate helper use."},
@@ -179,7 +180,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        ToolComputerObserve().String(),
-			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility-tree listing of interactive UI elements with refs for later desktop actions. Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and is not attached automatically.",
+			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility-tree listing of interactive UI elements with refs for later desktop actions. Use screenshot only when accessibility is unavailable or you need visual layout; the image is stored as a media asset and returns a content_hash instead of a workspace path.",
 			Parameters: browserObjectSchema(map[string]any{
 				"observe": map[string]any{"type": "string", "enum": []string{"snapshot", "screenshot"}, "description": "What to observe from the desktop."},
 			}, []string{"observe"}),
@@ -360,7 +361,7 @@ func (p *BrowserProvider) execComputerScreenshot(ctx context.Context, session Se
 	if err != nil {
 		return nil, err
 	}
-	return p.buildScreenshotBytesResult(ctx, botID, img, mime, p.screenshotDir(computerScreenshotSubdir), nil), nil
+	return p.buildScreenshotBytesResult(ctx, botID, img, mime, nil), nil
 }
 
 func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session SessionContext) (any, error) {
@@ -1428,7 +1429,7 @@ func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Cl
 
 func (p *BrowserProvider) browserActionResult(ctx context.Context, botID string, data map[string]any) any {
 	if b64, ok := data["screenshot"].(string); ok && b64 != "" {
-		return p.buildScreenshotResult(ctx, botID, b64, p.screenshotDir(browserScreenshotSubdir), data)
+		return p.buildScreenshotResult(ctx, botID, b64, data)
 	}
 	return data
 }
@@ -1943,24 +1944,40 @@ func (p *cdpPage) navigateHistory(ctx context.Context, forward bool) error {
 	return err
 }
 
-func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base64Data string, dir string, data map[string]any) any {
+func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base64Data string, data map[string]any) any {
 	imgBytes, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
 		return map[string]any{"content": []map[string]any{{"type": "text", "text": "Screenshot captured (failed to decode image data)"}}}
 	}
-	return p.buildScreenshotBytesResult(ctx, botID, imgBytes, "image/png", dir, data)
+	return p.buildScreenshotBytesResult(ctx, botID, imgBytes, "image/png", data)
 }
 
-func (p *BrowserProvider) buildScreenshotBytesResult(ctx context.Context, botID string, imgBytes []byte, mimeType string, dir string, data map[string]any) any {
+func (p *BrowserProvider) buildScreenshotBytesResult(ctx context.Context, botID string, imgBytes []byte, mimeType string, data map[string]any) any {
 	if mimeType == "" {
 		mimeType = "image/png"
 	}
-	ext := screenshotExtension(mimeType)
-	containerPath := fmt.Sprintf("%s/%d%s", dir, time.Now().UnixMilli(), ext)
-	saveErr := p.saveBytes(ctx, botID, containerPath, imgBytes)
-	text := fmt.Sprintf("Screenshot saved to %s", containerPath)
+	var asset media.Asset
+	var saveErr error
+	if p.media == nil {
+		saveErr = errors.New("media service is not configured")
+	} else {
+		asset, saveErr = p.media.Ingest(ctx, media.IngestInput{
+			BotID:    botID,
+			Mime:     mimeType,
+			Reader:   bytes.NewReader(imgBytes),
+			MaxBytes: defaultReadMediaMaxBytes,
+		})
+	}
+	text := fmt.Sprintf("Screenshot stored with content_hash %s", asset.ContentHash)
 	if saveErr != nil {
-		text = fmt.Sprintf("Screenshot captured (failed to save: %s)", saveErr.Error())
+		if p.logger != nil {
+			p.logger.Error(
+				"store screenshot failed",
+				slog.Any("error", saveErr),
+				slog.String("bot_id", botID),
+			)
+		}
+		text = "Screenshot captured but could not be stored"
 	}
 	content := []map[string]any{{"type": "text", "text": text}}
 	if data != nil {
@@ -1968,45 +1985,19 @@ func (p *BrowserProvider) buildScreenshotBytesResult(ctx context.Context, botID 
 			content = append(content, map[string]any{"type": "text", "text": fmt.Sprintf("Annotations: %v", annotations)})
 		}
 	}
-	result := map[string]any{"content": content, "path": containerPath, "mimeType": mimeType}
+	result := map[string]any{
+		"content":      content,
+		"content_hash": asset.ContentHash,
+		"mime":         mimeType,
+		"mimeType":     mimeType,
+		"size":         asset.SizeBytes,
+	}
 	if saveErr != nil {
-		result["save_error"] = saveErr.Error()
+		result["save_error"] = "screenshot storage failed"
+		delete(result, "content_hash")
+		delete(result, "size")
 	}
 	return result
-}
-
-func (p *BrowserProvider) screenshotDir(name string) string {
-	root := strings.TrimRight(strings.TrimSpace(p.dataRoot), "/")
-	if root == "" {
-		root = "/data"
-	}
-	return root + "/" + strings.TrimLeft(name, "/")
-}
-
-func (p *BrowserProvider) saveBytes(ctx context.Context, botID, path string, data []byte) error {
-	if p.containers == nil {
-		return errors.New("workspace runtime provider is not configured")
-	}
-	client, err := p.containers.MCPClient(ctx, botID)
-	if err != nil {
-		return err
-	}
-	dir := path[:strings.LastIndex(path, "/")]
-	if _, err := client.Exec(ctx, "mkdir -p "+dir, "/", 5); err != nil {
-		return err
-	}
-	return client.WriteFile(ctx, path, data)
-}
-
-func screenshotExtension(mimeType string) string {
-	switch strings.ToLower(strings.TrimSpace(mimeType)) {
-	case "image/jpeg", "image/jpg":
-		return ".jpg"
-	case "image/png":
-		return ".png"
-	default:
-		return ".img"
-	}
 }
 
 func (p *BrowserProvider) pointerClick(ctx context.Context, botID string, x, y int, mask byte) error {

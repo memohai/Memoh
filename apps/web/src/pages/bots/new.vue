@@ -42,7 +42,7 @@
             <Avatar class="size-16 rounded-full">
               <AvatarImage
                 v-if="form.avatar_url?.trim()"
-                :src="form.avatar_url.trim()"
+                :src="resolveAvatarUrl(form.avatar_url)"
                 :alt="form.display_name"
               />
               <AvatarFallback class="text-xl">
@@ -290,6 +290,7 @@ import { useQuery } from '@pinia/colada'
 import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability } from '@memohai/sdk'
 import type { BotsCreateBotRequest } from '@memohai/sdk'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
 import TimezoneSelect from '@/components/timezone-select/index.vue'

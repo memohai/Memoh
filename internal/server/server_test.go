@@ -29,6 +29,7 @@ func TestShouldSkipJWT_ChannelWebhookPaths(t *testing.T) {
 		{path: "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg", want: true},
 		{path: "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/metadata", want: false},
 		{path: "/channels/telegram/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg", want: true},
+		{path: "/avatars/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", want: false},
 		{path: "/channels/feishu/webhook", want: false},
 		{path: "/api/channels/feishu/webhook", want: false},
 		{path: "/webhook-tunnel/status", want: false},
@@ -72,6 +73,20 @@ func TestSafeRequestLogURIStripsPublicMediaQuery(t *testing.T) {
 	}
 	got := safeRequestLogURI(u, u.RequestURI())
 	want := "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg"
+	if got != want {
+		t.Fatalf("safeRequestLogURI = %q, want %q", got, want)
+	}
+}
+
+func TestSafeRequestLogURIStripsAuthenticatedAvatarToken(t *testing.T) {
+	t.Parallel()
+
+	u, err := neturl.Parse("/avatars/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?token=secret")
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	got := safeRequestLogURI(u, u.RequestURI())
+	want := "/avatars/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if got != want {
 		t.Fatalf("safeRequestLogURI = %q, want %q", got, want)
 	}

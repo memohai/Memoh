@@ -24,6 +24,7 @@ import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import { safeSessionSet } from '@/utils/safe-storage'
 import { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent, withACPMetadata, type ACPForm } from '@/utils/acp'
@@ -369,7 +370,7 @@ function skipOAuth() {
                   <Avatar class="size-16 rounded-full">
                     <AvatarImage
                       v-if="form.avatar_url?.trim()"
-                      :src="form.avatar_url.trim()"
+                      :src="resolveAvatarUrl(form.avatar_url)"
                       :alt="form.display_name"
                     />
                     <AvatarFallback class="text-xl text-muted-foreground">

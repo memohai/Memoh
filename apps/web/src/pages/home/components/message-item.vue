@@ -356,12 +356,11 @@ import type {
 } from '@/store/chat-list'
 
 import { resolveUrl } from '../composables/useMediaGallery'
+import { resolveAvatarUrl } from '@/lib/avatar-url'
 import { useElementVisibility } from '@vueuse/core'
-
 
 enableKatex()
 enableMermaid()
-
 
 const settingsStore = useSettingsStore()
 const isDark = computed(() => settingsStore.isDark)
@@ -636,9 +635,9 @@ const bubbleSelf = computed(() => isSelf.value && !props.channelThread)
 // Resolve the avatar/name for whoever sent this turn: the bot for assistant
 // replies, the signed-in user for own messages, the remote sender otherwise.
 const avatarSrc = computed(() => {
-  if (props.message.role === 'assistant') return props.botAvatarUrl ?? ''
+  if (props.message.role === 'assistant') return resolveAvatarUrl(props.botAvatarUrl)
   if (props.message.role === 'user') {
-    return isSelf.value ? (userStore.userInfo.avatarUrl ?? '') : (props.message.senderAvatarUrl ?? '')
+    return resolveAvatarUrl(isSelf.value ? userStore.userInfo.avatarUrl : props.message.senderAvatarUrl)
   }
   return ''
 })

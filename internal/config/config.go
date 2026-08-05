@@ -3,8 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +51,8 @@ const (
 	DefaultAgentToolOutputBytes  = 64 * 1024
 	DefaultAgentToolOutputLines  = 2000
 	DefaultAgentSystemFilesBytes = 32 * 1024
+	DefaultStorageProvider       = StorageProviderFilesystem
+	DefaultS3Region              = "us-east-1"
 
 	ImagePullPolicyIfNotPresent = "if_not_present"
 	ImagePullPolicyAlways       = "always"
@@ -76,6 +80,7 @@ type Config struct {
 	Supermarket    SupermarketConfig    `toml:"supermarket"`
 	OAuthClients   OAuthClientsConfig   `toml:"oauth_clients"`
 	SessionRuntime SessionRuntimeConfig `toml:"session_runtime"`
+	Storage        StorageConfig        `toml:"storage"`
 	InstanceID     string               `toml:"instance_id"`
 	BridgeTLS      BridgeTLSConfig      `toml:"bridge_tls"`
 	WebhookTunnel  WebhookTunnelConfig  `toml:"webhook_tunnel"`
@@ -222,6 +227,74 @@ type AgentConfig struct {
 	ToolOutputMaxBytes  int `toml:"tool_output_max_bytes"`
 	ToolOutputMaxLines  int `toml:"tool_output_max_lines"`
 	SystemFilesMaxBytes int `toml:"system_files_max_bytes"`
+}
+
+const (
+	StorageProviderFilesystem = "filesystem"
+	StorageProviderS3         = "s3"
+)
+
+// StorageConfig selects the media object storage implementation. Filesystem
+// preserves the existing container/local behavior; S3 uses a private
+// S3-compatible bucket shared by Server and Channel.
+type StorageConfig struct {
+	Provider string          `toml:"provider"`
+	S3       S3StorageConfig `toml:"s3"`
+}
+
+type S3StorageConfig struct {
+	Endpoint        string `toml:"endpoint"`
+	Bucket          string `toml:"bucket"`
+	AccessKeyID     string `toml:"access_key_id" json:"-"`
+	SecretAccessKey string `toml:"secret_access_key" json:"-"`
+	Region          string `toml:"region"`
+	Prefix          string `toml:"prefix"`
+	PathStyle       bool   `toml:"path_style"`
+	BackfillOnStart bool   `toml:"backfill_on_start"`
+}
+
+func (c StorageConfig) ProviderOrDefault() string {
+	provider := strings.ToLower(strings.TrimSpace(c.Provider))
+	if provider == "" {
+		return DefaultStorageProvider
+	}
+	return provider
+}
+
+func (c StorageConfig) Validate() error {
+	switch c.ProviderOrDefault() {
+	case StorageProviderFilesystem:
+		return nil
+	case StorageProviderS3:
+		return c.S3.Validate()
+	default:
+		return fmt.Errorf("unsupported storage provider %q", c.Provider)
+	}
+}
+
+func (c S3StorageConfig) RegionOrDefault() string {
+	if region := strings.TrimSpace(c.Region); region != "" {
+		return region
+	}
+	return DefaultS3Region
+}
+
+func (c S3StorageConfig) Validate() error {
+	endpoint := strings.TrimSpace(c.Endpoint)
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed == nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return errors.New("storage.s3.endpoint must be an absolute HTTP(S) URL")
+	}
+	if strings.TrimSpace(c.Bucket) == "" {
+		return errors.New("storage.s3.bucket is required")
+	}
+	if strings.TrimSpace(c.AccessKeyID) == "" {
+		return errors.New("storage.s3.access_key_id is required")
+	}
+	if strings.TrimSpace(c.SecretAccessKey) == "" {
+		return errors.New("storage.s3.secret_access_key is required")
+	}
+	return nil
 }
 
 const (
@@ -695,6 +768,13 @@ func Load(path string) (Config, error) {
 				KeyPrefix: DefaultSessionRuntimeRedisKeyPrefix,
 			},
 		},
+		Storage: StorageConfig{
+			Provider: DefaultStorageProvider,
+			S3: S3StorageConfig{
+				Region:    DefaultS3Region,
+				PathStyle: true,
+			},
+		},
 	}
 
 	if path == "" {
@@ -704,7 +784,7 @@ func Load(path string) (Config, error) {
 
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			cfg.applyBridgeTLSEnvOverrides()
+			cfg.applyEnvOverrides()
 			if err := cfg.validate(); err != nil {
 				return cfg, err
 			}
@@ -746,7 +826,7 @@ func Load(path string) (Config, error) {
 	} else {
 		cfg.Workspace = cfg.Container.WorkspaceConfig
 	}
-	cfg.applyBridgeTLSEnvOverrides()
+	cfg.applyEnvOverrides()
 	if err := cfg.validate(); err != nil {
 		return cfg, err
 	}
@@ -766,6 +846,9 @@ func (cfg Config) validate() error {
 		return err
 	}
 	if err := cfg.ConnectIt.Validate(); err != nil {
+		return err
+	}
+	if err := cfg.Storage.Validate(); err != nil {
 		return err
 	}
 	return nil
@@ -804,7 +887,7 @@ func (cfg Config) ValidateChannelRuntime() error {
 	return cfg.InternalRPC.Validate()
 }
 
-func (cfg *Config) applyBridgeTLSEnvOverrides() {
+func (cfg *Config) applyEnvOverrides() {
 	if value := strings.TrimSpace(os.Getenv("MEMOH_INSTANCE_ID")); value != "" {
 		cfg.InstanceID = value
 	}
@@ -855,6 +938,32 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_CONNECT_IT_API_TOKEN")); value != "" {
 		cfg.ConnectIt.APIToken = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_STORAGE_PROVIDER")); value != "" {
+		cfg.Storage.Provider = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_STORAGE_S3_ENDPOINT")); value != "" {
+		cfg.Storage.S3.Endpoint = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_STORAGE_S3_BUCKET")); value != "" {
+		cfg.Storage.S3.Bucket = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_STORAGE_S3_ACCESS_KEY_ID")); value != "" {
+		cfg.Storage.S3.AccessKeyID = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_STORAGE_S3_SECRET_ACCESS_KEY")); value != "" {
+		cfg.Storage.S3.SecretAccessKey = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_STORAGE_S3_REGION")); value != "" {
+		cfg.Storage.S3.Region = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_STORAGE_S3_PREFIX")); value != "" {
+		cfg.Storage.S3.Prefix = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_STORAGE_S3_BACKFILL_ON_START")); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			cfg.Storage.S3.BackfillOnStart = enabled
+		}
 	}
 }
 

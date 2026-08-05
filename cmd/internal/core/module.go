@@ -7,6 +7,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/context/compaction"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	audiopkg "github.com/memohai/memoh/internal/audio"
+	avatarpkg "github.com/memohai/memoh/internal/avatar"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channelaccess"
@@ -105,6 +106,8 @@ func ServerModule() fx.Option {
 			videopkg.NewService,
 			provideAudioTempStore,
 			provideMediaService,
+			provideMediaBackfill,
+			avatarpkg.NewService,
 			provideSessionRunLedger,
 			provideRuntimeFenceActivator,
 			provideSessionRuntimeManager,
