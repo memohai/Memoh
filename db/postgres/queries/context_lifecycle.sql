@@ -73,6 +73,37 @@ WHERE context_lifecycles.team_id = public.memoh_current_team_id()
   AND context_lifecycles.session_id = EXCLUDED.session_id
 RETURNING *;
 
+-- name: UpsertTerminalContextLifecycle :one
+INSERT INTO context_lifecycles (
+  run_id,
+  bot_id,
+  session_id,
+  status,
+  error_code,
+  snapshot
+)
+VALUES (
+  sqlc.arg(run_id),
+  sqlc.arg(bot_id),
+  sqlc.arg(session_id),
+  sqlc.arg(status),
+  sqlc.narg(error_code)::text,
+  sqlc.arg(snapshot)
+)
+ON CONFLICT (run_id) DO UPDATE
+SET
+  status = EXCLUDED.status,
+  error_code = EXCLUDED.error_code,
+  snapshot = CASE
+    WHEN sqlc.arg(replace_snapshot)::boolean THEN EXCLUDED.snapshot
+    ELSE context_lifecycles.snapshot
+  END
+WHERE context_lifecycles.team_id = public.memoh_current_team_id()
+  AND context_lifecycles.team_id = EXCLUDED.team_id
+  AND context_lifecycles.bot_id = EXCLUDED.bot_id
+  AND context_lifecycles.session_id = EXCLUDED.session_id
+RETURNING *;
+
 -- name: GetLatestAssistantContextLifecycleByRunID :one
 SELECT id, metadata
 FROM bot_history_messages

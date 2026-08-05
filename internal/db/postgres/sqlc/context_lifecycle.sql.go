@@ -327,3 +327,69 @@ func (q *Queries) UpsertAbortedContextLifecycle(ctx context.Context, arg UpsertA
 	)
 	return i, err
 }
+
+const upsertTerminalContextLifecycle = `-- name: UpsertTerminalContextLifecycle :one
+INSERT INTO context_lifecycles (
+  run_id,
+  bot_id,
+  session_id,
+  status,
+  error_code,
+  snapshot
+)
+VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5::text,
+  $6
+)
+ON CONFLICT (run_id) DO UPDATE
+SET
+  status = EXCLUDED.status,
+  error_code = EXCLUDED.error_code,
+  snapshot = CASE
+    WHEN $7::boolean THEN EXCLUDED.snapshot
+    ELSE context_lifecycles.snapshot
+  END
+WHERE context_lifecycles.team_id = public.memoh_current_team_id()
+  AND context_lifecycles.team_id = EXCLUDED.team_id
+  AND context_lifecycles.bot_id = EXCLUDED.bot_id
+  AND context_lifecycles.session_id = EXCLUDED.session_id
+RETURNING run_id, team_id, bot_id, session_id, status, error_code, snapshot, created_at
+`
+
+type UpsertTerminalContextLifecycleParams struct {
+	RunID           pgtype.UUID `json:"run_id"`
+	BotID           pgtype.UUID `json:"bot_id"`
+	SessionID       pgtype.UUID `json:"session_id"`
+	Status          string      `json:"status"`
+	ErrorCode       pgtype.Text `json:"error_code"`
+	Snapshot        []byte      `json:"snapshot"`
+	ReplaceSnapshot bool        `json:"replace_snapshot"`
+}
+
+func (q *Queries) UpsertTerminalContextLifecycle(ctx context.Context, arg UpsertTerminalContextLifecycleParams) (ContextLifecycle, error) {
+	row := q.db.QueryRow(ctx, upsertTerminalContextLifecycle,
+		arg.RunID,
+		arg.BotID,
+		arg.SessionID,
+		arg.Status,
+		arg.ErrorCode,
+		arg.Snapshot,
+		arg.ReplaceSnapshot,
+	)
+	var i ContextLifecycle
+	err := row.Scan(
+		&i.RunID,
+		&i.TeamID,
+		&i.BotID,
+		&i.SessionID,
+		&i.Status,
+		&i.ErrorCode,
+		&i.Snapshot,
+		&i.CreatedAt,
+	)
+	return i, err
+}

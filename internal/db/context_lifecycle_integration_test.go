@@ -5,6 +5,7 @@ package db_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -284,6 +285,138 @@ VALUES ($1, gen_random_uuid(), $2, $3, 'completed', '{}'::jsonb)
 `, team.DefaultTeamID, botID, sessionID)
 	if sqlState(crossTeamErr) != "42501" {
 		t.Fatalf("cross-team lifecycle insert SQLSTATE = %q, want 42501", sqlState(crossTeamErr))
+	}
+}
+
+func TestUpsertTerminalContextLifecycleConvergesByRunIdentity(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire database connection: %v", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SELECT set_config('memoh.team_id', $1, false)", team.DefaultTeamID); err != nil {
+		t.Fatalf("bind default team: %v", err)
+	}
+
+	const (
+		botID          = "00000000-0000-0000-0000-00000000b511"
+		sessionID      = "00000000-0000-0000-0000-00000000c511"
+		otherSessionID = "00000000-0000-0000-0000-00000000c512"
+		runID          = "00000000-0000-0000-0000-00000000d511"
+	)
+	if _, err := conn.Exec(ctx, `
+WITH principal AS (
+  INSERT INTO users (username, is_active, metadata)
+  VALUES ('terminal-lifecycle-owner', true, '{}')
+  RETURNING id
+), membership AS (
+  INSERT INTO team_members (team_id, user_id)
+  SELECT $1, principal.id FROM principal
+  RETURNING user_id
+), bot AS (
+  INSERT INTO bots (id, team_id, owner_user_id, name, status, metadata)
+  SELECT $2, $1, membership.user_id, 'terminal-lifecycle-bot', 'ready', '{}' FROM membership
+  RETURNING id
+)
+INSERT INTO bot_sessions (id, team_id, bot_id, channel_type, title, metadata)
+SELECT sessions.session_id, $1, bot.id, 'local', 'terminal lifecycle', '{}'
+FROM bot
+CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
+`, team.DefaultTeamID, botID, sessionID, otherSessionID); err != nil {
+		t.Fatalf("seed terminal lifecycle identity: %v", err)
+	}
+
+	queries := sqlc.New(conn)
+	parsedRunID := mustParseLifecycleUUID(t, runID)
+	parsedBotID := mustParseLifecycleUUID(t, botID)
+	parsedSessionID := mustParseLifecycleUUID(t, sessionID)
+	parsedOtherSessionID := mustParseLifecycleUUID(t, otherSessionID)
+	initialSnapshot := []byte(`{"version":1,"source":"initial"}`)
+	created, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:           parsedRunID,
+		BotID:           parsedBotID,
+		SessionID:       parsedSessionID,
+		Status:          "completed",
+		Snapshot:        initialSnapshot,
+		ReplaceSnapshot: true,
+	})
+	if err != nil {
+		t.Fatalf("insert terminal context lifecycle: %v", err)
+	}
+	if created.Status != "completed" || created.ErrorCode.Valid {
+		t.Fatalf("created terminal lifecycle = (%q, %#v), want completed with no error", created.Status, created.ErrorCode)
+	}
+	assertJSONSemanticallyEqual(t, created.Snapshot, initialSnapshot)
+
+	authoritativeSnapshot := []byte(`{"version":2,"source":"terminal-candidate"}`)
+	failed, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:           parsedRunID,
+		BotID:           parsedBotID,
+		SessionID:       parsedSessionID,
+		Status:          "failed_provider",
+		ErrorCode:       pgtype.Text{String: "provider.timeout", Valid: true},
+		Snapshot:        authoritativeSnapshot,
+		ReplaceSnapshot: true,
+	})
+	if err != nil {
+		t.Fatalf("replace terminal context lifecycle: %v", err)
+	}
+	if failed.Status != "failed_provider" || !failed.ErrorCode.Valid || failed.ErrorCode.String != "provider.timeout" {
+		t.Fatalf("replaced terminal lifecycle = (%q, %#v), want failed_provider/provider.timeout", failed.Status, failed.ErrorCode)
+	}
+	assertJSONSemanticallyEqual(t, failed.Snapshot, authoritativeSnapshot)
+	if failed.CreatedAt != created.CreatedAt {
+		t.Fatalf("terminal upsert changed created_at = %#v, want %#v", failed.CreatedAt, created.CreatedAt)
+	}
+
+	staleSnapshot := []byte(`{"version":0,"source":"stale"}`)
+	preserveArgs := sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:           parsedRunID,
+		BotID:           parsedBotID,
+		SessionID:       parsedSessionID,
+		Status:          "aborted",
+		Snapshot:        staleSnapshot,
+		ReplaceSnapshot: false,
+	}
+	preserved, err := queries.UpsertTerminalContextLifecycle(ctx, preserveArgs)
+	if err != nil {
+		t.Fatalf("preserve terminal context lifecycle snapshot: %v", err)
+	}
+	if preserved.Status != "aborted" || preserved.ErrorCode.Valid {
+		t.Fatalf("preserved terminal lifecycle = (%q, %#v), want aborted with no error", preserved.Status, preserved.ErrorCode)
+	}
+	assertJSONSemanticallyEqual(t, preserved.Snapshot, authoritativeSnapshot)
+	if preserved.CreatedAt != created.CreatedAt {
+		t.Fatalf("snapshot-preserving upsert changed created_at = %#v, want %#v", preserved.CreatedAt, created.CreatedAt)
+	}
+
+	idempotent, err := queries.UpsertTerminalContextLifecycle(ctx, preserveArgs)
+	if err != nil {
+		t.Fatalf("repeat terminal context lifecycle upsert: %v", err)
+	}
+	if !reflect.DeepEqual(idempotent, preserved) {
+		t.Fatalf("idempotent terminal upsert = %#v, want %#v", idempotent, preserved)
+	}
+
+	_, err = queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:           parsedRunID,
+		BotID:           parsedBotID,
+		SessionID:       parsedOtherSessionID,
+		Status:          "completed",
+		Snapshot:        []byte(`{"version":3,"source":"wrong-session"}`),
+		ReplaceSnapshot: true,
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("cross-session terminal upsert error = %v, want pgx.ErrNoRows", err)
+	}
+	unchanged, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("reload terminal context lifecycle after rejected identity: %v", err)
+	}
+	if !reflect.DeepEqual(unchanged, preserved) {
+		t.Fatalf("rejected cross-session upsert changed lifecycle: got %#v, want %#v", unchanged, preserved)
 	}
 }
 

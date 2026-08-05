@@ -429,6 +429,7 @@ type Queries interface {
 	UpdateUserProviderOAuthState(ctx context.Context, arg dbsqlc.UpdateUserProviderOAuthStateParams) error
 	UpsertAccountByUsername(ctx context.Context, arg dbsqlc.UpsertAccountByUsernameParams) (dbsqlc.UpsertAccountByUsernameRow, error)
 	UpsertAbortedContextLifecycle(ctx context.Context, arg dbsqlc.UpsertAbortedContextLifecycleParams) (dbsqlc.ContextLifecycle, error)
+	UpsertTerminalContextLifecycle(ctx context.Context, arg dbsqlc.UpsertTerminalContextLifecycleParams) (dbsqlc.ContextLifecycle, error)
 	UpsertBotChannelConfig(ctx context.Context, arg dbsqlc.UpsertBotChannelConfigParams) (dbsqlc.BotChannelConfig, error)
 	UpsertBotSettings(ctx context.Context, arg dbsqlc.UpsertBotSettingsParams) (dbsqlc.UpsertBotSettingsRow, error)
 	UpsertBotStorageBinding(ctx context.Context, arg dbsqlc.UpsertBotStorageBindingParams) (dbsqlc.BotStorageBinding, error)
