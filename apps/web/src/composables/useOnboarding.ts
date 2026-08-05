@@ -5,8 +5,8 @@ import { putUsersMe } from '@memohai/sdk'
 import { toast } from '@felinic/ui'
 import { useUserStore } from '@/store/user'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
-import { readACPSelection, clearACPSelection } from '@/pages/onboarding/steps/useACPSetup'
-import { safeLocalRemove, safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
+import { onboardingRuntimeState, resetOnboardingRuntimeState } from '@/pages/onboarding/state'
+import { safeLocalRemove } from '@/utils/safe-storage'
 
 export const LAST_STEP_INDEX = 4
 export const STEP_COUNT = 5
@@ -66,23 +66,26 @@ export function useOnboarding() {
       return false
     }
     await minWait
-    const createdBotId = safeSessionGet(ONBOARDING_KEYS.createdBotId)
-    const acpAgentId = readACPSelection()?.agentId ?? ''
-    safeSessionRemove(ONBOARDING_KEYS.createdBotId)
-    safeSessionRemove(ONBOARDING_KEYS.providerAddedCount)
-    clearACPSelection()
-    safeLocalRemove(ONBOARDING_KEYS.forceOnboarding)
-    if (createdBotId) {
-      // Navigate to the `bot` route directly (not the `/chat/...` redirect,
-      // which drops the query) so the chat page can read `?acp=` on landing.
-      await router.replace(
-        acpAgentId
-          ? { name: 'bot', params: { botName: createdBotId }, query: { acp: acpAgentId } }
-          : { name: 'bot', params: { botName: createdBotId } },
-      )
-    } else {
-      await router.replace('/')
+    const { botId: createdBotId, acpLaunchAgentId = '' } = onboardingRuntimeState.value.botResult ?? {}
+    try {
+      if (createdBotId) {
+        // Navigate to the `bot` route directly (not the `/chat/...` redirect,
+        // which drops the query) so the chat page can read `?acp=` on landing.
+        await router.replace(
+          acpLaunchAgentId
+            ? { name: 'bot', params: { botName: createdBotId }, query: { acp: acpLaunchAgentId } }
+            : { name: 'bot', params: { botName: createdBotId } },
+        )
+      } else {
+        await router.replace('/')
+      }
+    } catch {
+      toast.error(t('onboarding.complete.navigationFailed'))
+      completing.value = false
+      return false
     }
+    resetOnboardingRuntimeState()
+    safeLocalRemove(ONBOARDING_KEYS.forceOnboarding)
     completing.value = false
     return true
   }

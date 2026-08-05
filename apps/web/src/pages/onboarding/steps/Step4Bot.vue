@@ -18,22 +18,27 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { FieldStack, InlineLoadingRow, toast, useClipboard } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, getMemoryProviders, getAcpProfiles, type AcpprofilePublicProfile } from '@memohai/sdk'
+import { getModels, getProviders, getProvidersByIdModels, getMemoryProviders, getAcpProfiles, putModelsById, type AcpprofilePublicProfile } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
-import { safeSessionSet } from '@/utils/safe-storage'
 import { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent, withACPMetadata, type ACPForm } from '@/utils/acp'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 import { useStepTransition, nextFrame } from '../useStepTransition'
-import { ONBOARDING_KEYS } from '../constants'
-import { clearACPSelection, readACPSelection, type OnboardingACPSelection } from './useACPSetup'
+import {
+  beginOnboardingBotCreation,
+  commitOnboardingBotResult,
+  disableOnboardingACPLaunch,
+  onboardingOAuthResumeBotId,
+  onboardingRuntimeState,
+} from '../state'
+import { mergeOnboardingModels } from './provider-setup'
 import StepFrame from '../components/step-frame.vue'
 import StepExitShell from '../components/step-exit-shell.vue'
 import HintBox from '../components/hint-box.vue'
@@ -50,9 +55,14 @@ const submitting = ref(false)
 const store = useBotCreateProgressStore()
 const { lines: terminalLines, status: createStatus } = storeToRefs(store)
 
-const acpSelection = ref<OnboardingACPSelection | null>(null)
 const acpProfiles = ref<AcpprofilePublicProfile[]>([])
 
+const acpSelection = computed(() => onboardingRuntimeState.value.selection.kind === 'acp'
+  ? onboardingRuntimeState.value.selection.selection
+  : null)
+const onboardingProviderId = computed(() => onboardingRuntimeState.value.selection.kind === 'provider'
+  ? onboardingRuntimeState.value.selection.providerId
+  : '')
 const isACPSelected = computed(() => !!acpSelection.value)
 const acpAgentId = computed(() => acpSelection.value?.agentId ?? '')
 const acpAgentName = computed(() => acpAgentDisplayName(acpAgentId.value))
@@ -86,7 +96,6 @@ const {
 } = useACPOAuth(() => oauthBotId.value)
 
 onMounted(() => {
-  acpSelection.value = readACPSelection()
   if (acpSelection.value) {
     void (async () => {
       try {
@@ -97,6 +106,9 @@ onMounted(() => {
       }
     })()
   }
+
+  const resumeBotId = onboardingOAuthResumeBotId()
+  if (resumeBotId) enterOAuthPhase(resumeBotId)
 })
 
 const form = reactive({
@@ -135,6 +147,23 @@ const { data: modelData } = useQuery({
   },
 })
 
+const {
+  data: onboardingModelData,
+  status: onboardingModelsStatus,
+  isLoading: onboardingModelsLoading,
+  refresh: refreshOnboardingModels,
+} = useQuery({
+  key: () => ['onboarding-provider-models', onboardingProviderId.value],
+  query: async () => {
+    if (!onboardingProviderId.value) return []
+    const { data } = await getProvidersByIdModels({
+      path: { id: onboardingProviderId.value },
+      throwOnError: true,
+    })
+    return data ?? []
+  },
+})
+
 const { data: providerData } = useQuery({
   key: ['providers'],
   query: async () => {
@@ -143,11 +172,17 @@ const { data: providerData } = useQuery({
   },
 })
 
-const models = computed(() => modelData.value ?? [])
+const models = computed(() => mergeOnboardingModels(
+  modelData.value ?? [],
+  onboardingModelData.value ?? [],
+))
 const providers = computed(() => providerData.value ?? [])
 
 const canSubmit = computed(() => {
-  return !!form.display_name.trim()
+  if (!form.display_name.trim()) return false
+  if (isACPSelected.value || !onboardingProviderId.value) return true
+  if (onboardingModelsStatus.value !== 'success') return false
+  return !!form.chat_model_id
 })
 
 const isContainerSubmitting = computed(() => submitting.value)
@@ -180,9 +215,34 @@ function buildMetadata(): Record<string, unknown> | undefined {
 async function handleSubmit() {
   if (!canSubmit.value || submitting.value) return
   submitting.value = true
+  beginOnboardingBotCreation()
+
+  const selectedModel = models.value.find(model => model.id === form.chat_model_id)
+  if (selectedModel?.id && !selectedModel.enable) {
+    try {
+      await putModelsById({
+        path: { id: selectedModel.id },
+        body: {
+          model_id: selectedModel.model_id,
+          name: selectedModel.name,
+          provider_id: selectedModel.provider_id,
+          type: selectedModel.type,
+          config: selectedModel.config,
+          enable: true,
+        },
+        throwOnError: true,
+      })
+      void queryCache.invalidateQueries({ key: ['models'] })
+      void queryCache.invalidateQueries({ key: ['all-models'] })
+    } catch {
+      toast.error(t('common.saveFailed'))
+      submitting.value = false
+      return
+    }
+  }
 
   // The store drives the inline terminal reactively while we await completion.
-  await store.start({
+  const createResult = await store.start({
     display_name: form.display_name.trim(),
     avatar_url: form.avatar_url.trim() || undefined,
     timezone: undefined,
@@ -211,10 +271,17 @@ async function handleSubmit() {
 
   const botId = store.bot?.id
   if (botId) {
-    safeSessionSet(ONBOARDING_KEYS.createdBotId, botId)
+    commitOnboardingBotResult({
+      botId,
+      settingsApplied: createResult.settingsApplied,
+      ...(form.chat_model_id && createResult.settingsApplied && { selectedModelId: form.chat_model_id }),
+      ...(acpSelection.value && { acpLaunchAgentId: acpSelection.value.agentId }),
+    })
   }
   if (store.setupError) {
     toast.error(store.setupError)
+  } else if (!createResult.settingsApplied) {
+    toast.error(t('common.saveFailed'))
   }
 
   void queryCache.invalidateQueries({ key: getBotsQueryKey() })
@@ -340,7 +407,7 @@ function skipOAuth() {
   // redirect with ?acp=<agent>. Starting an ACP session without a token would
   // fail on the first prompt; the user can authorize later via bot settings.
   if (codexDevicePending.value) void cancelCodexDeviceAuthorization()
-  clearACPSelection()
+  disableOnboardingACPLaunch()
   leave(nextStep)
 }
 </script>
@@ -458,7 +525,32 @@ function skipOAuth() {
                   </TooltipContent>
                 </Tooltip>
               </div>
+              <InlineLoadingRow
+                v-if="onboardingProviderId && onboardingModelsStatus === 'pending'"
+                size="sm"
+              >
+                {{ $t('onboarding.bot.model.loading') }}
+              </InlineLoadingRow>
+              <div
+                v-else-if="onboardingProviderId && onboardingModelsStatus === 'error'"
+                class="flex items-center justify-between gap-3"
+              >
+                <p class="text-sm text-destructive">
+                  {{ $t('onboarding.bot.model.loadFailed') }}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  :disabled="onboardingModelsLoading"
+                  @click="refreshOnboardingModels()"
+                >
+                  <Spinner v-if="onboardingModelsLoading" />
+                  {{ $t('onboarding.bot.model.retry') }}
+                </Button>
+              </div>
               <ModelSelect
+                v-else
                 v-model="form.chat_model_id"
                 :models="models"
                 :providers="providers"

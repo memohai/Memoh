@@ -65,6 +65,7 @@
     "inactive": "未启用",
     "loadFailed": "加载失败",
     "saveFailed": "保存失败",
+    "networkError": "网络连接失败，请检查网络后重试。",
     "createdAt": "创建时间",
     "none": "无",
     "yes": "是",
@@ -3333,7 +3334,10 @@
       "preparingEnvironment": "正在准备环境...",
       "model": {
         "selectPlaceholder": "选择模型",
-        "hint": "选择 Bot 回复时使用的模型。建议现在选择，之后也可随时在设置中更改。"
+        "hint": "选择 Bot 回复时使用的模型。建议现在选择，之后也可随时在设置中更改。",
+        "loading": "正在加载模型...",
+        "loadFailed": "模型列表加载失败，请重试。",
+        "retry": "重试"
       },
       "acp": {
         "banner": "该 Bot 将以 {agent} 作为主要智能体",
@@ -3379,7 +3383,8 @@
         }
       },
       "saveFailed": "保存失败，请重试",
-      "noProviderWarning": "你尚未配置 AI 服务商，Bot 将无法回复消息。请前往 设置 → 服务商 添加"
+      "navigationFailed": "无法打开 Bot，请重试。",
+      "noModelWarning": "尚未为 Bot 选择模型，Bot 将无法回复消息。你可以稍后在 Bot 设置中配置。"
     }
   },
   "deviceCode": {

@@ -152,7 +152,7 @@ describe('useBotCreateProgressStore', () => {
     ]))
 
     const store = useBotCreateProgressStore()
-    await store.start(
+    const result = await store.start(
       { name: 'ada', display_name: 'Ada' },
       { settings: { chat_model_id: 'm1', memory_provider_id: 'p1' } },
     )
@@ -162,6 +162,7 @@ describe('useBotCreateProgressStore', () => {
       body: { chat_model_id: 'm1', memory_provider_id: 'p1' },
     }))
     expect(store.status).toBe('ready')
+    expect(result.settingsApplied).toBe(true)
     expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'done')).toBe(true)
   })
 
@@ -174,13 +175,15 @@ describe('useBotCreateProgressStore', () => {
     putBotsByBotIdSettings.mockRejectedValue(new Error('settings boom'))
 
     const store = useBotCreateProgressStore()
-    await store.start(
+    const result = await store.start(
       { name: 'ada', display_name: 'Ada' },
       { settings: { chat_model_id: 'm1' } },
     )
 
     expect(store.status).toBe('ready')
     expect(store.bot).toEqual(bot)
+    expect(result.settingsApplied).toBe(false)
+    expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'error')).toBe(true)
   })
 
   it('reset returns the store to idle', async () => {

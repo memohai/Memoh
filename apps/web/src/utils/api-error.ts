@@ -116,6 +116,11 @@ function pickErrorDetail(error: unknown): string {
   return ''
 }
 
+function pickNetworkErrorMessage(error: unknown): string {
+  if (!(error instanceof TypeError)) return ''
+  return renderI18nMessage('common.networkError')
+}
+
 export function parseMemohError(error: unknown): MemohError | null {
   for (const record of collectErrorRecords(error)) {
     if (typeof record.code !== 'string' || !record.code.trim()) continue
@@ -157,7 +162,9 @@ export function resolveApiErrorMessage(
   fallback: string,
   options: ResolveApiErrorMessageOptions = {},
 ): string {
-  const detail = pickApiFeedbackMessage(error) || pickErrorDetail(error)
+  const detail = pickApiFeedbackMessage(error)
+    || pickNetworkErrorMessage(error)
+    || pickErrorDetail(error)
   if (!detail) {
     return fallback
   }
