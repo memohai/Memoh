@@ -22,6 +22,8 @@ type abortLifecycleQueries struct {
 	dbstore.Queries
 	mu            sync.Mutex
 	existing      *sqlc.ContextLifecycle
+	existingAfter int
+	getCalls      int
 	assistantID   pgtype.UUID
 	metadata      []byte
 	metadataErr   error
@@ -48,7 +50,8 @@ func (q *abortLifecycleQueries) GetContextLifecycleByRunID(
 ) (sqlc.ContextLifecycle, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.existing == nil {
+	q.getCalls++
+	if q.existing == nil || q.existingAfter > 0 && q.getCalls < q.existingAfter {
 		return sqlc.ContextLifecycle{}, pgx.ErrNoRows
 	}
 	return *q.existing, nil
