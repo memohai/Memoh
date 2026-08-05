@@ -65,6 +65,7 @@
     "inactive": "Inactive",
     "loadFailed": "Failed to load",
     "saveFailed": "Failed to save",
+    "networkError": "Network connection failed. Check your connection and try again.",
     "createdAt": "Created at",
     "none": "None",
     "yes": "Yes",

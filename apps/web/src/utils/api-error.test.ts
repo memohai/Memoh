@@ -69,6 +69,19 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
+    ['en', 'Network connection failed. Check your connection and try again.'],
+    ['zh', '网络连接失败，请检查网络后重试。'],
+    ['ja', 'ネットワークに接続できません。接続を確認してもう一度お試しください。'],
+  ])('localizes native fetch failures for %s', (language, expected) => {
+    locale = language
+
+    expect(resolveApiErrorMessage(
+      new TypeError('NetworkError when attempting to fetch resource.'),
+      'fallback',
+    )).toBe(expected)
+  })
+
+  it.each([
     ['zh', '启动工作区失败'],
     ['ja', 'Workspace を起動できませんでした'],
   ])('localizes workspace errors for %s instead of exposing backend English', (language, expected) => {
