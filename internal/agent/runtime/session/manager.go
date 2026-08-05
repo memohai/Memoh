@@ -55,6 +55,8 @@ type Manager struct {
 	commandHandler         func(context.Context, Command) error
 	commandReconciler      func(context.Context, Command) (bool, error)
 	decisionStore          DecisionStore
+	terminalObserver       func(context.Context, TerminalRun)
+	terminalReconciler     func(context.Context) error
 	pendingCommands        map[string]map[*commandWaiter]struct{}
 	inflightCommandTargets map[string]struct{}
 	commandExecutions      map[string]chan struct{}
@@ -329,6 +331,56 @@ func (m *Manager) SetDecisionStore(store DecisionStore) {
 	m.mu.Unlock()
 }
 
+// SetTerminalObserver installs the application-owned sink for authoritative
+// durable run outcomes. The callback is invoked synchronously without holding
+// the manager lock, and may be called more than once for the same run when a
+// fenced terminal transition is replayed.
+func (m *Manager) SetTerminalObserver(observer func(context.Context, TerminalRun)) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.terminalObserver = observer
+	m.mu.Unlock()
+}
+
+// SetTerminalReconciler installs a bounded application-owned repair pass for
+// terminal runs whose observation was interrupted after the ledger commit.
+// The elected reaper invokes it once per tick after its own terminal duties.
+func (m *Manager) SetTerminalReconciler(reconciler func(context.Context) error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.terminalReconciler = reconciler
+	m.mu.Unlock()
+}
+
+func (m *Manager) observeTerminalRun(ctx context.Context, run TerminalRun) {
+	if m == nil || run.RunID == "" {
+		return
+	}
+	m.mu.Lock()
+	observer := m.terminalObserver
+	m.mu.Unlock()
+	if observer != nil {
+		observer(context.WithoutCancel(ctx), run)
+	}
+}
+
+func (m *Manager) reconcileTerminalRuns(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	reconciler := m.terminalReconciler
+	m.mu.Unlock()
+	if reconciler == nil {
+		return nil
+	}
+	return reconciler(context.WithoutCancel(ctx))
+}
+
 func (m *Manager) Start(ctx context.Context) error {
 	if m == nil {
 		return nil
@@ -457,6 +509,8 @@ func (m *Manager) startReaper(ctx context.Context) error {
 	}
 	reaper := NewReaper(m.runs, m.liveness, m.tuning, m.ownerID, m.logger)
 	reaper.SetWaitingDecisionRecoverer(m.recoverWaitingDecision)
+	reaper.SetTerminalObserver(m.observeTerminalRun)
+	reaper.SetTerminalReconciler(m.reconcileTerminalRuns)
 	if err := reaper.Start(ctx); err != nil {
 		return err
 	}
@@ -964,7 +1018,11 @@ func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, messa
 	}
 	finishMessage := strings.TrimSpace(message)
 	status = m.resolveTerminalStatus(ctx, handle, status, finishMessage)
-	if err := m.finalizeLedgerRun(ctx, handle, status, finishMessage); err != nil {
+	terminal, err := m.finalizeLedgerRun(ctx, handle, status, finishMessage)
+	if terminal.RunID != "" {
+		defer m.observeTerminalRun(ctx, terminal)
+	}
+	if err != nil {
 		// The lease is deliberately left alone: it is the only pointer the
 		// reaper has to this run, and the durable row still says the run is
 		// active. Renewal has already stopped, so expiry brings the reaper.
