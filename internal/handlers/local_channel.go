@@ -1316,7 +1316,7 @@ func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAd
 		// terminal write was refused and the reaper names the outcome instead.
 		h.logger.Warn("skip finishing runtime run after ownership loss",
 			slog.String("run_id", admission.RunID))
-	case err != nil:
+	default:
 		h.logger.Error("finish runtime run failed",
 			slog.Any("error", err),
 			slog.String("run_id", admission.RunID),
