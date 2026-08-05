@@ -145,6 +145,15 @@ func (s *synchronizedLifecycleStore) UpsertTerminalContextLifecycle(
 	return s.store.UpsertTerminalContextLifecycle(ctx, arg)
 }
 
+func (s *synchronizedLifecycleStore) ListTerminalSessionRunsNeedingContextLifecycle(
+	ctx context.Context,
+	batchSize int32,
+) ([]sqlc.ListTerminalSessionRunsNeedingContextLifecycleRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.ListTerminalSessionRunsNeedingContextLifecycle(ctx, batchSize)
+}
+
 func (s *synchronizedLifecycleStore) creates() []sqlc.CreateContextLifecycleParams {
 	s.mu.Lock()
 	defer s.mu.Unlock()

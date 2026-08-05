@@ -26,20 +26,26 @@ const (
 )
 
 type recordingContextLifecycleStore struct {
-	creates           []sqlc.CreateContextLifecycleParams
-	createErr         error
-	existing          *sqlc.ContextLifecycle
-	getErr            error
-	getCalls          int
-	updates           []sqlc.UpdateAbortedContextLifecycleSnapshotParams
-	updateErr         error
-	assistantID       pgtype.UUID
-	metadata          []byte
-	metadataErr       error
-	upserts           []sqlc.UpsertAbortedContextLifecycleParams
-	upsertErr         error
-	terminalUpserts   []sqlc.UpsertTerminalContextLifecycleParams
-	terminalUpsertErr error
+	creates             []sqlc.CreateContextLifecycleParams
+	createErr           error
+	existing            *sqlc.ContextLifecycle
+	getErr              error
+	getCalls            int
+	updates             []sqlc.UpdateAbortedContextLifecycleSnapshotParams
+	updateErr           error
+	assistantID         pgtype.UUID
+	metadata            []byte
+	metadataErr         error
+	upserts             []sqlc.UpsertAbortedContextLifecycleParams
+	upsertErr           error
+	terminalUpserts     []sqlc.UpsertTerminalContextLifecycleParams
+	terminalUpsertErr   error
+	terminalUpsertBound bool
+	terminalRows        []sqlc.ListTerminalSessionRunsNeedingContextLifecycleRow
+	terminalListErr     error
+	terminalListCalls   int
+	terminalListLimit   int32
+	terminalListBound   bool
 }
 
 func (s *recordingContextLifecycleStore) CreateContextLifecycle(
@@ -136,9 +142,10 @@ func (s *recordingContextLifecycleStore) UpsertAbortedContextLifecycle(
 }
 
 func (s *recordingContextLifecycleStore) UpsertTerminalContextLifecycle(
-	_ context.Context,
+	ctx context.Context,
 	arg sqlc.UpsertTerminalContextLifecycleParams,
 ) (sqlc.ContextLifecycle, error) {
+	_, s.terminalUpsertBound = ctx.Deadline()
 	s.terminalUpserts = append(s.terminalUpserts, arg)
 	if s.terminalUpsertErr != nil {
 		return sqlc.ContextLifecycle{}, s.terminalUpsertErr
@@ -149,6 +156,16 @@ func (s *recordingContextLifecycleStore) UpsertTerminalContextLifecycle(
 	}
 	s.existing = &upserted
 	return upserted, nil
+}
+
+func (s *recordingContextLifecycleStore) ListTerminalSessionRunsNeedingContextLifecycle(
+	ctx context.Context,
+	batchSize int32,
+) ([]sqlc.ListTerminalSessionRunsNeedingContextLifecycleRow, error) {
+	s.terminalListCalls++
+	s.terminalListLimit = batchSize
+	_, s.terminalListBound = ctx.Deadline()
+	return append([]sqlc.ListTerminalSessionRunsNeedingContextLifecycleRow(nil), s.terminalRows...), s.terminalListErr
 }
 
 func lifecycleTestRunConfig() native.RunConfig {

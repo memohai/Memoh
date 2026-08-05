@@ -51,6 +51,7 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 	manager.SetDecisionStore(s)
 	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
 	manager.SetTerminalObserver(s.reconcileTerminalContextLifecycle)
+	manager.SetTerminalReconciler(s.reconcileTerminalContextLifecycles)
 }
 
 // admitTurnRun puts a StartTurnCommand through durable admission and answers in

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -22,10 +23,11 @@ import (
 )
 
 const (
-	contextLifecycleStatusCompleted      = "completed"
-	contextLifecycleStatusFailedProvider = "failed_provider"
-	contextLifecycleStatusAborted        = "aborted"
-	contextLifecycleWriteTimeout         = 10 * time.Second
+	contextLifecycleStatusCompleted               = "completed"
+	contextLifecycleStatusFailedProvider          = "failed_provider"
+	contextLifecycleStatusAborted                 = "aborted"
+	contextLifecycleWriteTimeout                  = 10 * time.Second
+	contextLifecycleReconciliationBatchSize int32 = 100
 )
 
 type contextLifecycleStore interface {
@@ -35,6 +37,7 @@ type contextLifecycleStore interface {
 	UpdateAbortedContextLifecycleSnapshot(context.Context, sqlc.UpdateAbortedContextLifecycleSnapshotParams) (sqlc.ContextLifecycle, error)
 	UpsertAbortedContextLifecycle(context.Context, sqlc.UpsertAbortedContextLifecycleParams) (sqlc.ContextLifecycle, error)
 	UpsertTerminalContextLifecycle(context.Context, sqlc.UpsertTerminalContextLifecycleParams) (sqlc.ContextLifecycle, error)
+	ListTerminalSessionRunsNeedingContextLifecycle(context.Context, int32) ([]sqlc.ListTerminalSessionRunsNeedingContextLifecycleRow, error)
 }
 
 type contextLifecycleCandidateKey struct {
@@ -350,7 +353,7 @@ func (s *Service) reconcileTerminalContextLifecycle(ctx context.Context, run ses
 		return
 	}
 
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(nonNilContext(ctx)), contextLifecycleWriteTimeout)
+	writeCtx, cancel := contextLifecycleBoundedContext(ctx)
 	defer cancel()
 	existing, getErr := s.contextLifecycles.GetContextLifecycleByRunID(writeCtx, runUUID)
 	existingReady := getErr == nil
@@ -440,6 +443,53 @@ func (s *Service) reconcileTerminalContextLifecycle(ctx context.Context, run ses
 		return
 	}
 	s.recordContextLifecyclePersistenceError(err, run.RunID, run.BotID, run.SessionID, status)
+}
+
+func (s *Service) reconcileTerminalContextLifecycles(ctx context.Context) error {
+	if s == nil || s.contextLifecycles == nil {
+		return nil
+	}
+	repairCtx, cancel := contextLifecycleBoundedContext(ctx)
+	defer cancel()
+	rows, err := s.contextLifecycles.ListTerminalSessionRunsNeedingContextLifecycle(
+		repairCtx,
+		contextLifecycleReconciliationBatchSize,
+	)
+	if err != nil {
+		return fmt.Errorf("list terminal runs needing context lifecycle: %w", err)
+	}
+	for _, row := range rows {
+		if err := repairCtx.Err(); err != nil {
+			return fmt.Errorf("reconcile terminal context lifecycles: %w", err)
+		}
+		errorCode := ""
+		if row.ErrorCode.Valid {
+			errorCode = row.ErrorCode.String
+		}
+		s.reconcileTerminalContextLifecycle(repairCtx, sessionruntime.TerminalRun{
+			RunID:        pgUUIDString(row.RunID),
+			BotID:        pgUUIDString(row.BotID),
+			SessionID:    pgUUIDString(row.SessionID),
+			FencingToken: row.FencingToken,
+			State:        row.State,
+			ErrorCode:    errorCode,
+		})
+	}
+	if err := repairCtx.Err(); err != nil {
+		return fmt.Errorf("reconcile terminal context lifecycles: %w", err)
+	}
+	return nil
+}
+
+func contextLifecycleBoundedContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx = nonNilContext(ctx)
+	timeout := contextLifecycleWriteTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < timeout {
+			timeout = remaining
+		}
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
 }
 
 func (s *Service) contextLifecycleCandidateFor(run sessionruntime.TerminalRun) (contextLifecycleCandidate, bool) {
