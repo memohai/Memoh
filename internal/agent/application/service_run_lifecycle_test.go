@@ -26,18 +26,20 @@ const (
 )
 
 type recordingContextLifecycleStore struct {
-	creates     []sqlc.CreateContextLifecycleParams
-	createErr   error
-	existing    *sqlc.ContextLifecycle
-	getErr      error
-	getCalls    int
-	updates     []sqlc.UpdateAbortedContextLifecycleSnapshotParams
-	updateErr   error
-	assistantID pgtype.UUID
-	metadata    []byte
-	metadataErr error
-	upserts     []sqlc.UpsertAbortedContextLifecycleParams
-	upsertErr   error
+	creates           []sqlc.CreateContextLifecycleParams
+	createErr         error
+	existing          *sqlc.ContextLifecycle
+	getErr            error
+	getCalls          int
+	updates           []sqlc.UpdateAbortedContextLifecycleSnapshotParams
+	updateErr         error
+	assistantID       pgtype.UUID
+	metadata          []byte
+	metadataErr       error
+	upserts           []sqlc.UpsertAbortedContextLifecycleParams
+	upsertErr         error
+	terminalUpserts   []sqlc.UpsertTerminalContextLifecycleParams
+	terminalUpsertErr error
 }
 
 func (s *recordingContextLifecycleStore) CreateContextLifecycle(
@@ -131,6 +133,22 @@ func (s *recordingContextLifecycleStore) UpsertAbortedContextLifecycle(
 ) (sqlc.ContextLifecycle, error) {
 	s.upserts = append(s.upserts, arg)
 	return sqlc.ContextLifecycle{}, s.upsertErr
+}
+
+func (s *recordingContextLifecycleStore) UpsertTerminalContextLifecycle(
+	_ context.Context,
+	arg sqlc.UpsertTerminalContextLifecycleParams,
+) (sqlc.ContextLifecycle, error) {
+	s.terminalUpserts = append(s.terminalUpserts, arg)
+	if s.terminalUpsertErr != nil {
+		return sqlc.ContextLifecycle{}, s.terminalUpsertErr
+	}
+	upserted := sqlc.ContextLifecycle{
+		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
+		Status: arg.Status, ErrorCode: arg.ErrorCode, Snapshot: arg.Snapshot,
+	}
+	s.existing = &upserted
+	return upserted, nil
 }
 
 func lifecycleTestRunConfig() native.RunConfig {

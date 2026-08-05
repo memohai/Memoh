@@ -117,11 +117,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 	defer close(h.events)
 	defer close(h.errs)
 	defer func() {
-		// Passive and empty discuss turns have no provider terminal event or
-		// assembled holder. Persist their content-light completion only after
-		// the fenced runtime finish. A concurrent cancellation is handled by the
-		// finisher's aborted fallback instead, so the two rows cannot disagree.
-		if h.contentLightTerminal && !h.failed.Load() && h.streamErr == nil {
+		if h.contentLightTerminal && !h.failed.Load() && h.streamErr == nil && !s.usesDurableTerminalObserver() {
 			s.EnsureTerminalContextLifecycle(ctx, h.id, cmd.BotID, cmd.ThreadID, nil)
 		}
 	}()

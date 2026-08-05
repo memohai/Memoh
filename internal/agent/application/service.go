@@ -144,6 +144,8 @@ type Service struct {
 	abortRuntime                      runtimeAbortController
 	contextLifecycles                 contextLifecycleStore
 	contextLifecyclePersistenceErrors atomic.Uint64
+	contextLifecycleCandidatesMu      sync.Mutex
+	contextLifecycleCandidates        map[contextLifecycleCandidateKey]contextLifecycleCandidate
 	publishTurnEvent                  func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
 	turnHooks                         *turnRuntimeHooks
 }

@@ -136,6 +136,15 @@ func (s *synchronizedLifecycleStore) UpsertAbortedContextLifecycle(
 	return s.store.UpsertAbortedContextLifecycle(ctx, arg)
 }
 
+func (s *synchronizedLifecycleStore) UpsertTerminalContextLifecycle(
+	ctx context.Context,
+	arg sqlc.UpsertTerminalContextLifecycleParams,
+) (sqlc.ContextLifecycle, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.UpsertTerminalContextLifecycle(ctx, arg)
+}
+
 func (s *synchronizedLifecycleStore) creates() []sqlc.CreateContextLifecycleParams {
 	s.mu.Lock()
 	defer s.mu.Unlock()

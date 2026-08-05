@@ -462,7 +462,17 @@ func (s *Service) persistRuntimeDecisionLifecycle(
 func (s *Service) finishRuntimeDecision(ctx context.Context, handle sessionruntime.RunHandle, cause error) {
 	status, message := runtimeDecisionTerminal(ctx, cause)
 	lifecycleCtx := frozenContextCause(ctx)
-	if err := s.decisionRuntime.FinishRun(context.WithoutCancel(nonNilContext(ctx)), handle, status, message); err == nil {
+	minimal := minimalContextLifecycleSnapshot()
+	staged := s.stageContextLifecycleCandidate(
+		lifecycleCtx,
+		handle.RunID,
+		handle.BotID,
+		handle.SessionID,
+		&minimal,
+		cause,
+		contextLifecycleCandidateMinimal,
+	)
+	if err := s.decisionRuntime.FinishRun(context.WithoutCancel(nonNilContext(ctx)), handle, status, message); err == nil && !staged {
 		s.EnsureTerminalContextLifecycle(
 			lifecycleCtx,
 			handle.RunID,
