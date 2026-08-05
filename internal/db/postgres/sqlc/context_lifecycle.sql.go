@@ -234,6 +234,68 @@ func (q *Queries) ListRecentContextLifecyclesBySession(ctx context.Context, arg 
 	return items, nil
 }
 
+const listTerminalSessionRunsNeedingContextLifecycle = `-- name: ListTerminalSessionRunsNeedingContextLifecycle :many
+SELECT
+  session_runs.run_id,
+  session_runs.bot_id,
+  session_runs.session_id,
+  session_runs.fencing_token,
+  session_runs.state,
+  session_runs.error_code
+FROM session_runs
+LEFT JOIN context_lifecycles
+  ON context_lifecycles.team_id = session_runs.team_id
+ AND context_lifecycles.run_id = session_runs.run_id
+WHERE session_runs.team_id = public.memoh_current_team_id()
+  AND session_runs.state IN ('completed', 'aborted', 'failed', 'lost')
+  AND (
+    context_lifecycles.run_id IS NULL
+    OR context_lifecycles.status IS DISTINCT FROM CASE session_runs.state
+      WHEN 'completed' THEN 'completed'
+      WHEN 'aborted' THEN 'aborted'
+      ELSE 'failed_provider'
+    END
+  )
+ORDER BY session_runs.updated_at, session_runs.run_id
+LIMIT $1
+`
+
+type ListTerminalSessionRunsNeedingContextLifecycleRow struct {
+	RunID        pgtype.UUID `json:"run_id"`
+	BotID        pgtype.UUID `json:"bot_id"`
+	SessionID    pgtype.UUID `json:"session_id"`
+	FencingToken int64       `json:"fencing_token"`
+	State        string      `json:"state"`
+	ErrorCode    pgtype.Text `json:"error_code"`
+}
+
+func (q *Queries) ListTerminalSessionRunsNeedingContextLifecycle(ctx context.Context, batchSize int32) ([]ListTerminalSessionRunsNeedingContextLifecycleRow, error) {
+	rows, err := q.db.Query(ctx, listTerminalSessionRunsNeedingContextLifecycle, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTerminalSessionRunsNeedingContextLifecycleRow
+	for rows.Next() {
+		var i ListTerminalSessionRunsNeedingContextLifecycleRow
+		if err := rows.Scan(
+			&i.RunID,
+			&i.BotID,
+			&i.SessionID,
+			&i.FencingToken,
+			&i.State,
+			&i.ErrorCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateAbortedContextLifecycleSnapshot = `-- name: UpdateAbortedContextLifecycleSnapshot :one
 UPDATE context_lifecycles
 SET snapshot = $1

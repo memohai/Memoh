@@ -346,6 +346,7 @@ type Queries interface {
 	ListSpeechProviders(ctx context.Context) ([]dbsqlc.Provider, error)
 	ListStorageProviders(ctx context.Context) ([]dbsqlc.StorageProvider, error)
 	ListSubagentSessionsByParent(ctx context.Context, parentSessionID pgtype.UUID) ([]dbsqlc.BotSession, error)
+	ListTerminalSessionRunsNeedingContextLifecycle(ctx context.Context, batchSize int32) ([]dbsqlc.ListTerminalSessionRunsNeedingContextLifecycleRow, error)
 	ListTokenUsageRecords(ctx context.Context, arg dbsqlc.ListTokenUsageRecordsParams) ([]dbsqlc.ListTokenUsageRecordsRow, error)
 	ListToolApprovalsBySession(ctx context.Context, arg dbsqlc.ListToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
 	ListToolApprovalsBySessionToolCalls(ctx context.Context, arg dbsqlc.ListToolApprovalsBySessionToolCallsParams) ([]dbsqlc.ToolApprovalRequest, error)

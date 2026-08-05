@@ -136,3 +136,28 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
 ORDER BY created_at DESC, run_id DESC
 LIMIT sqlc.arg(max_count);
+
+-- name: ListTerminalSessionRunsNeedingContextLifecycle :many
+SELECT
+  session_runs.run_id,
+  session_runs.bot_id,
+  session_runs.session_id,
+  session_runs.fencing_token,
+  session_runs.state,
+  session_runs.error_code
+FROM session_runs
+LEFT JOIN context_lifecycles
+  ON context_lifecycles.team_id = session_runs.team_id
+ AND context_lifecycles.run_id = session_runs.run_id
+WHERE session_runs.team_id = public.memoh_current_team_id()
+  AND session_runs.state IN ('completed', 'aborted', 'failed', 'lost')
+  AND (
+    context_lifecycles.run_id IS NULL
+    OR context_lifecycles.status IS DISTINCT FROM CASE session_runs.state
+      WHEN 'completed' THEN 'completed'
+      WHEN 'aborted' THEN 'aborted'
+      ELSE 'failed_provider'
+    END
+  )
+ORDER BY session_runs.updated_at, session_runs.run_id
+LIMIT sqlc.arg(batch_size);
