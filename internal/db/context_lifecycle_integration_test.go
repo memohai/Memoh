@@ -129,12 +129,22 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 		t.Fatalf("marshal paused lifecycle metadata: %v", err)
 	}
 	parsedPausedRunID := mustParseLifecycleUUID(t, pausedRunID)
-	if _, err := conn.Exec(ctx, `
+	var pausedAssistantID pgtype.UUID
+	if err := conn.QueryRow(ctx, `
 INSERT INTO bot_history_messages (bot_id, session_id, role, content, metadata, run_id)
 VALUES ($1, $2, 'assistant', '{}'::jsonb, $3, $4)
-`, botID, sessionID, pausedMetadata, pausedRunID); err != nil {
+RETURNING id
+`, botID, sessionID, pausedMetadata, pausedRunID).Scan(&pausedAssistantID); err != nil {
 		t.Fatalf("seed paused assistant lifecycle: %v", err)
 	}
+	pausedAssistant, err := queries.GetLatestAssistantContextLifecycleByRunID(ctx, parsedPausedRunID)
+	if err != nil {
+		t.Fatalf("get paused assistant lifecycle: %v", err)
+	}
+	if pausedAssistant.ID != pausedAssistantID {
+		t.Fatalf("paused assistant ID = %v, want %v", pausedAssistant.ID, pausedAssistantID)
+	}
+	assertJSONSemanticallyEqual(t, pausedAssistant.Metadata, pausedMetadata)
 	pausedRaw, err := queries.GetLatestAssistantContextLifecycleMetadataByRunID(ctx, parsedPausedRunID)
 	if err != nil {
 		t.Fatalf("get paused assistant lifecycle metadata: %v", err)
