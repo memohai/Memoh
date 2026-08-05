@@ -1,21 +1,24 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Plug, AudioLines, Globe, AlertTriangle } from 'lucide-vue-next'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { nextFrame } from '../useStepTransition'
 import StepExitShell from '../components/step-exit-shell.vue'
 import HintBox from '../components/hint-box.vue'
-import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
+import { safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
-import { readACPSelection } from './useACPSetup'
+import { onboardingRuntimeState } from '../state'
 
 const { t } = useI18n()
 const { complete, completing } = useOnboarding()
 
 const visible = ref(false)
 const exiting = ref(false)
-const hasProvider = ref(true)
+const hasConfiguredAI = computed(() => {
+  const result = onboardingRuntimeState.value.botResult
+  return !!result?.selectedModelId || !!result?.acpLaunchAgentId
+})
 
 const cards = [
   { icon: Plug, titleKey: 'onboarding.complete.cards.im.title', descKey: 'onboarding.complete.cards.im.desc' },
@@ -24,8 +27,6 @@ const cards = [
 ] as const
 
 onMounted(() => {
-  const count = Number.parseInt(safeSessionGet(ONBOARDING_KEYS.providerAddedCount) ?? '0', 10)
-  hasProvider.value = (Number.isFinite(count) && count > 0) || !!readACPSelection()
   nextFrame(() => {
     visible.value = true
   })
@@ -84,7 +85,7 @@ async function handleComplete() {
     </div>
 
     <div
-      v-if="!hasProvider"
+      v-if="!hasConfiguredAI"
       class="mb-8 flex justify-center transition-all duration-[350ms] ease-out delay-[200ms]"
       :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
     >
@@ -96,7 +97,7 @@ async function handleComplete() {
           <AlertTriangle class="size-4 shrink-0 text-warning-foreground mt-0.5" />
         </template>
         <p class="text-muted-foreground">
-          {{ t('onboarding.complete.noProviderWarning') }}
+          {{ t('onboarding.complete.noModelWarning') }}
         </p>
       </HintBox>
     </div>

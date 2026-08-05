@@ -40,6 +40,10 @@ export type StartBotCreateOptions = {
   settings?: BotCreateSettings
 }
 
+export type BotCreateStartResult = {
+  settingsApplied: boolean
+}
+
 function hasSettings(settings?: BotCreateSettings): boolean {
   return !!(settings && (settings.chat_model_id || settings.memory_provider_id || settings.reasoning_effort))
 }
@@ -91,8 +95,12 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     lines.value = appendBotCreateTerminalLine(lines.value, { type: 'error', message })
   }
 
-  async function start(payload: BotsCreateBotRequest, options: StartBotCreateOptions = {}) {
-    if (status.value === 'creating') return
+  async function start(
+    payload: BotsCreateBotRequest,
+    options: StartBotCreateOptions = {},
+  ): Promise<BotCreateStartResult> {
+    if (status.value === 'creating') return { settingsApplied: false }
+    let settingsApplied = !hasSettings(options.settings)
     lastPayload = payload
     lastOptions = options
 
@@ -133,7 +141,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       if (!createdBot) {
         ensureErrorLine(result.setupError ?? toMessage(undefined))
         status.value = 'error'
-        return
+        return { settingsApplied: false }
       }
 
       const botId = createdBot.id
@@ -145,16 +153,21 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
             body: settingsBody(options.settings!),
             throwOnError: true,
           })
+          settingsApplied = true
         } catch {
           // Bot created successfully, settings save failed; this is non-fatal.
+          lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
         }
-        lines.value = finalizeBotCreateTerminalLines(lines.value)
+        if (settingsApplied) {
+          lines.value = finalizeBotCreateTerminalLines(lines.value)
+        }
       }
 
       if (!result.setupError) {
         lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'ready', status: 'done' })
       }
       status.value = 'ready'
+      return { settingsApplied }
     } catch (error) {
       const parsed = parseMemohError(error)
       const message = resolveApiErrorMessage(error, toMessage(error))
@@ -166,11 +179,12 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       // to a hard error — otherwise a successful create is reported as failed.
       if (bot.value) {
         status.value = 'ready'
-        return
+        return { settingsApplied }
       }
       progress.value = { phase: 'error', error: message }
       ensureErrorLine(message)
       status.value = 'error'
+      return { settingsApplied: false }
     }
   }
 

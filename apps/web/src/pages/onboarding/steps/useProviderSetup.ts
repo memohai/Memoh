@@ -2,23 +2,27 @@ import { ref, computed, watch, provide, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import {
+  getProviderTemplates,
   postProviders,
   postProvidersByIdImportModels,
   postProvidersByIdTest,
+  postProvidersFromTemplate,
   deleteModelsById,
   getProvidersByIdModels,
   getProvidersNameByName,
-  putModelsById,
   putProvidersById,
   type ProvidersCreateRequest,
+  type ProvidersGetResponse,
   type ModelsGetResponse,
 } from '@memohai/sdk'
 import { MANUAL_LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
 import type { ProviderPreset } from '@/constants/provider-presets'
+import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
+import { findProviderTemplate } from './provider-setup'
 
 export function useProviderSetup(options: {
   selectedPreset: () => ProviderPreset | null
-  onProviderReady: () => void
+  onProviderReady: (result: { providerId: string }) => void
 }) {
   const { t } = useI18n()
   const queryCache = useQueryCache()
@@ -83,6 +87,25 @@ export function useProviderSetup(options: {
     },
     onSettled: () => {
       queryCache.invalidateQueries({ key: ['providers'] })
+    },
+  })
+
+  const { mutateAsync: createProviderFromTemplate } = useMutation({
+    mutation: async (payload: { templateId: string, name: string, config: Record<string, unknown> }) => {
+      const { data } = await postProvidersFromTemplate({
+        body: {
+          template_id: payload.templateId,
+          domain: 'llm',
+          name: payload.name,
+          config: payload.config,
+        },
+        throwOnError: true,
+      })
+      return data
+    },
+    onSettled: () => {
+      queryCache.invalidateQueries({ key: ['providers'] })
+      queryCache.invalidateQueries({ key: ['provider-templates', 'llm'] })
     },
   })
 
@@ -159,37 +182,79 @@ export function useProviderSetup(options: {
       return null
     }
     formError.value = ''
+    const preset = options.selectedPreset()
 
     try {
       if (createdProviderId.value) {
-        // Include client_type so a corrected protocol selection on retry takes
-        // effect: a custom provider first created with the wrong client_type
-        // would otherwise keep the stale value here and keep probing/importing
-        // with the wrong protocol, leaving the user unable to recover without
-        // starting over. The backend re-normalizes config for the new protocol.
+        // Custom providers may correct their protocol on retry. Template-backed
+        // providers keep the template driver as their source of truth.
         await putProvidersById({
           path: { id: createdProviderId.value },
-          body: { name, client_type: formValues.value.client_type, config: { base_url: baseUrl, api_key: apiKey }, enable: true },
+          body: {
+            name,
+            ...(!preset && { client_type: formValues.value.client_type }),
+            config: { base_url: baseUrl, api_key: apiKey },
+            enable: true,
+          },
           throwOnError: true,
         })
         return createdProviderId.value
       }
 
-      const preset = options.selectedPreset()
-      const lookupName = preset?.registryName ?? name
-      const intendedClientType = preset?.clientType ?? formValues.value.client_type
+      if (preset) {
+        const { data: templates } = await getProviderTemplates({
+          query: { domain: 'llm' },
+          throwOnError: true,
+        })
+        const template = findProviderTemplate(templates ?? [], preset)
+        if (!template?.id) {
+          formError.value = t('onboarding.provider.form.saveFailed')
+          return null
+        }
+
+        const config = { base_url: baseUrl, api_key: apiKey }
+        let result: ProvidersGetResponse | undefined
+        try {
+          result = await createProviderFromTemplate({
+            templateId: template.id,
+            name,
+            config,
+          })
+        } catch (error) {
+          if (!isApiErrorCode(error, 'provider.name_taken')) throw error
+
+          const { data: existing } = await getProvidersNameByName({
+            path: { name },
+            throwOnError: true,
+          })
+          if (!existing?.id || existing.provider_template_id !== template.id) throw error
+
+          await putProvidersById({
+            path: { id: existing.id },
+            body: { config, enable: true },
+            throwOnError: true,
+          })
+          result = existing
+        }
+        if (!result?.id) {
+          errorState.value = 'http'
+          return null
+        }
+        createdProviderId.value = result.id
+        return result.id
+      }
+
       const { data: existing } = await getProvidersNameByName({
-        path: { name: lookupName },
+        path: { name },
       })
 
       if (existing?.id) {
         // Reuse (dedup) onto an existing provider only when the protocol matches.
         // A differing — or missing — client_type means overwriting credentials
         // would land them on the wrong/undefined API format and break every later
-        // call, so refuse and ask the user to rename. intendedClientType is always
-        // concrete (formValues defaults to a real type), so a blank existing
-        // client_type is correctly treated as a mismatch here.
-        if (existing.client_type !== intendedClientType) {
+        // call, so refuse and ask the user to rename. The custom form always has
+        // a concrete client type, so a blank existing value is also a mismatch.
+        if (existing.client_type !== formValues.value.client_type) {
           formError.value = t('onboarding.provider.form.typeConflict')
           return null
         }
@@ -215,7 +280,7 @@ export function useProviderSetup(options: {
       return result.id
     }
     catch (e) {
-      formError.value = (e as Error).message || t('onboarding.provider.form.saveFailed')
+      formError.value = resolveApiErrorMessage(e, t('onboarding.provider.form.saveFailed'))
       return null
     }
   }
@@ -254,15 +319,13 @@ export function useProviderSetup(options: {
     try {
       const { data: models } = await getProvidersByIdModels({
         path: { id: providerId },
+        throwOnError: true,
       })
       if (models && models.length > 0) {
-        // Imports land disabled per LobeHub-style policy; onboarding needs at
-        // least one enabled chat model so the next bot step has something to
-        // select. Activate the first chat model we see so the auto-advance
-        // path stays usable; the user can fine-tune the rest later.
-        await ensureFirstChatModelEnabled(models)
-        options.onProviderReady()
-        return
+        if (models.some(model => model.type === 'chat')) {
+          options.onProviderReady({ providerId })
+          return
+        }
       }
     } catch {
       errorState.value = 'http'
@@ -272,37 +335,13 @@ export function useProviderSetup(options: {
     errorState.value = importFailed ? 'http' : 'noModels'
   }
 
-  async function ensureFirstChatModelEnabled(models: ModelsGetResponse[]) {
-    if (models.some((m) => m.type === 'chat' && m.enable)) return
-    const target = models.find((m) => m.type === 'chat')
-    if (!target?.id) return
-    try {
-      await putModelsById({
-        path: { id: target.id },
-        body: {
-          model_id: target.model_id,
-          name: target.name,
-          provider_id: target.provider_id,
-          type: target.type,
-          config: target.config,
-          enable: true,
-        },
-        throwOnError: true,
-      })
-      queryCache.invalidateQueries({ key: ['provider-models'] })
-      queryCache.invalidateQueries({ key: ['models'] })
-      queryCache.invalidateQueries({ key: ['all-models'] })
-    } catch {
-      // Non-fatal: the user will still see the model list and can enable
-      // models manually if the auto-activate failed.
-    }
-  }
-
   async function saveAndNext() {
     if (saving.value) return
     if (manualMode.value) {
       if (providerModels.value.length === 0) return
-      options.onProviderReady()
+      if (!createdProviderId.value) return
+      if (!providerModels.value.some(model => model.type === 'chat')) return
+      options.onProviderReady({ providerId: createdProviderId.value })
       return
     }
 

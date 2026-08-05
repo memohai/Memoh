@@ -3337,7 +3337,10 @@
       "preparingEnvironment": "Preparing environment...",
       "model": {
         "selectPlaceholder": "Select a model",
-        "hint": "Pick the model your bot replies with. Recommended, but you can change it anytime in settings."
+        "hint": "Pick the model your bot replies with. Recommended, but you can change it anytime in settings.",
+        "loading": "Loading models...",
+        "loadFailed": "Failed to load the model list. Try again.",
+        "retry": "Retry"
       },
       "acp": {
         "banner": "This bot will use {agent} as its primary agent",
@@ -3383,7 +3386,8 @@
         }
       },
       "saveFailed": "Failed to save, please try again",
-      "noProviderWarning": "You haven't configured an AI provider yet. Your bot won't be able to reply until you add one in Settings → Providers"
+      "navigationFailed": "Couldn't open your bot. Please try again.",
+      "noModelWarning": "No model is selected for this bot, so it cannot reply yet. You can configure one later in Bot Settings."
     }
   },
   "deviceCode": {

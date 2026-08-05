@@ -41,10 +41,12 @@ import {
   normalizeACPAgentID,
 } from '@/utils/acp'
 import { useStepTransition, nextFrame } from '../useStepTransition'
-import { safeSessionGet, safeSessionSet } from '@/utils/safe-storage'
-import { ONBOARDING_KEYS } from '../constants'
+import {
+  commitOnboardingACP,
+  commitOnboardingProvider,
+  onboardingRuntimeState,
+} from '../state'
 import { useProviderSetup } from './useProviderSetup'
-import { writeACPSelection, clearACPSelection } from './useACPSetup'
 
 const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
@@ -55,7 +57,7 @@ const mode = ref<'list' | 'form' | 'acp'>('list')
 const formVisible = ref(false)
 const formContentVisible = ref(false)
 const selectedPreset = ref<ProviderPreset | null>(null)
-const addedCount = ref(0)
+const hasConfiguredAI = computed(() => onboardingRuntimeState.value.selection.kind !== 'none')
 
 const acpProfiles = ref<AcpprofilePublicProfile[]>([])
 const selectedAcpProfile = ref<AcpprofilePublicProfile | null>(null)
@@ -64,9 +66,8 @@ const acpManaged = reactive<Record<string, string>>({})
 const acpError = ref('')
 const acpSubmitting = ref(false)
 
-function advanceWithCount() {
-  addedCount.value++
-  safeSessionSet(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
+function advanceWithProvider(result: { providerId: string }) {
+  commitOnboardingProvider(result.providerId)
   leave(nextStep)
 }
 
@@ -82,14 +83,16 @@ const {
   handleEditModel, handleDeleteModel,
 } = useProviderSetup({
   selectedPreset: () => selectedPreset.value,
-  onProviderReady: advanceWithCount,
+  onProviderReady: advanceWithProvider,
 })
 
-const ctaLabel = computed(() => addedCount.value > 0 ? t('onboarding.next') : t('onboarding.skip'))
+const ctaLabel = computed(() =>
+  hasConfiguredAI.value
+    ? t('onboarding.next')
+    : t('onboarding.skip'),
+)
 
 function openForm(preset: ProviderPreset | null) {
-  // Choosing a regular provider supersedes any earlier ACP pick.
-  clearACPSelection()
   selectedPreset.value = preset
   initFormValues(preset)
   listVisible.value = false
@@ -123,14 +126,7 @@ function backToList() {
 }
 
 function onSkipStep() {
-  // Skipping (or finishing with a regular provider) means this is not an ACP
-  // bot, so drop any stale ACP selection from an earlier visit to this step.
-  clearACPSelection()
-  if (createdProviderId.value) {
-    advanceWithCount()
-  } else {
-    leave(nextStep)
-  }
+  leave(nextStep)
 }
 
 async function openAcpForm(profile: AcpprofilePublicProfile) {
@@ -278,22 +274,12 @@ function saveAcpAndNext() {
       if (value) managed[id] = value
     }
   }
-  writeACPSelection({ agentId, setupMode: acpSetupMode.value, managed })
+  commitOnboardingACP({ agentId, setupMode: acpSetupMode.value, managed })
   acpSubmitting.value = true
   leave(nextStep)
 }
 
 onMounted(() => {
-  // Drop any ACP selection left over from an abandoned run; it is (re)written
-  // only when the user actually picks an agent on this step.
-  clearACPSelection()
-
-  const stored = safeSessionGet(ONBOARDING_KEYS.providerAddedCount)
-  if (stored !== null) {
-    const parsed = Number.parseInt(stored, 10)
-    if (Number.isFinite(parsed) && parsed >= 0) addedCount.value = parsed
-  }
-
   void (async () => {
     try {
       const { data } = await getAcpProfiles({ throwOnError: true })
