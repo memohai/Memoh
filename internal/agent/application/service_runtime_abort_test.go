@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
@@ -144,6 +145,17 @@ func (q *abortLifecycleQueries) recordedUpserts() []sqlc.UpsertAbortedContextLif
 type recordingAbortRuntime struct {
 	applied bool
 	err     error
+}
+
+func TestSetSessionRuntimeConfiguresAbortRuntime(t *testing.T) {
+	manager := &sessionruntime.Manager{}
+	service := &Service{}
+
+	service.SetSessionRuntime(manager)
+
+	if service.abortRuntime != manager {
+		t.Fatalf("abort runtime = %T, want injected session manager", service.abortRuntime)
+	}
 }
 
 func (r *recordingAbortRuntime) AbortControl(
