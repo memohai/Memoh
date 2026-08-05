@@ -278,7 +278,8 @@ func workspaceTargetHTTPError(log *slog.Logger, err error) error {
 		return echo.NewHTTPError(http.StatusNotFound, "workspace target not found")
 	case errors.Is(err, workspace.ErrRemoteRuntimeRevoked),
 		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
-		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):
+		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded),
+		errors.Is(err, workspace.ErrWorkspaceTargetInUse):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	default:
 		if log != nil {

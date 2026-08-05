@@ -1,8 +1,8 @@
 -- name: CreateBotPluginInstallation :one
 INSERT INTO bot_plugin_installations (
-  bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest
+  bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, workspace_target_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (team_id, bot_id, plugin_id)
 DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               version = EXCLUDED.version,
@@ -11,17 +11,18 @@ DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               config = EXCLUDED.config,
               metadata = EXCLUDED.metadata,
               manifest = EXCLUDED.manifest,
+              workspace_target_id = EXCLUDED.workspace_target_id,
               updated_at = now()
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id;
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id, workspace_target_id;
 
 -- name: GetBotPluginInstallationByID :one
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id, workspace_target_id
 FROM bot_plugin_installations
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND id = $2
 LIMIT 1;
 
 -- name: ListBotPluginInstallations :many
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id, workspace_target_id
 FROM bot_plugin_installations
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY installed_at DESC;
@@ -32,7 +33,7 @@ SET status = $3,
     enabled = $4,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND id = $2
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id;
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id, workspace_target_id;
 
 -- name: DeleteBotPluginInstallation :exec
 DELETE FROM bot_plugin_installations

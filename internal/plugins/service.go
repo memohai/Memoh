@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"path"
 	"regexp"
@@ -14,12 +13,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"gopkg.in/yaml.v3"
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/skillpackages"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -79,7 +78,76 @@ func (s *Service) Get(ctx context.Context, botID, installationID string) (Instal
 	return s.normalizeInstallation(ctx, row)
 }
 
+// InstalledPluginRelease returns the immutable release currently owned by a
+// bot/plugin identity. An installed Plugin without release metadata is still
+// reported as installed so callers cannot mistake it for a new installation.
+func (s *Service) InstalledPluginRelease(ctx context.Context, botID, pluginID string) (string, bool, error) {
+	state, installed, err := s.InstalledPluginState(ctx, botID, pluginID)
+	return state.ReleaseRevision, installed, err
+}
+
+// InstalledPluginState returns both the immutable release revision and the
+// mutable installation generation represented by updated_at.
+func (s *Service) InstalledPluginState(
+	ctx context.Context,
+	botID, pluginID string,
+) (InstalledPluginState, bool, error) {
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return InstalledPluginState{}, false, err
+	}
+	rows, err := s.queries.ListBotPluginInstallations(ctx, botUUID)
+	if err != nil {
+		return InstalledPluginState{}, false, err
+	}
+	for _, row := range rows {
+		if row.PluginID != pluginID {
+			continue
+		}
+		metadata, err := decodeJSONMap(row.Metadata)
+		if err != nil {
+			return InstalledPluginState{}, false, err
+		}
+		revision, _ := metadata["release_revision"].(string)
+		return InstalledPluginState{
+			ReleaseRevision: strings.TrimSpace(revision),
+			UpdatedAt:       timeFromPg(row.UpdatedAt),
+		}, true, nil
+	}
+	return InstalledPluginState{}, false, nil
+}
+
 func (s *Service) Install(ctx context.Context, botID string, req InstallRequest) (Installation, error) {
+	var result Installation
+	removals, err := s.prepareObsoletePackageRemovals(ctx, botID, req)
+	if err != nil {
+		return Installation{}, err
+	}
+	bundleRemoval, err := s.prepareObsoleteBundleRemoval(ctx, botID, req)
+	if err != nil {
+		return Installation{}, errors.Join(err, removals.rollback(ctx))
+	}
+	if err := s.inTransaction(ctx, func(txService *Service) error {
+		var installErr error
+		result, installErr = txService.install(ctx, botID, req)
+		return installErr
+	}); err != nil {
+		return Installation{}, errors.Join(err, removals.rollback(ctx), bundleRemoval.rollback(ctx))
+	}
+	if err := removals.commit(ctx); err != nil {
+		s.logger.Warn("cleanup obsolete Plugin Packages failed", slog.String("bot_id", botID), slog.String("plugin_id", req.Manifest.ID), slog.Any("error", err))
+	}
+	if err := bundleRemoval.commit(ctx); err != nil {
+		s.logger.Warn("cleanup obsolete Plugin bundle failed", slog.String("bot_id", botID), slog.String("plugin_id", req.Manifest.ID), slog.Any("error", err))
+	}
+	return result, nil
+}
+
+func (s *Service) install(
+	ctx context.Context,
+	botID string,
+	req InstallRequest,
+) (Installation, error) {
 	if s.queries == nil || s.mcpService == nil {
 		return Installation{}, errors.New("plugin service is not configured")
 	}
@@ -90,6 +158,18 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	manifest := normalizeManifest(req.Manifest)
 	if manifest.ID == "" {
 		return Installation{}, errors.New("plugin id is required")
+	}
+	if err := ValidatePackageReferences(manifest.Packages); err != nil {
+		return Installation{}, err
+	}
+	if err := validateInstalledSkills(manifest.Packages, req.InstalledSkills); err != nil {
+		return Installation{}, err
+	}
+	if err := validateInstalledPackages(manifest.Packages, req.InstalledPackages); err != nil {
+		return Installation{}, err
+	}
+	if err := validateReleaseMetadata(req.Release); err != nil {
+		return Installation{}, err
 	}
 	if manifest.Name == "" {
 		manifest.Name = manifest.ID
@@ -103,7 +183,12 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	if err != nil {
 		return Installation{}, err
 	}
-	metadataPayload, err := encodeJSON(manifestMetadata(manifest))
+	metadata := manifestMetadata(manifest)
+	if req.Release.Revision != "" {
+		metadata["release_revision"] = req.Release.Revision
+		metadata["plugin_artifact_digest"] = req.Release.ArtifactDigest
+	}
+	metadataPayload, err := encodeJSON(metadata)
 	if err != nil {
 		return Installation{}, err
 	}
@@ -112,16 +197,21 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		return Installation{}, err
 	}
 
+	workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID)
+	if workspaceTargetID == "" {
+		workspaceTargetID = "native"
+	}
 	row, err := s.queries.CreateBotPluginInstallation(ctx, sqlc.CreateBotPluginInstallationParams{
-		BotID:      botUUID,
-		PluginID:   manifest.ID,
-		PluginName: manifest.Name,
-		Version:    manifest.Version,
-		Status:     status,
-		Enabled:    enabled,
-		Config:     configPayload,
-		Metadata:   metadataPayload,
-		Manifest:   manifestPayload,
+		BotID:             botUUID,
+		PluginID:          manifest.ID,
+		PluginName:        manifest.Name,
+		Version:           manifest.Version,
+		Status:            status,
+		Enabled:           enabled,
+		Config:            configPayload,
+		Metadata:          metadataPayload,
+		Manifest:          manifestPayload,
+		WorkspaceTargetID: workspaceTargetID,
 	})
 	if err != nil {
 		return Installation{}, err
@@ -133,6 +223,17 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	}
 	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
 		return Installation{}, err
+	}
+	if req.ReplacePackages {
+		packageRequirements := make([]skillpackages.Requirement, 0, len(req.InstalledPackages))
+		for _, pkg := range req.InstalledPackages {
+			packageRequirements = append(packageRequirements, skillpackages.Requirement{
+				RegistryID: pkg.RegistryID, PackageID: pkg.PackageID, Revision: pkg.Revision,
+			})
+		}
+		if _, err := skillpackages.ReplacePluginReferences(ctx, s.queries, botUUID, row.ID, req.WorkspaceTargetID, packageRequirements); err != nil {
+			return Installation{}, err
+		}
 	}
 
 	for _, resource := range manifest.MCPs {
@@ -161,46 +262,45 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		}
 	}
 
-	for _, resource := range manifest.Skills {
-		if _, err := s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
-			InstallationID: row.ID,
-			ResourceType:   "skill",
-			ResourceKey:    resource.Key,
-			ResourceID:     resource.Path,
-			Status:         "bundled",
-			Metadata:       mustJSON(map[string]any{"name": resource.Name}),
-		}); err != nil {
-			return Installation{}, err
+	for _, resource := range req.InstalledSkills {
+		dirPath, err := skillset.SkillDirForIDs(resource.RegistryID, resource.PackageID, resource.SkillID)
+		if err != nil {
+			return Installation{}, fmt.Errorf("installed Plugin Skill %q is invalid", InstalledSkillIdentity(resource))
 		}
-	}
-	for _, skill := range manifest.BundledSkills {
-		name := strings.TrimSpace(skill.Name)
-		if name == "" {
-			name = strings.TrimSpace(skill.ID)
+		identity := InstalledSkillIdentity(resource)
+		metadata := map[string]any{
+			"registry_id": resource.RegistryID,
+			"package_id":  resource.PackageID,
+			"skill_id":    resource.SkillID,
 		}
-		key := sanitizeID(name)
-		if key == "" {
-			continue
+		if workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID); workspaceTargetID != "" {
+			metadata["workspace_target_id"] = workspaceTargetID
 		}
 		if _, err := s.queries.UpsertBotPluginResource(ctx, sqlc.UpsertBotPluginResourceParams{
 			InstallationID: row.ID,
 			ResourceType:   "skill",
-			ResourceKey:    key,
-			ResourceID:     path.Join(skillset.ManagedDir(), name, "SKILL.md"),
-			Status:         "bundled",
-			Metadata:       mustJSON(map[string]any{"name": name, "skill_id": skill.ID}),
+			ResourceKey:    identity,
+			ResourceID:     path.Join(dirPath, "SKILL.md"),
+			Status:         "installed",
+			Metadata:       mustJSON(metadata),
 		}); err != nil {
 			return Installation{}, err
 		}
 	}
-	if err := s.installBundledSkills(ctx, botID, row, manifest); err != nil {
-		return Installation{}, err
-	}
-
 	return s.normalizeInstallation(ctx, row)
 }
 
 func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, enabled bool) (Installation, error) {
+	var result Installation
+	err := s.inTransaction(ctx, func(txService *Service) error {
+		var updateErr error
+		result, updateErr = txService.setEnabled(ctx, botID, installationID, enabled)
+		return updateErr
+	})
+	return result, err
+}
+
+func (s *Service) setEnabled(ctx context.Context, botID, installationID string, enabled bool) (Installation, error) {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
 		return Installation{}, err
@@ -248,6 +348,56 @@ func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, 
 }
 
 func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (Installation, error) {
+	var result Installation
+	row, err := s.getRow(ctx, botID, installationID)
+	if err != nil {
+		return Installation{}, err
+	}
+	packageRemovals, err := s.prepareUnownedPackageRemovals(ctx, botID, row)
+	if err != nil {
+		return Installation{}, err
+	}
+	var bundleRemoval *pluginBundleRemoval
+	if row.Status != StatusUninstalled {
+		bundleRemoval, err = s.preparePluginBundleRemoval(ctx, botID, row)
+		if err != nil {
+			return Installation{}, errors.Join(err, packageRemovals.rollback(ctx))
+		}
+	}
+	if err := s.inTransaction(ctx, func(txService *Service) error {
+		var uninstallErr error
+		result, uninstallErr = txService.uninstall(ctx, botID, installationID)
+		return uninstallErr
+	}); err != nil {
+		return Installation{}, errors.Join(
+			err,
+			packageRemovals.rollback(ctx),
+			bundleRemoval.rollback(ctx),
+		)
+	}
+	if err := packageRemovals.commit(ctx); err != nil {
+		s.logger.Warn(
+			"cleanup unowned Plugin Packages failed",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", row.PluginID),
+			slog.Any("error", err),
+		)
+	}
+	if err := bundleRemoval.commit(ctx); err != nil {
+		s.logger.Warn(
+			"cleanup removed Plugin bundle failed",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", row.PluginID),
+			slog.Any("error", err),
+		)
+	}
+	return result, nil
+}
+
+func (s *Service) uninstall(
+	ctx context.Context,
+	botID, installationID string,
+) (Installation, error) {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
 		return Installation{}, err
@@ -255,10 +405,14 @@ func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (
 	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
 		return Installation{}, err
 	}
-	if err := s.uninstallBundledSkills(ctx, botID, row); err != nil {
+	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
 		return Installation{}, err
 	}
-	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return Installation{}, err
+	}
+	if _, err := skillpackages.ReplacePluginReferences(ctx, s.queries, botUUID, row.ID, "", nil); err != nil {
 		return Installation{}, err
 	}
 	updated, err := s.updateStatus(ctx, botID, installationID, StatusUninstalled, false)
@@ -273,10 +427,54 @@ func (s *Service) Purge(ctx context.Context, botID, installationID string) error
 	if err != nil {
 		return err
 	}
-	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
+	packageRemovals, err := s.prepareUnownedPackageRemovals(ctx, botID, row)
+	if err != nil {
 		return err
 	}
-	if err := s.uninstallBundledSkills(ctx, botID, row); err != nil {
+	var bundleRemoval *pluginBundleRemoval
+	if row.Status != StatusUninstalled {
+		bundleRemoval, err = s.preparePluginBundleRemoval(ctx, botID, row)
+		if err != nil {
+			return errors.Join(err, packageRemovals.rollback(ctx))
+		}
+	}
+	if err := s.inTransaction(ctx, func(txService *Service) error {
+		return txService.purge(ctx, botID, installationID)
+	}); err != nil {
+		return errors.Join(
+			err,
+			packageRemovals.rollback(ctx),
+			bundleRemoval.rollback(ctx),
+		)
+	}
+	if err := packageRemovals.commit(ctx); err != nil {
+		s.logger.Warn(
+			"cleanup unowned Plugin Packages failed",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", row.PluginID),
+			slog.Any("error", err),
+		)
+	}
+	if err := bundleRemoval.commit(ctx); err != nil {
+		s.logger.Warn(
+			"cleanup purged Plugin bundle failed",
+			slog.String("bot_id", botID),
+			slog.String("plugin_id", row.PluginID),
+			slog.Any("error", err),
+		)
+	}
+	return nil
+}
+
+func (s *Service) purge(
+	ctx context.Context,
+	botID, installationID string,
+) error {
+	row, err := s.getRow(ctx, botID, installationID)
+	if err != nil {
+		return err
+	}
+	if err := s.mcpService.DeleteByPlugin(ctx, botID, installationID); err != nil {
 		return err
 	}
 	if err := s.queries.DeleteBotPluginResources(ctx, row.ID); err != nil {
@@ -286,14 +484,20 @@ func (s *Service) Purge(ctx context.Context, botID, installationID string) error
 	if err != nil {
 		return err
 	}
+	if _, err := skillpackages.ReplacePluginReferences(ctx, s.queries, botUUID, row.ID, "", nil); err != nil {
+		return err
+	}
 	installationUUID, err := db.ParseUUID(installationID)
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteBotPluginInstallation(ctx, sqlc.DeleteBotPluginInstallationParams{
+	if err := s.queries.DeleteBotPluginInstallation(ctx, sqlc.DeleteBotPluginInstallationParams{
 		BotID: botUUID,
 		ID:    installationUUID,
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbackURL string) (*mcp.AuthorizeResult, error) {
@@ -361,6 +565,16 @@ func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbac
 }
 
 func (s *Service) RefreshOAuthStatus(ctx context.Context, botID, installationID string) (Installation, error) {
+	var result Installation
+	err := s.inTransaction(ctx, func(txService *Service) error {
+		var refreshErr error
+		result, refreshErr = txService.refreshOAuthStatusAndInstallation(ctx, botID, installationID)
+		return refreshErr
+	})
+	return result, err
+}
+
+func (s *Service) refreshOAuthStatusAndInstallation(ctx context.Context, botID, installationID string) (Installation, error) {
 	row, err := s.getRow(ctx, botID, installationID)
 	if err != nil {
 		return Installation{}, err
@@ -442,159 +656,21 @@ func (s *Service) normalizeInstallation(ctx context.Context, row sqlc.BotPluginI
 		outResources = append(outResources, item)
 	}
 	return Installation{
-		ID:          row.ID.String(),
-		BotID:       row.BotID.String(),
-		PluginID:    row.PluginID,
-		PluginName:  row.PluginName,
-		Version:     row.Version,
-		Status:      row.Status,
-		Enabled:     row.Enabled,
-		Config:      redactConfig(manifest, config),
-		Metadata:    metadata,
-		Manifest:    manifest,
-		Resources:   outResources,
-		InstalledAt: timeFromPg(row.InstalledAt),
-		UpdatedAt:   timeFromPg(row.UpdatedAt),
+		ID:                row.ID.String(),
+		BotID:             row.BotID.String(),
+		PluginID:          row.PluginID,
+		PluginName:        row.PluginName,
+		Version:           row.Version,
+		Status:            row.Status,
+		Enabled:           row.Enabled,
+		Config:            redactConfig(manifest, config),
+		Metadata:          metadata,
+		Manifest:          manifest,
+		Resources:         outResources,
+		WorkspaceTargetID: row.WorkspaceTargetID,
+		InstalledAt:       timeFromPg(row.InstalledAt),
+		UpdatedAt:         timeFromPg(row.UpdatedAt),
 	}, nil
-}
-
-func (s *Service) installBundledSkills(ctx context.Context, botID string, row sqlc.BotPluginInstallation, manifest Manifest) error {
-	if s.bridges == nil || len(manifest.BundledSkills) == 0 {
-		return nil
-	}
-	client, err := s.bridges.MCPClient(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("install plugin skills: workspace is not reachable: %w", err)
-	}
-	for _, skill := range manifest.BundledSkills {
-		name := strings.TrimSpace(skill.Name)
-		if name == "" {
-			name = strings.TrimSpace(skill.ID)
-		}
-		if !skillset.IsValidName(name) {
-			return fmt.Errorf("plugin skill %q has an invalid name", name)
-		}
-		raw := pluginSkillRaw(skill, name, row)
-		parsed := skillset.ParseFile(raw, name)
-		dirPath, err := skillset.ManagedSkillDirForName(parsed.Name)
-		if err != nil {
-			return fmt.Errorf("plugin skill %q has an invalid name", parsed.Name)
-		}
-		if err := client.Mkdir(ctx, dirPath); err != nil {
-			return fmt.Errorf("create plugin skill %q directory: %w", parsed.Name, err)
-		}
-		if err := client.WriteFile(ctx, path.Join(dirPath, "SKILL.md"), []byte(raw)); err != nil {
-			return fmt.Errorf("write plugin skill %q: %w", parsed.Name, err)
-		}
-		owner, err := encodeJSON(pluginSkillOwner(row, manifest, skill, parsed.Name))
-		if err != nil {
-			return err
-		}
-		if err := client.WriteFile(ctx, path.Join(dirPath, ".memoh-plugin-owner.json"), owner); err != nil {
-			return fmt.Errorf("write plugin skill %q owner marker: %w", parsed.Name, err)
-		}
-	}
-	return nil
-}
-
-func (s *Service) uninstallBundledSkills(ctx context.Context, botID string, row sqlc.BotPluginInstallation) error {
-	if s.bridges == nil {
-		return nil
-	}
-	manifest, err := decodeManifest(row.Manifest)
-	if err != nil {
-		return err
-	}
-	if len(manifest.BundledSkills) == 0 {
-		return nil
-	}
-	client, err := s.bridges.MCPClient(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("uninstall plugin skills: workspace is not reachable: %w", err)
-	}
-	for _, skill := range manifest.BundledSkills {
-		name := strings.TrimSpace(skill.Name)
-		if name == "" {
-			name = strings.TrimSpace(skill.ID)
-		}
-		if !skillset.IsValidName(name) {
-			continue
-		}
-		dirPath, err := skillset.ManagedSkillDirForName(name)
-		if err != nil {
-			continue
-		}
-		if !canDeletePluginSkill(ctx, client, dirPath, row.ID.String()) {
-			continue
-		}
-		if err := client.DeleteFile(ctx, dirPath, true); err != nil {
-			return fmt.Errorf("delete plugin skill %q: %w", name, err)
-		}
-	}
-	return nil
-}
-
-type skillFileClient interface {
-	ReadRaw(ctx context.Context, path string) (io.ReadCloser, error)
-}
-
-func canDeletePluginSkill(ctx context.Context, client skillFileClient, dirPath, installationID string) bool {
-	rc, err := client.ReadRaw(ctx, path.Join(dirPath, ".memoh-plugin-owner.json"))
-	if err != nil {
-		return false
-	}
-	defer func() { _ = rc.Close() }()
-	var owner struct {
-		InstallationID string `json:"installation_id"`
-	}
-	if err := json.NewDecoder(rc).Decode(&owner); err != nil {
-		return false
-	}
-	return strings.TrimSpace(owner.InstallationID) == installationID
-}
-
-func pluginSkillRaw(skill SkillEntry, name string, row sqlc.BotPluginInstallation) string {
-	metadata := normalizeMetadataMap(skill.Metadata)
-	metadata["managed_by_plugin"] = map[string]any{
-		"installation_id": row.ID.String(),
-		"plugin_id":       row.PluginID,
-		"plugin_name":     row.PluginName,
-	}
-	frontmatter := map[string]any{
-		"name":        name,
-		"description": strings.TrimSpace(skill.Description),
-		"metadata":    metadata,
-	}
-	payload, _ := encodeYAML(frontmatter)
-	body := strings.TrimSpace(skill.Content)
-	if body == "" {
-		body = "# " + name
-	}
-	return "---\n" + strings.TrimSpace(string(payload)) + "\n---\n\n" + body + "\n"
-}
-
-func pluginSkillOwner(row sqlc.BotPluginInstallation, manifest Manifest, skill SkillEntry, name string) map[string]any {
-	return map[string]any{
-		"installation_id": row.ID.String(),
-		"plugin_id":       manifest.ID,
-		"skill_id":        skill.ID,
-		"skill_name":      name,
-	}
-}
-
-func normalizeMetadataMap(value map[string]any) map[string]any {
-	if value == nil {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(value))
-	for key, item := range value {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out[key] = item
-	}
-	return out
 }
 
 func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]string) string {
@@ -696,11 +772,9 @@ func normalizeManifest(manifest Manifest) Manifest {
 			manifest.MCPs[i].Name = manifest.MCPs[i].DisplayName
 		}
 	}
-	for i := range manifest.Skills {
-		manifest.Skills[i].Key = sanitizeID(manifest.Skills[i].Key)
-		if manifest.Skills[i].Key == "" {
-			manifest.Skills[i].Key = sanitizeID(manifest.Skills[i].Name)
-		}
+	for i := range manifest.Packages {
+		manifest.Packages[i].RegistryID = strings.TrimSpace(manifest.Packages[i].RegistryID)
+		manifest.Packages[i].PackageID = strings.TrimSpace(manifest.Packages[i].PackageID)
 	}
 	return manifest
 }
@@ -943,13 +1017,6 @@ func encodeJSON(value any) ([]byte, error) {
 	return json.Marshal(value)
 }
 
-func encodeYAML(value any) ([]byte, error) {
-	if value == nil {
-		value = map[string]any{}
-	}
-	return yaml.Marshal(value)
-}
-
 func mustJSON(value any) []byte {
 	payload, _ := encodeJSON(value)
 	return payload
@@ -1033,6 +1100,100 @@ func authorizationServerFromEndpoint(endpoint string) string {
 }
 
 var (
-	idPattern          = regexp.MustCompile(`[^a-z0-9_-]+`)
-	templateVarPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+	idPattern             = regexp.MustCompile(`[^a-z0-9_-]+`)
+	artifactDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	templateVarPattern    = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 )
+
+func PackageReferenceIdentity(reference PackageReference) string {
+	return reference.RegistryID + "/" + reference.PackageID
+}
+
+func ValidatePackageReferences(references []PackageReference) error {
+	seen := make(map[string]struct{}, len(references))
+	for _, reference := range references {
+		identity := PackageReferenceIdentity(reference)
+		if !skillset.IsValidRegistryID(reference.RegistryID) ||
+			!skillset.IsValidRegistryComponent(reference.PackageID) {
+			return fmt.Errorf("plugin Package reference %q is invalid", identity)
+		}
+		if _, ok := seen[identity]; ok {
+			return fmt.Errorf("plugin Package reference %q is duplicated", identity)
+		}
+		seen[identity] = struct{}{}
+	}
+	return nil
+}
+
+func InstalledSkillIdentity(skill InstalledSkill) string {
+	return skill.RegistryID + "/" + skill.PackageID + "/" + skill.SkillID
+}
+
+func validateInstalledSkills(packages []PackageReference, skills []InstalledSkill) error {
+	allowed := make(map[string]struct{}, len(packages))
+	counts := make(map[string]int, len(packages))
+	for _, reference := range packages {
+		identity := PackageReferenceIdentity(reference)
+		allowed[identity] = struct{}{}
+		counts[identity] = 0
+	}
+	seen := make(map[string]struct{}, len(skills))
+	for _, skill := range skills {
+		identity := InstalledSkillIdentity(skill)
+		if !skillset.IsValidRegistryID(skill.RegistryID) ||
+			!skillset.IsValidRegistryComponent(skill.PackageID) ||
+			!skillset.IsValidRegistryComponent(skill.SkillID) {
+			return fmt.Errorf("installed Plugin Skill %q is invalid", identity)
+		}
+		packageIdentity := PackageReferenceIdentity(PackageReference{
+			RegistryID: skill.RegistryID, PackageID: skill.PackageID,
+		})
+		if _, ok := allowed[packageIdentity]; !ok {
+			return fmt.Errorf("installed Plugin Skill %q does not belong to a referenced Package", identity)
+		}
+		if _, ok := seen[identity]; ok {
+			return fmt.Errorf("installed Plugin Skill %q is duplicated", identity)
+		}
+		seen[identity] = struct{}{}
+		counts[packageIdentity]++
+	}
+	for identity, count := range counts {
+		if count == 0 {
+			return fmt.Errorf("plugin Package %q installed no Skills", identity)
+		}
+	}
+	return nil
+}
+
+func validateReleaseMetadata(release ReleaseMetadata) error {
+	if release.Revision == "" && release.ArtifactDigest == "" {
+		return nil
+	}
+	if !artifactDigestPattern.MatchString(release.Revision) ||
+		!artifactDigestPattern.MatchString(release.ArtifactDigest) {
+		return errors.New("plugin release metadata is invalid")
+	}
+	return nil
+}
+
+func validateInstalledPackages(references []PackageReference, installed []InstalledPackage) error {
+	if len(references) != len(installed) {
+		return errors.New("installed Plugin Packages do not match the manifest")
+	}
+	expected := make(map[string]struct{}, len(references))
+	for _, reference := range references {
+		expected[PackageReferenceIdentity(reference)] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(installed))
+	for _, pkg := range installed {
+		identity := PackageReferenceIdentity(PackageReference{RegistryID: pkg.RegistryID, PackageID: pkg.PackageID})
+		if _, ok := expected[identity]; !ok || !artifactDigestPattern.MatchString(pkg.Revision) {
+			return fmt.Errorf("installed Plugin Package %q is invalid", identity)
+		}
+		if _, exists := seen[identity]; exists {
+			return fmt.Errorf("installed Plugin Package %q is duplicated", identity)
+		}
+		seen[identity] = struct{}{}
+	}
+	return nil
+}

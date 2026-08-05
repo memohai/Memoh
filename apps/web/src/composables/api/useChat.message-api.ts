@@ -73,6 +73,10 @@ function serializeUITurns(items: ConversationUiTurn[]): UITurn[] {
   })) as UITurn[]
 }
 
+export function safeSkillCatalogQueryKey(botId: string) {
+  return ['bot-safe-skills-catalog', botId.trim()] as const
+}
+
 function isCommandEvent(value: unknown): value is CommandEventResponse {
   if (!value || typeof value !== 'object') return false
   const type = String((value as { type?: unknown }).type ?? '').trim()

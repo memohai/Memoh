@@ -138,11 +138,11 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
         },
       },
       {
-        name: 'supermarket-skill-detail',
-        path: 'skills/:skillId',
-        loader: () => import('@memohai/web/pages/supermarket/skill-detail.vue'),
+        name: 'supermarket-package-detail',
+        path: 'skills/:registryId/:packageId',
+        loader: () => import('@memohai/web/pages/supermarket/package-detail.vue'),
         meta: {
-          breadcrumb: (route) => String(route.params.skillId ?? ''),
+          breadcrumb: (route) => String(route.params.packageId ?? ''),
         },
       },
     ],

@@ -28,8 +28,8 @@ func (*Queries) SupportsAtomicDirectHistoryTurnWrites() bool {
 }
 
 // SupportsTransactions reports whether InTx opens a real PostgreSQL
-// transaction. The pool-less wrapper intentionally retains its historical
-// direct-execution fallback for tests and legacy callers.
+// transaction. Wrappers without a pool or pinned connection retain the
+// historical direct-execution fallback for tests and legacy callers.
 func (q *Queries) SupportsTransactions() bool {
 	return q != nil && q.pool != nil
 }
@@ -45,7 +45,11 @@ func (q *Queries) InTx(ctx context.Context, fn func(dbstore.Queries) error) erro
 	if q == nil || q.pool == nil {
 		return fn(q)
 	}
-	tx, err := q.pool.Begin(ctx)
+	var (
+		tx  pgx.Tx
+		err error
+	)
+	tx, err = q.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}

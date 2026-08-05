@@ -1,17 +1,10 @@
 package plugins
 
 import (
-	"context"
-	"io"
-	"path"
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/mcp"
-	skillset "github.com/memohai/memoh/internal/skills"
 )
 
 func TestMissingRequiredVariablesTreatsSelfTemplateDefaultAsMissing(t *testing.T) {
@@ -92,59 +85,62 @@ func TestManifestScopesOverrideDiscoveredScopes(t *testing.T) {
 	}
 }
 
-func TestPluginSkillRawAddsFrontmatterAndOwnership(t *testing.T) {
-	row := sqlc.BotPluginInstallation{
-		ID:         pgtype.UUID{Bytes: [16]byte{15: 1}, Valid: true},
-		PluginID:   "github",
-		PluginName: "GitHub",
+func TestValidatePackageReferencesRequiresNamespacedUniqueIdentity(t *testing.T) {
+	reference := PackageReference{RegistryID: "memoh", PackageID: "github"}
+	if err := ValidatePackageReferences([]PackageReference{reference}); err != nil {
+		t.Fatalf("ValidatePackageReferences(valid) error = %v", err)
 	}
-	raw := pluginSkillRaw(SkillEntry{
-		ID:          "github",
-		Name:        "github",
-		Description: "Use GitHub.",
-		Content:     "# GitHub\n\nUse the connected app.",
-	}, "github", row)
-
-	parsed := skillset.ParseFile(raw, "")
-	if parsed.Name != "github" {
-		t.Fatalf("parsed name = %q, want github", parsed.Name)
+	if got := PackageReferenceIdentity(reference); got != "memoh/github" {
+		t.Fatalf("PackageReferenceIdentity() = %q", got)
 	}
-	if parsed.Description != "Use GitHub." {
-		t.Fatalf("parsed description = %q", parsed.Description)
+	if err := ValidatePackageReferences([]PackageReference{reference, reference}); err == nil {
+		t.Fatal("ValidatePackageReferences() accepted a duplicate reference")
 	}
-	owner, ok := parsed.Metadata["managed_by_plugin"].(map[string]any)
-	if !ok {
-		t.Fatalf("managed_by_plugin metadata missing: %#v", parsed.Metadata)
+	dotted := PackageReference{RegistryID: "openai.api", PackageID: "documents.v2"}
+	if err := ValidatePackageReferences([]PackageReference{dotted}); err != nil {
+		t.Fatalf("ValidatePackageReferences(dotted) error = %v", err)
 	}
-	if owner["plugin_id"] != "github" {
-		t.Fatalf("plugin_id = %#v, want github", owner["plugin_id"])
+	reference.RegistryID = "Not Valid"
+	if err := ValidatePackageReferences([]PackageReference{reference}); err == nil {
+		t.Fatal("ValidatePackageReferences() accepted an invalid Registry ID")
 	}
-}
-
-func TestCanDeletePluginSkillRequiresMatchingOwnerMarker(t *testing.T) {
-	dir := path.Join(skillset.ManagedDir(), "github")
-	client := &pluginSkillFileClient{
-		files: map[string]string{
-			path.Join(dir, ".memoh-plugin-owner.json"): `{"installation_id":"install-1"}`,
-		},
-	}
-
-	if !canDeletePluginSkill(context.Background(), client, dir, "install-1") {
-		t.Fatal("expected matching owner marker to allow deletion")
-	}
-	if canDeletePluginSkill(context.Background(), client, dir, "install-2") {
-		t.Fatal("expected mismatched owner marker to block deletion")
+	for _, invalid := range []PackageReference{
+		{RegistryID: "user", PackageID: "github"},
+		{RegistryID: "memoh", PackageID: "github..v2"},
+		{RegistryID: "memoh", PackageID: "nul.txt"},
+	} {
+		if err := ValidatePackageReferences([]PackageReference{invalid}); err == nil {
+			t.Fatalf("ValidatePackageReferences() accepted invalid reference %+v", invalid)
+		}
 	}
 }
 
-type pluginSkillFileClient struct {
-	files map[string]string
+func TestValidateInstalledPackagesRequiresPinnedManifestPackages(t *testing.T) {
+	references := []PackageReference{{RegistryID: "memoh", PackageID: "notion"}}
+	installed := []InstalledPackage{{RegistryID: "memoh", PackageID: "notion", Revision: strings.Repeat("b", 64)}}
+	if err := validateInstalledPackages(references, installed); err != nil {
+		t.Fatalf("validateInstalledPackages(valid) error = %v", err)
+	}
+	if err := validateInstalledPackages(references, nil); err == nil {
+		t.Fatal("validateInstalledPackages() accepted a missing Package")
+	}
+	installed[0].Revision = "not-a-digest"
+	if err := validateInstalledPackages(references, installed); err == nil {
+		t.Fatal("validateInstalledPackages() accepted an invalid revision")
+	}
 }
 
-func (c *pluginSkillFileClient) ReadRaw(_ context.Context, filePath string) (io.ReadCloser, error) {
-	raw, ok := c.files[filePath]
-	if !ok {
-		return nil, io.ErrUnexpectedEOF
+func TestValidateInstalledSkillsRequiresEveryReferencedPackage(t *testing.T) {
+	packages := []PackageReference{{RegistryID: "memoh", PackageID: "notion"}}
+	if err := validateInstalledSkills(packages, nil); err == nil {
+		t.Fatal("validateInstalledSkills() accepted a Package without installed Skills")
 	}
-	return io.NopCloser(strings.NewReader(raw)), nil
+	skill := InstalledSkill{RegistryID: "memoh", PackageID: "notion", SkillID: "meeting"}
+	if err := validateInstalledSkills(packages, []InstalledSkill{skill}); err != nil {
+		t.Fatalf("validateInstalledSkills(valid) error = %v", err)
+	}
+	skill.PackageID = "other"
+	if err := validateInstalledSkills(packages, []InstalledSkill{skill}); err == nil {
+		t.Fatal("validateInstalledSkills() accepted a Skill outside the referenced Package")
+	}
 }

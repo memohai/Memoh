@@ -18,11 +18,17 @@ vi.mock('@memohai/sdk/client', () => ({
 
 import { getBotsByBotIdSessionsEvents } from '@memohai/sdk'
 
-import { streamBotSessionsActivityEvents } from './useChat.message-api'
+import { safeSkillCatalogQueryKey, streamBotSessionsActivityEvents } from './useChat.message-api'
 
 async function* singleEventStream(event: unknown) {
   yield event
 }
+
+describe('safeSkillCatalogQueryKey', () => {
+  it('keeps every catalog reader and invalidator on one normalized key', () => {
+    expect(safeSkillCatalogQueryKey(' bot-1 ')).toEqual(['bot-safe-skills-catalog', 'bot-1'])
+  })
+})
 
 describe('streamBotSessionsActivityEvents', () => {
   beforeEach(() => {

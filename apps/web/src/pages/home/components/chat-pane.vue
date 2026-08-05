@@ -759,7 +759,7 @@ import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAtta
 import { useComposerDrafts } from '../composables/useComposerDrafts'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
-import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
+import { fetchSafeSkillCatalog, fetchSession, safeSkillCatalogQueryKey, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultQuickActionText, isCommandResultItemSelectable } from './slash-command-result'
 import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, shouldRefreshACPComposerConfig } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
@@ -1228,7 +1228,7 @@ const activeSessionId = computed(() => paneTarget.value.sessionId ?? activeSessi
 const requestedSkills = ref<RequestedSkillSelection[]>([])
 const skillSlashEnabled = computed(() => !activeIsACP.value && !activeIsPendingACP.value)
 const { data: safeSkillCatalog, isLoading: safeSkillCatalogLoading } = useQuery({
-  key: () => ['bot-safe-skills-catalog', currentBotId.value ?? ''],
+  key: () => safeSkillCatalogQueryKey(currentBotId.value ?? ''),
   query: () => fetchSafeSkillCatalog(currentBotId.value!),
   enabled: () => !!currentBotId.value && skillSlashEnabled.value,
   refetchOnWindowFocus: false,

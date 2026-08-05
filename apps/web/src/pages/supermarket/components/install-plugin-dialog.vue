@@ -33,39 +33,32 @@
             >
               {{ plugin.mcps.length }} MCPs
             </Badge>
-            <Badge
-              v-if="pluginSkills.length"
-              variant="outline"
-              size="sm"
-            >
-              {{ pluginSkills.length }} Skills
-            </Badge>
           </div>
           <p class="text-caption text-muted-foreground line-clamp-3">
             {{ plugin.description }}
           </p>
           <div
-            v-if="pluginSkills.length"
+            v-if="pluginPackages.length"
             class="mt-3 grid gap-1.5"
           >
             <div
-              v-for="skill in pluginSkills"
-              :key="skillKey(skill)"
+              v-for="pkg in pluginPackages"
+              :key="packageKey(pkg)"
               class="flex min-w-0 items-start gap-2 rounded border border-border-soft bg-muted/20 px-2 py-1.5"
             >
               <Boxes class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <div class="min-w-0 flex-1">
                 <p
                   class="truncate text-caption font-medium"
-                  :title="skillName(skill)"
+                  :title="pkg.package_id"
                 >
-                  {{ skillName(skill) }}
+                  {{ pkg.package_id }}
                 </p>
                 <p
                   class="truncate text-[10px] text-muted-foreground"
-                  :title="skillDescription(skill)"
+                  :title="pkg.registry_id"
                 >
-                  {{ skillDescription(skill) }}
+                  {{ pkg.registry_id }}
                 </p>
               </div>
             </div>
@@ -129,14 +122,14 @@ import {
   Button, Badge, Input, Label, toast,
 } from '@felinic/ui'
 import {
+  getBotsByBotIdPlugins,
   getBotsByBotIdPluginsByIdOauthStatus,
   postBotsByBotIdPluginsByIdOauthAuthorize,
   postBotsByBotIdSupermarketInstallPlugin,
+  type HandlersSupermarketPluginEntry,
   type PluginsConfigVar,
   type PluginsInstallation,
-  type PluginsManifest,
-  type PluginsSkillEntry,
-  type PluginsSkillResource,
+  type HandlersSupermarketPluginResolvedPackage,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import { FieldStack } from '@felinic/ui'
@@ -146,7 +139,7 @@ import BotSelect from '@/components/bot-select/index.vue'
 
 const props = defineProps<{
   open: boolean
-  plugin: PluginsManifest | null
+  plugin: HandlersSupermarketPluginEntry | null
 }>()
 
 const emit = defineEmits<{
@@ -162,38 +155,18 @@ const installing = ref(false)
 const variableValues = reactive<Record<string, string>>({})
 
 const variables = computed<PluginsConfigVar[]>(() => props.plugin?.variables ?? [])
-type PluginSkill = PluginsSkillEntry | PluginsSkillResource
-
-const pluginSkills = computed<PluginSkill[]>(() => [
-  ...(props.plugin?.bundled_skills ?? []),
-  ...(props.plugin?.skills ?? []),
-])
+const pluginPackages = computed<HandlersSupermarketPluginResolvedPackage[]>(() => props.plugin?.release.packages ?? [])
 
 const requiresManagedOAuth = computed(() => {
   return (props.plugin?.auth_requirements ?? []).some(item => item.type === 'managed_oauth')
 })
 const canInstall = computed(() => {
-  if (!selectedBotId.value || !props.plugin?.id) return false
+  if (!selectedBotId.value || !props.plugin?.id || !props.plugin.release?.revision) return false
   return variables.value.every(item => !item.required || !!variableValues[item.key || '']?.trim())
 })
 
-function skillKey(skill: PluginSkill): string {
-  if ('id' in skill && skill.id) return skill.id
-  if ('key' in skill && skill.key) return skill.key
-  return skillName(skill)
-}
-
-function skillName(skill: PluginSkill): string {
-  if ('name' in skill && skill.name) return skill.name
-  if ('id' in skill && skill.id) return skill.id
-  if ('key' in skill && skill.key) return skill.key
-  return t('supermarket.unnamedSkill')
-}
-
-function skillDescription(skill: PluginSkill): string {
-  if ('description' in skill && skill.description) return skill.description
-  if ('path' in skill && skill.path) return skill.path
-  return t('supermarket.noDescription')
+function packageKey(pkg: HandlersSupermarketPluginResolvedPackage): string {
+  return `${pkg.registry_id}/${pkg.package_id}`
 }
 
 watch(() => props.open, (open) => {
@@ -209,17 +182,32 @@ watch(() => props.open, (open) => {
 })
 
 async function handleInstall() {
-  if (!selectedBotId.value || !props.plugin?.id) return
+  if (!selectedBotId.value || !props.plugin?.id || !props.plugin.release?.revision) return
   const botId = selectedBotId.value
   const oauthPopup = requiresManagedOAuth.value && !canOpenOAuthExternally()
     ? window.open('', 'mcp-oauth', 'width=600,height=700')
     : null
   installing.value = true
   try {
+    const { data: installedPlugins } = await getBotsByBotIdPlugins({
+      path: { bot_id: botId },
+      throwOnError: true,
+    })
+    const installedPlugin = (installedPlugins.items ?? []).find(item => item.plugin_id === props.plugin?.id)
+    const installedRevision = installedPlugin?.metadata?.release_revision
+    const expectedInstalledRevision = typeof installedRevision === 'string' && installedRevision
+      ? installedRevision
+      : null
+	const expectedInstallationUpdatedAt = expectedInstalledRevision && installedPlugin?.updated_at
+		? installedPlugin.updated_at
+		: null
     const { data } = await postBotsByBotIdSupermarketInstallPlugin({
       path: { bot_id: botId },
       body: {
         plugin_id: props.plugin.id,
+        release_revision: props.plugin.release.revision,
+        expected_installed_revision: expectedInstalledRevision,
+		expected_installation_updated_at: expectedInstallationUpdatedAt,
         variables: Object.fromEntries(
           Object.entries(variableValues).filter(([, value]) => value.trim() !== ''),
         ),

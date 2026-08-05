@@ -215,19 +215,31 @@ type BotHistoryMessageCompact struct {
 }
 
 type BotPluginInstallation struct {
-	ID          pgtype.UUID        `json:"id"`
-	BotID       pgtype.UUID        `json:"bot_id"`
-	PluginID    string             `json:"plugin_id"`
-	PluginName  string             `json:"plugin_name"`
-	Version     string             `json:"version"`
-	Status      string             `json:"status"`
-	Enabled     bool               `json:"enabled"`
-	Config      []byte             `json:"config"`
-	Metadata    []byte             `json:"metadata"`
-	Manifest    []byte             `json:"manifest"`
-	InstalledAt pgtype.Timestamptz `json:"installed_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	TeamID      pgtype.UUID        `json:"team_id"`
+	ID                pgtype.UUID        `json:"id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	PluginID          string             `json:"plugin_id"`
+	PluginName        string             `json:"plugin_name"`
+	Version           string             `json:"version"`
+	Status            string             `json:"status"`
+	Enabled           bool               `json:"enabled"`
+	Config            []byte             `json:"config"`
+	Metadata          []byte             `json:"metadata"`
+	Manifest          []byte             `json:"manifest"`
+	InstalledAt       pgtype.Timestamptz `json:"installed_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	TeamID            pgtype.UUID        `json:"team_id"`
+	WorkspaceTargetID string             `json:"workspace_target_id"`
+}
+
+type BotPluginPackageReference struct {
+	TeamID                pgtype.UUID        `json:"team_id"`
+	PluginInstallationID  pgtype.UUID        `json:"plugin_installation_id"`
+	PackageInstallationID pgtype.UUID        `json:"package_installation_id"`
+	RequiredRevision      string             `json:"required_revision"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	BotID                 pgtype.UUID        `json:"bot_id"`
+	WorkspaceTargetID     string             `json:"workspace_target_id"`
 }
 
 type BotPluginResource struct {
@@ -298,6 +310,19 @@ type BotSessionEvent struct {
 	ReceivedAtMs            int64              `json:"received_at_ms"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	TeamID                  pgtype.UUID        `json:"team_id"`
+}
+
+type BotSkillPackageInstallation struct {
+	ID                pgtype.UUID        `json:"id"`
+	TeamID            pgtype.UUID        `json:"team_id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	WorkspaceTargetID string             `json:"workspace_target_id"`
+	RegistryID        string             `json:"registry_id"`
+	PackageID         string             `json:"package_id"`
+	Revision          string             `json:"revision"`
+	DirectlyInstalled bool               `json:"directly_installed"`
+	InstalledAt       pgtype.Timestamptz `json:"installed_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotStorageBinding struct {

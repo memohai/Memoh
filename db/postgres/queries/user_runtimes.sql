@@ -145,8 +145,23 @@ WHERE team_id = public.memoh_current_team_id()
 RETURNING id;
 
 -- name: DeleteBotRemoteRuntimeMount :one
-DELETE FROM bot_remote_runtime_bindings
-WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = sqlc.arg(bot_id)
-  AND id = sqlc.arg(target_id)
+DELETE FROM bot_remote_runtime_bindings AS binding
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND binding.bot_id = sqlc.arg(bot_id)
+  AND binding.id = sqlc.arg(target_id)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_skill_package_installations AS package
+    WHERE package.team_id = public.memoh_current_team_id()
+      AND package.bot_id = binding.bot_id
+      AND package.workspace_target_id = binding.id::text
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_plugin_installations AS plugin
+    WHERE plugin.team_id = public.memoh_current_team_id()
+      AND plugin.bot_id = binding.bot_id
+      AND plugin.status <> 'uninstalled'
+      AND plugin.workspace_target_id = binding.id::text
+  )
 RETURNING id;

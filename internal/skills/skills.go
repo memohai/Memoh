@@ -26,10 +26,10 @@ const (
 	PluginDirPath             = config.DefaultDataMount + "/.memoh/plugins"
 	SkillDiscoveryRootsEnvVar = "MEMOH_SKILL_DISCOVERY_ROOTS"
 
-	SourceKindManaged = "managed"
-	SourceKindLegacy  = "legacy"
-	SourceKindCompat  = "compat"
-	SourceKindPlugin  = "plugin"
+	SourceKindManaged  = "managed"
+	SourceKindLegacy   = "legacy"
+	SourceKindCompat   = "compat"
+	SourceKindRegistry = "registry"
 
 	StateEffective = "effective"
 	StateShadowed  = "shadowed"
@@ -110,30 +110,8 @@ func ManagedDir() string {
 	return ManagedDirPath
 }
 
-func ManagedSkillDirForName(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if !IsValidName(name) {
-		return "", bridge.ErrBadRequest
-	}
-
-	dirPath := path.Clean(path.Join(ManagedDirPath, name))
-	if dirPath == ManagedDirPath || !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
-		return "", bridge.ErrBadRequest
-	}
-	return dirPath, nil
-}
-
-func PluginSkillsDirForID(pluginID string) (string, error) {
-	pluginRoot, err := PluginDirForID(pluginID)
-	if err != nil {
-		return "", err
-	}
-	return safePluginChildDir(pluginRoot, "skills")
-}
-
 func PluginDirForID(pluginID string) (string, error) {
-	pluginID = strings.TrimSpace(pluginID)
-	if !IsValidName(pluginID) {
+	if !IsValidPluginID(pluginID) {
 		return "", bridge.ErrBadRequest
 	}
 
@@ -181,17 +159,9 @@ func ContainerEnv(rawCompatRoots []string) []string {
 }
 
 func DiscoveryRoots(rawCompatRoots []string) []Root {
-	return DiscoveryRootsWithPluginRoots(rawCompatRoots, nil)
-}
-
-func DiscoveryRootsWithPluginRoots(rawCompatRoots []string, rawPluginRoots []string) []Root {
 	roots := []Root{
-		{Path: ManagedDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: IndexDirPath, Kind: SourceKindManaged, Managed: true},
 		{Path: LegacyDirPath, Kind: SourceKindLegacy, Managed: false},
-	}
-	for _, pluginRoot := range normalizePluginDiscoveryRoots(rawPluginRoots) {
-		roots = append(roots, Root{Path: pluginRoot, Kind: SourceKindPlugin, Managed: false})
 	}
 	for _, compatRoot := range compatDiscoveryRoots(rawCompatRoots) {
 		roots = append(roots, Root{Path: compatRoot, Kind: SourceKindCompat, Managed: false})
@@ -200,23 +170,16 @@ func DiscoveryRootsWithPluginRoots(rawCompatRoots []string, rawPluginRoots []str
 }
 
 func List(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
-	return ListWithPluginRoots(ctx, client, rawCompatRoots, nil)
-}
-
-func ListWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, error) {
 	idx := readIndex(ctx, client)
-	items := scan(ctx, client, DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots))
+	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots)
+	items := scan(ctx, client, roots)
 	resolved := resolve(items, idx.Overrides)
 	writeIndex(ctx, client, idx.withItems(resolved))
 	return resolved, nil
 }
 
 func LoadEffective(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
-	return LoadEffectiveWithPluginRoots(ctx, client, rawCompatRoots, nil)
-}
-
-func LoadEffectiveWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, error) {
-	items, err := ListWithPluginRoots(ctx, client, rawCompatRoots, rawPluginRoots)
+	items, err := List(ctx, client, rawCompatRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +224,7 @@ func computeRuntimeUsability(entry Entry) (bool, string) {
 		return false, "content"
 	}
 	switch entry.SourceKind {
-	case SourceKindManaged, SourceKindLegacy, SourceKindCompat, SourceKindPlugin:
+	case SourceKindManaged, SourceKindLegacy, SourceKindCompat, SourceKindRegistry:
 	default:
 		return false, "source_kind"
 	}
@@ -305,16 +268,15 @@ func metadataBool(metadata map[string]any, key string) (bool, bool) {
 }
 
 func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string, req ActionRequest) error {
-	return ApplyActionWithPluginRoots(ctx, client, rawCompatRoots, nil, req)
-}
-
-func ApplyActionWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string, req ActionRequest) error {
 	targetPath := strings.TrimSpace(req.TargetPath)
 	if targetPath == "" {
 		return bridge.ErrBadRequest
 	}
+	if _, _, _, ok := RegistrySkillIDs(targetPath); ok {
+		return ErrRegistrySkillReadOnly
+	}
 
-	roots := DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots)
+	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots)
 	switch strings.TrimSpace(req.Action) {
 	case ActionDisable:
 		idx := readIndex(ctx, client)
@@ -351,7 +313,7 @@ func ApplyActionWithPluginRoots(ctx context.Context, client fileClient, rawCompa
 				return bridge.ErrBadRequest
 			}
 		}
-		dirPath, err := ManagedSkillDirForName(target.Name)
+		dirPath, err := userSkillDirForName(target.Name)
 		if err != nil {
 			return err
 		}
@@ -395,28 +357,7 @@ func normalizeCompatDiscoveryRoots(paths []string) []string {
 		if !strings.HasPrefix(p, "/") {
 			continue
 		}
-		if p == ManagedDirPath || p == IndexDirPath || p == LegacyDirPath {
-			continue
-		}
-		if _, ok := seen[p]; ok {
-			continue
-		}
-		seen[p] = struct{}{}
-		out = append(out, p)
-	}
-	return out
-}
-
-func normalizePluginDiscoveryRoots(paths []string) []string {
-	out := make([]string, 0, len(paths))
-	seen := make(map[string]struct{}, len(paths))
-	for _, p := range paths {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		p = path.Clean(p)
-		if !strings.HasPrefix(p, PluginDirPath+"/") || !strings.HasSuffix(p, "/skills") {
+		if p == ManagedDirPath || p == IndexDirPath || p == LegacyDirPath || p == PluginDirPath {
 			continue
 		}
 		if _, ok := seen[p]; ok {
@@ -495,12 +436,63 @@ func IsValidName(name string) bool {
 		case r >= 'a' && r <= 'z':
 		case r >= 'A' && r <= 'Z':
 		case r >= '0' && r <= '9':
-		case r == '-' || r == '_' || r == '.':
+		case r == '-' || r == '_' || r == '.' || r == '+':
 		default:
 			return false
 		}
 	}
 	return true
+}
+
+const maxPortableResourceIDBytes = 128
+
+// IsValidPluginID validates the canonical Plugin and MCP identifier alphabet.
+func IsValidPluginID(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > maxPortableResourceIDBytes || isWindowsReservedName(value) {
+		return false
+	}
+	for index, character := range []byte(value) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') ||
+			(index > 0 && (character == '-' || character == '_')) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// IsValidRegistryComponent validates one Registry, Package, or Skill path component.
+func IsValidRegistryComponent(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > maxPortableResourceIDBytes ||
+		strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") || strings.Contains(value, "..") ||
+		isWindowsReservedName(value) {
+		return false
+	}
+	if first := value[0]; (first < 'a' || first > 'z') && (first < '0' || first > '9') {
+		return false
+	}
+	for _, character := range []byte(value) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') ||
+			character == '-' || character == '_' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// IsValidRegistryID also excludes the namespace reserved for user-authored Skills.
+func IsValidRegistryID(value string) bool {
+	return value != UserSkillNamespace && IsValidRegistryComponent(value)
+}
+
+func isWindowsReservedName(value string) bool {
+	base := strings.ToLower(strings.SplitN(value, ".", 2)[0])
+	if base == "con" || base == "prn" || base == "aux" || base == "nul" {
+		return true
+	}
+	return len(base) == 4 && (strings.HasPrefix(base, "com") || strings.HasPrefix(base, "lpt")) &&
+		base[3] >= '1' && base[3] <= '9'
 }
 
 func normalizeParsed(skill Parsed) Parsed {

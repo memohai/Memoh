@@ -111,6 +111,33 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
+    ['en', 'skill.builtin_read_only', 'Built-in Skills are managed by Memoh and cannot be edited or deleted.'],
+    ['zh', 'skill.builtin_read_only', 'Memoh 自带 Skill 由系统管理，无法编辑或删除。'],
+    ['ja', 'skill.builtin_read_only', 'Memoh 組み込みの Skill はシステムによって管理されているため、編集または削除できません。'],
+    ['en', 'skill.name_taken', 'A Skill with this name already exists. Choose a different name.'],
+    ['zh', 'skill.name_taken', '已存在同名 Skill，请换一个名称。'],
+    ['ja', 'skill.name_taken', '同じ名前の Skill がすでに存在します。別の名前を使用してください。'],
+    ['en', 'skill.save_failed', 'The Skill could not be saved. Please try again.'],
+    ['zh', 'skill.save_failed', 'Skill 保存失败，请重试。'],
+    ['ja', 'skill.save_failed', 'Skill を保存できませんでした。もう一度お試しください。'],
+    ['en', 'registry.unavailable', 'The Supermarket is unavailable. Please try again later.'],
+    ['zh', 'registry.unavailable', '暂时无法连接 Supermarket，请稍后重试。'],
+    ['ja', 'registry.unavailable', 'Supermarket に接続できません。しばらくしてからもう一度お試しください。'],
+    ['en', 'registry.package_not_found', 'This package is no longer available.'],
+    ['zh', 'registry.package_not_found', '该技能包已不存在。'],
+    ['ja', 'registry.package_not_found', 'このパッケージは現在利用できません。'],
+    ['en', 'registry.package_invalid', 'This package is invalid and cannot be installed.'],
+    ['zh', 'registry.package_invalid', '该技能包无效，无法安装。'],
+    ['ja', 'registry.package_invalid', 'このパッケージは無効なため、インストールできません。'],
+    ['en', 'registry.package_install_failed', 'The package could not be installed. Please try again.'],
+    ['zh', 'registry.package_install_failed', '技能包安装失败，请重试。'],
+    ['ja', 'registry.package_install_failed', 'パッケージをインストールできませんでした。もう一度お試しください。'],
+  ])('localizes %s error %s', (language, code, expected) => {
+    locale = language
+    expect(resolveApiErrorMessage({ code, detail: 'backend fallback' }, 'fallback')).toBe(expected)
+  })
+
+  it.each([
     ['en', 'The workspace could not be reached.'],
     ['zh', '暂时无法连接工作区，请稍后重试。'],
     ['ja', 'Workspace に接続できません。しばらくしてからもう一度お試しください。'],

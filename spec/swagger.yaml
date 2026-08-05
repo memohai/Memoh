@@ -2982,19 +2982,97 @@ definitions:
           $ref: '#/definitions/handlers.HookEventInfo'
         type: array
     type: object
+  handlers.InstallPackageRequest:
+    properties:
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      workspace_target_id:
+        type: string
+    required:
+    - package_id
+    - registry_id
+    - revision
+    type: object
   handlers.InstallPluginRequest:
     properties:
+      expected_installation_updated_at:
+        type: string
+        x-nullable: true
+      expected_installed_revision:
+        type: string
+        x-nullable: true
       plugin_id:
+        type: string
+      release_revision:
         type: string
       variables:
         additionalProperties:
           type: string
         type: object
+    required:
+    - expected_installation_updated_at
+    - expected_installed_revision
+    - plugin_id
+    - release_revision
     type: object
-  handlers.InstallSkillRequest:
+  handlers.InstallRegistryPackageResponse:
     properties:
+      installation:
+        $ref: '#/definitions/skillpackages.Installation'
+      ok:
+        type: boolean
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/handlers.InstallRegistrySkillResponse'
+        type: array
+      workspace_target_id:
+        type: string
+    required:
+    - installation
+    - ok
+    - package_id
+    - registry_id
+    - revision
+    - skills
+    - workspace_target_id
+    type: object
+  handlers.InstallRegistrySkillResponse:
+    properties:
+      artifact_digest:
+        type: string
+      files_written:
+        type: integer
+      install_id:
+        type: string
+      ok:
+        type: boolean
+      package_id:
+        type: string
+      registry_id:
+        type: string
       skill_id:
         type: string
+      workspace_target_id:
+        type: string
+    required:
+    - artifact_digest
+    - files_written
+    - install_id
+    - ok
+    - package_id
+    - registry_id
+    - skill_id
+    - workspace_target_id
     type: object
   handlers.ListSnapshotsResponse:
     properties:
@@ -3167,8 +3245,12 @@ definitions:
     properties:
       content:
         type: string
+      deletable:
+        type: boolean
       description:
         type: string
+      editable:
+        type: boolean
       managed:
         type: boolean
       metadata:
@@ -3176,9 +3258,15 @@ definitions:
         type: object
       name:
         type: string
+      package_id:
+        type: string
       raw:
         type: string
+      registry_id:
+        type: string
       shadowed_by:
+        type: string
+      skill_id:
         type: string
       source_kind:
         type: string
@@ -3198,7 +3286,10 @@ definitions:
     type: object
   handlers.SkillsDeleteRequest:
     properties:
-      names:
+      source_paths:
+        description: |-
+          SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
+          cannot address registry skills, which are nested by registry and package.
         items:
           type: string
         type: array
@@ -3216,6 +3307,12 @@ definitions:
         items:
           type: string
         type: array
+      source_path:
+        description: |-
+          SourcePath is the existing SKILL.md being edited when saving a single skill.
+          Empty means create (or overwrite by frontmatter name under
+          /data/skills/user/personal/<name>/).
+        type: string
     type: object
   handlers.SnapshotInfo:
     properties:
@@ -3252,23 +3349,19 @@ definitions:
         type: string
       name:
         type: string
+    required:
+    - email
+    - name
     type: object
-  handlers.SupermarketPluginListResponse:
+  handlers.SupermarketCatalogSkill:
     properties:
-      data:
-        items:
-          $ref: '#/definitions/plugins.Manifest'
-        type: array
-      limit:
-        type: integer
-      page:
-        type: integer
-      total:
-        type: integer
-    type: object
-  handlers.SupermarketSkillEntry:
-    properties:
-      content:
+      artifact:
+        $ref: '#/definitions/handlers.SupermarketSkillArtifact'
+      author:
+        $ref: '#/definitions/handlers.SupermarketAuthor'
+      category:
+        type: string
+      category_name:
         type: string
       description:
         type: string
@@ -3276,18 +3369,139 @@ definitions:
         items:
           type: string
         type: array
-      id:
+      homepage:
         type: string
-      metadata:
-        $ref: '#/definitions/handlers.SupermarketSkillMetadata'
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      install_id:
+        type: string
       name:
         type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      schema_version:
+        type: string
+      skill_id:
+        type: string
+      source:
+        $ref: '#/definitions/handlers.SupermarketSkillSource'
+      source_category:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+    required:
+    - artifact
+    - author
+    - category
+    - category_name
+    - description
+    - files
+    - install_id
+    - name
+    - package_id
+    - registry_id
+    - schema_version
+    - skill_id
+    - source
+    - tags
     type: object
-  handlers.SupermarketSkillListResponse:
+  handlers.SupermarketCatalogSkillListResponse:
     properties:
       data:
         items:
-          $ref: '#/definitions/handlers.SupermarketSkillEntry'
+          $ref: '#/definitions/handlers.SupermarketCatalogSkill'
+        type: array
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+    required:
+    - data
+    - limit
+    - page
+    - total
+    type: object
+  handlers.SupermarketPluginArtifact:
+    properties:
+      content_type:
+        type: string
+      digest:
+        type: string
+      download_url:
+        type: string
+      format:
+        type: string
+      size:
+        type: integer
+    required:
+    - content_type
+    - digest
+    - download_url
+    - format
+    - size
+    type: object
+  handlers.SupermarketPluginEntry:
+    properties:
+      auth_requirements:
+        items:
+          $ref: '#/definitions/plugins.AuthRequirement'
+        type: array
+      author:
+        $ref: '#/definitions/plugins.Author'
+      capabilities:
+        items:
+          type: string
+        type: array
+      description:
+        type: string
+      homepage:
+        type: string
+      icon:
+        $ref: '#/definitions/plugins.Icon'
+      id:
+        type: string
+      install:
+        items:
+          type: string
+        type: array
+      mcps:
+        items:
+          $ref: '#/definitions/plugins.MCPResource'
+        type: array
+      name:
+        type: string
+      packages:
+        items:
+          $ref: '#/definitions/plugins.PackageReference'
+        type: array
+      release:
+        $ref: '#/definitions/handlers.SupermarketPluginRelease'
+      schema_version:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      variables:
+        items:
+          $ref: '#/definitions/plugins.ConfigVar'
+        type: array
+      version:
+        type: string
+    required:
+    - release
+    type: object
+  handlers.SupermarketPluginListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketPluginEntry'
         type: array
       limit:
         type: integer
@@ -3296,23 +3510,291 @@ definitions:
       total:
         type: integer
     type: object
-  handlers.SupermarketSkillMetadata:
+  handlers.SupermarketPluginRelease:
     properties:
-      author:
-        $ref: '#/definitions/handlers.SupermarketAuthor'
-      homepage:
+      artifact:
+        $ref: '#/definitions/handlers.SupermarketPluginArtifact'
+      packages:
+        items:
+          $ref: '#/definitions/handlers.SupermarketPluginResolvedPackage'
+        type: array
+      published_at:
         type: string
-      tags:
-        items:
-          type: string
-        type: array
+      revision:
+        type: string
+    required:
+    - artifact
+    - packages
+    - published_at
+    - revision
     type: object
-  handlers.SupermarketTagsResponse:
+  handlers.SupermarketPluginResolvedPackage:
     properties:
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+    required:
+    - package_id
+    - registry_id
+    - revision
+    type: object
+  handlers.SupermarketRegistry:
+    properties:
+      adapter:
+        type: string
+      category_count:
+        type: integer
+      enabled:
+        type: boolean
+      id:
+        type: string
+      name:
+        type: string
+      package_count:
+        type: integer
+      priority:
+        type: integer
+      published_at:
+        type: string
+      revision:
+        type: string
+      skill_count:
+        type: integer
+      skipped_package_count:
+        type: integer
+    required:
+    - adapter
+    - category_count
+    - enabled
+    - id
+    - name
+    - package_count
+    - priority
+    - skill_count
+    - skipped_package_count
+    type: object
+  handlers.SupermarketRegistryListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketRegistry'
+        type: array
+    required:
+    - data
+    type: object
+  handlers.SupermarketSkillArtifact:
+    properties:
+      archive_size:
+        type: integer
+      content_type:
+        type: string
+      digest:
+        type: string
+      download_url:
+        type: string
+      file_count:
+        type: integer
+      format:
+        type: string
+      size:
+        type: integer
+      uncompressed_size:
+        type: integer
+    required:
+    - archive_size
+    - content_type
+    - digest
+    - download_url
+    - file_count
+    - format
+    - size
+    - uncompressed_size
+    type: object
+  handlers.SupermarketSkillCategory:
+    properties:
+      count:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      registries:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillCategoryRegistry'
+        type: array
+    required:
+    - count
+    - id
+    - name
+    - registries
+    type: object
+  handlers.SupermarketSkillCategoryListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillCategory'
+        type: array
+    required:
+    - data
+    type: object
+  handlers.SupermarketSkillCategoryRegistry:
+    properties:
+      count:
+        type: integer
+      id:
+        type: string
+    required:
+    - count
+    - id
+    type: object
+  handlers.SupermarketSkillIcon:
+    properties:
+      brand_color:
+        type: string
+      card:
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
+      dark:
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
+      detail:
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
+    type: object
+  handlers.SupermarketSkillIconAsset:
+    properties:
+      content_type:
+        type: string
+      digest:
+        type: string
+      size:
+        type: integer
+    required:
+    - content_type
+    - digest
+    - size
+    type: object
+  handlers.SupermarketSkillPackageCategory:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      skill_count:
+        type: integer
+    required:
+    - id
+    - name
+    - skill_count
+    type: object
+  handlers.SupermarketSkillPackageDescriptor:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillPackageCategory'
+        type: array
+      description:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      name:
+        type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      schema_version:
+        type: string
+      skill_count:
+        type: integer
+      skills:
+        items:
+          $ref: '#/definitions/handlers.SupermarketCatalogSkill'
+        type: array
       tags:
         items:
           type: string
         type: array
+    required:
+    - categories
+    - description
+    - name
+    - package_id
+    - registry_id
+    - revision
+    - schema_version
+    - skill_count
+    - skills
+    - tags
+    type: object
+  handlers.SupermarketSkillPackageListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillPackageSummary'
+        type: array
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+    required:
+    - data
+    - limit
+    - page
+    - total
+    type: object
+  handlers.SupermarketSkillPackageSummary:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillPackageCategory'
+        type: array
+      description:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      name:
+        type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      schema_version:
+        type: string
+      skill_count:
+        type: integer
+      tags:
+        items:
+          type: string
+        type: array
+    required:
+    - categories
+    - description
+    - name
+    - package_id
+    - registry_id
+    - schema_version
+    - skill_count
+    - tags
+    type: object
+  handlers.SupermarketSkillSource:
+    properties:
+      path:
+        type: string
+      repository:
+        type: string
+      revision:
+        type: string
+      type:
+        type: string
+    required:
+    - path
+    - revision
+    - type
     type: object
   handlers.TokenUsageRecord:
     properties:
@@ -4175,6 +4657,8 @@ definitions:
         type: string
       version:
         type: string
+      workspace_target_id:
+        type: string
     type: object
   plugins.ListResponse:
     properties:
@@ -4230,10 +4714,6 @@ definitions:
         type: array
       author:
         $ref: '#/definitions/plugins.Author'
-      bundled_skills:
-        items:
-          $ref: '#/definitions/plugins.SkillEntry'
-        type: array
       capabilities:
         items:
           type: string
@@ -4256,12 +4736,12 @@ definitions:
         type: array
       name:
         type: string
+      packages:
+        items:
+          $ref: '#/definitions/plugins.PackageReference'
+        type: array
       schema_version:
         type: string
-      skills:
-        items:
-          $ref: '#/definitions/plugins.SkillResource'
-        type: array
       tags:
         items:
           type: string
@@ -4277,6 +4757,16 @@ definitions:
     properties:
       callback_url:
         type: string
+    type: object
+  plugins.PackageReference:
+    properties:
+      package_id:
+        type: string
+      registry_id:
+        type: string
+    required:
+    - package_id
+    - registry_id
     type: object
   plugins.Resource:
     properties:
@@ -4296,33 +4786,6 @@ definitions:
       status:
         type: string
       updated_at:
-        type: string
-    type: object
-  plugins.SkillEntry:
-    properties:
-      content:
-        type: string
-      description:
-        type: string
-      files:
-        items:
-          type: string
-        type: array
-      id:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-    type: object
-  plugins.SkillResource:
-    properties:
-      key:
-        type: string
-      name:
-        type: string
-      path:
         type: string
     type: object
   providers.CountResponse:
@@ -4994,6 +5457,40 @@ definitions:
       video_model_id:
         type: string
     type: object
+  skillpackages.Installation:
+    properties:
+      bot_id:
+        type: string
+      directly_installed:
+        type: boolean
+      id:
+        type: string
+      installed_at:
+        type: string
+      package_id:
+        type: string
+      plugin_reference_count:
+        type: integer
+      registry_id:
+        type: string
+      revision:
+        type: string
+      updated_at:
+        type: string
+      workspace_target_id:
+        type: string
+    required:
+    - bot_id
+    - directly_installed
+    - id
+    - installed_at
+    - package_id
+    - plugin_reference_count
+    - registry_id
+    - revision
+    - updated_at
+    - workspace_target_id
+    type: object
   skills.SafeCatalogItem:
     properties:
       description:
@@ -5006,6 +5503,19 @@ definitions:
         type: string
       state:
         type: string
+    type: object
+  supermarket.UninstallPackageResponse:
+    properties:
+      installation:
+        $ref: '#/definitions/skillpackages.Installation'
+      ok:
+        type: boolean
+      removed_files:
+        type: boolean
+    required:
+    - installation
+    - ok
+    - removed_files
     type: object
   userinput.UIOption:
     properties:
@@ -7520,6 +8030,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -7588,10 +8102,14 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -7626,6 +8144,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -10395,6 +10917,48 @@ paths:
       summary: List runtime-safe skills for chat-time skill selection
       tags:
       - skills
+  /bots/{bot_id}/supermarket/install-package:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Install Package request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.InstallPackageRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.InstallRegistryPackageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Install an immutable Skill Package release to a bot workspace
+      tags:
+      - supermarket
   /bots/{bot_id}/supermarket/install-plugin:
     post:
       parameters:
@@ -10422,6 +10986,14 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
@@ -10429,40 +11001,55 @@ paths:
       summary: Install plugin from supermarket to bot
       tags:
       - supermarket
-  /bots/{bot_id}/supermarket/install-skill:
-    post:
+  /bots/{bot_id}/supermarket/packages:
+    get:
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Install skill request
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.InstallSkillRequest'
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: boolean
-            type: object
-        "400":
-          description: Bad Request
+            items:
+              $ref: '#/definitions/skillpackages.Installation'
+            type: array
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skill Packages installed for a bot
+      tags:
+      - supermarket
+  /bots/{bot_id}/supermarket/packages/{installation_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Package installation ID
+        in: path
+        name: installation_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/supermarket.UninstallPackageResponse'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-        "502":
-          description: Bad Gateway
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Install skill from supermarket to bot workspace
+      summary: Remove a directly installed Skill Package from a bot
       tags:
       - supermarket
   /bots/{bot_id}/token-usage:
@@ -13749,6 +14336,81 @@ paths:
       summary: List speech provider metadata
       tags:
       - speech-providers
+  /supermarket/artifacts/icon/{digest}:
+    get:
+      parameters:
+      - description: SHA-256 digest
+        in: path
+        name: digest
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a mirrored Skill icon
+      tags:
+      - supermarket
+  /supermarket/packages:
+    get:
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Registry ID
+        in: query
+        name: registry
+        type: string
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
+        in: query
+        name: tag
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Sort order
+        in: query
+        name: sort
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillPackageListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skill Packages across supermarket Registries
+      tags:
+      - supermarket
   /supermarket/plugins:
     get:
       parameters:
@@ -13792,7 +14454,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/plugins.Manifest'
+            $ref: '#/definitions/handlers.SupermarketPluginEntry'
         "404":
           description: Not Found
           schema:
@@ -13804,14 +14466,65 @@ paths:
       summary: Get plugin detail from supermarket
       tags:
       - supermarket
-  /supermarket/skills:
+  /supermarket/registries:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketRegistryListResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skill Registries from supermarket
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/categories:
     get:
       parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillCategoryListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List categories in a Skill Registry
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
       - description: Search query
         in: query
         name: q
         type: string
-      - description: Filter by tag
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
         in: query
         name: tag
         type: string
@@ -13823,31 +14536,19 @@ paths:
         in: query
         name: limit
         type: integer
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.SupermarketSkillListResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List skills from supermarket
-      tags:
-      - supermarket
-  /supermarket/skills/{id}:
-    get:
-      parameters:
-      - description: Skill ID
-        in: path
-        name: id
-        required: true
+      - description: Sort order
+        in: query
+        name: sort
         type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketSkillEntry'
+            $ref: '#/definitions/handlers.SupermarketSkillPackageListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -13856,21 +14557,167 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get skill detail from supermarket
+      summary: List Skill Packages in one Registry
       tags:
       - supermarket
-  /supermarket/tags:
+  /supermarket/registries/{registry_id}/packages/{package_id}:
     get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Package ID
+        in: path
+        name: package_id
+        required: true
+        type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketTagsResponse'
+            $ref: '#/definitions/handlers.SupermarketSkillPackageDescriptor'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List all tags from supermarket
+      summary: Get a namespaced Skill Package
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Package ID
+        in: path
+        name: package_id
+        required: true
+        type: string
+      - description: Package revision
+        in: path
+        name: revision
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillPackageDescriptor'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get an immutable Skill Package release
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Package ID
+        in: path
+        name: package_id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skill_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketCatalogSkill'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a namespaced Registry Skill
+      tags:
+      - supermarket
+  /supermarket/skills:
+    get:
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Registry ID
+        in: query
+        name: registry
+        type: string
+      - description: Package ID
+        in: query
+        name: package
+        type: string
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
+        in: query
+        name: tag
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Sort order
+        in: query
+        name: sort
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketCatalogSkillListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skills across supermarket Registries
       tags:
       - supermarket
   /transcription-models:

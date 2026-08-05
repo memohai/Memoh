@@ -60,19 +60,26 @@ type MCPResource struct {
 	Capabilities []string    `json:"capabilities,omitempty"`
 }
 
-type SkillResource struct {
-	Key  string `json:"key"`
-	Name string `json:"name,omitempty"`
-	Path string `json:"path,omitempty"`
+type PackageReference struct {
+	RegistryID string `json:"registry_id" validate:"required"`
+	PackageID  string `json:"package_id" validate:"required"`
 }
 
-type SkillEntry struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Content     string         `json:"content,omitempty"`
-	Files       []string       `json:"files,omitempty"`
+type InstalledSkill struct {
+	RegistryID string `json:"registry_id"`
+	PackageID  string `json:"package_id"`
+	SkillID    string `json:"skill_id"`
+}
+
+type InstalledPackage struct {
+	RegistryID string `json:"registry_id"`
+	PackageID  string `json:"package_id"`
+	Revision   string `json:"revision"`
+}
+
+type ReleaseMetadata struct {
+	Revision       string `json:"revision,omitempty"`
+	ArtifactDigest string `json:"artifact_digest,omitempty"`
 }
 
 type InstallCommands []string
@@ -107,27 +114,31 @@ func (c InstallCommands) MarshalJSON() ([]byte, error) {
 }
 
 type Manifest struct {
-	SchemaVersion    string            `json:"schema_version,omitempty"`
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Version          string            `json:"version,omitempty"`
-	Description      string            `json:"description,omitempty"`
-	Author           Author            `json:"author"`
-	Icon             *Icon             `json:"icon,omitempty"`
-	Homepage         string            `json:"homepage,omitempty"`
-	Tags             []string          `json:"tags,omitempty"`
-	Capabilities     []string          `json:"capabilities,omitempty"`
-	Install          InstallCommands   `json:"install,omitempty"`
-	Variables        []ConfigVar       `json:"variables,omitempty"`
-	AuthRequirements []AuthRequirement `json:"auth_requirements,omitempty"`
-	MCPs             []MCPResource     `json:"mcps,omitempty"`
-	Skills           []SkillResource   `json:"skills,omitempty"`
-	BundledSkills    []SkillEntry      `json:"bundled_skills,omitempty"`
+	SchemaVersion    string             `json:"schema_version,omitempty"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Version          string             `json:"version,omitempty"`
+	Description      string             `json:"description,omitempty"`
+	Author           Author             `json:"author"`
+	Icon             *Icon              `json:"icon,omitempty"`
+	Homepage         string             `json:"homepage,omitempty"`
+	Tags             []string           `json:"tags,omitempty"`
+	Capabilities     []string           `json:"capabilities,omitempty"`
+	Install          InstallCommands    `json:"install,omitempty"`
+	Variables        []ConfigVar        `json:"variables,omitempty"`
+	AuthRequirements []AuthRequirement  `json:"auth_requirements,omitempty"`
+	MCPs             []MCPResource      `json:"mcps,omitempty"`
+	Packages         []PackageReference `json:"packages,omitempty"`
 }
 
 type InstallRequest struct {
-	Manifest  Manifest          `json:"manifest"`
-	Variables map[string]string `json:"variables,omitempty"`
+	Manifest          Manifest           `json:"manifest"`
+	Variables         map[string]string  `json:"variables,omitempty"`
+	InstalledSkills   []InstalledSkill   `json:"-"`
+	InstalledPackages []InstalledPackage `json:"-"`
+	ReplacePackages   bool               `json:"-"`
+	Release           ReleaseMetadata    `json:"-"`
+	WorkspaceTargetID string             `json:"-"`
 }
 
 type OAuthAuthorizeRequest struct {
@@ -146,19 +157,27 @@ type Resource struct {
 }
 
 type Installation struct {
-	ID          string         `json:"id"`
-	BotID       string         `json:"bot_id"`
-	PluginID    string         `json:"plugin_id"`
-	PluginName  string         `json:"plugin_name"`
-	Version     string         `json:"version"`
-	Status      string         `json:"status"`
-	Enabled     bool           `json:"enabled"`
-	Config      map[string]any `json:"config,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Manifest    Manifest       `json:"manifest"`
-	Resources   []Resource     `json:"resources,omitempty"`
-	InstalledAt time.Time      `json:"installed_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	ID                string         `json:"id"`
+	BotID             string         `json:"bot_id"`
+	PluginID          string         `json:"plugin_id"`
+	PluginName        string         `json:"plugin_name"`
+	Version           string         `json:"version"`
+	Status            string         `json:"status"`
+	Enabled           bool           `json:"enabled"`
+	Config            map[string]any `json:"config,omitempty"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
+	Manifest          Manifest       `json:"manifest"`
+	Resources         []Resource     `json:"resources,omitempty"`
+	WorkspaceTargetID string         `json:"workspace_target_id,omitempty"`
+	InstalledAt       time.Time      `json:"installed_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+}
+
+// InstalledPluginState identifies the mutable installation state used by
+// Supermarket compare-and-set requests.
+type InstalledPluginState struct {
+	ReleaseRevision string
+	UpdatedAt       time.Time
 }
 
 type ListResponse struct {

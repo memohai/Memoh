@@ -96,17 +96,16 @@
       </section>
 
       <section
-        v-if="pluginSkills.length"
+        v-if="pluginPackages.length"
         class="mt-8"
       >
         <h2 class="mb-4 text-lg font-semibold">
-          {{ $t('supermarket.skillsSection') }}
-          <span class="ml-1 text-muted-foreground">{{ pluginSkills.length }}</span>
+          {{ $t('supermarket.packagesSection') }}
         </h2>
         <SettingsSection>
           <SettingsRow
-            v-for="skill in pluginSkills"
-            :key="skillKey(skill)"
+            v-for="pkg in pluginPackages"
+            :key="packageKey(pkg)"
             align="start"
           >
             <template #leading>
@@ -115,18 +114,30 @@
               </div>
             </template>
             <template #content>
-              <p
-                class="min-w-0 truncate text-sm font-medium text-foreground"
-                :title="skillName(skill)"
+              <RouterLink
+                :to="{
+                  name: 'supermarket-package-detail',
+                  params: {
+                    registryId: pkg.registry_id,
+                    packageId: pkg.package_id,
+                  },
+                  query: { revision: pkg.revision },
+                }"
+                class="block rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                {{ skillName(skill) }}
-              </p>
-              <p
-                class="mt-0.5 line-clamp-2 break-words text-xs text-muted-foreground"
-                :title="skillDescription(skill)"
-              >
-                {{ skillDescription(skill) }}
-              </p>
+                <p
+                  class="min-w-0 truncate text-sm font-medium text-foreground hover:text-primary"
+                  :title="pkg.package_id"
+                >
+                  {{ pkg.package_id }}
+                </p>
+                <p
+                  class="mt-0.5 truncate text-xs text-muted-foreground"
+                  :title="pkg.registry_id"
+                >
+                  {{ pkg.registry_id }}
+                </p>
+              </RouterLink>
             </template>
           </SettingsRow>
         </SettingsSection>
@@ -177,7 +188,6 @@
     <InstallPluginDialog
       v-model:open="installDialogOpen"
       :plugin="plugin"
-      @installed="loadPlugin"
     />
   </div>
 </template>
@@ -188,20 +198,22 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, Boxes, ExternalLink, PackageOpen, Plug } from 'lucide-vue-next'
 import { Badge, Button, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
-import { getSupermarketPluginsById, type PluginsManifest, type PluginsSkillEntry, type PluginsSkillResource } from '@memohai/sdk'
+import {
+  getSupermarketPluginsById,
+  type HandlersSupermarketPluginEntry,
+  type HandlersSupermarketPluginResolvedPackage,
+} from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
 import InfoItem from './components/info-item.vue'
 import MarketDetailHeader from './components/market-detail-header.vue'
 
-type PluginSkill = PluginsSkillEntry | PluginsSkillResource
-
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 
-const plugin = ref<PluginsManifest | null>(null)
+const plugin = ref<HandlersSupermarketPluginEntry | null>(null)
 const loading = ref(false)
 const installDialogOpen = ref(false)
 
@@ -215,26 +227,10 @@ const iconValue = computed(() => {
   return ''
 })
 
-const pluginSkills = computed<PluginSkill[]>(() => [
-  ...(plugin.value?.bundled_skills ?? []),
-  ...(plugin.value?.skills ?? []),
-])
+const pluginPackages = computed<HandlersSupermarketPluginResolvedPackage[]>(() => plugin.value?.release.packages ?? [])
 
-function skillKey(skill: PluginSkill) {
-  return 'id' in skill ? skill.id : skill.key
-}
-
-function skillName(skill: PluginSkill) {
-  if ('name' in skill && skill.name) return skill.name
-  if ('id' in skill && skill.id) return skill.id
-  if ('key' in skill && skill.key) return skill.key
-  return t('supermarket.unnamedSkill')
-}
-
-function skillDescription(skill: PluginSkill) {
-  if ('description' in skill && skill.description) return skill.description
-  if ('path' in skill && skill.path) return skill.path
-  return t('supermarket.noDescription')
+function packageKey(pkg: HandlersSupermarketPluginResolvedPackage) {
+  return `${pkg.registry_id}/${pkg.package_id}`
 }
 
 function authTypeForMcp(key?: string) {

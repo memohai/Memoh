@@ -5,7 +5,7 @@
   >
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
-        <DialogTitle>{{ $t('supermarket.skillInstallTitle') }}</DialogTitle>
+        <DialogTitle>{{ $t('supermarket.packageInstallTitle') }}</DialogTitle>
       </DialogHeader>
       <div class="space-y-4 py-2">
         <FieldStack :label="$t('supermarket.selectBot')">
@@ -14,22 +14,15 @@
             trigger-class="w-full"
           />
         </FieldStack>
-
         <div
-          v-if="skill"
-          class="rounded-md border border-border p-3 space-y-1"
+          v-if="pkg"
+          class="space-y-1 rounded-md border border-border p-3"
         >
           <p class="text-xs font-medium">
-            {{ skill.name }}
+            {{ pkg.name || pkg.package_id }}
           </p>
-          <p class="text-[11px] text-muted-foreground line-clamp-3">
-            {{ skill.description }}
-          </p>
-          <p
-            v-if="skill.files?.length"
-            class="text-[11px] text-muted-foreground"
-          >
-            {{ $t('supermarket.files') }}: {{ skill.files.length }}
+          <p class="line-clamp-3 text-xs text-muted-foreground">
+            {{ pkg.description }}
           </p>
         </div>
       </div>
@@ -43,7 +36,7 @@
           </Button>
         </DialogClose>
         <Button
-          :disabled="!selectedBotId"
+          :disabled="!selectedBotId || !pkg?.revision || !pkg.skills.length"
           :loading="installing"
           @click="handleInstall"
         >
@@ -57,30 +50,28 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FieldStack, toast } from '@felinic/ui'
+import { useQueryCache } from '@pinia/colada'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button,
+  Button, Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, FieldStack, toast,
 } from '@felinic/ui'
 import {
-  postBotsByBotIdSupermarketInstallSkill,
-  type HandlersSupermarketSkillEntry,
+  postBotsByBotIdSupermarketInstallPackage,
+  type HandlersSupermarketSkillPackageDescriptor,
 } from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import BotSelect from '@/components/bot-select/index.vue'
+import { safeSkillCatalogQueryKey } from '@/composables/api/useChat'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{
   open: boolean
-  skill: HandlersSupermarketSkillEntry | null
+  pkg: HandlersSupermarketSkillPackageDescriptor | null
 }>()
-
 const emit = defineEmits<{
   'update:open': [open: boolean]
   'installed': []
 }>()
-
 const { t } = useI18n()
-
+const queryCache = useQueryCache()
 const selectedBotId = ref('')
 const installing = ref(false)
 
@@ -92,23 +83,31 @@ watch(() => props.open, (open) => {
 })
 
 async function handleInstall() {
-  if (!selectedBotId.value || !props.skill?.id) return
+  if (!selectedBotId.value || !props.pkg?.registry_id || !props.pkg.package_id || !props.pkg.revision) return
+  const botID = selectedBotId.value
+  const registryID = props.pkg.registry_id
+  const packageID = props.pkg.package_id
+  const revision = props.pkg.revision
   installing.value = true
   try {
-    await postBotsByBotIdSupermarketInstallSkill({
-      path: { bot_id: selectedBotId.value },
+    await postBotsByBotIdSupermarketInstallPackage({
+      path: { bot_id: botID },
       body: {
-        skill_id: props.skill.id,
+        registry_id: registryID,
+        package_id: packageID,
+        revision,
       },
       throwOnError: true,
     })
     toast.success(t('supermarket.installSuccess'))
-    emit('update:open', false)
+    void queryCache.invalidateQueries({ key: safeSkillCatalogQueryKey(botID) })
     emit('installed')
+    emit('update:open', false)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('supermarket.installFailed')))
   } finally {
     installing.value = false
   }
 }
+
 </script>
