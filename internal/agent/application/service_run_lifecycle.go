@@ -234,7 +234,9 @@ func classifyContextLifecycleTerminal(ctx context.Context, cause error) (string,
 func contextLifecycleOwnershipLost(ctx context.Context, cause error) bool {
 	return errors.Is(context.Cause(nonNilContext(ctx)), sessionruntime.ErrRunOwnershipLost) ||
 		errors.Is(cause, sessionruntime.ErrRunOwnershipLost) ||
-		errors.Is(apperror.CauseOf(cause), sessionruntime.ErrRunOwnershipLost)
+		errors.Is(apperror.CauseOf(cause), sessionruntime.ErrRunOwnershipLost) ||
+		errors.Is(cause, sessionruntime.ErrCommandTargetNotActive) ||
+		errors.Is(apperror.CauseOf(cause), sessionruntime.ErrCommandTargetNotActive)
 }
 
 func nonNilContext(ctx context.Context) context.Context {
