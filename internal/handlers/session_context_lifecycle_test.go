@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -360,11 +362,13 @@ func TestGetSessionContextLifecycleMapsLoadFailureTo500(t *testing.T) {
 	tests := map[string]struct {
 		configure       func(*contextLifecycleQueryStub)
 		wantLegacyCalls int
+		wantCause       string
 	}{
 		"run query": {
 			configure: func(queries *contextLifecycleQueryStub) {
 				queries.lifecycleErr = errors.New("private database detail")
 			},
+			wantCause: "private database detail",
 		},
 		"run snapshot decode": {
 			configure: func(queries *contextLifecycleQueryStub) {
@@ -373,12 +377,14 @@ func TestGetSessionContextLifecycleMapsLoadFailureTo500(t *testing.T) {
 					Snapshot: []byte(`{"version":"invalid"}`),
 				}}
 			},
+			wantCause: "decode lifecycle snapshot",
 		},
 		"legacy query": {
 			configure: func(queries *contextLifecycleQueryStub) {
 				queries.legacyErr = errors.New("private legacy database detail")
 			},
 			wantLegacyCalls: 1,
+			wantCause:       "private legacy database detail",
 		},
 	}
 	for name, test := range tests {
@@ -386,9 +392,16 @@ func TestGetSessionContextLifecycleMapsLoadFailureTo500(t *testing.T) {
 			queries := newContextLifecycleTestQueries()
 			test.configure(queries)
 			err := newContextLifecycleTestHandler(queries).GetSessionContextLifecycle(newContextLifecycleTestContext(t, ""))
-			var httpErr *echo.HTTPError
-			if !errors.As(err, &httpErr) || httpErr.Code != http.StatusInternalServerError || httpErr.Message != "failed to load context lifecycle" {
-				t.Fatalf("error = %#v, want stable 500 without private detail", err)
+			problem, ok := apperror.ProblemFrom(err, "request-1")
+			if !ok || problem.Code != string(apperror.CodeContextLifecycleLoadFailed) || problem.Status != http.StatusInternalServerError {
+				t.Fatalf("error = %#v, want context lifecycle load Problem", err)
+			}
+			cause := apperror.CauseOf(err)
+			if cause == nil || !strings.Contains(cause.Error(), test.wantCause) {
+				t.Fatalf("cause = %v, want private cause containing %q", cause, test.wantCause)
+			}
+			if strings.Contains(problem.Detail, test.wantCause) {
+				t.Fatalf("problem detail exposed private cause: %#v", problem)
 			}
 			if len(queries.legacyParams) != test.wantLegacyCalls {
 				t.Fatalf("legacy query calls = %d, want %d", len(queries.legacyParams), test.wantLegacyCalls)

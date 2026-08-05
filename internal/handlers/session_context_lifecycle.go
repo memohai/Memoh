@@ -3,17 +3,19 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	"github.com/memohai/memoh/internal/apperror"
 	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -46,32 +48,37 @@ type ContextLifecycleTurn struct {
 // @Param session_id path string true "Session ID"
 // @Param limit query int false "Maximum number of turns to return (default 50, max 200)"
 // @Success 200 {object} ContextLifecycleResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 401 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle [get].
 func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
 	if err != nil {
-		return err
+		return mapContextLifecycleError(err)
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
 	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
 	}
 	pgSessionID, err := db.ParseUUID(sessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid session id")
+		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
 	}
 
 	ctx := c.Request().Context()
 	sessionRow, err := h.queries.GetSessionByID(ctx, pgSessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+		}
+		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
 	sessionMode, runtimeType := normalizedSessionDescriptor(session.Thread{
 		Type:        sessionRow.Type,
@@ -87,14 +94,14 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 		requiredReadPermissionForSessionRuntime(sessionMode, runtimeType),
 	)
 	if err != nil {
-		return err
+		return mapContextLifecycleError(err)
 	}
 	if sessionRow.BotID.String() != bot.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
 	}
 	perms, err := h.resolveCurrentUserPermissions(c, userID, bot.ID)
 	if err != nil {
-		return err
+		return mapContextLifecycleError(err)
 	}
 	sess := session.Thread{
 		ID:          sessionRow.ID.String(),
@@ -107,15 +114,36 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 		sess.CreatedByUserID = sessionRow.CreatedByUserID.String()
 	}
 	if !canAccessSession(sess, userID, perms) {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
 	}
 
 	turns, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, contextLifecycleLimit(c))
 	if err != nil {
-		h.logger.Error("load session context lifecycle failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load context lifecycle")
+		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
 	return c.JSON(http.StatusOK, ContextLifecycleResponse{Turns: turns})
+}
+
+func mapContextLifecycleError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
+	}
+	switch httpErr.Code {
+	case http.StatusBadRequest:
+		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+	case http.StatusUnauthorized:
+		return apperror.New(apperror.CodeContextLifecycleAuthenticationRequired, nil)
+	case http.StatusForbidden:
+		return apperror.New(apperror.CodeContextLifecycleAccessDenied, nil)
+	case http.StatusNotFound:
+		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+	default:
+		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
+	}
 }
 
 func contextLifecycleLimit(c echo.Context) int {

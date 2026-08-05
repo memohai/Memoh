@@ -102,3 +102,35 @@ func TestLookupDoesNotExposeMutableCatalogState(t *testing.T) {
 		t.Fatalf("catalog allowed args were mutated: %#v", fresh.AllowedArgs)
 	}
 }
+
+func TestContextLifecycleErrorCatalog(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		code   Code
+		status int
+		detail string
+	}{
+		{CodeContextLifecycleRequestInvalid, http.StatusBadRequest, "The context lifecycle request is invalid."},
+		{CodeContextLifecycleAuthenticationRequired, http.StatusUnauthorized, "Sign in to view context lifecycle diagnostics."},
+		{CodeContextLifecycleAccessDenied, http.StatusForbidden, "You do not have access to context lifecycle diagnostics."},
+		{CodeContextLifecycleNotFound, http.StatusNotFound, "The conversation was not found."},
+		{CodeContextLifecycleLoadFailed, http.StatusInternalServerError, "Context lifecycle diagnostics could not be loaded. Please try again."},
+	}
+	for _, test := range tests {
+		t.Run(string(test.code), func(t *testing.T) {
+			t.Parallel()
+
+			definition, ok := Lookup(test.code)
+			if !ok {
+				t.Fatalf("Lookup(%q) did not find catalog definition", test.code)
+			}
+			if definition.HTTPStatus != test.status || definition.Detail != test.detail {
+				t.Fatalf("Lookup(%q) = %#v, want status %d and detail %q", test.code, definition, test.status, test.detail)
+			}
+			if len(definition.AllowedArgs) != 0 {
+				t.Fatalf("Lookup(%q).AllowedArgs = %#v, want none", test.code, definition.AllowedArgs)
+			}
+		})
+	}
+}
