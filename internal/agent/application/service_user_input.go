@@ -10,6 +10,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/bots"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/models"
@@ -154,6 +155,15 @@ func (s *Service) CommitUserInputResponse(ctx context.Context, input UserInputRe
 }
 
 func (s *Service) ContinueCommittedUserInputResponse(ctx context.Context, committed CommittedUserInputResponse, eventCh chan<- WSStreamEvent) error {
+	return s.continueCommittedUserInputResponse(ctx, committed, nil, eventCh)
+}
+
+func (s *Service) continueCommittedUserInputResponse(
+	ctx context.Context,
+	committed CommittedUserInputResponse,
+	lifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	resolved := committed.request
 	if strings.TrimSpace(resolved.ID) == "" {
 		return errors.New("committed user input response is missing its request")
@@ -185,7 +195,7 @@ func (s *Service) ContinueCommittedUserInputResponse(ctx context.Context, commit
 	if s.continueUserInputFn != nil {
 		return s.continueUserInputFn(ctx, resolved, committed.input, toolResult, eventCh)
 	}
-	return s.storeUserInputResultAndContinue(ctx, resolved, committed.input, toolResult, runID, eventCh)
+	return s.storeUserInputResultAndContinue(ctx, resolved, committed.input, toolResult, runID, lifecycle, eventCh)
 }
 
 func (s *Service) authorizeACPUserInputResponse(ctx context.Context, target userinput.Request, input UserInputResponseInput) error {
@@ -302,7 +312,15 @@ func splitUserInputAnswerText(text string) []string {
 	return parts
 }
 
-func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, runID string, eventCh chan<- WSStreamEvent) error {
+func (s *Service) storeUserInputResultAndContinue(
+	ctx context.Context,
+	req userinput.Request,
+	input UserInputResponseInput,
+	result sdk.ToolResultPart,
+	runID string,
+	lifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	target, err := s.resolveWorkspaceTargetSnapshot(ctx, input.BotID, req.WorkspaceTargetID)
@@ -326,10 +344,17 @@ func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req useri
 	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
-	return s.continueUserInputSession(ctx, req, input, runID, eventCh)
+	return s.continueUserInputSession(ctx, req, input, runID, lifecycle, eventCh)
 }
 
-func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, runID string, eventCh chan<- WSStreamEvent) error {
+func (s *Service) continueUserInputSession(
+	ctx context.Context,
+	req userinput.Request,
+	input UserInputResponseInput,
+	runID string,
+	runtimeLifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	resolved, err := s.ResolveRunConfig(ctx,
@@ -356,6 +381,23 @@ func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Re
 	if err != nil {
 		return err
 	}
+	terminal := s.contextLifecycleTerminal(ctx, cfg)
+	var lifecycleCause error
+	var lifecycleDeferred bool
+	var terminalEventSeen bool
+	defer func() {
+		if runtimeLifecycle != nil {
+			runtimeLifecycle.cause = lifecycleCause
+			runtimeLifecycle.deferred = lifecycleDeferred
+			if snapshot, ok := cfg.ContextLifecycle.Snapshot(); ok {
+				runtimeLifecycle.snapshot = &snapshot
+			}
+			return
+		}
+		if !lifecycleDeferred {
+			terminal(lifecycleCause)
+		}
+	}()
 
 	chatReq := ChatRequest{
 		RunID:                   cfg.RunID,
@@ -374,18 +416,41 @@ func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Re
 	stream := s.agent.Stream(ctx, cfg)
 	stored := false
 	for event := range stream {
+		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
+			lifecycleCause = eventErr
+		}
+		if event.IsTerminal() {
+			terminalEventSeen = true
+			lifecycleDeferred = pendingContinuationDecision(event)
+			if !lifecycleDeferred {
+				switch event.Type {
+				case native.EventAgentEnd:
+					lifecycleCause = nil
+				case native.EventAgentAbort:
+					if context.Cause(ctx) != nil || lifecycleCause == nil {
+						lifecycleCause = agentAbortCause(ctx)
+					}
+				}
+			}
+		}
 		data, err := json.Marshal(event)
 		if err != nil {
 			continue
 		}
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
+				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
+				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
+					lifecycleCause = agentAbortCause(ctx)
+				}
 				if storeErr := s.persistTerminalSnapshot(
 					context.WithoutCancel(ctx),
 					chatReq,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
+					resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}},
 					snap,
 				); storeErr != nil {
+					lifecycleCause = storeErr
+					lifecycleDeferred = false
 					return storeErr
 				}
 				stored = true
@@ -395,12 +460,17 @@ func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Re
 			select {
 			case eventCh <- json.RawMessage(data):
 			case <-ctx.Done():
-				return ctx.Err()
+				lifecycleCause = context.Cause(ctx)
+				return lifecycleCause
 			}
 		}
 	}
 	if ctx.Err() != nil {
-		return context.Cause(ctx)
+		lifecycleCause = context.Cause(ctx)
+		return lifecycleCause
+	}
+	if lifecycleCause == nil && !lifecycleDeferred && !terminalEventSeen {
+		lifecycleCause = errors.New("agent continuation ended without a terminal event")
 	}
 	return nil
 }

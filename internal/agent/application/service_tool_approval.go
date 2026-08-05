@@ -112,6 +112,15 @@ func (s *Service) CommitToolApprovalResponse(ctx context.Context, input ToolAppr
 }
 
 func (s *Service) ContinueCommittedToolApprovalResponse(ctx context.Context, committed CommittedToolApprovalResponse, eventCh chan<- WSStreamEvent) error {
+	return s.continueCommittedToolApprovalResponse(ctx, committed, nil, eventCh)
+}
+
+func (s *Service) continueCommittedToolApprovalResponse(
+	ctx context.Context,
+	committed CommittedToolApprovalResponse,
+	lifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	target := committed.request
 	if strings.TrimSpace(target.ID) == "" {
 		return errors.New("committed tool approval response is missing its request")
@@ -149,7 +158,7 @@ func (s *Service) ContinueCommittedToolApprovalResponse(ctx context.Context, com
 	default:
 		return fmt.Errorf("committed tool approval has unexpected status %q", target.Status)
 	}
-	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, runID, eventCh)
+	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, runID, lifecycle, eventCh)
 }
 
 func (s *Service) toolOutputLimit() contextlimit.ToolOutputLimit {
@@ -291,7 +300,15 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 	})
 }
 
-func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, result sdk.ToolResultPart, runID string, eventCh chan<- WSStreamEvent) error {
+func (s *Service) storeToolResultAndContinue(
+	ctx context.Context,
+	approval toolapproval.Request,
+	input ToolApprovalResponseInput,
+	result sdk.ToolResultPart,
+	runID string,
+	lifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	approval = withLocalWebReplyTarget(approval)
 	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
 	target, err := s.resolveWorkspaceTargetSnapshot(ctx, input.BotID, approval.WorkspaceTargetID)
@@ -315,10 +332,17 @@ func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toola
 	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
-	return s.continueToolApprovalSession(ctx, approval, input, runID, eventCh)
+	return s.continueToolApprovalSession(ctx, approval, input, runID, lifecycle, eventCh)
 }
 
-func (s *Service) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, runID string, eventCh chan<- WSStreamEvent) error {
+func (s *Service) continueToolApprovalSession(
+	ctx context.Context,
+	approval toolapproval.Request,
+	input ToolApprovalResponseInput,
+	runID string,
+	runtimeLifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	approval = withLocalWebReplyTarget(approval)
 	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
 	resolved, err := s.ResolveRunConfig(ctx,
@@ -345,6 +369,23 @@ func (s *Service) continueToolApprovalSession(ctx context.Context, approval tool
 	if err != nil {
 		return err
 	}
+	terminal := s.contextLifecycleTerminal(ctx, cfg)
+	var lifecycleCause error
+	var lifecycleDeferred bool
+	var terminalEventSeen bool
+	defer func() {
+		if runtimeLifecycle != nil {
+			runtimeLifecycle.cause = lifecycleCause
+			runtimeLifecycle.deferred = lifecycleDeferred
+			if snapshot, ok := cfg.ContextLifecycle.Snapshot(); ok {
+				runtimeLifecycle.snapshot = &snapshot
+			}
+			return
+		}
+		if !lifecycleDeferred {
+			terminal(lifecycleCause)
+		}
+	}()
 
 	req := ChatRequest{
 		RunID:                   cfg.RunID,
@@ -363,18 +404,41 @@ func (s *Service) continueToolApprovalSession(ctx context.Context, approval tool
 	stream := s.agent.Stream(ctx, cfg)
 	stored := false
 	for event := range stream {
+		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
+			lifecycleCause = eventErr
+		}
+		if event.IsTerminal() {
+			terminalEventSeen = true
+			lifecycleDeferred = pendingContinuationDecision(event)
+			if !lifecycleDeferred {
+				switch event.Type {
+				case native.EventAgentEnd:
+					lifecycleCause = nil
+				case native.EventAgentAbort:
+					if context.Cause(ctx) != nil || lifecycleCause == nil {
+						lifecycleCause = agentAbortCause(ctx)
+					}
+				}
+			}
+		}
 		data, err := json.Marshal(event)
 		if err != nil {
 			continue
 		}
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
+				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
+				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
+					lifecycleCause = agentAbortCause(ctx)
+				}
 				if storeErr := s.persistTerminalSnapshot(
 					context.WithoutCancel(ctx),
 					req,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
+					resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}},
 					snap,
 				); storeErr != nil {
+					lifecycleCause = storeErr
+					lifecycleDeferred = false
 					return storeErr
 				}
 				stored = true
@@ -384,12 +448,17 @@ func (s *Service) continueToolApprovalSession(ctx context.Context, approval tool
 			select {
 			case eventCh <- json.RawMessage(data):
 			case <-ctx.Done():
-				return ctx.Err()
+				lifecycleCause = context.Cause(ctx)
+				return lifecycleCause
 			}
 		}
 	}
 	if ctx.Err() != nil {
-		return context.Cause(ctx)
+		lifecycleCause = context.Cause(ctx)
+		return lifecycleCause
+	}
+	if lifecycleCause == nil && !lifecycleDeferred && !terminalEventSeen {
+		lifecycleCause = errors.New("agent continuation ended without a terminal event")
 	}
 	return nil
 }

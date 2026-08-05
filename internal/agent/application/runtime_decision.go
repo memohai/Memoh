@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/decision"
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
@@ -20,6 +22,12 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
+
+type continuationLifecycleResult struct {
+	snapshot *contextfrag.LifecycleSnapshot
+	cause    error
+	deferred bool
+}
 
 // ResolveRuntimeDecision reads the authoritative decision row before any live
 // owner lookup. Terminal rows are returned too: the router needs to distinguish
@@ -246,9 +254,10 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			defer runCancel()
 			s.continueRuntimeDecision(runCtx, command, func(
 				continuationCtx context.Context,
+				lifecycle *continuationLifecycleResult,
 				eventCh chan<- WSStreamEvent,
 			) error {
-				return s.ContinueCommittedUserInputResponse(continuationCtx, committed, eventCh)
+				return s.continueCommittedUserInputResponse(continuationCtx, committed, lifecycle, eventCh)
 			})
 		}()
 		return nil
@@ -289,9 +298,10 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			defer runCancel()
 			s.continueRuntimeDecision(runCtx, command, func(
 				continuationCtx context.Context,
+				lifecycle *continuationLifecycleResult,
 				eventCh chan<- WSStreamEvent,
 			) error {
-				return s.ContinueCommittedToolApprovalResponse(continuationCtx, committed, eventCh)
+				return s.continueCommittedToolApprovalResponse(continuationCtx, committed, lifecycle, eventCh)
 			})
 		}()
 		return nil
@@ -328,7 +338,7 @@ func (s *Service) publishCommittedRuntimeDecision(ctx context.Context, command s
 func (s *Service) continueRuntimeDecision(
 	ctx context.Context,
 	command sessionruntime.Command,
-	continueRun func(context.Context, chan<- WSStreamEvent) error,
+	continueRun func(context.Context, *continuationLifecycleResult, chan<- WSStreamEvent) error,
 ) {
 	handle := sessionruntime.RunHandle{
 		BotID:      command.BotID,
@@ -337,23 +347,45 @@ func (s *Service) continueRuntimeDecision(
 		Generation: command.Generation,
 	}
 	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
+		s.recoverContextLifecycleFromAssistantMetadata(ctx, command.RunID, command.BotID, command.SessionID, err)
 		s.finishRuntimeDecision(ctx, handle, err)
 		return
 	}
 	eventCh := make(chan WSStreamEvent, 64)
 	runDone := make(chan error, 1)
+	lifecycle := &continuationLifecycleResult{}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
-		runDone <- continueRun(runCtx, eventCh)
+		runDone <- continueRun(runCtx, lifecycle, eventCh)
 		close(eventCh)
 	}()
 
-	var publishErr error
+	var (
+		publishErr        error
+		eventCause        error
+		lifecycleDeferred bool
+	)
 	for raw := range eventCh {
 		var event native.StreamEvent
 		if err := json.Unmarshal(raw, &event); err != nil {
 			continue
+		}
+		if eventErr := agentStreamEventError(event); eventErr != nil && eventCause == nil {
+			eventCause = eventErr
+		}
+		if event.IsTerminal() {
+			lifecycleDeferred = pendingContinuationDecision(event)
+			if !lifecycleDeferred {
+				switch event.Type {
+				case native.EventAgentEnd:
+					eventCause = nil
+				case native.EventAgentAbort:
+					if context.Cause(ctx) != nil || eventCause == nil {
+						eventCause = agentAbortCause(ctx)
+					}
+				}
+			}
 		}
 		if _, err := s.decisionRuntime.HandleAgentEvent(runCtx, handle, event); err != nil {
 			publishErr = err
@@ -362,19 +394,95 @@ func (s *Service) continueRuntimeDecision(
 		}
 	}
 	runErr := <-runDone
+	lifecycleDeferred = lifecycleDeferred || lifecycle.deferred
+	lifecycleCause := firstLifecycleCause(runErr, eventCause, lifecycle.cause)
 	if publishErr != nil {
 		runErr = publishErr
+		lifecycleCause = publishErr
+		lifecycleDeferred = false
 	}
 	if runErr != nil {
+		s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
 		s.finishRuntimeDecision(ctx, handle, runErr)
 		return
 	}
-	_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "", "")
+	if lifecycleDeferred {
+		_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "", "")
+		return
+	}
+	s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
+	s.finishRuntimeDecision(ctx, handle, lifecycleCause)
+}
+
+func firstLifecycleCause(causes ...error) error {
+	for _, cause := range causes {
+		if cause != nil {
+			return cause
+		}
+	}
+	return nil
+}
+
+func pendingContinuationDecision(event native.StreamEvent) bool {
+	if !event.IsTerminal() ||
+		(strings.TrimSpace(event.ApprovalID) == "" && strings.TrimSpace(event.UserInputID) == "") {
+		return false
+	}
+	status := strings.TrimSpace(event.Status)
+	return status == "" || strings.EqualFold(status, "pending")
+}
+
+func (s *Service) persistRuntimeDecisionLifecycle(
+	ctx context.Context,
+	command sessionruntime.Command,
+	result *continuationLifecycleResult,
+	cause error,
+) {
+	if result != nil && result.snapshot != nil {
+		s.persistContextLifecycleSnapshot(
+			ctx,
+			command.RunID,
+			command.BotID,
+			command.SessionID,
+			result.snapshot,
+			cause,
+			true,
+		)
+		return
+	}
+	s.recoverContextLifecycleFromAssistantMetadata(
+		ctx,
+		command.RunID,
+		command.BotID,
+		command.SessionID,
+		cause,
+	)
 }
 
 func (s *Service) finishRuntimeDecision(ctx context.Context, handle sessionruntime.RunHandle, cause error) {
 	status, message := runtimeDecisionTerminal(ctx, cause)
-	_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, status, message)
+	lifecycleCtx := frozenContextCause(ctx)
+	if err := s.decisionRuntime.FinishRun(context.WithoutCancel(nonNilContext(ctx)), handle, status, message); err == nil {
+		s.EnsureTerminalContextLifecycle(
+			lifecycleCtx,
+			handle.RunID,
+			handle.BotID,
+			handle.SessionID,
+			cause,
+		)
+	}
+}
+
+func frozenContextCause(ctx context.Context) context.Context {
+	ctx = nonNilContext(ctx)
+	frozen := context.WithoutCancel(ctx)
+	cause := context.Cause(ctx)
+	if cause == nil {
+		return frozen
+	}
+	frozen, cancel := context.WithCancelCause(frozen)
+	cancel(cause)
+	return frozen
 }
 
 func runtimeDecisionTerminal(ctx context.Context, cause error) (string, string) {
