@@ -1023,9 +1023,16 @@ func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, messa
 		defer m.observeTerminalRun(ctx, terminal)
 	}
 	if err != nil {
+		if errors.Is(err, ErrRunOwnershipLost) && terminal.RunID != "" {
+			// A newer fence already made this run terminal. This owner cannot
+			// release shared state, but it must stop its stale local control and
+			// lease renewal before the authoritative outcome is observed.
+			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), handle)
+		}
 		// The lease is deliberately left alone: it is the only pointer the
 		// reaper has to this run, and the durable row still says the run is
-		// active. Renewal has already stopped, so expiry brings the reaper.
+		// active. Renewal has already stopped, so expiry brings the reaper. The
+		// terminal newer-fence case above is the exception: no reaping remains.
 		return err
 	}
 	changed, err := m.finishRunState(ctx, handle, status, finishMessage)

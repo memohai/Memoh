@@ -74,6 +74,21 @@ func TestFinishRunObservesTerminalNewerFenceButRejectsStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctrl := fixture.manager.localControlForHandle(admission.Handle)
+	if ctrl == nil {
+		t.Fatal("admitted owner control is missing before stale finish")
+	}
+	leaseCtx, stopLease := context.WithCancel(context.Background())
+	leaseDone := make(chan struct{})
+	go func() {
+		<-leaseCtx.Done()
+		close(leaseDone)
+	}()
+	t.Cleanup(stopLease)
+	ctrl.leaseLifecycleMu.Lock()
+	ctrl.leaseStop = stopLease
+	ctrl.leaseDone = leaseDone
+	ctrl.leaseLifecycleMu.Unlock()
 	fixture.runs.mu.Lock()
 	run := fixture.runs.runs[admission.RunID]
 	run.FencingToken++
@@ -91,6 +106,14 @@ func TestFinishRunObservesTerminalNewerFenceButRejectsStaleOwner(t *testing.T) {
 	}
 	if len(observed) != 1 || observed[0].State != string(ledger.StateAborted) || observed[0].FencingToken != newToken {
 		t.Fatalf("terminal observations = %+v, want authoritative newer aborted row", observed)
+	}
+	if fixture.manager.localControlForHandle(admission.Handle) != nil {
+		t.Fatal("stale owner control remains after authoritative terminal observation")
+	}
+	select {
+	case <-leaseDone:
+	default:
+		t.Fatal("stale owner lease renewal remains active after authoritative terminal observation")
 	}
 }
 
