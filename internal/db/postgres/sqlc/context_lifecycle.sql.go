@@ -137,7 +137,7 @@ SELECT
 FROM bot_history_messages
 WHERE session_id = $1
   AND role = 'assistant'
-  AND metadata IS NOT NULL
+  AND metadata ? 'context_lifecycle'
 ORDER BY created_at DESC, id DESC
 LIMIT $2
 `

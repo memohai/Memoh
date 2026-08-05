@@ -8,7 +8,7 @@ SELECT
 FROM bot_history_messages
 WHERE session_id = sqlc.arg(session_id)
   AND role = 'assistant'
-  AND metadata IS NOT NULL
+  AND metadata ? 'context_lifecycle'
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(max_count);
 

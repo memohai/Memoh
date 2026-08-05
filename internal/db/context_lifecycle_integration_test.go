@@ -131,11 +131,18 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 	parsedPausedRunID := mustParseLifecycleUUID(t, pausedRunID)
 	var pausedAssistantID pgtype.UUID
 	if err := conn.QueryRow(ctx, `
-INSERT INTO bot_history_messages (bot_id, session_id, role, content, metadata, run_id)
-VALUES ($1, $2, 'assistant', '{}'::jsonb, $3, $4)
+INSERT INTO bot_history_messages (bot_id, session_id, role, content, metadata, run_id, created_at)
+VALUES ($1, $2, 'assistant', '{}'::jsonb, $3, $4, '2026-01-01T00:00:00Z')
 RETURNING id
 `, botID, sessionID, pausedMetadata, pausedRunID).Scan(&pausedAssistantID); err != nil {
 		t.Fatalf("seed paused assistant lifecycle: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `
+INSERT INTO bot_history_messages (bot_id, session_id, role, content, metadata, run_id, created_at)
+VALUES ($1, $2, 'assistant', '{}'::jsonb, '{"other":"metadata"}'::jsonb,
+        '00000000-0000-0000-0000-00000000d504', '2026-01-02T00:00:00Z')
+`, botID, sessionID); err != nil {
+		t.Fatalf("seed newer unrelated assistant metadata: %v", err)
 	}
 	pausedAssistant, err := queries.GetLatestAssistantContextLifecycleByRunID(ctx, parsedPausedRunID)
 	if err != nil {
