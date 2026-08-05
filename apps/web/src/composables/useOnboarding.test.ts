@@ -46,7 +46,7 @@ describe('useOnboarding completion', () => {
     resetOnboardingRuntimeState()
   })
 
-  it('clears runtime state only after navigating to the created bot', async () => {
+  it('keeps runtime state on navigation failure and clears it after retry', async () => {
     commitOnboardingACP({ agentId: 'codex', setupMode: 'oauth', managed: {} })
     commitOnboardingBotResult({
       botId: 'bot-id',
@@ -54,30 +54,19 @@ describe('useOnboarding completion', () => {
       acpLaunchAgentId: 'codex',
     })
 
-    const result = await useOnboarding().complete()
+    mocks.replace.mockRejectedValue(new Error('navigation failed'))
 
-    expect(result).toBe(true)
-    expect(mocks.replace).toHaveBeenCalledWith({
+    expect(await useOnboarding().complete()).toBe(false)
+    expect(onboardingRuntimeState.value.botResult?.botId).toBe('bot-id')
+    expect(mocks.toastError).toHaveBeenCalledWith('onboarding.complete.navigationFailed')
+
+    mocks.replace.mockResolvedValue(undefined)
+    expect(await useOnboarding().complete()).toBe(true)
+    expect(mocks.replace).toHaveBeenLastCalledWith({
       name: 'bot',
       params: { botName: 'bot-id' },
       query: { acp: 'codex' },
     })
-    expect(onboardingRuntimeState.value).toEqual({ selection: { kind: 'none' } })
-  })
-
-  it('keeps runtime state when navigation fails', async () => {
-    commitOnboardingACP({ agentId: 'codex', setupMode: 'oauth', managed: {} })
-    commitOnboardingBotResult({
-      botId: 'bot-id',
-      settingsApplied: true,
-      acpLaunchAgentId: 'codex',
-    })
-    mocks.replace.mockRejectedValue(new Error('navigation failed'))
-
-    const result = await useOnboarding().complete()
-
-    expect(result).toBe(false)
-    expect(onboardingRuntimeState.value.botResult?.botId).toBe('bot-id')
-    expect(mocks.toastError).toHaveBeenCalledWith('onboarding.complete.navigationFailed')
+    expect(onboardingRuntimeState.value.selection.kind).toBe('none')
   })
 })

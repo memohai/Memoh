@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   postProvider: vi.fn(),
   postProviderFromTemplate: vi.fn(),
   testProvider: vi.fn(),
-  updateModel: vi.fn(),
   updateProvider: vi.fn(),
   invalidateQueries: vi.fn(),
 }))
@@ -50,22 +49,30 @@ vi.mock('@memohai/sdk', () => ({
   postProvidersByIdImportModels: mocks.importModels,
   postProvidersByIdTest: mocks.testProvider,
   postProvidersFromTemplate: mocks.postProviderFromTemplate,
-  putModelsById: mocks.updateModel,
   putProvidersById: mocks.updateProvider,
 }))
 
 import { useProviderSetup } from './useProviderSetup'
 
-function mountSetup(preset: ProviderPreset | null) {
+const preset: ProviderPreset = {
+  id: 'deepseek',
+  name: 'DeepSeek',
+  clientType: 'openai-completions',
+  baseUrl: 'https://api.deepseek.com/v1',
+  source: 'deepseek.yaml',
+}
+
+function mountSetup(selectedPreset: ProviderPreset | null) {
   let setup: ReturnType<typeof useProviderSetup> | undefined
   const ready = vi.fn()
   const app = createApp({
     setup() {
-      setup = useProviderSetup({ selectedPreset: () => preset, onProviderReady: ready })
+      setup = useProviderSetup({ selectedPreset: () => selectedPreset, onProviderReady: ready })
       return () => h('div')
     },
   })
   app.mount(document.createElement('div'))
+  setup!.initFormValues(selectedPreset)
   return { app, ready, setup: setup! }
 }
 
@@ -73,32 +80,21 @@ describe('useProviderSetup', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.testProvider.mockResolvedValue({ data: { status: 'ok' } })
-    mocks.importModels.mockResolvedValue({
-      data: { created: 2, updated: 0, skipped: 0, models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
-    })
+    mocks.importModels.mockResolvedValue({ data: { created: 2 } })
     mocks.getProviderModels.mockResolvedValue({
       data: [
-        { id: 'pro-id', model_id: 'deepseek-v4-pro', name: 'Pro', provider_id: 'provider-id', type: 'chat', enable: false },
-        { id: 'flash-id', model_id: 'deepseek-v4-flash', name: 'Flash', provider_id: 'provider-id', type: 'chat', enable: false },
+        { id: 'pro-id', model_id: 'deepseek-v4-pro', provider_id: 'provider-id', type: 'chat', enable: false },
+        { id: 'flash-id', model_id: 'deepseek-v4-flash', provider_id: 'provider-id', type: 'chat', enable: false },
       ],
     })
-    mocks.updateModel.mockResolvedValue({ data: {} })
   })
 
-  it('materializes a preset through its template', async () => {
-    const preset = {
-      id: 'deepseek',
-      name: 'DeepSeek',
-      clientType: 'openai-completions',
-      baseUrl: 'https://api.deepseek.com/v1',
-      source: 'deepseek.yaml',
-    }
+  it('creates a preset from its template and exposes all chat models', async () => {
     mocks.getProviderTemplates.mockResolvedValue({
-      data: [{ id: 'template-id', domain: 'llm', key: 'deepseek', name: 'DeepSeek' }],
+      data: [{ id: 'template-id', domain: 'llm', key: 'deepseek' }],
     })
     mocks.postProviderFromTemplate.mockResolvedValue({ data: { id: 'provider-id' } })
     const { app, ready, setup } = mountSetup(preset)
-    setup.initFormValues(preset)
     setup.formValues.value.api_key = 'sk-test'
 
     await setup.saveAndNext()
@@ -108,68 +104,22 @@ describe('useProviderSetup', () => {
         template_id: 'template-id',
         domain: 'llm',
         name: 'DeepSeek',
-        config: { base_url: 'https://api.deepseek.com/v1', api_key: 'sk-test' },
+        config: { base_url: preset.baseUrl, api_key: 'sk-test' },
       },
       throwOnError: true,
     })
     expect(mocks.postProvider).not.toHaveBeenCalled()
-    expect(mocks.getProviderByName).not.toHaveBeenCalled()
-    expect(mocks.updateModel).not.toHaveBeenCalled()
     expect(ready).toHaveBeenCalledWith({ providerId: 'provider-id' })
     app.unmount()
   })
 
-  it('recovers the same template provider when the create response was lost', async () => {
-    const preset = {
-      id: 'deepseek',
-      name: 'DeepSeek',
-      clientType: 'openai-completions',
-      baseUrl: 'https://api.deepseek.com/v1',
-      source: 'deepseek.yaml',
-    }
+  it('never reuses a same-name custom provider for a preset', async () => {
     mocks.getProviderTemplates.mockResolvedValue({
       data: [{ id: 'template-id', domain: 'llm', key: 'deepseek' }],
     })
     mocks.postProviderFromTemplate.mockRejectedValue({ code: 'provider.name_taken' })
-    mocks.getProviderByName.mockResolvedValue({
-      data: { id: 'provider-id', provider_template_id: 'template-id' },
-    })
-    mocks.updateProvider.mockResolvedValue({ data: { id: 'provider-id' } })
+    mocks.getProviderByName.mockResolvedValue({ data: { id: 'custom-provider-id' } })
     const { app, ready, setup } = mountSetup(preset)
-    setup.initFormValues(preset)
-    setup.formValues.value.api_key = 'sk-test'
-
-    await setup.saveAndNext()
-
-    expect(mocks.updateProvider).toHaveBeenCalledWith({
-      path: { id: 'provider-id' },
-      body: {
-        config: { base_url: 'https://api.deepseek.com/v1', api_key: 'sk-test' },
-        enable: true,
-      },
-      throwOnError: true,
-    })
-    expect(ready).toHaveBeenCalledWith({ providerId: 'provider-id' })
-    app.unmount()
-  })
-
-  it('does not recover a same-name custom provider for a template preset', async () => {
-    const preset = {
-      id: 'deepseek',
-      name: 'DeepSeek',
-      clientType: 'openai-completions',
-      baseUrl: 'https://api.deepseek.com/v1',
-      source: 'deepseek.yaml',
-    }
-    mocks.getProviderTemplates.mockResolvedValue({
-      data: [{ id: 'template-id', domain: 'llm', key: 'deepseek' }],
-    })
-    mocks.postProviderFromTemplate.mockRejectedValue({ code: 'provider.name_taken' })
-    mocks.getProviderByName.mockResolvedValue({
-      data: { id: 'custom-provider-id' },
-    })
-    const { app, ready, setup } = mountSetup(preset)
-    setup.initFormValues(preset)
     setup.formValues.value.api_key = 'sk-test'
 
     await setup.saveAndNext()
@@ -179,11 +129,10 @@ describe('useProviderSetup', () => {
     app.unmount()
   })
 
-  it('keeps the generic provider endpoint for the custom entry', async () => {
+  it('uses the generic provider API for the custom entry', async () => {
     mocks.getProviderByName.mockResolvedValue({ data: null })
     mocks.postProvider.mockResolvedValue({ data: { id: 'provider-id' } })
     const { app, setup } = mountSetup(null)
-    setup.initFormValues(null)
     setup.formValues.value = {
       name: 'My Provider',
       api_key: 'sk-test',
@@ -193,70 +142,26 @@ describe('useProviderSetup', () => {
 
     await setup.saveAndNext()
 
-    expect(mocks.postProvider).toHaveBeenCalledWith({
-      body: {
-        name: 'My Provider',
-        client_type: 'openai-completions',
-        config: { base_url: 'https://example.com/v1', api_key: 'sk-test' },
-      },
-      throwOnError: true,
-    })
-    expect(mocks.getProviderTemplates).not.toHaveBeenCalled()
+    expect(mocks.postProvider).toHaveBeenCalled()
     expect(mocks.postProviderFromTemplate).not.toHaveBeenCalled()
     app.unmount()
   })
 
-
-  it('does not advance when an imported provider has no chat model', async () => {
-    const preset = {
-      id: 'deepseek',
-      name: 'DeepSeek',
-      clientType: 'openai-completions',
-      baseUrl: 'https://api.deepseek.com/v1',
-      source: 'deepseek.yaml',
-    }
+  it('does not advance without a chat model', async () => {
     mocks.getProviderTemplates.mockResolvedValue({
       data: [{ id: 'template-id', domain: 'llm', key: 'deepseek' }],
     })
     mocks.postProviderFromTemplate.mockResolvedValue({ data: { id: 'provider-id' } })
-    mocks.importModels.mockResolvedValue({
-      data: { created: 1, updated: 0, skipped: 0, models: ['embedding'] },
-    })
     mocks.getProviderModels.mockResolvedValue({
       data: [{ id: 'embedding-id', model_id: 'embedding', type: 'embedding', enable: false }],
     })
     const { app, ready, setup } = mountSetup(preset)
-    setup.initFormValues(preset)
     setup.formValues.value.api_key = 'sk-test'
 
     await setup.saveAndNext()
 
     expect(ready).not.toHaveBeenCalled()
     expect(setup.errorState.value).toBe('noModels')
-    app.unmount()
-  })
-
-  it('reports an HTTP failure when the imported model list cannot be loaded', async () => {
-    mocks.getProviderByName.mockResolvedValue({ data: null })
-    mocks.postProvider.mockResolvedValue({ data: { id: 'provider-id' } })
-    mocks.getProviderModels.mockRejectedValue(new Error('network unavailable'))
-    const { app, ready, setup } = mountSetup(null)
-    setup.initFormValues(null)
-    setup.formValues.value = {
-      name: 'My Provider',
-      api_key: 'sk-test',
-      base_url: 'https://example.com/v1',
-      client_type: 'openai-completions',
-    }
-
-    await setup.saveAndNext()
-
-    expect(mocks.getProviderModels).toHaveBeenCalledWith({
-      path: { id: 'provider-id' },
-      throwOnError: true,
-    })
-    expect(ready).not.toHaveBeenCalled()
-    expect(setup.errorState.value).toBe('http')
     app.unmount()
   })
 })

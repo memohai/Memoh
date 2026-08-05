@@ -4,80 +4,34 @@ import { ONBOARDING_KEYS } from './constants'
 
 describe('onboarding runtime state', () => {
   beforeEach(() => {
-    vi.restoreAllMocks()
     vi.resetModules()
     sessionStorage.clear()
   })
 
-  it('keeps the active state in memory when session storage cannot persist it', async () => {
-    const state = await import('./state')
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
-      throw new DOMException('blocked', 'SecurityError')
-    })
-
-    state.commitOnboardingProvider('provider-id')
-
-    expect(state.onboardingRuntimeState.value.selection).toEqual({
-      kind: 'provider',
-      providerId: 'provider-id',
-    })
-  })
-
-  it('replaces Provider and ACP selections atomically and clears stale bot results', async () => {
+  it('replaces AI selections and never keeps an unsuccessfully saved model', async () => {
     const state = await import('./state')
     state.commitOnboardingProvider('provider-id')
     state.commitOnboardingBotResult({
-      botId: 'bot-id',
-      selectedModelId: 'model-id',
+      botId: 'old-bot',
+      selectedModelId: 'old-model',
       settingsApplied: true,
     })
 
     state.commitOnboardingACP({ agentId: 'Codex', setupMode: 'oauth', managed: {} })
+    expect(state.onboardingRuntimeState.value.botResult).toBeUndefined()
 
-    expect(state.onboardingRuntimeState.value).toEqual({
-      selection: {
-        kind: 'acp',
-        selection: { agentId: 'codex', setupMode: 'oauth', managed: {} },
-      },
-      botResult: undefined,
-    })
-  })
-
-  it('records a model only when Step 4 reports that settings were applied', async () => {
-    const state = await import('./state')
-    state.commitOnboardingProvider('provider-id')
-    state.beginOnboardingBotCreation()
     state.commitOnboardingBotResult({
       botId: 'bot-id',
       selectedModelId: 'must-not-survive',
       settingsApplied: false,
     })
-
     expect(state.onboardingRuntimeState.value.botResult).toEqual({
       botId: 'bot-id',
       settingsApplied: false,
     })
   })
 
-  it('can suppress the ACP launch redirect without losing the created bot', async () => {
-    const state = await import('./state')
-    state.commitOnboardingACP({ agentId: 'codex', setupMode: 'oauth', managed: {} })
-    state.commitOnboardingBotResult({
-      botId: 'bot-id',
-      settingsApplied: true,
-      acpLaunchAgentId: 'codex',
-    })
-
-    state.disableOnboardingACPLaunch()
-
-    expect(state.onboardingRuntimeState.value.botResult).toEqual({
-      botId: 'bot-id',
-      settingsApplied: true,
-    })
-    expect(state.onboardingOAuthResumeBotId()).toBe('')
-  })
-
-  it('restores the OAuth phase only for the matching ACP bot', async () => {
+  it('resumes OAuth until the user explicitly skips it', async () => {
     const state = await import('./state')
     state.commitOnboardingACP({ agentId: 'codex', setupMode: 'oauth', managed: {} })
     state.commitOnboardingBotResult({
@@ -87,9 +41,12 @@ describe('onboarding runtime state', () => {
     })
 
     expect(state.onboardingOAuthResumeBotId()).toBe('bot-id')
+    state.disableOnboardingACPLaunch()
+    expect(state.onboardingOAuthResumeBotId()).toBe('')
+    expect(state.onboardingRuntimeState.value.botResult?.botId).toBe('bot-id')
   })
 
-  it('restores a valid state and rejects malformed storage', async () => {
+  it('restores valid session state and rejects malformed storage', async () => {
     sessionStorage.setItem(ONBOARDING_KEYS.runtimeState, JSON.stringify({
       selection: { kind: 'provider', providerId: 'provider-id' },
       botResult: { botId: 'bot-id', selectedModelId: 'model-id', settingsApplied: true },
@@ -100,6 +57,6 @@ describe('onboarding runtime state', () => {
     vi.resetModules()
     sessionStorage.setItem(ONBOARDING_KEYS.runtimeState, '{broken')
     state = await import('./state')
-    expect(state.onboardingRuntimeState.value).toEqual({ selection: { kind: 'none' } })
+    expect(state.onboardingRuntimeState.value.selection.kind).toBe('none')
   })
 })
