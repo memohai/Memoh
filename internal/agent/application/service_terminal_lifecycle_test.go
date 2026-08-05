@@ -112,6 +112,36 @@ func TestTerminalLifecycleCandidateOwnsErrorCodeIndependently(t *testing.T) {
 	}
 }
 
+func TestTerminalLifecycleMinimalCandidateOwnsOnlyErrorCode(t *testing.T) {
+	store := &recordingContextLifecycleStore{}
+	service := &Service{contextLifecycles: store}
+	snapshot := minimalContextLifecycleSnapshot()
+	service.stageContextLifecycleCandidate(
+		lifecycleFencedContext(10),
+		lifecycleTestRunID,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		&snapshot,
+		apperror.New(apperror.CodeWorkspaceUnreachable, nil),
+		contextLifecycleCandidateMinimal,
+	)
+
+	service.reconcileTerminalContextLifecycle(
+		context.Background(),
+		lifecycleTerminalRun(10, "failed", "runtime_run_failed"),
+	)
+	if len(store.terminalUpserts) != 1 {
+		t.Fatalf("terminal upserts = %d, want 1", len(store.terminalUpserts))
+	}
+	upsert := store.terminalUpserts[0]
+	if upsert.ReplaceSnapshot || !upsert.ReplaceErrorCode {
+		t.Fatalf("minimal candidate authorities = snapshot:%t error_code:%t, want false/true", upsert.ReplaceSnapshot, upsert.ReplaceErrorCode)
+	}
+	if !upsert.ErrorCode.Valid || upsert.ErrorCode.String != string(apperror.CodeWorkspaceUnreachable) {
+		t.Fatalf("minimal candidate error code = %#v, want %q", upsert.ErrorCode, apperror.CodeWorkspaceUnreachable)
+	}
+}
+
 func TestTerminalLifecycleIgnoresStaleFenceCandidate(t *testing.T) {
 	store := &recordingContextLifecycleStore{}
 	service := &Service{contextLifecycles: store}

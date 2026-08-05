@@ -356,20 +356,39 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 		BotID:           parsedBotID,
 		SessionID:       parsedSessionID,
 		Status:          "failed_provider",
-		ErrorCode:       pgtype.Text{String: "provider.timeout", Valid: true},
+		ErrorCode:       pgtype.Text{String: "runtime.generic", Valid: true},
 		Snapshot:        authoritativeSnapshot,
 		ReplaceSnapshot: true,
 	})
 	if err != nil {
 		t.Fatalf("replace terminal context lifecycle: %v", err)
 	}
-	if failed.Status != "failed_provider" || !failed.ErrorCode.Valid || failed.ErrorCode.String != "provider.timeout" {
-		t.Fatalf("replaced terminal lifecycle = (%q, %#v), want failed_provider/provider.timeout", failed.Status, failed.ErrorCode)
+	if failed.Status != "failed_provider" || !failed.ErrorCode.Valid || failed.ErrorCode.String != "runtime.generic" {
+		t.Fatalf("replaced terminal lifecycle = (%q, %#v), want failed_provider/runtime.generic", failed.Status, failed.ErrorCode)
 	}
 	assertJSONSemanticallyEqual(t, failed.Snapshot, authoritativeSnapshot)
 	if failed.CreatedAt != created.CreatedAt {
 		t.Fatalf("terminal upsert changed created_at = %#v, want %#v", failed.CreatedAt, created.CreatedAt)
 	}
+
+	errorOnlySnapshot := []byte(`{"version":0,"source":"error-only-repair"}`)
+	errorOnlyRepair, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:            parsedRunID,
+		BotID:            parsedBotID,
+		SessionID:        parsedSessionID,
+		Status:           "failed_provider",
+		ErrorCode:        pgtype.Text{String: "provider.timeout", Valid: true},
+		Snapshot:         errorOnlySnapshot,
+		ReplaceSnapshot:  false,
+		ReplaceErrorCode: true,
+	})
+	if err != nil {
+		t.Fatalf("apply error-only lifecycle repair: %v", err)
+	}
+	if !errorOnlyRepair.ErrorCode.Valid || errorOnlyRepair.ErrorCode.String != "provider.timeout" {
+		t.Fatalf("error-only repair code = %#v, want provider.timeout", errorOnlyRepair.ErrorCode)
+	}
+	assertJSONSemanticallyEqual(t, errorOnlyRepair.Snapshot, authoritativeSnapshot)
 
 	staleRepair, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
 		RunID:           parsedRunID,

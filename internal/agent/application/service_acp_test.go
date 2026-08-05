@@ -1374,6 +1374,7 @@ func TestPersistACPRoundAttachesLifecycleOnlyToFinalAssistant(t *testing.T) {
 		t.Fatalf("final assistant lifecycle metadata = %#v, want snapshot", messages.persisted[3].Metadata)
 	}
 }
+
 func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 	t.Parallel()
 
