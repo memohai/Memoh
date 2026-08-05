@@ -137,17 +137,24 @@ func TestReaperMarksExpiredLeaseLost(t *testing.T) {
 func TestReaperObservesAppliedAndAlreadyTerminalOutcomes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		seedState ledger.State
-		wantState ledger.State
+		name           string
+		seedState      ledger.State
+		abortRequested bool
+		wantState      ledger.State
 	}{
 		{name: "applied lost", wantState: ledger.StateLost},
+		{name: "applied abort intent", abortRequested: true, wantState: ledger.StateAborted},
 		{name: "already completed", seedState: ledger.StateCompleted, wantState: ledger.StateCompleted},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			runs := newFakeLedger()
 			runs.insertClaimed("run-observed", "session-observed", 5, "generation-1")
+			if tt.abortRequested {
+				runs.mu.Lock()
+				runs.runs["run-observed"].AbortRequestedAt = time.Now()
+				runs.mu.Unlock()
+			}
 			if tt.seedState != "" {
 				if _, applied, err := runs.Finalize(context.Background(), ledger.FinalizeParams{
 					RunID: "run-observed", FencingToken: 5, State: tt.seedState,

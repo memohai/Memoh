@@ -46,6 +46,7 @@ type recordingContextLifecycleStore struct {
 	terminalListCalls   int
 	terminalListLimit   int32
 	terminalListBound   bool
+	terminalListWait    bool
 }
 
 func (s *recordingContextLifecycleStore) CreateContextLifecycle(
@@ -165,6 +166,10 @@ func (s *recordingContextLifecycleStore) ListTerminalSessionRunsNeedingContextLi
 	s.terminalListCalls++
 	s.terminalListLimit = batchSize
 	_, s.terminalListBound = ctx.Deadline()
+	if s.terminalListWait {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return append([]sqlc.ListTerminalSessionRunsNeedingContextLifecycleRow(nil), s.terminalRows...), s.terminalListErr
 }
 

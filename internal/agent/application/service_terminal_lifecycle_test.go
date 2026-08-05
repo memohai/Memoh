@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -199,6 +200,25 @@ func TestTerminalLifecycleReconcilerRepairsCrashGapWithBoundedRead(t *testing.T)
 	store.terminalListErr = errors.New("query unavailable")
 	if err := service.reconcileTerminalContextLifecycles(context.Background()); err == nil {
 		t.Fatal("reconciliation query error was swallowed")
+	}
+}
+
+func TestTerminalLifecycleReconcilerHonorsShorterDeadline(t *testing.T) {
+	store := &recordingContextLifecycleStore{terminalListWait: true}
+	service := &Service{contextLifecycles: store}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+
+	err := service.reconcileTerminalContextLifecycles(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("reconciliation error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("bounded reconciliation took %s", elapsed)
+	}
+	if !store.terminalListBound {
+		t.Fatal("blocking reconciliation query did not receive a deadline")
 	}
 }
 
