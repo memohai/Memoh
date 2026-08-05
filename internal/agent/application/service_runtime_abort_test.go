@@ -21,6 +21,7 @@ type abortLifecycleQueries struct {
 	dbstore.Queries
 	mu            sync.Mutex
 	existing      *sqlc.ContextLifecycle
+	assistantID   pgtype.UUID
 	metadata      []byte
 	metadataErr   error
 	sessionRun    sqlc.SessionRun
@@ -65,6 +66,24 @@ func (q *abortLifecycleQueries) GetLatestAssistantContextLifecycleMetadataByRunI
 		return nil, pgx.ErrNoRows
 	}
 	return append([]byte(nil), q.metadata...), nil
+}
+
+func (q *abortLifecycleQueries) GetLatestAssistantContextLifecycleByRunID(
+	context.Context,
+	pgtype.UUID,
+) (sqlc.GetLatestAssistantContextLifecycleByRunIDRow, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.metadataErr != nil {
+		return sqlc.GetLatestAssistantContextLifecycleByRunIDRow{}, q.metadataErr
+	}
+	if q.metadata == nil {
+		return sqlc.GetLatestAssistantContextLifecycleByRunIDRow{}, pgx.ErrNoRows
+	}
+	return sqlc.GetLatestAssistantContextLifecycleByRunIDRow{
+		ID:       q.assistantID,
+		Metadata: append([]byte(nil), q.metadata...),
+	}, nil
 }
 
 func (q *abortLifecycleQueries) UpdateAbortedContextLifecycleSnapshot(
@@ -147,6 +166,8 @@ func TestAbortRuntimeRunReconcilesAssistantLifecycleWithoutChangingAck(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	const assistantMessageID = "66666666-6666-4666-8666-666666666666"
+	want.AssistantMessageID = assistantMessageID
 	wantRaw, err := json.Marshal(want)
 	if err != nil {
 		t.Fatal(err)
@@ -163,6 +184,7 @@ func TestAbortRuntimeRunReconcilesAssistantLifecycleWithoutChangingAck(t *testin
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			queries := newAbortedLifecycleQueries(t)
+			queries.assistantID = flowTestUUID(assistantMessageID)
 			queries.metadata = metadata
 			queries.upsertErr = tt.upsertErr
 			service := &Service{
@@ -188,6 +210,40 @@ func TestAbortRuntimeRunReconcilesAssistantLifecycleWithoutChangingAck(t *testin
 			}
 			waitForLifecycleFailureCount(t, service, tt.wantFailureCount)
 		})
+	}
+}
+
+func TestAbortRuntimeRunMalformedAssistantLifecycleFallsBackToMinimal(t *testing.T) {
+	queries := newAbortedLifecycleQueries(t)
+	queries.assistantID = flowTestUUID("77777777-7777-4777-8777-777777777777")
+	queries.metadata = []byte(`{"context_lifecycle":"invalid"}`)
+	service := &Service{
+		queries:           queries,
+		contextLifecycles: queries,
+		abortRuntime:      &recordingAbortRuntime{applied: true},
+	}
+
+	applied, err := service.AbortRuntimeRun(
+		context.Background(),
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		lifecycleTestRunID,
+		"abort-malformed-metadata",
+	)
+	if err != nil || !applied {
+		t.Fatalf("AbortRuntimeRun() = (%t, %v), want (true, nil)", applied, err)
+	}
+	waitForAbortedLifecycleUpsert(t, queries)
+	upserts := queries.recordedUpserts()
+	minimal, marshalErr := json.Marshal(minimalContextLifecycleSnapshot())
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if len(upserts) != 1 || !bytes.Equal(upserts[0].Snapshot, minimal) {
+		t.Fatalf("aborted upserts = %#v, want minimal fallback %s", upserts, minimal)
+	}
+	if got := service.contextLifecyclePersistenceErrors.Load(); got != 0 {
+		t.Fatalf("persistence failure count = %d, want 0 for non-recoverable metadata", got)
 	}
 }
 

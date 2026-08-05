@@ -24,6 +24,13 @@ type runtimeAbortController interface {
 	AbortControl(ctx context.Context, botID, sessionID, runID, controlID string) (bool, error)
 }
 
+type assistantContextLifecycleStore interface {
+	GetLatestAssistantContextLifecycleByRunID(
+		context.Context,
+		pgtype.UUID,
+	) (sqlc.GetLatestAssistantContextLifecycleByRunIDRow, error)
+}
+
 // AbortRuntimeRun routes an abort through the durable runtime and then
 // reconciles its lifecycle asynchronously. The acknowledgement remains owned
 // by AbortControl; audit persistence failures are counted and logged only.
@@ -161,7 +168,19 @@ func (s *Service) assistantContextLifecycleSnapshot(
 	ctx context.Context,
 	runID pgtype.UUID,
 ) ([]byte, bool, error) {
-	metadata, err := s.contextLifecycles.GetLatestAssistantContextLifecycleMetadataByRunID(ctx, runID)
+	var (
+		assistantID pgtype.UUID
+		metadata    []byte
+		err         error
+	)
+	if store, ok := s.contextLifecycles.(assistantContextLifecycleStore); ok {
+		row, rowErr := store.GetLatestAssistantContextLifecycleByRunID(ctx, runID)
+		assistantID = row.ID
+		metadata = row.Metadata
+		err = rowErr
+	} else {
+		metadata, err = s.contextLifecycles.GetLatestAssistantContextLifecycleMetadataByRunID(ctx, runID)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -170,7 +189,10 @@ func (s *Service) assistantContextLifecycleSnapshot(
 	}
 	snapshot, ok := contextLifecycleSnapshotFromMetadata(metadata)
 	if !ok {
-		return nil, false, errors.New("assistant message has no context lifecycle snapshot")
+		return nil, false, nil
+	}
+	if assistantID.Valid {
+		snapshot.AssistantMessageID = assistantID.String()
 	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
@@ -186,7 +208,9 @@ func contextLifecycleSnapshotFromMetadata(raw []byte) (contextfrag.LifecycleSnap
 	var metadata struct {
 		ContextLifecycle *contextfrag.LifecycleSnapshot `json:"context_lifecycle"`
 	}
-	if json.Unmarshal(raw, &metadata) != nil || metadata.ContextLifecycle == nil {
+	if json.Unmarshal(raw, &metadata) != nil ||
+		metadata.ContextLifecycle == nil ||
+		metadata.ContextLifecycle.Version <= 0 {
 		return contextfrag.LifecycleSnapshot{}, false
 	}
 	return *metadata.ContextLifecycle, true
