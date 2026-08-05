@@ -4,9 +4,7 @@ package db_test
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -79,7 +77,6 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 		t.Fatalf("seed context lifecycle owner: %v", err)
 	}
 
-	contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(secret)))
 	snapshot := map[string]any{
 		"version": 1,
 		"view":    "run_config_pre_provider",
@@ -89,13 +86,6 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 			"images":     0,
 			"text_bytes": len(secret),
 		},
-		"items": []any{map[string]any{
-			"id":           "system.prompt",
-			"kind":         "system_prompt",
-			"slot":         "system",
-			"content_hash": contentHash,
-			"text_bytes":   len(secret),
-		}},
 	}
 	snapshotJSON, err := json.Marshal(snapshot)
 	if err != nil {
@@ -113,15 +103,15 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 		RunID:     parsedRunID,
 		BotID:     parsedBotID,
 		SessionID: parsedSessionID,
-		Status:    "failed_budget",
-		ErrorCode: pgtype.Text{String: "context.budget_unsatisfied", Valid: true},
+		Status:    "failed_provider",
+		ErrorCode: pgtype.Text{String: "workspace.unreachable", Valid: true},
 		Snapshot:  snapshotJSON,
 	})
 	if err != nil {
 		t.Fatalf("create context lifecycle: %v", err)
 	}
-	if created.RunID != parsedRunID || created.Status != "failed_budget" {
-		t.Fatalf("created lifecycle identity = (%v, %q), want (%v, failed_budget)", created.RunID, created.Status, parsedRunID)
+	if created.RunID != parsedRunID || created.Status != "failed_provider" {
+		t.Fatalf("created lifecycle identity = (%v, %q), want (%v, failed_provider)", created.RunID, created.Status, parsedRunID)
 	}
 
 	got, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
@@ -168,9 +158,9 @@ VALUES ($1, $2, 'assistant', '{}'::jsonb, $3, $4)
 	if err != nil {
 		t.Fatalf("list context lifecycles: %v", err)
 	}
-	if len(recent) != 1 || recent[0].RunID != parsedRunID || recent[0].Status != "failed_budget" ||
-		!recent[0].ErrorCode.Valid || recent[0].ErrorCode.String != "context.budget_unsatisfied" {
-		t.Fatalf("recent context lifecycles = %#v, want one failed_budget row for %s", recent, runID)
+	if len(recent) != 1 || recent[0].RunID != parsedRunID || recent[0].Status != "failed_provider" ||
+		!recent[0].ErrorCode.Valid || recent[0].ErrorCode.String != "workspace.unreachable" {
+		t.Fatalf("recent context lifecycles = %#v, want one failed_provider row for %s", recent, runID)
 	}
 
 	if _, err := queries.CreateContextLifecycle(ctx, sqlc.CreateContextLifecycleParams{
