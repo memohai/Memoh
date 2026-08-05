@@ -388,15 +388,36 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 	}
 	assertJSONSemanticallyEqual(t, staleRepair.Snapshot, authoritativeSnapshot)
 
+	recoveredMetadataSnapshot := []byte(`{"version":2,"source":"recovered-assistant-metadata"}`)
+	recoveredMetadataRepair, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:            parsedRunID,
+		BotID:            parsedBotID,
+		SessionID:        parsedSessionID,
+		Status:           "failed_provider",
+		ErrorCode:        pgtype.Text{String: "runtime.generic", Valid: true},
+		Snapshot:         recoveredMetadataSnapshot,
+		ReplaceSnapshot:  true,
+		ReplaceErrorCode: false,
+	})
+	if err != nil {
+		t.Fatalf("apply recovered-metadata lifecycle repair: %v", err)
+	}
+	if !recoveredMetadataRepair.ErrorCode.Valid || recoveredMetadataRepair.ErrorCode.String != "provider.timeout" {
+		t.Fatalf("recovered-metadata repair code = %#v, want richer provider.timeout code", recoveredMetadataRepair.ErrorCode)
+	}
+	assertJSONSemanticallyEqual(t, recoveredMetadataRepair.Snapshot, recoveredMetadataSnapshot)
+	authoritativeSnapshot = recoveredMetadataSnapshot
+
 	reclassifiedSnapshot := []byte(`{"version":3,"source":"authoritative-reclassification"}`)
 	reclassified, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
-		RunID:           parsedRunID,
-		BotID:           parsedBotID,
-		SessionID:       parsedSessionID,
-		Status:          "failed_provider",
-		ErrorCode:       pgtype.Text{String: "provider.reclassified", Valid: true},
-		Snapshot:        reclassifiedSnapshot,
-		ReplaceSnapshot: true,
+		RunID:            parsedRunID,
+		BotID:            parsedBotID,
+		SessionID:        parsedSessionID,
+		Status:           "failed_provider",
+		ErrorCode:        pgtype.Text{String: "provider.reclassified", Valid: true},
+		Snapshot:         reclassifiedSnapshot,
+		ReplaceSnapshot:  true,
+		ReplaceErrorCode: true,
 	})
 	if err != nil {
 		t.Fatalf("replace same-status lifecycle authoritatively: %v", err)

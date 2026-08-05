@@ -422,13 +422,14 @@ func (s *Service) reconcileTerminalContextLifecycle(ctx context.Context, run ses
 		code = pgtype.Text{String: errorCode, Valid: true}
 	}
 	_, err = s.contextLifecycles.UpsertTerminalContextLifecycle(writeCtx, sqlc.UpsertTerminalContextLifecycleParams{
-		RunID:           runUUID,
-		BotID:           botUUID,
-		SessionID:       sessionUUID,
-		Status:          status,
-		ErrorCode:       code,
-		Snapshot:        snapshot,
-		ReplaceSnapshot: replaceSnapshot,
+		RunID:            runUUID,
+		BotID:            botUUID,
+		SessionID:        sessionUUID,
+		Status:           status,
+		ErrorCode:        code,
+		Snapshot:         snapshot,
+		ReplaceSnapshot:  replaceSnapshot,
+		ReplaceErrorCode: candidateReady && candidate.errorCode != "",
 	})
 	if err == nil {
 		s.clearContextLifecycleCandidates(run.RunID)

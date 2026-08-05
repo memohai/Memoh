@@ -417,7 +417,7 @@ SET
     ELSE COALESCE(context_lifecycles.error_code, EXCLUDED.error_code)
   END,
   snapshot = CASE
-    WHEN $7::boolean THEN EXCLUDED.snapshot
+    WHEN $8::boolean THEN EXCLUDED.snapshot
     ELSE context_lifecycles.snapshot
   END
 WHERE context_lifecycles.team_id = public.memoh_current_team_id()
@@ -428,13 +428,14 @@ RETURNING run_id, team_id, bot_id, session_id, status, error_code, snapshot, cre
 `
 
 type UpsertTerminalContextLifecycleParams struct {
-	RunID           pgtype.UUID `json:"run_id"`
-	BotID           pgtype.UUID `json:"bot_id"`
-	SessionID       pgtype.UUID `json:"session_id"`
-	Status          string      `json:"status"`
-	ErrorCode       pgtype.Text `json:"error_code"`
-	Snapshot        []byte      `json:"snapshot"`
-	ReplaceSnapshot bool        `json:"replace_snapshot"`
+	RunID            pgtype.UUID `json:"run_id"`
+	BotID            pgtype.UUID `json:"bot_id"`
+	SessionID        pgtype.UUID `json:"session_id"`
+	Status           string      `json:"status"`
+	ErrorCode        pgtype.Text `json:"error_code"`
+	Snapshot         []byte      `json:"snapshot"`
+	ReplaceErrorCode bool        `json:"replace_error_code"`
+	ReplaceSnapshot  bool        `json:"replace_snapshot"`
 }
 
 func (q *Queries) UpsertTerminalContextLifecycle(ctx context.Context, arg UpsertTerminalContextLifecycleParams) (ContextLifecycle, error) {
@@ -445,6 +446,7 @@ func (q *Queries) UpsertTerminalContextLifecycle(ctx context.Context, arg Upsert
 		arg.Status,
 		arg.ErrorCode,
 		arg.Snapshot,
+		arg.ReplaceErrorCode,
 		arg.ReplaceSnapshot,
 	)
 	var i ContextLifecycle

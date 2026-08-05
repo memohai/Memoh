@@ -82,6 +82,36 @@ func TestTerminalLifecycleCandidateWaitsForAuthoritativeFence(t *testing.T) {
 	}
 }
 
+func TestTerminalLifecycleCandidateOwnsErrorCodeIndependently(t *testing.T) {
+	store := &recordingContextLifecycleStore{}
+	service := &Service{contextLifecycles: store}
+	snapshot := lifecycleRichSnapshot(t)
+	service.stageContextLifecycleCandidate(
+		lifecycleFencedContext(8),
+		lifecycleTestRunID,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		&snapshot,
+		apperror.New(apperror.CodeWorkspaceUnreachable, nil),
+		contextLifecycleCandidateAuthoritative,
+	)
+
+	service.reconcileTerminalContextLifecycle(
+		context.Background(),
+		lifecycleTerminalRun(8, "failed", "runtime_run_failed"),
+	)
+	if len(store.terminalUpserts) != 1 {
+		t.Fatalf("terminal upserts = %d, want 1", len(store.terminalUpserts))
+	}
+	upsert := store.terminalUpserts[0]
+	if !upsert.ReplaceSnapshot || !upsert.ReplaceErrorCode {
+		t.Fatalf("candidate authorities = snapshot:%t error_code:%t, want both true", upsert.ReplaceSnapshot, upsert.ReplaceErrorCode)
+	}
+	if !upsert.ErrorCode.Valid || upsert.ErrorCode.String != string(apperror.CodeWorkspaceUnreachable) {
+		t.Fatalf("candidate error code = %#v, want %q", upsert.ErrorCode, apperror.CodeWorkspaceUnreachable)
+	}
+}
+
 func TestTerminalLifecycleIgnoresStaleFenceCandidate(t *testing.T) {
 	store := &recordingContextLifecycleStore{}
 	service := &Service{contextLifecycles: store}
@@ -112,6 +142,9 @@ func TestTerminalLifecycleIgnoresStaleFenceCandidate(t *testing.T) {
 	}
 	if code := store.terminalUpserts[0].ErrorCode; !code.Valid || code.String != "runtime_run_failed" {
 		t.Fatalf("terminal error code = %#v, want stable ledger code", code)
+	}
+	if store.terminalUpserts[0].ReplaceErrorCode {
+		t.Fatal("stale-fence candidate was granted error-code authority")
 	}
 	service.contextLifecycleCandidatesMu.Lock()
 	remaining := len(service.contextLifecycleCandidates)
@@ -188,6 +221,9 @@ func TestTerminalLifecycleReconcilerRepairsCrashGapWithBoundedRead(t *testing.T)
 	upsert := store.terminalUpserts[0]
 	if upsert.Status != contextLifecycleStatusFailedProvider || !upsert.ErrorCode.Valid || upsert.ErrorCode.String != "provider.stable" {
 		t.Fatalf("reconciled terminal = (%q, %#v)", upsert.Status, upsert.ErrorCode)
+	}
+	if !upsert.ReplaceSnapshot || upsert.ReplaceErrorCode {
+		t.Fatalf("recovered metadata authorities = snapshot:%t error_code:%t, want true/false", upsert.ReplaceSnapshot, upsert.ReplaceErrorCode)
 	}
 	var recovered contextfrag.LifecycleSnapshot
 	if err := json.Unmarshal(upsert.Snapshot, &recovered); err != nil {
