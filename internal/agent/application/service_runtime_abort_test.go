@@ -35,7 +35,7 @@ type abortLifecycleQueries struct {
 	upsertCh      chan struct{}
 }
 
-func (q *abortLifecycleQueries) CreateContextLifecycle(
+func (*abortLifecycleQueries) CreateContextLifecycle(
 	context.Context,
 	sqlc.CreateContextLifecycleParams,
 ) (sqlc.ContextLifecycle, error) {
@@ -87,7 +87,7 @@ func (q *abortLifecycleQueries) GetLatestAssistantContextLifecycleByRunID(
 	}, nil
 }
 
-func (q *abortLifecycleQueries) UpdateAbortedContextLifecycleSnapshot(
+func (*abortLifecycleQueries) UpdateAbortedContextLifecycleSnapshot(
 	context.Context,
 	sqlc.UpdateAbortedContextLifecycleSnapshotParams,
 ) (sqlc.ContextLifecycle, error) {
