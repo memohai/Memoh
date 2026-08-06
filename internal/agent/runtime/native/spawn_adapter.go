@@ -229,6 +229,14 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		// Touch the watchdog on every event — this is the activity signal.
 		touchFn()
 		if observe != nil {
+			// A provider/loop abort has no owning-context cancellation and may
+			// carry no EventError. Publish a generic, non-diagnostic failure first
+			// so the live runtime reaches the same failed outcome as the durable
+			// admission and lifecycle writers. Explicit cancellation remains a
+			// plain abort and is classified from the owning context below.
+			if evt.Type == EventAgentAbort && lastError == "" && ctx.Err() == nil {
+				observe(StreamEvent{Type: EventError, Error: errSpawnAgentAborted.Error()})
+			}
 			// Published before this loop reads anything out of the event, so a
 			// subscriber to the spawned session never lags the parent's view.
 			observe(evt)

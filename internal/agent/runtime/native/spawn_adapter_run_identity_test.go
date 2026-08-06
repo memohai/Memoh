@@ -175,7 +175,12 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsProviderAbort(t *testing.T) {
 			), nil
 		},
 	}
-	result, err := NewSpawnAdapter(newTestAgent()).GenerateWithWatchdog(
+	adapter := NewSpawnAdapter(newTestAgent())
+	var observed []StreamEvent
+	adapter.SetRunObserverFactory(func(context.Context) func(StreamEvent) {
+		return func(event StreamEvent) { observed = append(observed, event) }
+	})
+	result, err := adapter.GenerateWithWatchdog(
 		context.Background(),
 		tools.SpawnRunConfig{
 			Model:       &sdk.Model{ID: "spawn-abort-model", Provider: provider, Type: sdk.ModelTypeChat},
@@ -191,6 +196,7 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsProviderAbort(t *testing.T) {
 	if result == nil || result.ContextLifecycle == nil {
 		t.Fatalf("GenerateWithWatchdog result = %#v, want failure lifecycle snapshot", result)
 	}
+	assertSpawnAbortObservedAsFailure(t, observed)
 }
 
 func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
@@ -230,7 +236,12 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
 		},
 	}
 	outerCtx := context.Background()
-	result, err := NewSpawnAdapter(newTestAgent()).GenerateWithWatchdog(
+	adapter := NewSpawnAdapter(newTestAgent())
+	var observed []StreamEvent
+	adapter.SetRunObserverFactory(func(context.Context) func(StreamEvent) {
+		return func(event StreamEvent) { observed = append(observed, event) }
+	})
+	result, err := adapter.GenerateWithWatchdog(
 		outerCtx,
 		tools.SpawnRunConfig{
 			Model:         &sdk.Model{ID: "spawn-loop-model", Provider: provider, Type: sdk.ModelTypeChat},
@@ -253,6 +264,25 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
 	if result == nil || result.ContextLifecycle == nil {
 		t.Fatalf("GenerateWithWatchdog result = %#v, want failure lifecycle snapshot", result)
 	}
+	assertSpawnAbortObservedAsFailure(t, observed)
+}
+
+func assertSpawnAbortObservedAsFailure(t *testing.T, events []StreamEvent) {
+	t.Helper()
+	errorIndex, abortIndex := -1, -1
+	for i, event := range events {
+		switch event.Type {
+		case EventError:
+			if event.Error == "agent run aborted" {
+				errorIndex = i
+			}
+		case EventAgentAbort:
+			abortIndex = i
+		}
+	}
+	if errorIndex < 0 || abortIndex <= errorIndex {
+		t.Fatalf("observed events = %#v, want generic error before abort", events)
+	}
 }
 
 func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *testing.T) {
@@ -265,7 +295,12 @@ func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *tes
 		},
 	}
 
-	_, err := NewSpawnAdapter(newTestAgent()).GenerateWithWatchdog(
+	adapter := NewSpawnAdapter(newTestAgent())
+	var observed []StreamEvent
+	adapter.SetRunObserverFactory(func(context.Context) func(StreamEvent) {
+		return func(event StreamEvent) { observed = append(observed, event) }
+	})
+	_, err := adapter.GenerateWithWatchdog(
 		ctx,
 		tools.SpawnRunConfig{
 			Model:       &sdk.Model{ID: "spawn-canceled-model", Provider: provider, Type: sdk.ModelTypeChat},
@@ -277,6 +312,16 @@ func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *tes
 	)
 	if !errors.Is(err, wantCause) {
 		t.Fatalf("GenerateWithWatchdog error = %v, want owning cause %v", err, wantCause)
+	}
+	abortSeen := false
+	for _, event := range observed {
+		if event.Type == EventError {
+			t.Fatalf("owning cancellation published provider failure: %#v", observed)
+		}
+		abortSeen = abortSeen || event.Type == EventAgentAbort
+	}
+	if !abortSeen {
+		t.Fatalf("observed events = %#v, want terminal abort", observed)
 	}
 }
 
