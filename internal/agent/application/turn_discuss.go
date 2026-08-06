@@ -251,10 +251,15 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		return
 	}
 
+	// The native stream deliberately drains to a terminal event after external
+	// cancellation. Preserve the admitted run's values and fencing token while
+	// detaching cancellation so that terminal history and runtime publication
+	// can cross the same durable boundary as the main chat stream.
+	terminalCtx := context.WithoutCancel(ctx)
 	if len(finalMessages) > 0 {
 		var sdkMsgs []sdk.Message
 		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
-			if storeErr := s.storeDiscussRound(ctx,
+			if storeErr := s.storeDiscussRound(terminalCtx,
 				runConfig.RunID,
 				cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
 				sdkMsgs, resolved.ModelID,
@@ -269,7 +274,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 	}
 	if hasTerminalEvent && h.publishAgentEvent != nil {
-		if publishErr := h.publishAgentEvent(ctx, terminalEvent); publishErr != nil {
+		if publishErr := h.publishAgentEvent(terminalCtx, terminalEvent); publishErr != nil {
 			lifecycleCause = publishErr
 			lifecycleDeferred = false
 			h.emitErr(publishErr)

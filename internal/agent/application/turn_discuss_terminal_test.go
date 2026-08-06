@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
@@ -24,6 +27,24 @@ func (f *canceledDiscussTerminalReporter) Stream(ctx context.Context, _ native.R
 		defer close(ch)
 		<-ctx.Done()
 		ch <- native.StreamEvent{Type: native.EventAgentAbort}
+	}()
+	return ch
+}
+
+type canceledDiscussMessagesReporter struct {
+	started chan struct{}
+}
+
+func (f *canceledDiscussMessagesReporter) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
+	ch := make(chan native.StreamEvent, 1)
+	close(f.started)
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+		ch <- native.StreamEvent{
+			Type:     native.EventAgentAbort,
+			Messages: json.RawMessage(`[{"role":"assistant","content":"partial answer"}]`),
+		}
 	}()
 	return ch
 }
@@ -62,13 +83,28 @@ func (*fullBufferTerminalDiscussStreamer) Stream(context.Context, native.RunConf
 	return ch
 }
 
-func TestDiscussCancellationWithDetachedTerminalEventFinishesAborted(t *testing.T) {
-	agent := &canceledDiscussTerminalReporter{started: make(chan struct{})}
+func TestDiscussCancellationPersistsAndPublishesTerminalOnDetachedContext(t *testing.T) {
+	agent := &canceledDiscussMessagesReporter{started: make(chan struct{})}
 	resolver := &fakeDiscussService{
 		resolveResult: ResolveRunConfigResult{ModelID: "model-1"},
 	}
 	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
 	admitter := a.sessionRuntime.(*scriptedAdmitter)
+	stored := make(chan struct{}, 1)
+	published := make(chan struct{}, 1)
+	a.turnHooks.storeRound = func(
+		ctx context.Context,
+		_, _, _, _, _ string,
+		_ []sdk.Message,
+		_ string,
+		_ *contextfrag.LifecycleHolder,
+	) error {
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
+		stored <- struct{}{}
+		return nil
+	}
 	a.publishTurnEvent = func(
 		ctx context.Context,
 		handle sessionruntime.RunHandle,
@@ -76,6 +112,9 @@ func TestDiscussCancellationWithDetachedTerminalEventFinishesAborted(t *testing.
 	) error {
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
+		}
+		if event.Type == native.EventAgentAbort {
+			published <- struct{}{}
 		}
 		return admitter.PublishAgentEvent(ctx, handle, event)
 	}
@@ -94,9 +133,19 @@ func TestDiscussCancellationWithDetachedTerminalEventFinishesAborted(t *testing.
 	for streamErr := range h.Errs() {
 		t.Fatalf("canceled discuss run exposed stream error: %v", streamErr)
 	}
+	select {
+	case <-stored:
+	default:
+		t.Fatal("canceled discuss terminal messages were not stored")
+	}
+	select {
+	case <-published:
+	default:
+		t.Fatal("canceled discuss terminal event was not published")
+	}
 
-	if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusAborted {
-		t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusAborted)
+	if got := admitter.awaitFinish(t); got.status != "" {
+		t.Fatalf("status = %q, want runtime-derived aborted status", got.status)
 	}
 }
 
