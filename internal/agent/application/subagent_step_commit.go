@@ -12,6 +12,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
@@ -25,28 +26,37 @@ import (
 // spawn path keeps its terminal-snapshot persistence, so this is a capability
 // probe as much as a constructor.
 //
-// The callback persists exactly what the legacy terminal path persists — every
+// The callbacks persist exactly what the legacy terminal path persists — every
 // non-user message of the step, marshalled whole — only earlier: each complete
-// step lands in one fenced transaction instead of the whole run landing at the
-// end. onPersisted fires after a step has durably committed; the spawn provider
-// uses it to stop retrying an attempt that already produced durable output.
-func (s *Service) SubagentStepCommit(ctx context.Context, botID, sessionID, modelID, turnRequestMessageID string, onPersisted func()) func(context.Context, int, *sdk.StepResult) error {
+// step or safe interrupted checkpoint lands in one fenced transaction instead
+// of the whole run landing at the end. onPersisted fires only after a complete
+// step has durably committed; the spawn provider uses it to stop retrying an
+// attempt that already produced durable output.
+func (s *Service) SubagentStepCommit(
+	ctx context.Context,
+	botID, sessionID, modelID, turnRequestMessageID string,
+	contextLifecycle *contextfrag.LifecycleHolder,
+	onPersisted func(),
+) (
+	func(context.Context, int, *sdk.StepResult) error,
+	func(context.Context, int, *sdk.StepResult) error,
+) {
 	if s == nil || s.messageService == nil {
-		return nil
+		return nil, nil
 	}
 	persister, ok := s.messageService.(messagepkg.AgentStepPersister)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	handle, ok := SubagentRunHandleFromContext(ctx)
 	if !ok || strings.TrimSpace(handle.RunID) == "" || handle.FencingToken <= 0 {
-		return nil
+		return nil, nil
 	}
 	if _, ok := runtimefence.FromContext(ctx); !ok {
-		return nil
+		return nil, nil
 	}
 	if strings.TrimSpace(botID) == "" || strings.TrimSpace(sessionID) == "" {
-		return nil
+		return nil, nil
 	}
 	// No request row means the pre-run user message write failed. Committing
 	// steps anyway would file them under no turn and — because the spawn path
@@ -54,7 +64,7 @@ func (s *Service) SubagentStepCommit(ctx context.Context, botID, sessionID, mode
 	// Decline instead: terminal persistence still writes the user message and
 	// the whole run behind it.
 	if strings.TrimSpace(turnRequestMessageID) == "" {
-		return nil
+		return nil, nil
 	}
 	committer := &subagentStepCommitter{
 		persister:            persister,
@@ -63,15 +73,16 @@ func (s *Service) SubagentStepCommit(ctx context.Context, botID, sessionID, mode
 		sessionID:            sessionID,
 		modelID:              modelID,
 		turnRequestMessageID: strings.TrimSpace(turnRequestMessageID),
+		contextLifecycle:     contextLifecycle,
 		onPersisted:          onPersisted,
 	}
-	return committer.commit
+	return committer.commit, committer.interrupt
 }
 
-// subagentStepCommitter appends a spawned agent's complete steps to its
-// thread's history as they finish. Unlike agentStepCommitter it carries no
-// ChatRequest: the subagent path has no resolved chat context, and its user
-// message is persisted by the spawn provider before execution starts.
+// subagentStepCommitter appends a spawned agent's complete steps and safe
+// interrupted checkpoint to its thread's history. Unlike agentStepCommitter it
+// carries no ChatRequest: the subagent path has no resolved chat context, and
+// its user message is persisted by the spawn provider before execution starts.
 type subagentStepCommitter struct {
 	persister messagepkg.AgentStepPersister
 	runID     string
@@ -82,6 +93,7 @@ type subagentStepCommitter struct {
 	// message, so the whole run files under the turn admission allocated
 	// instead of splitting into history-minted turns.
 	turnRequestMessageID string
+	contextLifecycle     *contextfrag.LifecycleHolder
 	onPersisted          func()
 
 	mu       sync.Mutex
@@ -89,8 +101,16 @@ type subagentStepCommitter struct {
 }
 
 func (c *subagentStepCommitter) commit(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+	return c.persist(ctx, stepIndex, step, false)
+}
+
+func (c *subagentStepCommitter) interrupt(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+	return c.persist(ctx, stepIndex, step, true)
+}
+
+func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step *sdk.StepResult, interrupted bool) error {
 	if c == nil || step == nil {
-		return errors.New("complete agent step is missing")
+		return errors.New("agent step is missing")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -110,11 +130,16 @@ func (c *subagentStepCommitter) commit(ctx context.Context, stepIndex int, step 
 		if msg.Usage != nil {
 			usage, _ = json.Marshal(msg.Usage)
 		}
+		var metadata map[string]any
+		if interrupted && msg.Role == sdk.MessageRoleAssistant {
+			metadata = map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true}
+		}
 		inputs = append(inputs, messagepkg.PersistInput{
 			BotID:                c.botID,
 			SessionID:            c.sessionID,
 			Role:                 string(msg.Role),
 			Content:              content,
+			Metadata:             metadata,
 			Usage:                usage,
 			ModelID:              c.modelID,
 			RunID:                c.runID,
@@ -125,13 +150,27 @@ func (c *subagentStepCommitter) commit(ctx context.Context, stepIndex int, step 
 		c.nextStep++
 		return nil
 	}
-	if _, err := c.persister.PersistAgentStep(context.WithoutCancel(ctx), messagepkg.AgentStep{
-		RunID: c.runID, Messages: inputs,
-	}); err != nil {
+	if snapshot, ok := c.contextLifecycle.Snapshot(); ok {
+		for i := len(inputs) - 1; i >= 0; i-- {
+			if !strings.EqualFold(strings.TrimSpace(inputs[i].Role), string(sdk.MessageRoleAssistant)) {
+				continue
+			}
+			if inputs[i].Metadata == nil {
+				inputs[i].Metadata = make(map[string]any, 1)
+			}
+			inputs[i].Metadata[contextfrag.MetadataContextLifecycleKey] = snapshot
+			break
+		}
+	}
+	persisted, err := c.persister.PersistAgentStep(context.WithoutCancel(ctx), messagepkg.AgentStep{
+		RunID: c.runID, Messages: inputs, Interrupted: interrupted,
+	})
+	if err != nil {
 		return err
 	}
+	c.contextLifecycle.SetAssistantMessageID(lastPersistedAssistantMessageID(persisted))
 	c.nextStep++
-	if c.onPersisted != nil {
+	if !interrupted && c.onPersisted != nil {
 		c.onPersisted()
 	}
 	return nil

@@ -19,7 +19,15 @@ import (
 // which case the spawn provider keeps its terminal-snapshot persistence.
 // turnRequestMessageID is the persisted task user message the step rows bind
 // to, so every step lands in the turn admission allocated.
-type SpawnStepCommitFactory func(ctx context.Context, botID, sessionID, modelUUID, turnRequestMessageID string, onPersisted func()) func(context.Context, int, *sdk.StepResult) error
+type SpawnStepCommitFactory func(
+	ctx context.Context,
+	botID, sessionID, modelUUID, turnRequestMessageID string,
+	contextLifecycle *contextfrag.LifecycleHolder,
+	onPersisted func(),
+) (
+	func(context.Context, int, *sdk.StepResult) error,
+	func(context.Context, int, *sdk.StepResult) error,
+)
 
 // SpawnRunObserverFactory builds the per-event publisher for one spawned run.
 // A nil return means nothing observes this run and events are not forwarded.
@@ -55,11 +63,20 @@ func (s *SpawnAdapter) installStepCommit(ctx context.Context, cfg tools.SpawnRun
 	if s.stepCommit == nil {
 		return false
 	}
-	commit := s.stepCommit(ctx, cfg.Identity.BotID, cfg.Identity.SessionID, cfg.ModelUUID, cfg.TurnRequestMessageID, cfg.OnStepPersisted)
-	if commit == nil {
+	commit, interrupt := s.stepCommit(
+		ctx,
+		cfg.Identity.BotID,
+		cfg.Identity.SessionID,
+		cfg.ModelUUID,
+		cfg.TurnRequestMessageID,
+		rc.ContextLifecycle,
+		cfg.OnStepPersisted,
+	)
+	if commit == nil || interrupt == nil {
 		return false
 	}
 	rc.OnStepCommitted = commit
+	rc.OnStepInterrupted = interrupt
 	return true
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	tools "github.com/memohai/memoh/internal/agent/tool"
 )
@@ -34,6 +35,44 @@ func TestSpawnRunConfigMintsRunIDForDirectCaller(t *testing.T) {
 	}
 	if first.RunID == second.RunID {
 		t.Fatalf("direct callers received the same RunID %q", first.RunID)
+	}
+}
+
+func TestSpawnAdapterStepCommitSharesLifecycleAndInstallsInterrupt(t *testing.T) {
+	adapter := NewSpawnAdapter(newTestAgent())
+	var captured *contextfrag.LifecycleHolder
+	adapter.SetStepCommitFactory(func(
+		_ context.Context,
+		_, _, _, _ string,
+		lifecycle *contextfrag.LifecycleHolder,
+		_ func(),
+	) (
+		func(context.Context, int, *sdk.StepResult) error,
+		func(context.Context, int, *sdk.StepResult) error,
+	) {
+		captured = lifecycle
+		callback := func(context.Context, int, *sdk.StepResult) error { return nil }
+		return callback, callback
+	})
+	rc := runConfigFromSpawnRunConfig(tools.SpawnRunConfig{})
+
+	if !adapter.installStepCommit(context.Background(), tools.SpawnRunConfig{}, &rc) {
+		t.Fatal("step persistence was not installed")
+	}
+	if captured == nil || captured != rc.ContextLifecycle {
+		t.Fatalf("captured lifecycle = %p, run lifecycle = %p", captured, rc.ContextLifecycle)
+	}
+	if rc.OnStepCommitted == nil || rc.OnStepInterrupted == nil {
+		t.Fatal("complete and interrupted step callbacks must be installed together")
+	}
+	captured.SetManifest(contextfrag.Manifest{
+		View:   contextfrag.ViewRunConfigPreProvider,
+		Counts: contextfrag.ManifestCounts{Fragments: 2},
+	})
+	captured.SetAssistantMessageID("assistant-1")
+	snapshot, ok := rc.ContextLifecycle.Snapshot()
+	if !ok || snapshot.Counts.Fragments != 2 || snapshot.AssistantMessageID != "assistant-1" {
+		t.Fatalf("shared lifecycle snapshot = %#v, set = %v", snapshot, ok)
 	}
 }
 
