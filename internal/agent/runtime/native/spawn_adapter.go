@@ -29,9 +29,21 @@ type SpawnStepCommitFactory func(
 	func(context.Context, int, *sdk.StepResult) error,
 )
 
+// SpawnRunObservation carries the terminal outcome selected by the session
+// runtime that serialized terminal publication against routed controls.
+type SpawnRunObservation struct {
+	TerminalResolved bool
+	TerminalOutcome  tools.SpawnAttemptDisposition
+}
+
+// SpawnRunObserver publishes one spawned-run event and reports a terminal
+// outcome when the session runtime resolved one. Nonterminal events and
+// observers without a session runtime return the zero observation.
+type SpawnRunObserver func(StreamEvent) SpawnRunObservation
+
 // SpawnRunObserverFactory builds the per-event publisher for one spawned run.
 // A nil return means nothing observes this run and events are not forwarded.
-type SpawnRunObserverFactory func(ctx context.Context) func(StreamEvent)
+type SpawnRunObserverFactory func(ctx context.Context) SpawnRunObserver
 
 var errSpawnAgentAborted = errors.New("agent run aborted")
 
@@ -211,7 +223,7 @@ func SpawnContextSourceFrags(rc RunConfig) []contextfrag.ContextFrag {
 func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.SpawnRunConfig, touchFn func()) (*tools.SpawnResult, error) {
 	rc := runConfigFromSpawnRunConfig(cfg)
 	persisted := s.installStepCommit(ctx, cfg, &rc)
-	var observe func(StreamEvent)
+	var observe SpawnRunObserver
 	if s.runObserver != nil {
 		observe = s.runObserver(ctx)
 	}
@@ -224,22 +236,34 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	var totalUsage sdk.Usage
 	var lastError string
 	completed := false
+	var abortEvent *StreamEvent
+	var endEvent *StreamEvent
+	var pendingErrors []StreamEvent
 
 	for evt := range eventCh {
 		// Touch the watchdog on every event — this is the activity signal.
 		touchFn()
-		if observe != nil {
-			// A provider/loop abort has no owning-context cancellation and may
-			// carry no EventError. Publish a generic, non-diagnostic failure first
-			// so the live runtime reaches the same failed outcome as the durable
-			// admission and lifecycle writers. Explicit cancellation remains a
-			// plain abort and is classified from the owning context below.
-			if evt.Type == EventAgentAbort && lastError == "" && ctx.Err() == nil {
-				observe(StreamEvent{Type: EventError, Error: errSpawnAgentAborted.Error()})
-			}
+		switch evt.Type {
+		case EventError:
+			// Error is attempt-local until the caller resolves the following abort:
+			// a retry clears it, while owning cancellation must not be mislabeled as
+			// a provider failure merely because the two raced.
+			pendingErrors = append(pendingErrors, evt)
+		case EventRetry:
+			observeSpawnEvents(observe, pendingErrors)
+			pendingErrors = nil
+			observeSpawnEvent(observe, evt)
+		case EventAgentAbort:
+			// The spawn provider owns the outer retry loop, so it decides below
+			// whether this is a terminal abort or only the end of one attempt.
+		case EventAgentEnd:
+			// A clean end is authoritative. Any un-retried transient error did not
+			// become this attempt's outcome and must not poison the terminal view.
+			pendingErrors = nil
+		default:
 			// Published before this loop reads anything out of the event, so a
 			// subscriber to the spawned session never lags the parent's view.
-			observe(evt)
+			observeSpawnEvent(observe, evt)
 		}
 
 		switch evt.Type {
@@ -255,6 +279,13 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 			lastError = ""
 		case EventAgentEnd, EventAgentAbort:
 			completed = evt.Type == EventAgentEnd
+			if completed {
+				terminal := evt
+				endEvent = &terminal
+			} else {
+				terminal := evt
+				abortEvent = &terminal
+			}
 			if evt.Messages != nil {
 				_ = json.Unmarshal(evt.Messages, &finalMessages)
 			}
@@ -264,12 +295,14 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		}
 	}
 
+	var runErr error
 	// Check if context was cancelled (watchdog fired or parent cancelled).
-	if ctx.Err() != nil {
+	if !completed && ctx.Err() != nil {
 		if cause := context.Cause(ctx); cause != nil {
-			return spawnFailureResult(rc), cause
+			runErr = cause
+		} else {
+			runErr = ctx.Err()
 		}
-		return spawnFailureResult(rc), ctx.Err()
 	}
 	// A stream that errored without reaching a clean end is a failed attempt,
 	// not a short answer. Surfacing the provider's own error text is what lets
@@ -277,11 +310,51 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	// pre-fix behavior swallowed these into an empty success. An error that
 	// the run recovered from (mid-stream retry reached EventAgentEnd) stays
 	// invisible here, exactly like the main chat path.
-	if !completed {
+	if runErr == nil && !completed {
 		if lastError != "" {
-			return spawnFailureResult(rc), errors.New(lastError)
+			runErr = errors.New(lastError)
+		} else {
+			runErr = errSpawnAgentAborted
 		}
-		return spawnFailureResult(rc), errSpawnAgentAborted
+	}
+	if runErr != nil {
+		outcome := observeSpawnAttemptFailure(ctx, observe, cfg, abortEvent, pendingErrors, lastError, runErr)
+		if cfg.ReconcileTerminal != nil {
+			cfg.ReconcileTerminal(outcome)
+		}
+		return spawnFailureResult(rc), runErr
+	}
+	disposition := tools.SpawnAttemptCompleted
+	if cfg.ResolveCompletion != nil {
+		disposition = cfg.ResolveCompletion()
+	}
+	terminal := StreamEvent{Type: EventAgentEnd}
+	if endEvent != nil {
+		terminal = *endEvent
+	}
+	if disposition != tools.SpawnAttemptCompleted {
+		terminal.Type = EventAgentAbort
+		if disposition != tools.SpawnAttemptAbort {
+			observeSpawnEvent(observe, StreamEvent{Type: EventError, Error: errSpawnAgentAborted.Error()})
+		}
+	}
+	observation := observeSpawnEvent(observe, terminal)
+	if observation.TerminalResolved {
+		disposition = observation.TerminalOutcome
+		if cfg.ReconcileTerminal != nil {
+			cfg.ReconcileTerminal(disposition)
+		}
+	}
+	if disposition != tools.SpawnAttemptCompleted {
+		cause := context.Cause(ctx)
+		if cause == nil {
+			if disposition == tools.SpawnAttemptAbort {
+				cause = context.Canceled
+			} else {
+				cause = errSpawnAgentAborted
+			}
+		}
+		return spawnFailureResult(rc), cause
 	}
 
 	spawnResult := &tools.SpawnResult{
@@ -294,6 +367,86 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		spawnResult.ContextLifecycle = &snapshot
 	}
 	return spawnResult, nil
+}
+
+func observeSpawnAttemptFailure(
+	ctx context.Context,
+	observe SpawnRunObserver,
+	cfg tools.SpawnRunConfig,
+	abortEvent *StreamEvent,
+	pendingErrors []StreamEvent,
+	lastError string,
+	runErr error,
+) tools.SpawnAttemptDisposition {
+	disposition := tools.SpawnAttemptFailure
+	if cfg.ResolveAttempt != nil {
+		disposition = cfg.ResolveAttempt(runErr)
+	} else if errors.Is(context.Cause(ctx), context.Canceled) {
+		disposition = tools.SpawnAttemptAbort
+	}
+	if observe == nil {
+		return disposition
+	}
+	reconcile := func(observation SpawnRunObservation) tools.SpawnAttemptDisposition {
+		if observation.TerminalResolved {
+			return observation.TerminalOutcome
+		}
+		return disposition
+	}
+	switch disposition {
+	case tools.SpawnAttemptRetry:
+		observeSpawnEvents(observe, pendingErrors)
+		retryError := strings.TrimSpace(lastError)
+		if retryError == "" {
+			retryError = errSpawnAgentAborted.Error()
+			observeSpawnEvent(observe, StreamEvent{Type: EventError, Error: retryError})
+		}
+		attempt := cfg.Attempt
+		if attempt <= 0 {
+			attempt = 1
+		}
+		maxAttempts := cfg.MaxAttempts
+		if maxAttempts < attempt {
+			maxAttempts = attempt
+		}
+		observeSpawnEvent(observe, StreamEvent{
+			Type:       EventRetry,
+			Attempt:    attempt,
+			MaxAttempt: maxAttempts,
+			RetryError: retryError,
+		})
+		return disposition
+	case tools.SpawnAttemptAbort:
+		if abortEvent != nil {
+			return reconcile(observeSpawnEvent(observe, *abortEvent))
+		}
+		return disposition
+	default:
+		observeSpawnEvents(observe, pendingErrors)
+		if len(pendingErrors) == 0 {
+			observeSpawnEvent(observe, StreamEvent{Type: EventError, Error: errSpawnAgentAborted.Error()})
+		}
+		if abortEvent != nil {
+			return reconcile(observeSpawnEvent(observe, *abortEvent))
+		}
+		return disposition
+	}
+}
+
+func observeSpawnEvents(observe SpawnRunObserver, events []StreamEvent) {
+	if observe == nil {
+		return
+	}
+	for _, event := range events {
+		observeSpawnEvent(observe, event)
+	}
+}
+
+func observeSpawnEvent(observe SpawnRunObserver, event StreamEvent) SpawnRunObservation {
+	if observe == nil {
+		return SpawnRunObservation{}
+	}
+	return observe(event)
 }
 
 func spawnFailureResult(rc RunConfig) *tools.SpawnResult {

@@ -1201,6 +1201,20 @@ func (m *Manager) cleanupFinishedRun(ctx context.Context, handle RunHandle) {
 }
 
 func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event native.StreamEvent) ([]chatview.UIMessage, error) {
+	return m.handleAgentEvent(ctx, handle, event, nil)
+}
+
+// HandleAgentEventWithStatus applies an agent event and returns the run status
+// from that same serialized mutation. Terminal callers use this instead of a
+// second snapshot read so a routed control and terminal event have one winner
+// even when a later backend read would fail.
+func (m *Manager) HandleAgentEventWithStatus(ctx context.Context, handle RunHandle, event native.StreamEvent) ([]chatview.UIMessage, string, error) {
+	status := ""
+	messages, err := m.handleAgentEvent(ctx, handle, event, &status)
+	return messages, status, err
+}
+
+func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event native.StreamEvent, committedStatus *string) ([]chatview.UIMessage, error) {
 	if m == nil || m.backend == nil {
 		return nil, nil
 	}
@@ -1249,7 +1263,7 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 		return messages, nil
 	}
 
-	_, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
+	snapshot, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
 		if !runMatchesHandle(run, handle) || !m.runOwnerMatches(run) || !isEventAcceptingRunStatus(run.Status) {
 			return snapshot, false, nil
@@ -1329,6 +1343,9 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	}
 	if !changed {
 		return nil, nil
+	}
+	if committedStatus != nil && snapshot.CurrentRunView != nil && snapshot.CurrentRunView.RunID == handle.RunID {
+		*committedStatus = snapshot.CurrentRunView.Status
 	}
 	return messages, nil
 }

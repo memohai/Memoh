@@ -36,6 +36,18 @@ type SpawnAgent interface {
 	GenerateWithWatchdog(ctx context.Context, cfg SpawnRunConfig, touchFn func()) (*SpawnResult, error)
 }
 
+// SpawnAttemptDisposition names the authoritative outcome of one native
+// attempt. Failed attempts can end the admitted run, retry inside it, or
+// reflect owning cancellation; a clean end is recorded as completed.
+type SpawnAttemptDisposition uint8
+
+const (
+	SpawnAttemptFailure SpawnAttemptDisposition = iota
+	SpawnAttemptRetry
+	SpawnAttemptAbort
+	SpawnAttemptCompleted
+)
+
 // SpawnRunConfig mirrors agent.RunConfig fields needed by subagent controls.
 type SpawnRunConfig struct {
 	RunID                 string
@@ -61,11 +73,25 @@ type SpawnRunConfig struct {
 	// assistant and tool rows bind to, so incremental step persistence files
 	// them into the same history turn the runtime view names.
 	TurnRequestMessageID string
-	// OnStepPersisted, if set, is called after a complete step of this run has
-	// been durably persisted. The spawn provider uses it to stop retrying an
-	// attempt that has already produced durable output (and possibly real side
-	// effects): replaying the turn from the top would do that work twice.
+	// OnStepPersisted, if set, is called after a complete or interrupted step of
+	// this run has been durably persisted. The spawn provider uses it to stop
+	// retrying an attempt that has already produced durable output (and possibly
+	// real side effects): replaying the turn from the top would do that work twice.
 	OnStepPersisted func()
+	// Attempt is one-based and MaxAttempts is the total outer-attempt budget.
+	// ResolveAttempt is called at most once after a failed native attempt. It is
+	// the spawn provider's authoritative disposition: retry keeps the admitted
+	// run live, abort records owning cancellation, and failure ends the run.
+	// ResolveCompletion arbitrates a clean native end against concurrent owning
+	// cancellation before that end is published; it returns Completed, Abort for
+	// an explicit stop, or Failure for another owning-context failure.
+	// ReconcileTerminal applies the outcome selected by the session runtime when
+	// terminal publication races a routed control such as AbortControl.
+	Attempt           int
+	MaxAttempts       int
+	ResolveAttempt    func(error) SpawnAttemptDisposition
+	ResolveCompletion func() SpawnAttemptDisposition
+	ReconcileTerminal func(SpawnAttemptDisposition)
 }
 
 // SpawnIdentity mirrors agent.SessionContext fields needed by subagent controls.
@@ -435,6 +461,8 @@ type agentRunResult struct {
 	TimedOut         bool                           `json:"timed_out,omitempty"`
 	ContextLifecycle *contextfrag.LifecycleSnapshot `json:"-"`
 	Cause            error                          `json:"-"`
+	AttemptResolved  bool                           `json:"-"`
+	AttemptOutcome   SpawnAttemptDisposition        `json:"-"`
 }
 
 type agentRequest struct {
@@ -772,33 +800,42 @@ func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *ag
 		req.requestMessageID = requestMessageID
 	}
 	result := p.runSubagentTask(runCtx, req)
-	if task := p.bgManager.Get(req.taskID); task != nil {
-		if snap := task.Snapshot(); snap.Status == background.TaskKilled {
+	if result.AttemptResolved && result.AttemptOutcome == SpawnAttemptAbort {
+		if p.agentTaskStopRequested(req.taskID) {
 			result.Status = string(background.TaskKilled)
-			// Manager.Kill publishes TaskKilled immediately before canceling the
-			// task context. Wait for the admitted child context so terminal
-			// classification cannot race through as completed.
-			if runCtx.Err() == nil {
-				<-runCtx.Done()
-			}
+			result.Error = "stopped by the user"
 		}
-	}
-	if result.Status != string(background.TaskKilled) &&
-		runCtx.Err() != nil && ctx.Err() == nil &&
-		errors.Is(context.Cause(runCtx), context.Canceled) {
-		// The run context died while the parent task is still alive: the child
-		// run itself was aborted (stop control on the subagent session). That
-		// is a deliberate stop, not a failure, so it is recorded exactly like a
-		// kill — and the wording tells the parent what happened rather than
-		// handing it an opaque cancellation.
-		result.Status = string(background.TaskKilled)
-		result.Error = "stopped by the user"
+		if result.Status != string(background.TaskKilled) &&
+			runCtx.Err() != nil && ctx.Err() == nil {
+			result.Status = string(background.TaskKilled)
+			result.Error = "stopped by the user"
+		}
+	} else if !result.AttemptResolved {
+		if p.agentTaskStopRequested(req.taskID) {
+			result.Status = string(background.TaskKilled)
+			result.Error = "stopped by the user"
+		}
+		if result.Status != string(background.TaskKilled) &&
+			runCtx.Err() != nil && ctx.Err() == nil &&
+			errors.Is(context.Cause(runCtx), context.Canceled) {
+			// The run context died while the parent task is still alive: the child
+			// run itself was aborted (stop control on the subagent session). That
+			// is a deliberate stop, not a failure, so it is recorded exactly like a
+			// kill — and the wording tells the parent what happened rather than
+			// handing it an opaque cancellation.
+			result.Status = string(background.TaskKilled)
+			result.Error = "stopped by the user"
+		}
 	}
 	// Release the thread's slot before the queue promotes the next message, or
 	// the successor's admission finds this run still active and is told the
 	// agent is busy.
 	finishRun(result)
 	return p.completeAgentRequest(ctx, key, req, result)
+}
+
+func (p *SpawnProvider) agentTaskStopRequested(taskID string) bool {
+	return p != nil && p.bgManager != nil && p.bgManager.AgentTaskStopRequested(taskID)
 }
 
 // completeAgentRequest closes the background record and hands the agent's queue
@@ -979,10 +1016,10 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		},
 		LoopDetection: SpawnLoopConfig{Enabled: true},
 	}
-	// stepPersisted flips once any complete step of this task has durably
-	// committed. From then on the attempt loop stops retrying: a committed step
-	// means the agent already produced durable output and possibly real side
-	// effects, and replaying the turn from the top would do that work twice.
+	// stepPersisted flips once any complete step or interrupted checkpoint has
+	// durably committed. From then on the attempt loop stops retrying: the agent
+	// already produced durable output and possibly real side effects, and
+	// replaying the turn from the top would do that work twice.
 	var stepPersisted atomic.Bool
 	cfg.OnStepPersisted = func() { stepPersisted.Store(true) }
 
@@ -997,12 +1034,51 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 				timer.Stop()
 				res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
 				res.Cause = context.Cause(ctx)
+				res.AttemptResolved = true
+				res.AttemptOutcome = SpawnAttemptFailure
+				if errors.Is(context.Cause(ctx), context.Canceled) {
+					res.AttemptOutcome = SpawnAttemptAbort
+				}
 				return res
 			}
 		}
 
 		safetyCtx, safetyCancel := context.WithTimeout(ctx, subagentTimeout)
 		wdCtx, wd := NewSubagentWatchdog(safetyCtx, subagentWatchdogTimeout, p.logger)
+		cfg.Attempt = attempt + 1
+		cfg.MaxAttempts = subagentMaxRetries + 1
+		attemptDisposition := SpawnAttemptFailure
+		dispositionResolved := false
+		cfg.ResolveAttempt = func(attemptErr error) SpawnAttemptDisposition {
+			if p.agentTaskStopRequested(req.taskID) {
+				attemptDisposition = SpawnAttemptAbort
+			} else {
+				attemptDisposition = subagentAttemptDisposition(
+					ctx,
+					attemptErr,
+					stepPersisted.Load(),
+					attempt < subagentMaxRetries,
+				)
+			}
+			dispositionResolved = true
+			return attemptDisposition
+		}
+		cfg.ResolveCompletion = func() SpawnAttemptDisposition {
+			switch {
+			case p.agentTaskStopRequested(req.taskID), errors.Is(context.Cause(ctx), context.Canceled):
+				attemptDisposition = SpawnAttemptAbort
+			case ctx.Err() != nil:
+				attemptDisposition = SpawnAttemptFailure
+			default:
+				attemptDisposition = SpawnAttemptCompleted
+			}
+			dispositionResolved = true
+			return attemptDisposition
+		}
+		cfg.ReconcileTerminal = func(outcome SpawnAttemptDisposition) {
+			attemptDisposition = outcome
+			dispositionResolved = true
+		}
 		genResult, err := p.agent.GenerateWithWatchdog(wdCtx, cfg, wd.Touch)
 		wd.Stop()
 		safetyCancel()
@@ -1011,6 +1087,29 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			res.ContextLifecycle = genResult.ContextLifecycle
 		}
 		if err == nil {
+			if !dispositionResolved {
+				attemptDisposition = cfg.ResolveCompletion()
+			}
+			res.AttemptResolved = true
+			res.AttemptOutcome = attemptDisposition
+			if attemptDisposition == SpawnAttemptAbort {
+				cause := context.Cause(ctx)
+				if cause == nil {
+					cause = context.Canceled
+				}
+				res.Error = fmt.Sprintf("parent cancelled: %v", cause)
+				res.Cause = cause
+				return res
+			}
+			if attemptDisposition != SpawnAttemptCompleted {
+				cause := context.Cause(ctx)
+				if cause == nil {
+					cause = errors.New("agent run failed")
+				}
+				res.Error = cause.Error()
+				res.Cause = cause
+				return res
+			}
 			res.Text = genResult.Text
 			if !genResult.Persisted && p.messageService != nil && req.agentSessionID != "" {
 				p.persistMessages(context.WithoutCancel(ctx), req, genResult, !req.messagePersisted)
@@ -1018,17 +1117,39 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			return res
 		}
 		lastErr = err
-		if ctx.Err() != nil && !errors.Is(err, ErrWatchdogTimedOut) {
-			res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
-			res.Cause = context.Cause(ctx)
+		if !dispositionResolved {
+			if p.agentTaskStopRequested(req.taskID) {
+				attemptDisposition = SpawnAttemptAbort
+			} else {
+				attemptDisposition = subagentAttemptDisposition(
+					ctx,
+					err,
+					stepPersisted.Load(),
+					attempt < subagentMaxRetries,
+				)
+			}
+		}
+		if attemptDisposition == SpawnAttemptRetry {
+			continue
+		}
+		res.AttemptResolved = true
+		res.AttemptOutcome = attemptDisposition
+		if attemptDisposition == SpawnAttemptAbort {
+			cause := context.Cause(ctx)
+			if cause == nil {
+				cause = context.Canceled
+			}
+			res.Error = fmt.Sprintf("parent cancelled: %v", cause)
+			res.Cause = cause
 			return res
 		}
 		if stepPersisted.Load() {
-			res.Error = fmt.Sprintf("%v (progress up to the last completed step is saved; send a follow-up message to continue)", err)
+			res.Error = fmt.Sprintf("%v (progress from this attempt is saved; send a follow-up message to continue)", err)
 			return res
 		}
-		if errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err) {
-			continue
+		if (errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err)) &&
+			attempt == subagentMaxRetries {
+			break
 		}
 		res.Error = err.Error()
 		res.Cause = err
@@ -1037,6 +1158,25 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
 	res.Cause = lastErr
 	return res
+}
+
+func subagentAttemptDisposition(
+	ctx context.Context,
+	err error,
+	stepPersisted bool,
+	attemptsRemain bool,
+) SpawnAttemptDisposition {
+	if errors.Is(context.Cause(ctx), context.Canceled) {
+		return SpawnAttemptAbort
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return SpawnAttemptFailure
+	}
+	if err != nil && !stepPersisted && attemptsRemain &&
+		(errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err)) {
+		return SpawnAttemptRetry
+	}
+	return SpawnAttemptFailure
 }
 
 func (p *SpawnProvider) runSubagentHook(ctx context.Context, eventName string, req *agentRequest, result agentRunResult) error {

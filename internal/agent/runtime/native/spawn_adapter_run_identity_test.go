@@ -115,6 +115,7 @@ func TestSpawnAdapterGenerateWithWatchdogCarriesLifecycleSnapshot(t *testing.T) 
 
 func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T) {
 	var streamCalls atomic.Int32
+	var dispositionCalls atomic.Int32
 	provider := &atomicMockProvider{
 		stream: func(_ context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
 			call := streamCalls.Add(1)
@@ -151,6 +152,10 @@ func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T
 				SessionID:  "session-1",
 				IsSubagent: true,
 			},
+			ResolveAttempt: func(error) tools.SpawnAttemptDisposition {
+				dispositionCalls.Add(1)
+				return tools.SpawnAttemptFailure
+			},
 		},
 		func() {},
 	)
@@ -162,6 +167,9 @@ func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T
 	}
 	if result == nil || result.Text != "recovered result" {
 		t.Fatalf("GenerateWithWatchdog result = %#v, want recovered result", result)
+	}
+	if got := dispositionCalls.Load(); got != 0 {
+		t.Fatalf("outer attempt resolver called %d times for recovered inner retry", got)
 	}
 }
 
@@ -177,8 +185,11 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsProviderAbort(t *testing.T) {
 	}
 	adapter := NewSpawnAdapter(newTestAgent())
 	var observed []StreamEvent
-	adapter.SetRunObserverFactory(func(context.Context) func(StreamEvent) {
-		return func(event StreamEvent) { observed = append(observed, event) }
+	adapter.SetRunObserverFactory(func(context.Context) SpawnRunObserver {
+		return func(event StreamEvent) SpawnRunObservation {
+			observed = append(observed, event)
+			return SpawnRunObservation{}
+		}
 	})
 	result, err := adapter.GenerateWithWatchdog(
 		context.Background(),
@@ -238,8 +249,11 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
 	outerCtx := context.Background()
 	adapter := NewSpawnAdapter(newTestAgent())
 	var observed []StreamEvent
-	adapter.SetRunObserverFactory(func(context.Context) func(StreamEvent) {
-		return func(event StreamEvent) { observed = append(observed, event) }
+	adapter.SetRunObserverFactory(func(context.Context) SpawnRunObserver {
+		return func(event StreamEvent) SpawnRunObservation {
+			observed = append(observed, event)
+			return SpawnRunObservation{}
+		}
 	})
 	result, err := adapter.GenerateWithWatchdog(
 		outerCtx,
@@ -286,9 +300,8 @@ func assertSpawnAbortObservedAsFailure(t *testing.T, events []StreamEvent) {
 }
 
 func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *testing.T) {
-	wantCause := errors.New("owning run stopped")
 	ctx, cancel := context.WithCancelCause(context.Background())
-	cancel(wantCause)
+	cancel(context.Canceled)
 	provider := &atomicMockProvider{
 		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
 			return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
@@ -297,8 +310,11 @@ func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *tes
 
 	adapter := NewSpawnAdapter(newTestAgent())
 	var observed []StreamEvent
-	adapter.SetRunObserverFactory(func(context.Context) func(StreamEvent) {
-		return func(event StreamEvent) { observed = append(observed, event) }
+	adapter.SetRunObserverFactory(func(context.Context) SpawnRunObserver {
+		return func(event StreamEvent) SpawnRunObservation {
+			observed = append(observed, event)
+			return SpawnRunObservation{}
+		}
 	})
 	_, err := adapter.GenerateWithWatchdog(
 		ctx,
@@ -310,8 +326,8 @@ func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *tes
 		},
 		func() {},
 	)
-	if !errors.Is(err, wantCause) {
-		t.Fatalf("GenerateWithWatchdog error = %v, want owning cause %v", err, wantCause)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("GenerateWithWatchdog error = %v, want owning cancellation", err)
 	}
 	abortSeen := false
 	for _, event := range observed {
@@ -323,6 +339,40 @@ func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *tes
 	if !abortSeen {
 		t.Fatalf("observed events = %#v, want terminal abort", observed)
 	}
+}
+
+func TestSpawnAdapterGenerateWithWatchdogTreatsOtherContextCausesAsFailures(t *testing.T) {
+	wantCause := errors.New("owning run failed")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(wantCause)
+	provider := &atomicMockProvider{
+		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}
+
+	adapter := NewSpawnAdapter(newTestAgent())
+	var observed []StreamEvent
+	adapter.SetRunObserverFactory(func(context.Context) SpawnRunObserver {
+		return func(event StreamEvent) SpawnRunObservation {
+			observed = append(observed, event)
+			return SpawnRunObservation{}
+		}
+	})
+	_, err := adapter.GenerateWithWatchdog(
+		ctx,
+		tools.SpawnRunConfig{
+			Model:       &sdk.Model{ID: "spawn-failed-model", Provider: provider, Type: sdk.ModelTypeChat},
+			Query:       "fail the task",
+			SessionType: sessionmode.Subagent,
+			Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
+		},
+		func() {},
+	)
+	if !errors.Is(err, wantCause) {
+		t.Fatalf("GenerateWithWatchdog error = %v, want owning failure %v", err, wantCause)
+	}
+	assertSpawnAbortObservedAsFailure(t, observed)
 }
 
 func TestSpawnAdapterGenerateFailureCarriesLifecycleSnapshot(t *testing.T) {

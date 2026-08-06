@@ -17,6 +17,8 @@ import (
 type SubagentTerminal struct {
 	Cause            error
 	ContextLifecycle *contextfrag.LifecycleSnapshot
+	OutcomeResolved  bool
+	Outcome          SpawnAttemptDisposition
 }
 
 // SubagentAdmitter is the durable admission gate a spawned agent's turn passes
@@ -87,8 +89,15 @@ func (p *SpawnProvider) admitAgentRun(ctx context.Context, req *agentRequest) (c
 		terminal := SubagentTerminal{
 			Cause:            result.Cause,
 			ContextLifecycle: result.ContextLifecycle,
+			OutcomeResolved:  result.AttemptResolved,
+			Outcome:          result.AttemptOutcome,
 		}
-		if result.Status == string(background.TaskKilled) {
+		if result.AttemptResolved && result.AttemptOutcome == SpawnAttemptAbort {
+			terminal.Cause = nil
+			finish(terminal)
+			return
+		}
+		if !result.AttemptResolved && result.Status == string(background.TaskKilled) {
 			// A kill is named by the admitted context cancellation, not by a
 			// provider error that may have raced it. The application boundary reads
 			// that owning context before it records the abort.

@@ -15,7 +15,9 @@ import (
 	tools "github.com/memohai/memoh/internal/agent/tool"
 )
 
-type abortAlignmentProvider struct{}
+type abortAlignmentProvider struct {
+	complete bool
+}
 
 func (abortAlignmentProvider) Name() string { return "abort-alignment" }
 
@@ -33,10 +35,19 @@ func (abortAlignmentProvider) DoGenerate(context.Context, sdk.GenerateParams) (*
 	return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
 }
 
-func (abortAlignmentProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
-	parts := make(chan sdk.StreamPart, 3)
+func (p abortAlignmentProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	parts := make(chan sdk.StreamPart, 7)
 	parts <- &sdk.StartPart{}
 	parts <- &sdk.StartStepPart{}
+	if p.complete {
+		parts <- &sdk.TextStartPart{ID: "completed"}
+		parts <- &sdk.TextDeltaPart{ID: "completed", Text: "done"}
+		parts <- &sdk.TextEndPart{ID: "completed"}
+		parts <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
+		parts <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
+		close(parts)
+		return &sdk.StreamResult{Stream: parts}, nil
+	}
 	parts <- &sdk.AbortPart{}
 	close(parts)
 	return &sdk.StreamResult{Stream: parts}, nil
@@ -202,8 +213,9 @@ func TestSpawnAbortAlignsManagerLedgerAndLifecycle(t *testing.T) {
 	service := &Service{contextLifecycles: lifecycles}
 	service.SetSessionRuntime(manager)
 
+	ownerCtx, cancelOwner := context.WithCancelCause(context.Background())
 	runCtx, admission, finish, err := service.AdmitSubagentRun(
-		context.Background(),
+		ownerCtx,
 		lifecycleTestBotID,
 		lifecycleTestSessionID,
 		"subagent:abort-alignment",
@@ -234,7 +246,13 @@ func TestSpawnAbortAlignsManagerLedgerAndLifecycle(t *testing.T) {
 	if result == nil || result.ContextLifecycle == nil {
 		t.Fatalf("spawn result = %#v, want lifecycle snapshot", result)
 	}
-	finish(tools.SubagentTerminal{Cause: runErr, ContextLifecycle: result.ContextLifecycle})
+	cancelOwner(context.Canceled)
+	finish(tools.SubagentTerminal{
+		Cause:            runErr,
+		ContextLifecycle: result.ContextLifecycle,
+		OutcomeResolved:  true,
+		Outcome:          tools.SpawnAttemptFailure,
+	})
 
 	snapshot, err := manager.Snapshot(context.Background(), lifecycleTestBotID, lifecycleTestSessionID)
 	if err != nil {
@@ -256,5 +274,126 @@ func TestSpawnAbortAlignsManagerLedgerAndLifecycle(t *testing.T) {
 	}
 	if errors.Is(runErr, context.Canceled) {
 		t.Fatalf("internal abort was misclassified as owning cancellation: %v", runErr)
+	}
+}
+
+func TestSpawnWatchdogRetryKeepsManagerRunActive(t *testing.T) {
+	runs := &abortAlignmentLedger{}
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+		OwnerID:       "watchdog-retry-owner",
+		OwnerLeaseTTL: time.Minute,
+		Ledger:        runs,
+		Fence:         abortAlignmentFence{},
+	})
+	t.Cleanup(func() { _ = manager.Close() })
+	lifecycles := &recordingContextLifecycleStore{}
+	service := &Service{contextLifecycles: lifecycles}
+	service.SetSessionRuntime(manager)
+
+	ownerCtx, cancelOwner := context.WithCancelCause(context.Background())
+	runCtx, admission, finish, err := service.AdmitSubagentRun(
+		ownerCtx,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		"subagent:watchdog-retry",
+		[]byte(`{"task":"watchdog retry"}`),
+	)
+	if err != nil {
+		t.Fatalf("admit subagent run: %v", err)
+	}
+	adapter := native.NewSpawnAdapter(native.New(native.Deps{}))
+	adapter.SetRunObserverFactory(service.SubagentRunObserver)
+	attemptCtx, cancelAttempt := context.WithCancelCause(runCtx)
+	cancelAttempt(tools.ErrWatchdogTimedOut)
+	first, firstErr := adapter.GenerateWithWatchdog(attemptCtx, tools.SpawnRunConfig{
+		RunID: admission.RunID,
+		Model: &sdk.Model{
+			ID:       "watchdog-attempt-model",
+			Provider: abortAlignmentProvider{},
+			Type:     sdk.ModelTypeChat,
+		},
+		Query: "retry after the watchdog",
+		Identity: tools.SpawnIdentity{
+			BotID:      lifecycleTestBotID,
+			SessionID:  lifecycleTestSessionID,
+			IsSubagent: true,
+		},
+		Attempt:     1,
+		MaxAttempts: 2,
+		ResolveAttempt: func(attemptErr error) tools.SpawnAttemptDisposition {
+			if errors.Is(attemptErr, tools.ErrWatchdogTimedOut) {
+				return tools.SpawnAttemptRetry
+			}
+			return tools.SpawnAttemptFailure
+		},
+	}, func() {})
+	if !errors.Is(firstErr, tools.ErrWatchdogTimedOut) {
+		t.Fatalf("first attempt error = %v, want watchdog timeout", firstErr)
+	}
+	if first == nil || first.ContextLifecycle == nil {
+		t.Fatalf("first attempt result = %#v, want lifecycle snapshot", first)
+	}
+	active, err := manager.Snapshot(context.Background(), lifecycleTestBotID, lifecycleTestSessionID)
+	if err != nil {
+		t.Fatalf("runtime snapshot after retry: %v", err)
+	}
+	if active.CurrentRunView == nil || active.CurrentRunView.Status != sessionruntime.RunStatusRunning || active.CurrentRunView.Error != "" {
+		t.Fatalf("live run after retry = %#v, want clean running state", active.CurrentRunView)
+	}
+	intermediate, err := runs.Get(context.Background(), admission.RunID)
+	if err != nil {
+		t.Fatalf("durable run after retry: %v", err)
+	}
+	if intermediate.State != ledger.StateRunning {
+		t.Fatalf("durable run after retry = %#v, want running", intermediate)
+	}
+
+	final, finalErr := adapter.GenerateWithWatchdog(runCtx, tools.SpawnRunConfig{
+		RunID: admission.RunID,
+		Model: &sdk.Model{
+			ID:       "watchdog-attempt-model",
+			Provider: abortAlignmentProvider{complete: true},
+			Type:     sdk.ModelTypeChat,
+		},
+		Query: "retry after the watchdog",
+		Identity: tools.SpawnIdentity{
+			BotID:      lifecycleTestBotID,
+			SessionID:  lifecycleTestSessionID,
+			IsSubagent: true,
+		},
+		Attempt:     2,
+		MaxAttempts: 2,
+	}, func() {})
+	if finalErr != nil {
+		t.Fatalf("final attempt: %v", finalErr)
+	}
+	if final == nil || final.ContextLifecycle == nil || final.Text != "done" {
+		t.Fatalf("final attempt result = %#v, want completed output and lifecycle", final)
+	}
+	// The clean End is already the live terminal. A later owner cancellation
+	// must not relabel durable or lifecycle state as aborted.
+	cancelOwner(context.Canceled)
+	finish(tools.SubagentTerminal{
+		ContextLifecycle: final.ContextLifecycle,
+		OutcomeResolved:  true,
+		Outcome:          tools.SpawnAttemptCompleted,
+	})
+
+	snapshot, err := manager.Snapshot(context.Background(), lifecycleTestBotID, lifecycleTestSessionID)
+	if err != nil {
+		t.Fatalf("runtime snapshot: %v", err)
+	}
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != sessionruntime.RunStatusCompleted {
+		t.Fatalf("live run = %#v, want completed terminal", snapshot.CurrentRunView)
+	}
+	durable, err := runs.Get(context.Background(), admission.RunID)
+	if err != nil {
+		t.Fatalf("durable run: %v", err)
+	}
+	if durable.State != ledger.StateCompleted || durable.ErrorCode != "" {
+		t.Fatalf("durable run = %#v, want completed terminal", durable)
+	}
+	if len(lifecycles.terminalUpserts) != 1 || lifecycles.terminalUpserts[0].Status != contextLifecycleStatusCompleted {
+		t.Fatalf("lifecycle terminal = %#v, want completed", lifecycles.terminalUpserts)
 	}
 }

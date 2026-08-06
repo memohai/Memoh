@@ -218,7 +218,12 @@ func runOwnershipLost(ctx context.Context) bool {
 //
 // The finish function is always returned non-nil when the error is nil, so a
 // caller can defer it unconditionally.
-func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, sessionruntime.Admission, func(error), error) {
+type triggeredRunTerminal struct {
+	status string
+	cause  error
+}
+
+func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, sessionruntime.Admission, func(triggeredRunTerminal), error) {
 	if s.sessionRuntime == nil {
 		return nil, sessionruntime.Admission{}, nil, errors.New("session runtime is not configured")
 	}
@@ -248,11 +253,16 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 	}
 	runCtx = s.withAdmissionRuntimeFence(runCtx, admission)
 	finishRun := s.turnRunFinisher(runCtx, admission)
-	finish := func(cause error) {
+	finish := func(terminal triggeredRunTerminal) {
 		defer cancelCause(context.Canceled)
 		if finishRun == nil {
 			return
 		}
+		if strings.TrimSpace(terminal.status) != "" {
+			finishRun(terminal.status, terminal.cause)
+			return
+		}
+		cause := terminal.cause
 		failureCause := cause
 		if privateCause := apperror.CauseOf(cause); privateCause != nil {
 			failureCause = privateCause
@@ -325,8 +335,20 @@ func (s *Service) AdmitSubagentRun(
 	terminal := func(result tools.SubagentTerminal) {
 		once.Do(func() {
 			lifecycleCause := result.Cause
-			if lifecycleCause == nil && runCtx.Err() != nil {
+			if lifecycleCause == nil && runCtx.Err() != nil &&
+				(!result.OutcomeResolved || result.Outcome != tools.SpawnAttemptCompleted) {
 				lifecycleCause = context.Cause(runCtx)
+			}
+			status := ""
+			if result.OutcomeResolved {
+				switch result.Outcome {
+				case tools.SpawnAttemptCompleted:
+					status = sessionruntime.RunStatusCompleted
+				case tools.SpawnAttemptAbort:
+					status = sessionruntime.RunStatusAborted
+				case tools.SpawnAttemptFailure:
+					status = sessionruntime.RunStatusErrored
+				}
 			}
 			s.persistContextLifecycleSnapshot(
 				runCtx,
@@ -337,7 +359,7 @@ func (s *Service) AdmitSubagentRun(
 				lifecycleCause,
 				true,
 			)
-			finish(result.Cause)
+			finish(triggeredRunTerminal{status: status, cause: result.Cause})
 		})
 	}
 	return runCtx, toolAdmission, terminal, nil

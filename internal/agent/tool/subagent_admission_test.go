@@ -347,6 +347,45 @@ func TestRunSubagentTaskPreservesOwningCancellationCause(t *testing.T) {
 	}
 }
 
+func TestRunSubagentTaskKeepsResolvedFailureWhenCancellationRaces(t *testing.T) {
+	providerErr := errors.New("provider failed before cancellation")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	agent := &mockSpawnAgent{
+		generateFunc: func(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
+			if cfg.ResolveAttempt == nil {
+				t.Fatal("attempt resolver is nil")
+			}
+			if got := cfg.ResolveAttempt(providerErr); got != SpawnAttemptFailure {
+				t.Fatalf("attempt disposition = %v, want failure", got)
+			}
+			cancel(context.Canceled)
+			return nil, providerErr
+		},
+	}
+	p := &SpawnProvider{
+		agent:  agent,
+		logger: slog.New(slog.DiscardHandler),
+		modelResolver: func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+			return resolvedSubagentModel{}, nil
+		},
+	}
+
+	result := p.runSubagentTask(ctx, &agentRequest{
+		taskID:         "task-failure-race",
+		agentID:        "worker",
+		agentSessionID: "session-failure-race",
+		message:        "work",
+		parentSession:  SessionContext{BotID: "bot-1"},
+	})
+
+	if !result.AttemptResolved || result.AttemptOutcome != SpawnAttemptFailure {
+		t.Fatalf("attempt outcome = resolved %v disposition %v, want failure", result.AttemptResolved, result.AttemptOutcome)
+	}
+	if !errors.Is(result.Cause, providerErr) || errors.Is(result.Cause, context.Canceled) {
+		t.Fatalf("terminal cause = %v, want resolved provider failure", result.Cause)
+	}
+}
+
 func newSubagentAdmissionTestProvider(t *testing.T, agent SpawnAgent, admitter SubagentAdmitter) *SpawnProvider {
 	t.Helper()
 	p := NewSpawnProvider(nil, nil, nil, nil, nil, background.New(nil))

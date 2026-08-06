@@ -15,6 +15,7 @@ import (
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	tools "github.com/memohai/memoh/internal/agent/tool"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	"github.com/memohai/memoh/internal/runtimefence"
 )
@@ -29,9 +30,9 @@ import (
 // The callbacks persist exactly what the legacy terminal path persists — every
 // non-user message of the step, marshalled whole — only earlier: each complete
 // step or safe interrupted checkpoint lands in one fenced transaction instead
-// of the whole run landing at the end. onPersisted fires only after a complete
-// step has durably committed; the spawn provider uses it to stop retrying an
-// attempt that already produced durable output.
+// of the whole run landing at the end. onPersisted fires after either kind of
+// durable write; the spawn provider uses it to stop retrying an attempt whose
+// output is already part of history.
 func (s *Service) SubagentStepCommit(
 	ctx context.Context,
 	botID, sessionID, modelID, turnRequestMessageID string,
@@ -170,7 +171,7 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 	}
 	c.contextLifecycle.SetAssistantMessageID(lastPersistedAssistantMessageID(persisted))
 	c.nextStep++
-	if !interrupted && c.onPersisted != nil {
+	if c.onPersisted != nil {
 		c.onPersisted()
 	}
 	return nil
@@ -185,7 +186,7 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 // (an aborted run's final events are exactly the ones a subscriber must see),
 // and a lost ownership stops publishing outright because every later event
 // would fail identically.
-func (s *Service) SubagentRunObserver(ctx context.Context) func(native.StreamEvent) {
+func (s *Service) SubagentRunObserver(ctx context.Context) native.SpawnRunObserver {
 	if s == nil || s.decisionRuntime == nil {
 		return nil
 	}
@@ -195,11 +196,12 @@ func (s *Service) SubagentRunObserver(ctx context.Context) func(native.StreamEve
 	}
 	publishCtx := context.WithoutCancel(ctx)
 	var lost atomic.Bool
-	return func(event native.StreamEvent) {
+	return func(event native.StreamEvent) native.SpawnRunObservation {
 		if lost.Load() {
-			return
+			return native.SpawnRunObservation{}
 		}
-		if _, err := s.decisionRuntime.HandleAgentEvent(publishCtx, handle, event); err != nil {
+		_, status, err := s.decisionRuntime.HandleAgentEventWithStatus(publishCtx, handle, event)
+		if err != nil {
 			if errors.Is(err, sessionruntime.ErrRunOwnershipLost) {
 				lost.Store(true)
 			}
@@ -211,6 +213,22 @@ func (s *Service) SubagentRunObserver(ctx context.Context) func(native.StreamEve
 					slog.String("run_id", handle.RunID),
 				)
 			}
+			return native.SpawnRunObservation{}
 		}
+		if event.Type != native.EventAgentEnd && event.Type != native.EventAgentAbort {
+			return native.SpawnRunObservation{}
+		}
+		observation := native.SpawnRunObservation{TerminalResolved: true}
+		switch status {
+		case sessionruntime.RunStatusCompleted:
+			observation.TerminalOutcome = tools.SpawnAttemptCompleted
+		case sessionruntime.RunStatusAborted:
+			observation.TerminalOutcome = tools.SpawnAttemptAbort
+		case sessionruntime.RunStatusErrored:
+			observation.TerminalOutcome = tools.SpawnAttemptFailure
+		default:
+			return native.SpawnRunObservation{}
+		}
+		return observation
 	}
 }

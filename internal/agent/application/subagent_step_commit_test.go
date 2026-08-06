@@ -150,8 +150,8 @@ func TestSubagentStepCommitPersistsStepsInOrder(t *testing.T) {
 	if _, ok := store.steps[2].Messages[0].Metadata[contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot); !ok {
 		t.Fatalf("interrupted lifecycle metadata = %#v, want snapshot", store.steps[2].Messages[0].Metadata)
 	}
-	if persistedSteps != 2 {
-		t.Fatalf("interrupted checkpoint fired complete-step callback: %d", persistedSteps)
+	if persistedSteps != 3 {
+		t.Fatalf("interrupted checkpoint did not report durable output: %d", persistedSteps)
 	}
 }
 

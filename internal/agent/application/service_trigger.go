@@ -39,7 +39,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		// than retried here.
 		return schedule.TriggerResult{}, err
 	}
-	defer func() { finish(err) }()
+	defer func() { finish(triggeredRunTerminal{cause: err}) }()
 	ctx = runCtx
 
 	req := ChatRequest{
@@ -121,7 +121,7 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 		// already scheduled and a stale check has nothing to report.
 		return heartbeat.TriggerResult{}, err
 	}
-	defer func() { finish(err) }()
+	defer func() { finish(triggeredRunTerminal{cause: err}) }()
 	ctx = runCtx
 
 	var heartbeatModel string
