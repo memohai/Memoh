@@ -264,6 +264,51 @@ func TestSpawnedTurnRetainsLifecycleSnapshotOnGenerationFailure(t *testing.T) {
 	}
 }
 
+type abortingSpawnAgent struct {
+	calls    int
+	snapshot *contextfrag.LifecycleSnapshot
+}
+
+func (a *abortingSpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
+	return a.GenerateWithWatchdog(ctx, cfg, func() {})
+}
+
+func (a *abortingSpawnAgent) GenerateWithWatchdog(context.Context, SpawnRunConfig, func()) (*SpawnResult, error) {
+	a.calls++
+	return &SpawnResult{ContextLifecycle: a.snapshot}, errors.New("agent run aborted")
+}
+
+func TestSpawnedTurnDoesNotCompleteAdmittedRunAfterAgentAbort(t *testing.T) {
+	snapshot := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 3, Messages: 2},
+	}
+	agent := &abortingSpawnAgent{snapshot: snapshot}
+	admitter := &fakeSubagentAdmitter{}
+	p := newSubagentAdmissionTestProvider(t, agent, admitter)
+
+	result := asMap(t, mustExecuteAgentTool(t, p, SessionContext{
+		BotID:     "bot1",
+		SessionID: "parent1",
+	}, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "abort internally",
+	}))
+	if result["status"] != string(background.TaskFailed) {
+		t.Fatalf("status = %v, want %q", result["status"], background.TaskFailed)
+	}
+	if agent.calls != 1 {
+		t.Fatalf("agent calls = %d, want one non-retryable attempt", agent.calls)
+	}
+	terminals := admitter.terminals()
+	if len(terminals) != 1 || terminals[0].cause != "agent run aborted" {
+		t.Fatalf("terminals = %#v, want one aborted-cause terminal", terminals)
+	}
+	if !reflect.DeepEqual(terminals[0].contextLifecycle, snapshot) {
+		t.Fatalf("terminal snapshot = %#v, want %#v", terminals[0].contextLifecycle, snapshot)
+	}
+}
+
 type canceledSubagentSpawnAgent struct{}
 
 func (*canceledSubagentSpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {

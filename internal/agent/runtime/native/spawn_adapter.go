@@ -33,6 +33,8 @@ type SpawnStepCommitFactory func(
 // A nil return means nothing observes this run and events are not forwarded.
 type SpawnRunObserverFactory func(ctx context.Context) func(StreamEvent)
 
+var errSpawnAgentAborted = errors.New("agent run aborted")
+
 // SpawnAdapter wraps *Agent to satisfy tools.SpawnAgent without creating
 // an import cycle (tools -> agent).
 type SpawnAdapter struct {
@@ -267,8 +269,11 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	// pre-fix behavior swallowed these into an empty success. An error that
 	// the run recovered from (mid-stream retry reached EventAgentEnd) stays
 	// invisible here, exactly like the main chat path.
-	if !completed && lastError != "" {
-		return spawnFailureResult(rc), errors.New(lastError)
+	if !completed {
+		if lastError != "" {
+			return spawnFailureResult(rc), errors.New(lastError)
+		}
+		return spawnFailureResult(rc), errSpawnAgentAborted
 	}
 
 	spawnResult := &tools.SpawnResult{

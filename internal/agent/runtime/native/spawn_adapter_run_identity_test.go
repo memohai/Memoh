@@ -3,8 +3,10 @@ package native
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -160,6 +162,121 @@ func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T
 	}
 	if result == nil || result.Text != "recovered result" {
 		t.Fatalf("GenerateWithWatchdog result = %#v, want recovered result", result)
+	}
+}
+
+func TestSpawnAdapterGenerateWithWatchdogRejectsProviderAbort(t *testing.T) {
+	provider := &atomicMockProvider{
+		stream: func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+			return closedAgentTestStream(
+				&sdk.StartPart{},
+				&sdk.StartStepPart{},
+				&sdk.AbortPart{},
+			), nil
+		},
+	}
+	result, err := NewSpawnAdapter(newTestAgent()).GenerateWithWatchdog(
+		context.Background(),
+		tools.SpawnRunConfig{
+			Model:       &sdk.Model{ID: "spawn-abort-model", Provider: provider, Type: sdk.ModelTypeChat},
+			Query:       "abort the task",
+			SessionType: sessionmode.Subagent,
+			Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
+		},
+		func() {},
+	)
+	if err == nil || err.Error() != "agent run aborted" {
+		t.Fatalf("GenerateWithWatchdog error = %v, want generic abort cause", err)
+	}
+	if result == nil || result.ContextLifecycle == nil {
+		t.Fatalf("GenerateWithWatchdog result = %#v, want failure lifecycle snapshot", result)
+	}
+}
+
+func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
+	repeatedChunk := strings.Repeat("abcd", 64)
+	var observedCancel atomic.Bool
+	provider := &atomicMockProvider{
+		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+			parts := make(chan sdk.StreamPart, 16)
+			go func() {
+				defer close(parts)
+				send := func(part sdk.StreamPart) bool {
+					select {
+					case <-ctx.Done():
+						observedCancel.Store(true)
+						return false
+					case parts <- part:
+						return true
+					}
+				}
+				if !send(&sdk.StartPart{}) || !send(&sdk.StartStepPart{}) || !send(&sdk.TextStartPart{ID: "loop"}) {
+					return
+				}
+				for range 4 {
+					if !send(&sdk.TextDeltaPart{ID: "loop", Text: repeatedChunk}) {
+						return
+					}
+				}
+				select {
+				case <-ctx.Done():
+					observedCancel.Store(true)
+					return
+				case <-time.After(50 * time.Millisecond):
+				}
+				_ = send(&sdk.FinishPart{FinishReason: sdk.FinishReasonStop})
+			}()
+			return &sdk.StreamResult{Stream: parts}, nil
+		},
+	}
+	outerCtx := context.Background()
+	result, err := NewSpawnAdapter(newTestAgent()).GenerateWithWatchdog(
+		outerCtx,
+		tools.SpawnRunConfig{
+			Model:         &sdk.Model{ID: "spawn-loop-model", Provider: provider, Type: sdk.ModelTypeChat},
+			Query:         "loop the task",
+			SessionType:   sessionmode.Subagent,
+			LoopDetection: tools.SpawnLoopConfig{Enabled: true},
+			Identity:      tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
+		},
+		func() {},
+	)
+	if err == nil || err.Error() != "agent run aborted" {
+		t.Fatalf("GenerateWithWatchdog error = %v, want generic abort cause", err)
+	}
+	if outerCtx.Err() != nil {
+		t.Fatalf("owning context was canceled: %v", outerCtx.Err())
+	}
+	if !observedCancel.Load() {
+		t.Fatal("stream provider did not observe child cancellation")
+	}
+	if result == nil || result.ContextLifecycle == nil {
+		t.Fatalf("GenerateWithWatchdog result = %#v, want failure lifecycle snapshot", result)
+	}
+}
+
+func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *testing.T) {
+	wantCause := errors.New("owning run stopped")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(wantCause)
+	provider := &atomicMockProvider{
+		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}
+
+	_, err := NewSpawnAdapter(newTestAgent()).GenerateWithWatchdog(
+		ctx,
+		tools.SpawnRunConfig{
+			Model:       &sdk.Model{ID: "spawn-canceled-model", Provider: provider, Type: sdk.ModelTypeChat},
+			Query:       "stop the task",
+			SessionType: sessionmode.Subagent,
+			Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
+		},
+		func() {},
+	)
+	if !errors.Is(err, wantCause) {
+		t.Fatalf("GenerateWithWatchdog error = %v, want owning cause %v", err, wantCause)
 	}
 }
 
