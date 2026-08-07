@@ -2,6 +2,7 @@ package models
 
 import (
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -58,8 +59,9 @@ const (
 	CompatFileInput = "file-input"
 )
 
+// Active effort tiers, weakest to strongest. These are the values that turn
+// reasoning on; "off" is ReasoningEffortDisable and deliberately not among them.
 const (
-	ReasoningEffortNone    = "none"
 	ReasoningEffortMinimal = "minimal"
 	ReasoningEffortLow     = "low"
 	ReasoningEffortMedium  = "medium"
@@ -68,16 +70,27 @@ const (
 	ReasoningEffortMax     = "max"
 )
 
-// ReasoningEffortDisable turns reasoning off. It is not a wire tier a model can
-// advertise — it is the settings/override value that says "send no reasoning at
-// all", which is why IsValidReasoningEffort rejects it. Since bots dropped the
-// separate reasoning_enabled flag, this is the only representation of "off".
+// ReasoningEffortDisable is the single representation of "no reasoning". It is
+// both what a user picks and what a model advertises: a model listing it in
+// reasoning_efforts can be turned off, whatever wire shape that takes on its
+// provider. Since bots dropped the separate reasoning_enabled flag, it is also
+// the only stored form of "off".
 const ReasoningEffortDisable = "disable"
 
-// orderedReasoningEfforts lists the real tiers weakest to strongest. Order is
-// what NearestEffortToMedium walks, so it must stay monotonic.
+// ReasoningEffortNone is OpenAI's wire spelling of "no reasoning" (gpt-5.1
+// introduced it and dropped minimal; gpt-5.0 has minimal and no none). It is
+// never declared by a model nor stored in settings — provider adaptors translate
+// ReasoningEffortDisable into it, exactly as the Anthropic path translates the
+// same intent into thinking{type:"disabled"}. Giving "off" one name on our side
+// and letting each provider spell it its own way is what keeps a single state
+// from acquiring two selectable tokens.
+const ReasoningEffortNone = "none"
+
+// orderedReasoningEfforts lists the active tiers weakest to strongest. Order is
+// what NearestEffortToMedium walks, so it must stay monotonic. ReasoningEffortDisable
+// is absent on purpose: it is not a tier, and including it would let the nearest-tier
+// fallback resolve an *active* reasoning config to "off".
 var orderedReasoningEfforts = []string{
-	ReasoningEffortNone,
 	ReasoningEffortMinimal,
 	ReasoningEffortLow,
 	ReasoningEffortMedium,
@@ -87,8 +100,14 @@ var orderedReasoningEfforts = []string{
 }
 
 // IsReasoningDisabled reports whether an effort value means "no reasoning".
+// ReasoningEffortNone is accepted as the legacy spelling: it was declarable and
+// storable before "off" was unified onto ReasoningEffortDisable.
 func IsReasoningDisabled(effort string) bool {
-	return strings.TrimSpace(effort) == ReasoningEffortDisable
+	switch strings.TrimSpace(effort) {
+	case ReasoningEffortDisable, ReasoningEffortNone:
+		return true
+	}
+	return false
 }
 
 // NearestEffortToMedium picks the tier closest to medium from levels, breaking
@@ -159,8 +178,12 @@ var validCompatibilities = map[string]struct{}{
 	CompatFileInput: {},
 }
 
+// validReasoningEfforts is the vocabulary a model may advertise: the active tiers
+// plus ReasoningEffortDisable, which declares that the model can be turned off.
+// ReasoningEffortNone is absent because it is a provider wire value, not something
+// a model declares — see the constant.
 var validReasoningEfforts = map[string]struct{}{
-	ReasoningEffortNone:    {},
+	ReasoningEffortDisable: {},
 	ReasoningEffortMinimal: {},
 	ReasoningEffortLow:     {},
 	ReasoningEffortMedium:  {},
@@ -203,7 +226,34 @@ func normalizeModelConfig(config ModelConfig) ModelConfig {
 		description := strings.TrimSpace(*config.Description)
 		config.Description = &description
 	}
+	config.ReasoningEfforts = normalizeAdvertisedEfforts(config.ReasoningEfforts)
 	return config
+}
+
+// normalizeAdvertisedEfforts rewrites the legacy spelling of "off" to the token a
+// model declares today. It runs on both boundaries of ModelConfig — before a write
+// is validated and after a row is read back — so nothing downstream has to know
+// that "none" was ever declarable.
+//
+// Without it the vocabulary change would only apply to freshly written configs:
+// rows persisted earlier, and provider registries that have not been regenerated,
+// would keep advertising "none", and every consumer that now looks for the disable
+// token would read those models as "cannot be turned off" — silently dropping Off
+// from the picker and misreading which thinking mechanism the model wants.
+func normalizeAdvertisedEfforts(efforts []string) []string {
+	if len(efforts) == 0 {
+		return efforts
+	}
+	out := make([]string, 0, len(efforts))
+	for _, effort := range efforts {
+		if strings.TrimSpace(effort) == ReasoningEffortNone {
+			effort = ReasoningEffortDisable
+		}
+		if !slices.Contains(out, effort) {
+			out = append(out, effort)
+		}
+	}
+	return out
 }
 
 type Model struct {
