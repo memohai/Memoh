@@ -77,6 +77,7 @@ func (b *Builder) Build(ctx context.Context, input BuildInput) (*ContextView, er
 	manifest.View = input.Intent.ManifestView()
 	manifest.DynamicMutators = normalizeDynamicMutators(input.DynamicMutators)
 	manifest.Selection = selectionTrace(result.Summary)
+	manifest.SelectionDecisions = selectionDecisions(sourceFrags, result)
 	manifest.EditTrace = append(manifest.EditTrace, selectionEditTrace(result.Dropped)...)
 	manifest.EditTrace = append(manifest.EditTrace, result.Edited...)
 	manifest.ValidationWarnings = append(manifest.ValidationWarnings, result.Warnings...)
@@ -127,6 +128,74 @@ func (b *Builder) Build(ctx context.Context, input BuildInput) (*ContextView, er
 	}
 
 	return view, nil
+}
+
+func selectionDecisions(sourceFrags []contextfrag.ContextFrag, result SelectionResult) []contextfrag.SelectionDecision {
+	dropReasons := make(map[string][]string, len(result.Summary.DropReasons))
+	for _, record := range result.Summary.DropReasons {
+		dropReasons[record.FragID] = append(dropReasons[record.FragID], record.Reason)
+	}
+	selectedByID := make(map[string][]contextfrag.ContextFrag, len(result.Selected))
+	for _, frag := range result.Selected {
+		selectedByID[frag.ID] = append(selectedByID[frag.ID], frag)
+	}
+
+	decisions := make([]contextfrag.SelectionDecision, 0, len(sourceFrags)+2)
+	sourceCounts := make(map[string]int, len(sourceFrags))
+	for _, source := range sourceFrags {
+		sourceCounts[source.ID]++
+		if reasons := dropReasons[source.ID]; len(reasons) > 0 {
+			decisions = append(decisions, selectionDecisionForFrag(source, contextfrag.DecisionDropped, reasons[0]))
+			dropReasons[source.ID] = reasons[1:]
+			continue
+		}
+		selected := selectedByID[source.ID]
+		if len(selected) == 0 {
+			decisions = append(decisions, selectionDecisionForFrag(source, contextfrag.DecisionDropped, "unknown"))
+			continue
+		}
+		decision := contextfrag.DecisionSelected
+		if source.Ref.ContentHash != selected[0].Ref.ContentHash ||
+			contextfrag.ResolveFragTokens(source) != contextfrag.ResolveFragTokens(selected[0]) {
+			decision = contextfrag.DecisionTrimmed
+		}
+		decisions = append(decisions, selectionDecisionForFrag(selected[0], decision, ""))
+		selectedByID[source.ID] = selected[1:]
+	}
+	for _, selected := range result.Selected {
+		if sourceCounts[selected.ID] > 0 {
+			sourceCounts[selected.ID]--
+			continue
+		}
+		decisions = append(decisions, selectionDecisionForFrag(selected, contextfrag.DecisionSelected, ""))
+	}
+	return decisions
+}
+
+func selectionDecisionForFrag(
+	frag contextfrag.ContextFrag,
+	decision contextfrag.SelectionDecisionKind,
+	reason string,
+) contextfrag.SelectionDecision {
+	itemManifest := contextfrag.BuildManifest([]contextfrag.ContextFrag{frag})
+	item := contextfrag.ManifestItem{}
+	if len(itemManifest.Items) > 0 {
+		item = itemManifest.Items[0]
+	}
+	return contextfrag.SelectionDecision{
+		ID:            frag.ID,
+		Ref:           item.Ref,
+		Slot:          frag.Slot,
+		Source:        frag.Provenance.Source,
+		SourceID:      frag.Provenance.SourceID,
+		Decision:      decision,
+		Reason:        reason,
+		TokenEstimate: item.TokenEstimate,
+		TextBytes:     item.TextBytes,
+		ImageCount:    item.ImageCount,
+		CacheClass:    frag.CacheClass,
+		RetentionTier: frag.RetentionTier,
+	}
 }
 
 func summarizePlacement(placement PlacementPlan) PlacementSummary {

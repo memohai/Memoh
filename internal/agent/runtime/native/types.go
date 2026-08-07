@@ -103,7 +103,9 @@ type RunConfig struct {
 	ContextMemoryMessageIndex      *int
 	ContextQueryMaterialized       bool
 	ContextToolUsage               string
+	ContextToolUsageFrags          []contextfrag.ContextFrag
 	ContextToolDefs                []contextfrag.ToolDefAccounting
+	ContextToolDefsResolved        bool
 	ContextToolExchangePolicy      *contextfrag.ToolExchangePolicy
 	ContextCachePlan               contextfrag.CachePlan
 	ContextMutations               *contextfrag.MutationLedger

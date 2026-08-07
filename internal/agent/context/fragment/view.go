@@ -4,7 +4,10 @@ package contextfrag
 // rendered into. One intent may fan out to several render targets.
 type Intent string
 
-const IntentRunConfigPreProvider Intent = "run_config_pre_provider"
+const (
+	IntentRunConfigPreProvider Intent = "run_config_pre_provider"
+	IntentDiscussReply         Intent = "discuss_reply"
+)
 
 func (i Intent) ManifestView() ManifestView {
 	return ManifestView(i)

@@ -107,28 +107,115 @@ func TestGenerateSystemSectionsShape(t *testing.T) {
 		Bot:                       BotInfo{ID: "bot-1", Name: "research-bot"},
 		Skills:                    []SkillEntry{{Name: "foo", Description: "does foo"}},
 		Files:                     []SystemFile{{Filename: "AGENTS.md", Content: "Be nice."}},
-		PlatformIdentitiesSection: "platform identity",
+		PlatformIdentitiesSection: "platform header\nplatform identity",
+		PlatformIdentities:        []SystemPromptItem{{ID: "telegram-1", Text: "platform identity"}},
 	})
 	want := []struct {
-		id       string
-		kind     contextfrag.Kind
-		priority int
+		id                 string
+		kind               contextfrag.Kind
+		priority           int
+		retention          contextfrag.RetentionTier
+		requiredCapability string
 	}{
-		{sectionIDIntro, contextfrag.KindSystemPrompt, priorityIntro},
-		{sectionIDBotIdentity, contextfrag.KindBotIdentity, priorityBotIdentity},
-		{sectionIDBody, contextfrag.KindSystemPrompt, priorityBody},
-		{sectionIDTail, contextfrag.KindSystemPrompt, priorityTail},
-		{sectionIDPlatformIdentity, contextfrag.KindPlatformIdentity, priorityPlatformIdentity},
-		{sectionIDSkills, contextfrag.KindSkillsCatalog, prioritySkills},
-		{sectionIDWorkspaceInstructions, contextfrag.KindWorkspaceInstruction, priorityWorkspaceInstructions},
+		{sectionIDIntro, contextfrag.KindSystemPrompt, priorityIntro, contextfrag.RetentionRequired, ""},
+		{sectionIDBotIdentity, contextfrag.KindBotIdentity, priorityBotIdentity, contextfrag.RetentionPreferred, ""},
+		{sectionIDBody, contextfrag.KindSystemPrompt, priorityBody, contextfrag.RetentionRequired, ""},
+		{sectionIDTail, contextfrag.KindSystemPrompt, priorityTail, contextfrag.RetentionRequired, ""},
+		{sectionIDPlatformIdentity + ".header", contextfrag.KindPlatformIdentity, priorityPlatformIdentity, contextfrag.RetentionPreferred, ""},
+		{sectionIDPlatformIdentity + ".telegram-1", contextfrag.KindPlatformIdentity, priorityPlatformIdentity, contextfrag.RetentionPreferred, ""},
+		{sectionIDSkills + ".header", contextfrag.KindSkillsCatalog, prioritySkills, contextfrag.RetentionOptional, "use_skill"},
+		{sectionIDSkill + ".foo", contextfrag.KindSkillsCatalog, prioritySkills, contextfrag.RetentionOptional, "use_skill"},
+		{sectionIDWorkspaceFile + ".AGENTS.md", contextfrag.KindWorkspaceInstruction, priorityWorkspaceInstructions, contextfrag.RetentionPreferred, ""},
 	}
 	if len(sections) != len(want) {
 		t.Fatalf("sections = %#v", sections)
 	}
 	for i := range want {
-		if sections[i].ID != want[i].id || sections[i].Kind != want[i].kind || sections[i].Priority != want[i].priority {
+		if sections[i].ID != want[i].id || sections[i].Kind != want[i].kind || sections[i].Priority != want[i].priority ||
+			sections[i].RetentionTier != want[i].retention || sections[i].RequiredCapability != want[i].requiredCapability {
 			t.Fatalf("section[%d] = %#v, want %#v", i, sections[i], want[i])
 		}
+	}
+}
+
+func TestGenerateSystemSectionsGranularDynamicItemsRemainByteEquivalent(t *testing.T) {
+	t.Parallel()
+
+	platformItems := []SystemPromptItem{
+		{ID: "telegram-1", Text: `<identity channel="telegram" username="@memoh"/>`},
+		{ID: "微信-2", Text: `<identity channel="weixin" username="小明"/>`},
+	}
+	platformSection := "## Platform Identities\n\nKnown identities.\n\n" +
+		platformItems[0].Text + "\n" + platformItems[1].Text
+	skills := []SkillEntry{
+		{Name: "技能", Description: "第二"},
+		{Name: "alpha", Description: "first"},
+	}
+	files := []SystemFile{
+		{Filename: "ZETA.md", Content: "zeta"},
+		{Filename: "AGENTS.md", Content: "agents"},
+		{Filename: "MEMORY.md", Content: "still included on the accepted PR1 path"},
+	}
+	params := SystemPromptParams{
+		SessionType:               sessionmode.Chat,
+		Timezone:                  "UTC",
+		Skills:                    skills,
+		Files:                     files,
+		PlatformIdentitiesSection: platformSection,
+		PlatformIdentities:        platformItems,
+	}
+
+	sections := GenerateSystemSections(params)
+	wantIDs := []string{
+		"system.prompt.intro",
+		"system.bot_identity",
+		"system.prompt.body",
+		"system.prompt.tail",
+		"system.platform_identity.header",
+		"system.platform_identity.telegram-1",
+		"system.platform_identity.微信-2",
+		"system.skills.header",
+		"system.skill.alpha",
+		"system.skill.技能",
+		"system.workspace_file.ZETA.md",
+		"system.workspace_file.AGENTS.md",
+		"system.workspace_file.MEMORY.md",
+	}
+	gotIDs := make([]string, 0, len(sections))
+	for _, section := range sections {
+		gotIDs = append(gotIDs, section.ID)
+	}
+	if strings.Join(gotIDs, "\n") != strings.Join(wantIDs, "\n") {
+		t.Fatalf("section IDs = %v, want %v", gotIDs, wantIDs)
+	}
+
+	wantSuffix := platformSection + "\n\n" +
+		buildSkillsSection(skills) + "\n\n" +
+		buildFileSections(files, DefaultSystemFilesMaxBytes)
+	if got := GenerateSystemPrompt(params); !strings.HasSuffix(got, wantSuffix) {
+		t.Fatalf("granular prompt suffix mismatch\ngot:  %q\nwant suffix: %q", got, wantSuffix)
+	}
+}
+
+func TestGenerateSystemSectionsSkillsRequireUseSkillCapability(t *testing.T) {
+	t.Parallel()
+
+	sections := GenerateSystemSections(SystemPromptParams{
+		SessionType: sessionmode.Chat,
+		Skills:      []SkillEntry{{Name: "alpha", Description: "first"}},
+	})
+	found := 0
+	for _, section := range sections {
+		if section.Kind != contextfrag.KindSkillsCatalog {
+			continue
+		}
+		found++
+		if section.RequiredCapability != skillRequiredCapability {
+			t.Fatalf("%s required capability = %q, want %q", section.ID, section.RequiredCapability, skillRequiredCapability)
+		}
+	}
+	if found != 2 {
+		t.Fatalf("skill sections = %d, want header plus item", found)
 	}
 }
 
@@ -154,7 +241,14 @@ func TestGenerateSystemSectionsKeepsOnlyStructuralEmptySection(t *testing.T) {
 
 func TestSystemSectionFragsPreserveTypedShape(t *testing.T) {
 	t.Parallel()
-	sections := []SystemSection{{ID: "a", Kind: contextfrag.KindSystemPrompt, Priority: 10, Text: " first "}, {ID: "b", Kind: contextfrag.KindBotIdentity, Priority: 20}}
+	sections := []SystemSection{
+		{
+			ID: "a", Kind: contextfrag.KindSystemPrompt, Priority: 10, Text: " first ",
+			RetentionTier: contextfrag.RetentionPreferred, DropPriority: 40, RequiredCapability: "read",
+			Render: contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown, GroupID: "group", GroupJoiner: "\n"},
+		},
+		{ID: "b", Kind: contextfrag.KindBotIdentity, Priority: 20},
+	}
 	frags := SystemSectionFrags(sections, contextfrag.Scope{BotID: "bot-1"})
 	if len(frags) != 2 {
 		t.Fatalf("frags = %#v", frags)
@@ -162,8 +256,17 @@ func TestSystemSectionFragsPreserveTypedShape(t *testing.T) {
 	for i, frag := range frags {
 		if frag.ID != sections[i].ID || frag.Kind != sections[i].Kind || frag.Priority != sections[i].Priority ||
 			frag.Role != sdk.MessageRoleSystem || frag.Slot != contextfrag.SlotSystem || frag.Scope.BotID != "bot-1" ||
-			frag.Parts[0].Text != strings.TrimSpace(sections[i].Text) {
+			frag.Parts[0].Text != contextfrag.RenderText(sections[i].Text, sections[i].Render) ||
+			frag.RetentionTier != sections[i].RetentionTier || frag.DropPriority != sections[i].DropPriority ||
+			frag.RequiredCapability != sections[i].RequiredCapability {
 			t.Fatalf("frag[%d] = %#v", i, frag)
+		}
+		wantRender := sections[i].Render
+		if wantRender.Format == "" {
+			wantRender.Format = contextfrag.RenderMarkdown
+		}
+		if frag.Render != wantRender {
+			t.Fatalf("frag[%d] render policy = %#v, want %#v", i, frag.Render, wantRender)
 		}
 	}
 }
@@ -187,7 +290,9 @@ func TestGenerateSystemSectionsDegradesWhenAnchorsAreMissing(t *testing.T) {
 
 func assertDegradedSection(t *testing.T, sections []SystemSection) {
 	t.Helper()
-	if len(sections) != 1 || sections[0].Kind != contextfrag.KindSystemPrompt || strings.Contains(sections[0].Text, "{{") || !strings.Contains(sections[0].Text, "research-bot") {
+	if len(sections) != 1 || sections[0].Kind != contextfrag.KindSystemPrompt ||
+		sections[0].RetentionTier != contextfrag.RetentionRequired ||
+		strings.Contains(sections[0].Text, "{{") || !strings.Contains(sections[0].Text, "research-bot") {
 		t.Fatalf("sections = %#v", sections)
 	}
 }

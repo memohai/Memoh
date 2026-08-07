@@ -2,7 +2,11 @@
 // describe context before it is rendered into provider-specific SDK inputs.
 package contextfrag
 
-import sdk "github.com/memohai/twilight-ai/sdk"
+import (
+	"strings"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
+)
 
 // Kind identifies the semantic source and intent of a context fragment.
 type Kind string
@@ -133,6 +137,25 @@ const (
 	OverflowDrop      OverflowAction = "drop"
 )
 
+// RetentionTier groups fragments by how strongly a policy pass must retain
+// them. The zero value leaves the policy unspecified.
+type RetentionTier string
+
+const (
+	RetentionUnspecified RetentionTier = ""
+	RetentionRequired    RetentionTier = "required"
+	RetentionPreferred   RetentionTier = "preferred"
+	RetentionOptional    RetentionTier = "optional"
+)
+
+// DropPriority orders fragments within one retention tier. Higher values drop
+// before lower values, so lower values survive longer under policy pressure.
+type DropPriority int
+
+func (p DropPriority) DropsBefore(other DropPriority) bool {
+	return p > other
+}
+
 // BudgetPolicy captures the budget behavior for a fragment: the selector
 // enforces MaxTokens/MaxChars via Trim or Drop, Summarize is not implemented
 // (deferred to compaction), and Keep marks the fragment as must-keep.
@@ -155,8 +178,30 @@ const (
 // RenderPolicy stores rendering hints. Anchor is used for sections such as
 // tool usage that must land before a known heading.
 type RenderPolicy struct {
-	Format RenderFormat `json:"format,omitempty"`
-	Anchor string       `json:"anchor,omitempty"`
+	Format      RenderFormat `json:"format,omitempty"`
+	Anchor      string       `json:"anchor,omitempty"`
+	GroupID     string       `json:"group_id,omitempty"`
+	GroupJoiner string       `json:"group_joiner,omitempty"`
+}
+
+func RenderText(text string, policy RenderPolicy) string {
+	if policy.GroupID != "" {
+		return strings.Trim(text, " \t\r")
+	}
+	return strings.TrimSpace(text)
+}
+
+func RenderSeparator(previous, current RenderPolicy) string {
+	if previous.GroupID == "" || previous.GroupID != current.GroupID {
+		return "\n\n"
+	}
+	if current.GroupJoiner != "" {
+		return current.GroupJoiner
+	}
+	if previous.GroupJoiner != "" {
+		return previous.GroupJoiner
+	}
+	return "\n\n"
 }
 
 // Provenance identifies where a fragment came from.
@@ -233,19 +278,22 @@ type Part struct {
 
 // ContextFrag is the typed context fragment abstraction.
 type ContextFrag struct {
-	ID            string          `json:"id"`
-	Ref           ContextRef      `json:"ref,omitempty"`
-	Kind          Kind            `json:"kind"`
-	Role          sdk.MessageRole `json:"role,omitempty"`
-	Slot          Slot            `json:"slot"`
-	Priority      int             `json:"priority,omitempty"`
-	CacheClass    CacheClass      `json:"cache_class,omitempty"`
-	Trust         TrustLevel      `json:"trust,omitempty"`
-	Scope         Scope           `json:"scope,omitempty"`
-	Budget        BudgetPolicy    `json:"budget,omitempty"`
-	Render        RenderPolicy    `json:"render,omitempty"`
-	Provenance    Provenance      `json:"provenance,omitempty"`
-	TokenEstimate int             `json:"token_estimate,omitempty"`
+	ID                 string          `json:"id"`
+	Ref                ContextRef      `json:"ref,omitempty"`
+	Kind               Kind            `json:"kind"`
+	Role               sdk.MessageRole `json:"role,omitempty"`
+	Slot               Slot            `json:"slot"`
+	Priority           int             `json:"priority,omitempty"`
+	RetentionTier      RetentionTier   `json:"retention_tier,omitempty"`
+	DropPriority       DropPriority    `json:"drop_priority,omitempty"`
+	RequiredCapability string          `json:"required_capability,omitempty"`
+	CacheClass         CacheClass      `json:"cache_class,omitempty"`
+	Trust              TrustLevel      `json:"trust,omitempty"`
+	Scope              Scope           `json:"scope,omitempty"`
+	Budget             BudgetPolicy    `json:"budget,omitempty"`
+	Render             RenderPolicy    `json:"render,omitempty"`
+	Provenance         Provenance      `json:"provenance,omitempty"`
+	TokenEstimate      int             `json:"token_estimate,omitempty"`
 	// ConflictKey groups fragments that are alternatives of one another: the
 	// selector keeps only the highest-precedence member (closest scope, then
 	// trust, then latest collected) and drops the rest.
@@ -280,6 +328,7 @@ type Manifest struct {
 	TrustBreakdown     []TrustBreakdown    `json:"trust_breakdown,omitempty"`
 	ToolDefs           []ToolDefAccounting `json:"tool_defs,omitempty"`
 	Items              []ManifestItem      `json:"items,omitempty"`
+	SelectionDecisions []SelectionDecision `json:"selection_decisions,omitempty"`
 	Selection          *SelectionTrace     `json:"selection,omitempty"`
 	CachePlan          *CachePlan          `json:"cache_plan,omitempty"`
 	Mutations          *MutationLedger     `json:"mutations,omitempty"`
@@ -350,25 +399,54 @@ type SelectionTrace struct {
 	DropReasons map[string]int `json:"drop_reasons,omitempty"`
 }
 
+type SelectionDecisionKind string
+
+const (
+	DecisionSelected SelectionDecisionKind = "selected"
+	DecisionTrimmed  SelectionDecisionKind = "trimmed"
+	DecisionDropped  SelectionDecisionKind = "dropped"
+)
+
+// SelectionDecision is the content-light per-fragment audit trail for
+// selection. It identifies sources and costs without retaining prompt text.
+type SelectionDecision struct {
+	ID            string                `json:"id"`
+	Ref           ContextRef            `json:"ref,omitempty"`
+	Slot          Slot                  `json:"slot"`
+	Source        string                `json:"source,omitempty"`
+	SourceID      string                `json:"source_id,omitempty"`
+	Decision      SelectionDecisionKind `json:"decision"`
+	Reason        string                `json:"reason,omitempty"`
+	TokenEstimate int                   `json:"token_estimate,omitempty"`
+	TextBytes     int                   `json:"text_bytes,omitempty"`
+	ImageCount    int                   `json:"image_count,omitempty"`
+	CacheClass    CacheClass            `json:"cache_class,omitempty"`
+	RetentionTier RetentionTier         `json:"retention_tier,omitempty"`
+}
+
 // ManifestItem is one non-sensitive fragment entry.
 type ManifestItem struct {
-	ID            string          `json:"id"`
-	Ref           ContextRef      `json:"ref,omitempty"`
-	Kind          Kind            `json:"kind"`
-	Slot          Slot            `json:"slot"`
-	Role          sdk.MessageRole `json:"role,omitempty"`
-	Priority      int             `json:"priority,omitempty"`
-	CacheClass    CacheClass      `json:"cache_class,omitempty"`
-	Trust         TrustLevel      `json:"trust,omitempty"`
-	Source        string          `json:"source,omitempty"`
-	SourceID      string          `json:"source_id,omitempty"`
-	Collector     string          `json:"collector,omitempty"`
-	ConflictKey   string          `json:"conflict_key,omitempty"`
-	PartTypes     []PartType      `json:"part_types,omitempty"`
-	TextBytes     int             `json:"text_bytes,omitempty"`
-	ImageCount    int             `json:"image_count,omitempty"`
-	TokenEstimate int             `json:"token_estimate,omitempty"`
-	Scope         Scope           `json:"scope,omitempty"`
+	ID                 string          `json:"id"`
+	Ref                ContextRef      `json:"ref,omitempty"`
+	Kind               Kind            `json:"kind"`
+	Slot               Slot            `json:"slot"`
+	Role               sdk.MessageRole `json:"role,omitempty"`
+	Priority           int             `json:"priority,omitempty"`
+	RetentionTier      RetentionTier   `json:"retention_tier,omitempty"`
+	DropPriority       DropPriority    `json:"drop_priority,omitempty"`
+	RequiredCapability string          `json:"required_capability,omitempty"`
+	CacheClass         CacheClass      `json:"cache_class,omitempty"`
+	Trust              TrustLevel      `json:"trust,omitempty"`
+	Source             string          `json:"source,omitempty"`
+	SourceID           string          `json:"source_id,omitempty"`
+	Collector          string          `json:"collector,omitempty"`
+	ConflictKey        string          `json:"conflict_key,omitempty"`
+	Render             RenderPolicy    `json:"render,omitempty"`
+	PartTypes          []PartType      `json:"part_types,omitempty"`
+	TextBytes          int             `json:"text_bytes,omitempty"`
+	ImageCount         int             `json:"image_count,omitempty"`
+	TokenEstimate      int             `json:"token_estimate,omitempty"`
+	Scope              Scope           `json:"scope,omitempty"`
 }
 
 type SlotRenderPolicy struct {
