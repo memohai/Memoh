@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/runtimefence"
@@ -31,9 +32,13 @@ func TestAgentStepCommitterPersistsOnlyStepDelta(t *testing.T) {
 	position := int64(4)
 	store := &recordingStepPersister{recordingMessageService: &recordingMessageService{}}
 	service := &Service{messageService: store}
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetManifest(contextfrag.Manifest{View: contextfrag.ViewRunConfigPreProvider})
 	req := ChatRequest{BotID: botID, ThreadID: sessionID, RunID: runID, TurnID: turnID, TurnPosition: &position, Query: "hello", SkipMemoryExtraction: true}
 	ctx := runtimefence.WithContext(context.Background(), runtimefence.Fence{BotID: botID, SessionID: sessionID, Token: 7})
-	committer := service.newAgentStepCommitter(ctx, req, resolvedContext{model: models.GetResponse{ID: uuid.NewString()}})
+	rc := resolvedContext{model: models.GetResponse{ID: uuid.NewString()}}
+	rc.runConfig.ContextLifecycle = holder
+	committer := service.newAgentStepCommitter(ctx, req, rc)
 	if committer == nil {
 		t.Fatal("step committer was not enabled for an admitted fenced turn")
 	}
@@ -51,6 +56,13 @@ func TestAgentStepCommitterPersistsOnlyStepDelta(t *testing.T) {
 	}
 	if store.steps[2].Messages[0].Metadata[messagepkg.AgentStepInterruptedMetadataKey] != true {
 		t.Fatalf("interrupted metadata = %#v", store.steps[2].Messages[0].Metadata)
+	}
+	if _, ok := store.steps[0].Messages[1].Metadata[contextfrag.MetadataContextLifecycleKey]; !ok {
+		t.Fatalf("first step lifecycle metadata = %#v", store.steps[0].Messages[1].Metadata)
+	}
+	snapshot, ok := holder.Snapshot()
+	if !ok || snapshot.AssistantMessageID != "committed" {
+		t.Fatalf("lifecycle snapshot = %#v, set = %v", snapshot, ok)
 	}
 	if got := store.steps[1].Messages[0].TurnRequestMessageID; got != "committed" {
 		t.Fatalf("second step request message = %q, want first committed user", got)

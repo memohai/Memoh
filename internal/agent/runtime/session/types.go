@@ -105,6 +105,19 @@ type RunHandle struct {
 	FencingToken int64
 }
 
+// TerminalRun is the authoritative durable outcome of one admitted run. It is
+// emitted only after the fenced session_runs transition has applied, or when a
+// replay observes that the same run is already terminal. State uses the durable
+// ledger vocabulary: completed, aborted, failed, or lost.
+type TerminalRun struct {
+	RunID        string
+	BotID        string
+	SessionID    string
+	FencingToken int64
+	State        string
+	ErrorCode    string
+}
+
 func (h RunHandle) normalized() RunHandle {
 	h.BotID = strings.TrimSpace(h.BotID)
 	h.SessionID = strings.TrimSpace(h.SessionID)

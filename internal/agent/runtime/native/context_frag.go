@@ -38,6 +38,7 @@ func (cfg RunConfig) RefreshContextFrag() RunConfig {
 		manifest.Mutations = cfg.ContextManifest.Mutations
 	}
 	cfg.ContextManifest = manifest
+	cfg.ContextLifecycle.SetManifest(manifest)
 	return cfg
 }
 

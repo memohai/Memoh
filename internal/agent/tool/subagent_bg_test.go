@@ -15,13 +15,15 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 )
 
 type fakeSpawnAgent struct {
-	block   chan struct{}
-	failFor map[string]string
+	block            chan struct{}
+	failFor          map[string]string
+	contextLifecycle *contextfrag.LifecycleSnapshot
 
 	mu    sync.Mutex
 	calls []SpawnRunConfig
@@ -52,6 +54,7 @@ func (f *fakeSpawnAgent) GenerateWithWatchdog(ctx context.Context, cfg SpawnRunC
 			Role:    sdk.MessageRoleAssistant,
 			Content: []sdk.MessagePart{sdk.TextPart{Text: "report for " + cfg.Query}},
 		}},
+		ContextLifecycle: f.contextLifecycle,
 	}, nil
 }
 
@@ -204,6 +207,7 @@ func (s *fakeAgentMessageService) Persist(_ context.Context, input messagepkg.Pe
 		SessionID: input.SessionID,
 		Role:      input.Role,
 		Content:   input.Content,
+		Metadata:  input.Metadata,
 		Usage:     input.Usage,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -625,6 +629,46 @@ func TestNonForkedSubagentDoesNotInheritAvailableParentSnapshot(t *testing.T) {
 	}
 }
 
+func TestSpawnAgentPersistsLifecycleOnFinalAssistantAndAssociatesItsID(t *testing.T) {
+	snapshot := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 3, Messages: 2},
+	}
+	admitter := &fakeSubagentAdmitter{}
+	p, _, sessions, messages := newAgentControlProviderWithAdmitter(
+		t,
+		&fakeSpawnAgent{contextLifecycle: snapshot},
+		admitter,
+	)
+
+	mustExecuteAgentTool(t, p, SessionContext{BotID: "bot1", SessionID: "parent1"}, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "audit context",
+	})
+	child, ok := sessions.byAgent("parent1", "worker")
+	if !ok {
+		t.Fatal("expected child session")
+	}
+	stored, err := messages.ListBySession(context.Background(), child.ID)
+	if err != nil {
+		t.Fatalf("ListBySession error: %v", err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("persisted messages = %d, want user and assistant", len(stored))
+	}
+	metadataSnapshot, ok := stored[1].Metadata[contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot)
+	if !ok || metadataSnapshot.Counts.Fragments != snapshot.Counts.Fragments {
+		t.Fatalf("assistant metadata lifecycle = %#v, want content-light snapshot", stored[1].Metadata)
+	}
+	terminals := admitter.terminals()
+	if len(terminals) != 1 || terminals[0].contextLifecycle == nil {
+		t.Fatalf("terminal records = %#v, want one lifecycle snapshot", terminals)
+	}
+	if got := terminals[0].contextLifecycle.AssistantMessageID; got != stored[1].ID {
+		t.Fatalf("assistant message association = %q, want %q", got, stored[1].ID)
+	}
+}
+
 func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	block := make(chan struct{})
 	agent := &fakeSpawnAgent{block: block}
@@ -778,7 +822,8 @@ func TestBackgroundWaitTimeoutDoesNotCancelRunningAgentTask(t *testing.T) {
 func TestKillBackgroundCancelsRunningAndQueuedAgentTasks(t *testing.T) {
 	block := make(chan struct{})
 	agent := &fakeSpawnAgent{block: block}
-	p, mgr, _, _ := newAgentControlProvider(t, agent)
+	admitter := &fakeSubagentAdmitter{}
+	p, mgr, _, _ := newAgentControlProviderWithAdmitter(t, agent, admitter)
 	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
 
 	first := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
@@ -805,6 +850,12 @@ func TestKillBackgroundCancelsRunningAndQueuedAgentTasks(t *testing.T) {
 		task := mgr.Get(first["task_id"].(string))
 		return task != nil && task.Snapshot().Status == background.TaskKilled
 	})
+	waitUntil(t, time.Second, func() bool {
+		return len(admitter.terminals()) == 1
+	})
+	if terminals := admitter.terminals(); len(terminals) != 1 || terminals[0].cause != "" {
+		t.Fatalf("killed terminal = %#v, want one cancellation-derived release", terminals)
+	}
 	if got := agent.queries(); !reflect.DeepEqual(got, []string{"first"}) {
 		t.Fatalf("killed queued task should not run, got queries %v", got)
 	}

@@ -1837,6 +1837,36 @@ definitions:
           $ref: '#/definitions/connectors.Connector'
         type: array
     type: object
+  contextfrag.LifecycleSnapshot:
+    properties:
+      assistant_message_id:
+        type: string
+      counts:
+        $ref: '#/definitions/contextfrag.ManifestCounts'
+      version:
+        type: integer
+      view:
+        $ref: '#/definitions/contextfrag.ManifestView'
+    type: object
+  contextfrag.ManifestCounts:
+    properties:
+      fragments:
+        type: integer
+      images:
+        type: integer
+      messages:
+        type: integer
+      text_bytes:
+        type: integer
+      token_estimate:
+        type: integer
+    type: object
+  contextfrag.ManifestView:
+    enum:
+    - run_config_pre_provider
+    type: string
+    x-enum-varnames:
+    - ViewRunConfigPreProvider
   conversation.SkillActivation:
     properties:
       prompt:
@@ -2671,6 +2701,28 @@ definitions:
         type: string
       used_bytes:
         type: integer
+    type: object
+  handlers.ContextLifecycleResponse:
+    properties:
+      turns:
+        items:
+          $ref: '#/definitions/handlers.ContextLifecycleTurn'
+        type: array
+    type: object
+  handlers.ContextLifecycleTurn:
+    properties:
+      assistant_message_id:
+        type: string
+      created_at:
+        type: string
+      error_code:
+        type: string
+      run_id:
+        type: string
+      snapshot:
+        $ref: '#/definitions/contextfrag.LifecycleSnapshot'
+      status:
+        type: string
     type: object
   handlers.ContextUsage:
     properties:
@@ -10225,6 +10277,54 @@ paths:
       summary: Trigger immediate context compaction
       tags:
       - compaction
+  /bots/{bot_id}/sessions/{session_id}/context-lifecycle:
+    get:
+      description: List run-keyed context lifecycle snapshots for a chat session;
+        sessions predating run lifecycle persistence fall back to legacy assistant
+        metadata
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Maximum number of turns to return (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ContextLifecycleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get session context lifecycle
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/fork:
     post:
       parameters:

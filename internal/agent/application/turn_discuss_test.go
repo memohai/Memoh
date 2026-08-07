@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/apperror"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
 )
@@ -33,11 +36,13 @@ func (f *fakeAgentStreamer) Stream(_ context.Context, cfg native.RunConfig) <-ch
 }
 
 type fakeDiscussService struct {
-	resolveResult ResolveRunConfigResult
-	inlineFn      func(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart
-	storeCalls    int
-	storeErr      error
-	storeFn       func() error
+	resolveResult  ResolveRunConfigResult
+	inlineFn       func(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart
+	storeCalls     int
+	lastStoreRunID string
+	lastLifecycle  *contextfrag.LifecycleHolder
+	storeErr       error
+	storeFn        func() error
 }
 
 func (f *fakeDiscussService) ResolveRunConfig(_ context.Context, _, _, _, _, _, _, _ string) (ResolveRunConfigResult, error) {
@@ -51,8 +56,10 @@ func (f *fakeDiscussService) InlineImageAttachments(ctx context.Context, botID s
 	return nil
 }
 
-func (f *fakeDiscussService) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
+func (f *fakeDiscussService) StoreRound(_ context.Context, runID, _, _, _, _ string, _ []sdk.Message, _ string, lifecycle *contextfrag.LifecycleHolder) error {
 	f.storeCalls++
+	f.lastStoreRunID = runID
+	f.lastLifecycle = lifecycle
 	if f.storeFn != nil {
 		return f.storeFn()
 	}
@@ -66,7 +73,7 @@ type testAgentStreamer interface {
 type testDiscussService interface {
 	ResolveRunConfig(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
 	InlineImageAttachments(context.Context, string, []timeline.ImageAttachmentRef) []sdk.ImagePart
-	StoreRound(context.Context, string, string, string, string, []sdk.Message, string) error
+	StoreRound(context.Context, string, string, string, string, string, []sdk.Message, string, *contextfrag.LifecycleHolder) error
 }
 
 func newDiscussTestService(streamer testChatStreamer, agent testAgentStreamer, resolver testDiscussService) *Service {
@@ -76,6 +83,28 @@ func newDiscussTestService(streamer testChatStreamer, agent testAgentStreamer, r
 	service.turnHooks.inlineImages = resolver.InlineImageAttachments
 	service.turnHooks.storeRound = resolver.StoreRound
 	return service
+}
+
+func configureDiscussLifecycle(service *Service) (*lifecycleTurnAdmitter, *recordingContextLifecycleStore) {
+	runtime := &lifecycleTurnAdmitter{admission: lifecycleTestAdmission()}
+	store := &recordingContextLifecycleStore{}
+	resolve := service.turnHooks.resolveRunConfig
+	service.turnHooks.resolveRunConfig = func(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
+		resolved, err := resolve(ctx, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken)
+		resolved.RunConfig.Identity = native.SessionContext{BotID: botID, SessionID: sessionID}
+		return resolved, err
+	}
+	service.sessionRuntime = runtime
+	service.contextLifecycles = store
+	service.publishTurnEvent = nil
+	return runtime, store
+}
+
+func lifecycleDiscussCommand() turn.StartTurnCommand {
+	cmd := discussCommand()
+	cmd.BotID = lifecycleTestBotID
+	cmd.ThreadID = lifecycleTestSessionID
+	return cmd
 }
 
 func drainDiscuss(t *testing.T, h turn.RunHandle) []turn.Event {
@@ -156,6 +185,152 @@ func TestDiscussInlinesImages(t *testing.T) {
 	}
 }
 
+func TestDiscussUsesAdmittedRunIDInNativeConfig(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: native.RunConfig{},
+			ModelID:   "model-1",
+		},
+	}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	_, lifecycles := configureDiscussLifecycle(a)
+
+	h, err := a.StartTurn(context.Background(), lifecycleDiscussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	if agent.lastConfig == nil {
+		t.Fatal("expected agent to be called")
+	}
+	if got := agent.lastConfig.RunID; got != h.RunID() {
+		t.Fatalf("native RunID = %q, want admitted run ID %q", got, h.RunID())
+	}
+	if got := resolver.lastStoreRunID; got != h.RunID() {
+		t.Fatalf("persisted RunID = %q, want admitted run ID %q", got, h.RunID())
+	}
+	if resolver.lastLifecycle == nil {
+		t.Fatal("resolved lifecycle holder did not reach discuss persistence")
+	}
+	if len(lifecycles.creates) != 1 || lifecycles.creates[0].Status != contextLifecycleStatusCompleted {
+		t.Fatalf("lifecycle creates = %#v, want one completed row", lifecycles.creates)
+	}
+	if got := pgUUIDString(lifecycles.creates[0].RunID); got != h.RunID() {
+		t.Fatalf("lifecycle RunID = %q, want admitted run ID %q", got, h.RunID())
+	}
+}
+
+func TestStoreDiscussRoundPersistsAdmittedRunIDAndLifecycleAssociation(t *testing.T) {
+	const admittedRunID = "77777777-7777-4777-8777-777777777777"
+	messages := &recordingMessageService{}
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetManifest(contextfrag.BuildManifest(nil))
+	service := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := service.storeDiscussRound(
+		context.Background(),
+		admittedRunID,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		"",
+		"local",
+		[]sdk.Message{sdk.AssistantMessage("done")},
+		"model-id",
+		holder,
+	)
+	if err != nil {
+		t.Fatalf("storeDiscussRound() error = %v", err)
+	}
+	if len(messages.persisted) != 1 {
+		t.Fatalf("persisted messages = %d, want 1", len(messages.persisted))
+	}
+	if got := messages.persisted[0].RunID; got != admittedRunID {
+		t.Fatalf("persisted discuss RunID = %q, want admitted ID %q", got, admittedRunID)
+	}
+	if _, ok := messages.persisted[0].Metadata[contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot); !ok {
+		t.Fatalf("assistant metadata = %#v, want lifecycle snapshot", messages.persisted[0].Metadata)
+	}
+	snapshot, ok := holder.Snapshot()
+	if !ok || snapshot.AssistantMessageID != "message-id" {
+		t.Fatalf("holder snapshot = %#v, %v; want assistant association", snapshot, ok)
+	}
+}
+
+func TestAdmittedDiscussCancellationPersistsAbortedLifecycle(t *testing.T) {
+	agent := &canceledDiscussTerminalReporter{started: make(chan struct{})}
+	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
+	service := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	runtime, lifecycles := configureDiscussLifecycle(service)
+
+	handle, err := service.StartTurn(context.Background(), lifecycleDiscussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-agent.started:
+	case <-time.After(time.Second):
+		t.Fatal("discuss turn did not reach native streaming")
+	}
+	handle.Cancel()
+	drainDiscuss(t, handle)
+
+	if len(lifecycles.creates) != 1 || lifecycles.creates[0].Status != contextLifecycleStatusAborted {
+		t.Fatalf("lifecycle creates = %#v, want one aborted row", lifecycles.creates)
+	}
+	if len(runtime.finishes) != 1 || runtime.finishes[0].status != sessionruntime.RunStatusAborted {
+		t.Fatalf("runtime finishes = %#v, want one aborted finish", runtime.finishes)
+	}
+}
+
+func TestAdmittedDiscussDecisionPauseDoesNotPersistLifecycle(t *testing.T) {
+	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
+	service := newDiscussTestService(&fakeRunner{}, &decisionDiscussAgentStreamer{}, resolver)
+	runtime, lifecycles := configureDiscussLifecycle(service)
+
+	handle, err := service.StartTurn(context.Background(), lifecycleDiscussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, handle)
+
+	if len(lifecycles.creates) != 0 {
+		t.Fatalf("lifecycle creates = %#v, want none for a parked decision", lifecycles.creates)
+	}
+	if len(runtime.finishes) != 1 || runtime.finishes[0].status != "" {
+		t.Fatalf("runtime finishes = %#v, want one unnamed parked finish", runtime.finishes)
+	}
+}
+
+func TestAdmittedDiscussStoreFailurePersistsFailedProviderLifecycle(t *testing.T) {
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{ModelID: "model-1"},
+		storeErr:      errors.New("private store failure"),
+	}
+	service := newDiscussTestService(&fakeRunner{}, &decisionDiscussAgentStreamer{}, resolver)
+	runtime, lifecycles := configureDiscussLifecycle(service)
+
+	handle, err := service.StartTurn(context.Background(), lifecycleDiscussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, handle)
+
+	if len(lifecycles.creates) != 1 || lifecycles.creates[0].Status != contextLifecycleStatusFailedProvider {
+		t.Fatalf("lifecycle creates = %#v, want one failed_provider row", lifecycles.creates)
+	}
+	if got := lifecycles.creates[0].ErrorCode.String; got != string(apperror.CodeSessionHistoryInconsistent) {
+		t.Fatalf("lifecycle error code = %q, want %q", got, apperror.CodeSessionHistoryInconsistent)
+	}
+	if len(runtime.finishes) != 1 || runtime.finishes[0].status != sessionruntime.RunStatusErrored {
+		t.Fatalf("runtime finishes = %#v, want one errored finish", runtime.finishes)
+	}
+}
+
 func TestDiscussNoInlineWhenNoVision(t *testing.T) {
 	agent := &fakeAgentStreamer{}
 	resolver := &fakeDiscussService{
@@ -221,6 +396,9 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	if req.BotID != "bot-1" || req.ThreadID != "sess-1" || req.SourceChannelIdentityID != "acct-1" {
 		t.Fatalf("runtime request = %#v", req)
 	}
+	if req.RunID != h.RunID() {
+		t.Fatalf("ACP discuss RunID = %q, want admitted run ID %q", req.RunID, h.RunID())
+	}
 	if req.RouteID != "route-1" || req.ChatToken != "chat-token" || req.Token != "Bearer owner-token" {
 		t.Fatalf("runtime context = route %q chat token %q token %q", req.RouteID, req.ChatToken, req.Token)
 	}
@@ -260,7 +438,8 @@ func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 		resolveResult: ResolveRunConfigResult{RuntimeType: sessionpkg.RuntimeACPAgent},
 	}
 	a := newDiscussTestService(runner, agent, resolver)
-	cmd := discussCommand()
+	_, lifecycles := configureDiscussLifecycle(a)
+	cmd := lifecycleDiscussCommand()
 	cmd.DiscussAddressed = false
 
 	h, err := a.StartTurn(context.Background(), cmd)
@@ -280,6 +459,9 @@ func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 	}
 	if !sawSkip {
 		t.Fatal("expected skip marker event")
+	}
+	if len(lifecycles.creates) != 1 || lifecycles.creates[0].Status != contextLifecycleStatusCompleted {
+		t.Fatalf("lifecycle creates = %#v, want one completed row", lifecycles.creates)
 	}
 }
 

@@ -47,6 +47,12 @@ const (
 	CodeSessionBusy                      Code = "session_runtime.session_busy"
 	CodeSessionInvocationConflict        Code = "session_runtime.invocation_conflict"
 	CodeSessionHistoryInconsistent       Code = "session_runtime.history_inconsistent"
+
+	CodeContextLifecycleRequestInvalid         Code = "context_lifecycle.request_invalid"
+	CodeContextLifecycleAuthenticationRequired Code = "context_lifecycle.authentication_required"
+	CodeContextLifecycleAccessDenied           Code = "context_lifecycle.access_denied"
+	CodeContextLifecycleNotFound               Code = "context_lifecycle.not_found"
+	CodeContextLifecycleLoadFailed             Code = "context_lifecycle.load_failed"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -213,6 +219,26 @@ var catalog = map[Code]Definition{
 	CodeSessionHistoryInconsistent: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The conversation history could not be reconciled. Refresh and try again.",
+	},
+	CodeContextLifecycleRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The context lifecycle request is invalid.",
+	},
+	CodeContextLifecycleAuthenticationRequired: {
+		HTTPStatus: http.StatusUnauthorized,
+		Detail:     "Sign in to view context lifecycle diagnostics.",
+	},
+	CodeContextLifecycleAccessDenied: {
+		HTTPStatus: http.StatusForbidden,
+		Detail:     "You do not have access to context lifecycle diagnostics.",
+	},
+	CodeContextLifecycleNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The conversation was not found.",
+	},
+	CodeContextLifecycleLoadFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "Context lifecycle diagnostics could not be loaded. Please try again.",
 	},
 }
 

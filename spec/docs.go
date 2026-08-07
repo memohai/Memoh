@@ -7572,6 +7572,75 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/context-lifecycle": {
+            "get": {
+                "description": "List run-keyed context lifecycle snapshots for a chat session; sessions predating run lifecycle persistence fall back to legacy assistant metadata",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get session context lifecycle",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of turns to return (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextLifecycleResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/fork": {
             "post": {
                 "tags": [
@@ -17239,6 +17308,52 @@ const docTemplate = `{
                 }
             }
         },
+        "contextfrag.LifecycleSnapshot": {
+            "type": "object",
+            "properties": {
+                "assistant_message_id": {
+                    "type": "string"
+                },
+                "counts": {
+                    "$ref": "#/definitions/contextfrag.ManifestCounts"
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "view": {
+                    "$ref": "#/definitions/contextfrag.ManifestView"
+                }
+            }
+        },
+        "contextfrag.ManifestCounts": {
+            "type": "object",
+            "properties": {
+                "fragments": {
+                    "type": "integer"
+                },
+                "images": {
+                    "type": "integer"
+                },
+                "messages": {
+                    "type": "integer"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ManifestView": {
+            "type": "string",
+            "enum": [
+                "run_config_pre_provider"
+            ],
+            "x-enum-varnames": [
+                "ViewRunConfigPreProvider"
+            ]
+        },
         "conversation.SkillActivation": {
             "type": "object",
             "properties": {
@@ -18498,6 +18613,40 @@ const docTemplate = `{
                 },
                 "used_bytes": {
                     "type": "integer"
+                }
+            }
+        },
+        "handlers.ContextLifecycleResponse": {
+            "type": "object",
+            "properties": {
+                "turns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ContextLifecycleTurn"
+                    }
+                }
+            }
+        },
+        "handlers.ContextLifecycleTurn": {
+            "type": "object",
+            "properties": {
+                "assistant_message_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "snapshot": {
+                    "$ref": "#/definitions/contextfrag.LifecycleSnapshot"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },

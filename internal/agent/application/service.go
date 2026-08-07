@@ -17,8 +17,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/accounts"
@@ -129,18 +131,23 @@ type Service struct {
 	acpPromptHubs      map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
-	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
-	sessionCompactionMu sync.Mutex
-	sessionCompactions  map[string]*sessionCompactionGate
-	timeout             time.Duration
-	memorySearchTimeout time.Duration
-	clockLocation       *time.Location
-	logger              *slog.Logger
-	allowedTeam         string
-	sessionRuntime      turnAdmitter
-	decisionRuntime     *sessionruntime.Manager
-	publishTurnEvent    func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
-	turnHooks           *turnRuntimeHooks
+	continueUserInputFn               func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
+	sessionCompactionMu               sync.Mutex
+	sessionCompactions                map[string]*sessionCompactionGate
+	timeout                           time.Duration
+	memorySearchTimeout               time.Duration
+	clockLocation                     *time.Location
+	logger                            *slog.Logger
+	allowedTeam                       string
+	sessionRuntime                    turnAdmitter
+	decisionRuntime                   *sessionruntime.Manager
+	abortRuntime                      runtimeAbortController
+	contextLifecycles                 contextLifecycleStore
+	contextLifecyclePersistenceErrors atomic.Uint64
+	contextLifecycleCandidatesMu      sync.Mutex
+	contextLifecycleCandidates        map[contextLifecycleCandidateKey]contextLifecycleCandidate
+	publishTurnEvent                  func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
+	turnHooks                         *turnRuntimeHooks
 }
 
 // NewService creates an application service backed by the native agent.
@@ -184,6 +191,7 @@ func NewService(
 		agent:               a,
 		modelsService:       modelsService,
 		queries:             queries,
+		contextLifecycles:   queries,
 		messageService:      messageService,
 		settingsService:     settingsService,
 		accountService:      accountService,
@@ -315,6 +323,13 @@ type resolvedContext struct {
 	contextTokenBudget          int // token budget used to clamp compaction triggers
 }
 
+func runIDForChatRequest(admittedRunID string) string {
+	if runID := strings.TrimSpace(admittedRunID); runID != "" {
+		return runID
+	}
+	return uuid.NewString()
+}
+
 // resolve builds the run context for one turn and returns the effective
 // request alongside it. Resolution fills in defaults the caller's copy does not
 // have — a direct turn on a subagent thread learns its session type, pinned
@@ -367,6 +382,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		// surface (no nested spawns), same prompt mode.
 		runCfg.Identity.IsSubagent = true
 	}
+	runCfg.RunID = runIDForChatRequest(req.RunID)
 	memoryMsg := s.loadMemoryContextMessage(ctx, req)
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
 	if memoryMsg != nil {
@@ -610,6 +626,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 		return ChatResponse{}, err
 	}
 	req.Query = rc.query
+	req.RunID = rc.runConfig.RunID
 
 	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
@@ -619,8 +636,12 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 		cfg.OnStepCommitted = stepCommitter.commit
 	}
 	cfg = s.prepareRunConfig(ctx, cfg)
+	terminal := s.contextLifecycleTerminal(ctx, cfg)
+	var lifecycleCause error
+	defer func() { terminal(lifecycleCause) }()
 
 	result, err := s.agent.Generate(ctx, cfg)
+	lifecycleCause = err
 	if err != nil {
 		if stepCommitter != nil {
 			_ = stepCommitter.finish(ctx, rc.estimatedTokens)
@@ -636,16 +657,20 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			inputTokens = result.Usage.InputTokens
 		}
 		if err := stepCommitter.finish(ctx, inputTokens); err != nil {
+			lifecycleCause = err
 			return ChatResponse{}, err
 		}
 	} else {
 		roundMessages := prependTurnUserMessage(storeReq, outputMessages)
 		if err := s.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
-			SkipMemory: storeReq.SkipMemoryExtraction,
+			SkipMemory:       storeReq.SkipMemoryExtraction,
+			ContextLifecycle: cfg.ContextLifecycle,
 		}); err != nil {
+			lifecycleCause = err
 			return ChatResponse{}, err
 		}
 		if err := s.persistSessionWorkspaceTarget(ctx, storeReq); err != nil {
+			lifecycleCause = err
 			return ChatResponse{}, err
 		}
 		if result.Usage != nil {
@@ -782,6 +807,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		Skills:            agentSkills,
 		LoopDetection:     native.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: s.bgManager,
+		ContextLifecycle:  contextfrag.NewLifecycleHolder(),
 		ContextScope: contextfrag.Scope{
 			BotID:             p.BotID,
 			ChatID:            chatID,
