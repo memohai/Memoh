@@ -64,7 +64,10 @@ type Profile struct {
 	RuntimeStorage    RuntimeStoragePolicy
 	ManagedFields     []ManagedField
 	SupportedBackends []string
-	SetupModes        []string
+	// BackendCapabilities maps a workspace backend to the Remote Runtime
+	// capability required before this profile may be launched there.
+	BackendCapabilities map[string]string
+	SetupModes          []string
 }
 
 type ManagedField struct {
@@ -229,8 +232,11 @@ func codexProfile() Profile {
 				Help:        "Optional Codex provider base URL.",
 			},
 		},
-		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		SupportedBackends: []string{"container", "remote"},
+		BackendCapabilities: map[string]string{
+			"remote": "acp_codex",
+		},
+		SetupModes: []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
 	}
 }
 
@@ -277,8 +283,11 @@ func claudeCodeProfile() Profile {
 				Help:        "Used by OAuth setup to authenticate Claude Code.",
 			},
 		},
-		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		SupportedBackends: []string{"container", "remote"},
+		BackendCapabilities: map[string]string{
+			"remote": "acp_claude_code",
+		},
+		SetupModes: []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
 	}
 }
 

@@ -271,6 +271,17 @@ func TestACPCodexDeviceTransientPollErrorStaysPending(t *testing.T) {
 	}
 }
 
+func TestACPCodexOAuthStatusReadsNativeWorkspace(t *testing.T) {
+	env := newACPCodexDeviceHTTPTestEnv(t, &acpCodexDeviceIntegrationProvider{})
+
+	rec := env.postJSON(t, http.MethodGet, "/bots/"+env.botID+"/acp/codex/oauth/status", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	assertWorkspaceTargetsNative(t, "Codex status WorkspaceInfo", env.workspace.workspaceInfoTargetsSnapshot())
+	assertWorkspaceTargetsNative(t, "Codex status MCPClient", env.workspace.mcpClientTargetsSnapshot())
+}
+
 func TestACPCodexDeviceHTTPFlowWritesManagedConfig(t *testing.T) { //nolint:gosec // test fixture validates token-shaped Codex auth JSON.
 	env := newACPCodexDeviceHTTPTestEnv(t, &acpCodexDeviceIntegrationProvider{
 		device: providers.OpenAICodexACPDeviceAuthorization{
@@ -415,6 +426,8 @@ func TestACPCodexDeviceHTTPFlowWritesManagedConfig(t *testing.T) { //nolint:gose
 	if got := env.provider.exchangeCodeVerifier(); got != "code-verifier" {
 		t.Fatalf("exchange code verifier = %q, want code-verifier", got)
 	}
+	assertWorkspaceTargetsNative(t, "Codex OAuth write WorkspaceInfo", env.workspace.workspaceInfoTargetsSnapshot())
+	assertWorkspaceTargetsNative(t, "Codex OAuth write MCPClient", env.workspace.mcpClientTargetsSnapshot())
 }
 
 func TestACPCodexDeviceHTTPWriteFailureMarksTerminal(t *testing.T) { //nolint:gosec // test fixture uses token-shaped Codex credentials.
@@ -675,12 +688,13 @@ func testCodexDeviceSession(sessionID string, now time.Time) *acpCodexDeviceAuth
 }
 
 type acpCodexDeviceHTTPTestEnv struct {
-	echo     *echo.Echo
-	handler  *ACPCodexOAuthHandler
-	provider *acpCodexDeviceIntegrationProvider
-	recorder *usersACPConfigBridgeServer
-	botID    string
-	userID   string
+	echo      *echo.Echo
+	handler   *ACPCodexOAuthHandler
+	provider  *acpCodexDeviceIntegrationProvider
+	recorder  *usersACPConfigBridgeServer
+	workspace *usersACPConfigWorkspace
+	botID     string
+	userID    string
 }
 
 func newACPCodexDeviceHTTPTestEnv(t *testing.T, provider *acpCodexDeviceIntegrationProvider) *acpCodexDeviceHTTPTestEnv {
@@ -691,14 +705,15 @@ func newACPCodexDeviceHTTPTestEnv(t *testing.T, provider *acpCodexDeviceIntegrat
 	queries := acpCodexDeviceIntegrationQueries{
 		bot: testBotRow(botID, map[string]any{}),
 	}
+	workspaceProvider := &usersACPConfigWorkspace{
+		backend: bridge.WorkspaceBackendContainer,
+		client:  client,
+	}
 	handler := &ACPCodexOAuthHandler{
 		provider:       provider,
 		botService:     bots.NewService(nil, queries),
 		accountService: newTestAdminAccountService("member"),
-		acpWorkspace: &usersACPConfigWorkspace{
-			backend: bridge.WorkspaceBackendContainer,
-			client:  client,
-		},
+		acpWorkspace:   workspaceProvider,
 		callbackURL:    "http://localhost:1455/auth/callback",
 		states:         map[string]acpCodexOAuthState{},
 		deviceSessions: map[string]*acpCodexDeviceAuthSession{},
@@ -718,12 +733,13 @@ func newACPCodexDeviceHTTPTestEnv(t *testing.T, provider *acpCodexDeviceIntegrat
 	})
 	handler.Register(e)
 	return &acpCodexDeviceHTTPTestEnv{
-		echo:     e,
-		handler:  handler,
-		provider: provider,
-		recorder: recorder,
-		botID:    botID,
-		userID:   userID,
+		echo:      e,
+		handler:   handler,
+		provider:  provider,
+		recorder:  recorder,
+		workspace: workspaceProvider,
+		botID:     botID,
+		userID:    userID,
 	}
 }
 

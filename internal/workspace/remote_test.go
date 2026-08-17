@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"slices"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -37,6 +38,7 @@ const (
 type fakeRemoteBindingStore struct {
 	records   []dbstore.BotRemoteRuntimeBindingRecord
 	createErr error
+	deleteErr error
 }
 
 func (s *fakeRemoteBindingStore) CreateOrUpdateMount(_ context.Context, botID, runtimeID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
@@ -126,6 +128,9 @@ func (s *fakeRemoteBindingStore) UpdateToolApproval(_ context.Context, botID, ta
 }
 
 func (s *fakeRemoteBindingStore) DeleteMount(_ context.Context, botID, targetID string) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	for i := range s.records {
 		if s.records[i].BotID == botID && s.records[i].ID == targetID {
 			s.records = append(s.records[:i], s.records[i+1:]...)
@@ -285,6 +290,24 @@ func TestOwnerMismatchIsRedactedButTargetCanBeDeleted(t *testing.T) {
 	}
 }
 
+func TestRemoteWorkspaceTargetInUseCannotBeDeleted(t *testing.T) {
+	store := &fakeRemoteBindingStore{
+		records: []dbstore.BotRemoteRuntimeBindingRecord{{
+			ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
+		}},
+		deleteErr: db.ErrWorkspaceTargetInUse,
+	}
+	service := &RemoteWorkspaceService{store: store}
+
+	err := service.DeleteMount(context.Background(), remoteTestBotID, remoteTestTargetID)
+	if !errors.Is(err, ErrWorkspaceTargetInUse) {
+		t.Fatalf("DeleteMount() error = %v, want ErrWorkspaceTargetInUse", err)
+	}
+	if len(store.records) != 1 || store.records[0].ID != remoteTestTargetID {
+		t.Fatalf("referenced target was removed: %#v", store.records)
+	}
+}
+
 func TestRemotePrimaryOfflineNeverFallsBackToNative(t *testing.T) {
 	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{{
 		ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
@@ -327,8 +350,16 @@ func TestRemotePrimaryDoesNotHideNativeContainerStatus(t *testing.T) {
 
 func TestRemoteWorkspaceClientUsesHostFilesystemCapability(t *testing.T) {
 	rootClient, captured := newRemoteScopeTestClient(t)
+	capabilities := []string{
+		userruntime.CapabilityFS,
+		userruntime.CapabilityExec,
+		userruntime.CapabilityHostFS,
+		userruntime.CapabilityACPCodex,
+		userruntime.CapabilityACPClaudeCode,
+	}
 	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{{
 		ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
+		RuntimeName:   "Office Mac",
 		IsPrimary:     true,
 		RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
 	}}}
@@ -340,7 +371,7 @@ func TestRemoteWorkspaceClientUsesHostFilesystemCapability(t *testing.T) {
 			Info: userruntime.RuntimeInfo{
 				WorkspaceBase: "/Users/alice",
 				OS:            "darwin",
-				Capabilities:  []string{userruntime.CapabilityFS, userruntime.CapabilityExec, userruntime.CapabilityHostFS},
+				Capabilities:  capabilities,
 			},
 		}},
 	}
@@ -348,8 +379,17 @@ func TestRemoteWorkspaceClientUsesHostFilesystemCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveMount: %v", err)
 	}
-	if target.Info.Backend != bridge.WorkspaceBackendRemote || target.Info.DefaultWorkDir != "/Users/alice" {
+	if target.Info.Backend != bridge.WorkspaceBackendRemote || target.Info.DefaultWorkDir != "/Users/alice" ||
+		target.Info.TargetID != remoteTestTargetID || target.Info.TargetKind != WorkspaceTargetRemote || target.Info.TargetName != "Office Mac" {
 		t.Fatalf("workspace info = %#v", target.Info)
+	}
+	if got := strings.Join(target.Info.Capabilities, ","); got != strings.Join(capabilities, ",") {
+		t.Fatalf("workspace capabilities = %q, want %q", got, strings.Join(capabilities, ","))
+	}
+	target.Info.Capabilities[0] = "mutated"
+	connection, ok := service.runtimes.Connection(remoteTestRuntimeID)
+	if !ok || connection.Info.Capabilities[0] != userruntime.CapabilityFS {
+		t.Fatalf("resolved WorkspaceInfo aliases runtime capabilities: %#v", connection)
 	}
 	if _, err := target.Client.Stat(context.Background(), "/Users/alice"); err != nil {
 		t.Fatalf("Stat: %v", err)

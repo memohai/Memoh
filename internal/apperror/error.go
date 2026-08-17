@@ -17,6 +17,8 @@ const (
 	CodeSettingsReasoningEffortInvalid   Code = "settings.reasoning_effort_invalid"
 	CodeSettingsReasoningUnavailable     Code = "settings.reasoning_options_unavailable"
 	CodeWorkspaceUnreachable             Code = "workspace.unreachable"
+	CodeWorkspaceReadPermissionRequired  Code = "workspace.read_permission_required"
+	CodeWorkspaceTargetInUse             Code = "workspace.target_in_use"
 	CodeWorkspaceImageIncompatible       Code = "workspace.image_incompatible"
 	CodeWorkspaceTemplateBootstrapFailed Code = "workspace.template_bootstrap_failed"
 	CodeWorkspaceDisplayPrepareFailed    Code = "workspace.display_prepare_failed"
@@ -112,6 +114,14 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The workspace could not be reached.",
+	},
+	CodeWorkspaceReadPermissionRequired: {
+		HTTPStatus: http.StatusForbidden,
+		Detail:     "Ask the bot owner for file-read access before using this connected computer.",
+	},
+	CodeWorkspaceTargetInUse: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This computer is still used by a folder and cannot be disconnected.",
 	},
 	CodeWorkspaceImageIncompatible: {
 		HTTPStatus: http.StatusUnprocessableEntity,

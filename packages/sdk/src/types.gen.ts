@@ -11131,6 +11131,10 @@ export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdError = DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors[keyof DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors];

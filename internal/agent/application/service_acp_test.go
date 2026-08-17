@@ -31,6 +31,8 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/workdir"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 const (
@@ -251,19 +253,24 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	resolver := &Service{
 		messageService: messages,
 		acpPool:        pool,
-		botPermissions: allowWorkspaceExecFor("user-1"),
+		botPermissions: allowWorkspaceReadAndExecFor("user-1"),
+		workdirs: fakeSessionWorkdirResolver{resolved: workdir.Resolved{
+			WorkdirID: "workdir-1", TargetID: "computer-b", Kind: workdir.TargetKindRemote, WorkDir: "/Users/alice/app",
+		}},
+		workspaceTargets: workspaceRequestTargetService{},
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Thread, error) {
 				if sessionID != "session-1" {
 					t.Fatalf("unexpected session id: %s", sessionID)
 				}
 				return session.Thread{
-					ID:    "session-1",
-					BotID: "bot-1",
-					Type:  session.TypeACPAgent,
+					ID:        "session-1",
+					BotID:     "bot-1",
+					Type:      session.TypeACPAgent,
+					WorkdirID: "workdir-1",
 					Metadata: map[string]any{
 						"acp_agent_id":             "codex",
-						"project_path":             "/data/app",
+						"project_path":             "/Users/alice/app",
 						"runtime_owner_account_id": "user-1",
 					},
 				}, nil
@@ -278,6 +285,7 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 		ChatRequest{
 			BotID:           "bot-1",
 			ThreadID:        "session-1",
+			UserID:          "user-1",
 			Query:           "inspect the app",
 			Model:           "gpt-5.1-codex",
 			ReasoningEffort: "high",
@@ -302,8 +310,11 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	if pool.calls != 1 {
 		t.Fatalf("ACP pool calls = %d, want 1", pool.calls)
 	}
-	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
+	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/Users/alice/app" {
 		t.Fatalf("ACP prompt input = %#v", pool.input)
+	}
+	if pool.input.WorkspaceTargetID != "computer-b" || pool.input.WorkspaceTargetKind != workspace.WorkspaceTargetRemote || pool.input.WorkspaceTargetName != "Computer B" {
+		t.Fatalf("ACP prompt workspace target = %#v", pool.input)
 	}
 	if pool.input.ModelID != "gpt-5.1-codex" || pool.input.ReasoningEffort != "high" {
 		t.Fatalf("ACP turn config = model %q reasoning %q", pool.input.ModelID, pool.input.ReasoningEffort)
@@ -421,9 +432,10 @@ func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 		},
 	}
 	resolver := &Service{
-		messageService: &recordingMessageService{},
-		acpPool:        pool,
-		botPermissions: allowWorkspaceExecFor("user-1"),
+		messageService:   &recordingMessageService{},
+		acpPool:          pool,
+		botPermissions:   allowWorkspaceReadAndExecFor("user-1"),
+		workspaceTargets: workspaceRequestTargetService{},
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Thread, error) {
 				if sessionID != "session-1" {
@@ -445,9 +457,11 @@ func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 	}
 
 	chunks, errs := resolver.StreamChat(context.Background(), ChatRequest{
-		BotID:    "bot-1",
-		ThreadID: "session-1",
-		Query:    "inspect the app",
+		BotID:             "bot-1",
+		ThreadID:          "session-1",
+		UserID:            "user-1",
+		Query:             "inspect the app",
+		WorkspaceTargetID: "computer-b",
 	})
 	events := drainStreamChunks(t, chunks)
 	if err := <-errs; err != nil {
@@ -459,6 +473,9 @@ func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
 		t.Fatalf("ACP prompt input = %#v", pool.input)
 	}
+	if pool.input.WorkspaceTargetID != "computer-b" || pool.input.WorkspaceTargetKind != workspace.WorkspaceTargetRemote || pool.input.WorkspaceTargetName != "Computer B" {
+		t.Fatalf("ACP prompt workspace target = %#v", pool.input)
+	}
 	if !containsStreamEvent(events, native.EventStart) || !containsStreamEvent(events, native.EventEnd) {
 		t.Fatalf("events = %#v, want agent start/end", events)
 	}
@@ -468,6 +485,51 @@ func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 	end := requireStreamEvent(t, events, native.EventEnd)
 	if got := terminalAssistantText(t, end); got != "done from codex" {
 		t.Fatalf("terminal assistant text = %q, want done from codex", got)
+	}
+}
+
+func TestChatACPWorkspaceTargetRunsWorkspacePreparation(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Service{
+		botPermissions:   allowWorkspaceExecFor("user-1"),
+		workspaceTargets: workspaceRequestTargetService{},
+		sessionService:   acpRuntimeSessionServiceForTest("user-1"),
+		logger:           slog.New(slog.DiscardHandler),
+	}
+	_, err := resolver.Chat(context.Background(), ChatRequest{
+		BotID:             "bot-1",
+		ThreadID:          "session-1",
+		UserID:            "user-1",
+		Query:             "inspect the app",
+		WorkspaceTargetID: "computer-b",
+	})
+	if err == nil || !strings.Contains(err.Error(), "workspace_read") {
+		t.Fatalf("Chat() error = %v, want workspace_read preparation failure", err)
+	}
+}
+
+func TestStreamACPAgentWSPromptTargetIDFallsBackToRequest(t *testing.T) {
+	t.Parallel()
+
+	pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"}}
+	resolver := &Service{
+		messageService: &recordingMessageService{},
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: acpRuntimeSessionServiceForTest("user-1"),
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	if err := resolver.streamACPAgentWS(context.Background(), ChatRequest{
+		BotID:             "bot-1",
+		ThreadID:          "session-1",
+		Query:             "inspect the app",
+		WorkspaceTargetID: "computer-b",
+	}, make(chan WSStreamEvent, 8), make(chan struct{})); err != nil {
+		t.Fatalf("streamACPAgentWS() error = %v", err)
+	}
+	if pool.input.WorkspaceTargetID != "computer-b" || pool.input.WorkspaceTargetKind != "" || pool.input.WorkspaceTargetName != "" {
+		t.Fatalf("ACP prompt workspace target fallback = %#v", pool.input)
 	}
 }
 
@@ -2140,6 +2202,12 @@ func allowWorkspaceExecForBot(botID, accountID string) *fakeBotPermissionChecker
 	return &fakeBotPermissionChecker{values: map[string]bool{
 		strings.TrimSpace(botID) + ":" + strings.TrimSpace(accountID) + ":" + bots.PermissionWorkspaceExec: true,
 	}}
+}
+
+func allowWorkspaceReadAndExecFor(accountID string) *fakeBotPermissionChecker {
+	checker := allowWorkspaceExecFor(accountID)
+	checker.values["bot-1:"+strings.TrimSpace(accountID)+":"+bots.PermissionWorkspaceRead] = true
+	return checker
 }
 
 func (f *fakeBotPermissionChecker) HasBotPermission(_ context.Context, botID, accountID, permission string) (bool, error) {

@@ -132,8 +132,8 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}
 	// Codex was the only ACP runtime before profiles were introduced, and the
 	// direct Runner API historically allowed callers (including embedders) to
-	// omit AgentID. Keep that compatibility default while still rejecting any
-	// explicit unknown profile in prepareRuntimeLease.
+	// omit AgentID. Keep that compatibility default; normal pool callers have
+	// already resolved the profile before reaching this layer.
 	if strings.TrimSpace(req.AgentID) == "" {
 		req.AgentID = acpprofile.AgentCodexID
 	}
@@ -255,7 +255,9 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if preflightGateway == nil {
 		preflightGateway = req.ToolGateway
 	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, req.CleanEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
+	// The process owns the effective env staging decision; the remote path
+	// overrides what the request asked for.
+	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, proc.cleanEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
 	callbacks.userInput = req.UserInput
 	callbacks.logger = r.logger
 	conn := newClientConnection(callbacks, proc, proc)
@@ -637,6 +639,14 @@ func (s *Session) ProjectPath() string {
 		return ""
 	}
 	return s.projectPath
+}
+
+// Done closes when the owned ACP process or its bridge transport exits.
+func (s *Session) Done() (<-chan struct{}, bool) {
+	if s == nil || s.proc == nil {
+		return nil, false
+	}
+	return s.proc.Done(), true
 }
 
 func (s *Session) Prompt(ctx context.Context, prompt string, sinks ...EventSink) (PromptResult, error) {

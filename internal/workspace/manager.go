@@ -311,9 +311,9 @@ func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID st
 			return ResolvedWorkspaceTarget{}, err
 		}
 		return ResolvedWorkspaceTarget{
-			TargetID: WorkspaceTargetNative,
-			Kind:     WorkspaceTargetNative,
-			Name:     "Server Workspace",
+			TargetID: info.TargetID,
+			Kind:     info.TargetKind,
+			Name:     info.TargetName,
 			Primary:  primary,
 			Client:   client,
 			Info:     info,
@@ -393,7 +393,7 @@ func (m *Manager) nativeWorkspaceInfo(ctx context.Context, botID string) (bridge
 	if provider, ok := m.service.(bridge.WorkspaceInfoProvider); ok {
 		info, err := provider.WorkspaceInfo(ctx, botID)
 		if err == nil {
-			return withACPToolsEndpoint(info), nil
+			return withNativeWorkspaceTarget(withACPToolsEndpoint(info)), nil
 		}
 		if !errors.Is(err, ctr.ErrNotSupported) && !ctr.IsNotFound(err) {
 			return bridge.WorkspaceInfo{}, err
@@ -403,7 +403,7 @@ func (m *Manager) nativeWorkspaceInfo(ctx context.Context, botID string) (bridge
 		Backend:        bridge.WorkspaceBackendContainer,
 		DefaultWorkDir: config.DefaultDataMount,
 	}
-	return withACPToolsEndpoint(info), nil
+	return withNativeWorkspaceTarget(withACPToolsEndpoint(info)), nil
 }
 
 func (m *Manager) nativeToolApprovalConfig(ctx context.Context, botID string) (settings.ToolApprovalConfig, error) {
@@ -476,6 +476,13 @@ func withACPToolsEndpoint(info bridge.WorkspaceInfo) bridge.WorkspaceInfo {
 		return info
 	}
 	info.ACPToolsHTTPURL = ACPToolsProxyHTTPURL
+	return info
+}
+
+func withNativeWorkspaceTarget(info bridge.WorkspaceInfo) bridge.WorkspaceInfo {
+	info.TargetID = WorkspaceTargetNative
+	info.TargetKind = WorkspaceTargetNative
+	info.TargetName = "Server Workspace"
 	return info
 }
 

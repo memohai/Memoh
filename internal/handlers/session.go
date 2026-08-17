@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/workdir"
@@ -38,7 +39,7 @@ type sessionWorkdirService interface {
 
 type acpSessionCloser interface {
 	CloseSession(sessionID string) error
-	BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error
+	BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, workspaceTargetID, runtimeOwnerAccountID string) error
 }
 
 type threadEnricher interface {
@@ -151,9 +152,18 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	boundWorkdir, err := h.resolveCreateSessionWorkdir(c.Request().Context(), bot.ID, req.WorkdirID, targetRuntimeType)
+	boundWorkdir, err := h.resolveCreateSessionWorkdir(c.Request().Context(), bot.ID, req.WorkdirID)
 	if err != nil {
 		return err
+	}
+	if boundWorkdir != nil && strings.EqualFold(strings.TrimSpace(boundWorkdir.TargetKind), workdir.TargetKindRemote) {
+		perms, resolveErr := h.resolveCurrentUserPermissions(c, channelIdentityID, bot.ID)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if permissionErr := requireRemoteWorkdirReadPermission(boundWorkdir.TargetKind, perms); permissionErr != nil {
+			return permissionErr
+		}
 	}
 	if targetRuntimeType == session.RuntimeACPAgent {
 		req.Metadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(req.Metadata, req.RuntimeMetadata))
@@ -186,12 +196,23 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	// after a successful create), not transactional. A failed bind keeps the
 	// session — the first prompt simply cold starts a runtime.
 	if runtimeID := strings.TrimSpace(req.ACPRuntimeID); runtimeID != "" && session.IsACPRuntime(sess) && h.acpPool != nil {
+		workspaceTargetID := ""
+		projectPath := sessionMetadataString(sess.Metadata, "project_path")
+		if boundWorkdir != nil {
+			workspaceTargetID = strings.TrimSpace(boundWorkdir.WorkspaceTargetID)
+			// Prompt-time resolution executes in the Folder's directory, so a
+			// warm runtime is only reusable when it was created on that exact
+			// path — binding on the metadata default would tear the runtime
+			// down again at the first prompt.
+			projectPath = strings.TrimSpace(boundWorkdir.Path)
+		}
 		if bindErr := h.acpPool.BindRuntime(
 			bot.ID,
 			runtimeID,
 			sess.ID,
 			sessionMetadataString(sess.Metadata, "acp_agent_id"),
-			sessionMetadataString(sess.Metadata, "project_path"),
+			projectPath,
+			workspaceTargetID,
 			sessionMetadataString(sess.Metadata, "runtime_owner_account_id"),
 		); bindErr != nil {
 			h.logger.Warn("failed to bind ACP runtime to new session; first prompt will cold start",
@@ -771,6 +792,14 @@ func (h *SessionHandler) resolveCurrentUserPermissions(c echo.Context, channelId
 	return perms, nil
 }
 
+func requireRemoteWorkdirReadPermission(targetKind string, permissions []string) error {
+	if !strings.EqualFold(strings.TrimSpace(targetKind), workdir.TargetKindRemote) ||
+		bots.HasPermission(permissions, bots.PermissionWorkspaceRead) {
+		return nil
+	}
+	return apperror.New(apperror.CodeWorkspaceReadPermissionRequired, nil)
+}
+
 func requiredReadPermissionForSessionType(sessionType string) string {
 	switch strings.TrimSpace(sessionType) {
 	case session.TypeChat:
@@ -863,12 +892,10 @@ func filterSessionsForPermissions(items []session.Thread, userID string, perms [
 	return out
 }
 
-// resolveCreateSessionWorkdir validates a requested workdir binding: the
-// workdir must exist on this bot and be live, and ACP sessions can only bind
-// native-workspace workdirs — the ACP runtime cannot reach a remote computer
-// yet, so accepting the binding would create a session that fails on its
-// first prompt.
-func (h *SessionHandler) resolveCreateSessionWorkdir(ctx context.Context, botID, workdirID, runtimeType string) (*workdir.Workdir, error) {
+// resolveCreateSessionWorkdir validates that a requested workdir binding
+// exists on this bot and is active. Its immutable target and path are copied
+// into the session by CreateSession for every supported runtime.
+func (h *SessionHandler) resolveCreateSessionWorkdir(ctx context.Context, botID, workdirID string) (*workdir.Workdir, error) {
 	workdirID = strings.TrimSpace(workdirID)
 	if workdirID == "" {
 		return nil, nil
@@ -879,10 +906,6 @@ func (h *SessionHandler) resolveCreateSessionWorkdir(ctx context.Context, botID,
 	bound, err := h.workdirs.RequireActive(ctx, botID, workdirID)
 	if err != nil {
 		return nil, workdirHTTPError(h.logger, err)
-	}
-	if runtimeType == session.RuntimeACPAgent && bound.TargetKind == workdir.TargetKindRemote {
-		return nil, echo.NewHTTPError(http.StatusBadRequest,
-			"ACP sessions cannot use a remote computer workdir yet; bind a native workspace workdir instead")
 	}
 	return &bound, nil
 }

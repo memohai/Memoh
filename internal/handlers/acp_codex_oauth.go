@@ -161,7 +161,8 @@ func (h *ACPCodexOAuthHandler) Status(c echo.Context) error {
 	if !status.Configured {
 		return c.JSON(http.StatusOK, status)
 	}
-	if err := h.ensureManagedWorkspace(c.Request().Context(), botID); err != nil {
+	ctx := nativeACPWorkspaceContext(c.Request().Context())
+	if err := h.ensureManagedWorkspace(ctx, botID); err != nil {
 		var httpErr *echo.HTTPError
 		if errors.As(err, &httpErr) && httpErr.Code == http.StatusBadRequest {
 			status.Configured = false
@@ -170,14 +171,14 @@ func (h *ACPCodexOAuthHandler) Status(c echo.Context) error {
 		return err
 	}
 
-	client, err := h.acpWorkspace.MCPClient(c.Request().Context(), botID)
+	client, err := h.acpWorkspace.MCPClient(ctx, botID)
 	if err != nil {
 		return c.JSON(http.StatusOK, status)
 	}
-	if !acpclient.IsCodexManagedOAuthConfig(c.Request().Context(), client) {
+	if !acpclient.IsCodexManagedOAuthConfig(ctx, client) {
 		return c.JSON(http.StatusOK, status)
 	}
-	auth, err := acpclient.CheckCodexManagedOAuthAuth(c.Request().Context(), client)
+	auth, err := acpclient.CheckCodexManagedOAuthAuth(ctx, client)
 	if err != nil {
 		return c.JSON(http.StatusOK, status)
 	}
@@ -251,6 +252,7 @@ func (h *ACPCodexOAuthHandler) requireBotAccess(c echo.Context) (string, string,
 func (h *ACPCodexOAuthHandler) ensureManagedWorkspace(ctx context.Context, botID string) error {
 	// Managed Codex auth is stored in the bot-scoped CODEX_HOME inside the
 	// workspace rather than a server host account.
+	ctx = nativeACPWorkspaceContext(ctx)
 	if _, err := h.acpWorkspace.WorkspaceInfo(ctx, botID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -261,6 +263,7 @@ func (h *ACPCodexOAuthHandler) writeCodexOAuthAuth(ctx context.Context, botID st
 	if h.acpWorkspace == nil {
 		return errors.New("workspace manager is not configured")
 	}
+	ctx = nativeACPWorkspaceContext(ctx)
 	if err := h.ensureManagedWorkspace(ctx, botID); err != nil {
 		return err
 	}

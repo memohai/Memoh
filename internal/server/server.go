@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	neturl "net/url"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel/publicmedia"
 	"github.com/memohai/memoh/internal/httpx"
+	"github.com/memohai/memoh/internal/mcp"
 )
 
 type Server struct {
@@ -51,7 +53,7 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
 		Limit: "1M",
 		Skipper: func(c echo.Context) bool {
-			return !shouldLimitPublicRequestBody(c.Request().URL.Path)
+			return !shouldLimitRequestBody(c.Request())
 		},
 	}))
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
@@ -78,7 +80,7 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 		},
 	}))
 	e.Use(auth.JWTMiddleware(jwtSecret, func(c echo.Context) bool {
-		return shouldSkipJWT(c.Request().URL.Path)
+		return shouldSkipJWTRequest(c.Request())
 	}, validateSession))
 
 	for _, h := range handlers {
@@ -100,6 +102,34 @@ func (s *Server) Start() error {
 
 func (s *Server) Stop(ctx context.Context) error {
 	return s.echo.Shutdown(ctx)
+}
+
+// shouldSkipJWTRequest admits the ACP runtime credential only on the exact
+// stateless MCP tools route. The handler still authenticates both values
+// against a live runtime before serving a request; this check merely lets that
+// independent credential reach the handler instead of being rejected as a
+// missing user JWT.
+func shouldSkipJWTRequest(req *http.Request) bool {
+	if req == nil || req.URL == nil {
+		return false
+	}
+	if shouldSkipJWT(req.URL.Path) {
+		return true
+	}
+	return isRuntimeToolsCredentialRequest(req)
+}
+
+func isRuntimeToolsCredentialRequest(req *http.Request) bool {
+	return req != nil && req.URL != nil && req.Method == http.MethodPost &&
+		isExactBotToolsPath(req.URL.Path) &&
+		strings.TrimSpace(req.Header.Get(mcp.ToolHeaderRuntimeID)) != "" &&
+		strings.TrimSpace(req.Header.Get(mcp.ToolHeaderRuntimeToken)) != ""
+}
+
+func isExactBotToolsPath(requestPath string) bool {
+	parts := strings.Split(requestPath, "/")
+	return len(parts) == 4 && parts[0] == "" && parts[1] == "bots" &&
+		strings.TrimSpace(parts[2]) != "" && parts[3] == "tools"
 }
 
 func shouldSkipJWT(path string) bool {
@@ -138,6 +168,13 @@ func shouldSkipJWT(path string) bool {
 
 func shouldLimitPublicRequestBody(path string) bool {
 	return isPublicChannelWebhookPath(path)
+}
+
+func shouldLimitRequestBody(req *http.Request) bool {
+	if req == nil || req.URL == nil {
+		return false
+	}
+	return shouldLimitPublicRequestBody(req.URL.Path) || isRuntimeToolsCredentialRequest(req)
 }
 
 func isPublicChannelWebhookPath(path string) bool {

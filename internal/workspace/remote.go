@@ -30,6 +30,7 @@ const (
 
 var (
 	ErrWorkspaceTargetNotFound          = errors.New("workspace target not found")
+	ErrWorkspaceTargetInUse             = errors.New("workspace target is referenced by a workdir")
 	ErrRemoteWorkspaceNotBound          = errors.New("remote workspace is not bound")
 	ErrRemoteRuntimeNotUsable           = errors.New("remote runtime not found, revoked, or owned by another user")
 	ErrRemoteRuntimeOffline             = errors.New("remote runtime is offline")
@@ -260,6 +261,8 @@ func (s *RemoteWorkspaceService) DeleteMount(ctx context.Context, botID, targetI
 	}
 	if err := s.store.DeleteMount(ctx, botID, targetID); errors.Is(err, db.ErrNotFound) {
 		return ErrWorkspaceTargetNotFound
+	} else if errors.Is(err, db.ErrWorkspaceTargetInUse) {
+		return ErrWorkspaceTargetInUse
 	} else {
 		return err
 	}
@@ -288,6 +291,10 @@ func (s *RemoteWorkspaceService) resolveRecord(record dbstore.BotRemoteRuntimeBi
 			Backend:        bridge.WorkspaceBackendRemote,
 			OS:             connection.Info.OS,
 			DefaultWorkDir: connection.Info.WorkspaceBase,
+			Capabilities:   append([]string(nil), connection.Info.Capabilities...),
+			TargetID:       record.ID,
+			TargetKind:     WorkspaceTargetRemote,
+			TargetName:     record.RuntimeName,
 		},
 		Approval: toolApprovalConfig(record.ToolApproval),
 	}, nil

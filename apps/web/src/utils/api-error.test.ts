@@ -137,6 +137,21 @@ describe('resolveApiErrorMessage', () => {
     }, 'fallback')).toBe(expected)
   })
 
+  it.each([
+    ['en', 'This computer is still used by a folder and cannot be disconnected.'],
+    ['zh', '这台电脑仍被文件夹使用，无法断开连接。'],
+    ['ja', 'このコンピューターはフォルダーで使用中のため、接続を解除できません。'],
+  ])('localizes workspace.target_in_use for %s', (language, expected) => {
+    locale = language
+
+    expect(resolveApiErrorMessage({
+      code: 'workspace.target_in_use',
+      args: {},
+      detail: 'This computer is still used by a folder and cannot be disconnected.',
+      status: 409,
+    }, 'fallback')).toBe(expected)
+  })
+
   it('keeps unknown codes as open strings and uses their safe fallback', () => {
     const error = {
       code: 'future.new_condition',

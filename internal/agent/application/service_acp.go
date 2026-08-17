@@ -282,6 +282,16 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	// in arrival order and the frontend sorts by ID, so pre-creating the text
 	// block would pin the answer text above any reasoning that streams first.
 	// The first text_delta lazily creates the text block instead.
+	workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID)
+	workspaceTargetKind := ""
+	workspaceTargetName := ""
+	if req.WorkspaceTarget != nil {
+		if resolvedID := strings.TrimSpace(req.WorkspaceTarget.TargetID); resolvedID != "" {
+			workspaceTargetID = resolvedID
+		}
+		workspaceTargetKind = strings.TrimSpace(req.WorkspaceTarget.Kind)
+		workspaceTargetName = strings.TrimSpace(req.WorkspaceTarget.Name)
+	}
 
 	result, err := s.acpPool.Prompt(streamCtx, acpagent.PromptInput{
 		BotID:                    req.BotID,
@@ -291,6 +301,9 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		RouteID:                  req.RouteID,
 		AgentID:                  agentID,
 		ProjectPath:              projectPath,
+		WorkspaceTargetID:        workspaceTargetID,
+		WorkspaceTargetKind:      workspaceTargetKind,
+		WorkspaceTargetName:      workspaceTargetName,
 		ModelID:                  strings.TrimSpace(req.Model),
 		ReasoningEffort:          strings.TrimSpace(req.ReasoningEffort),
 		Prompt:                   req.Query,

@@ -115,6 +115,12 @@ func (p *SessionPool) startDynamicAdapter(
 	startReq client.StartRequest,
 	sink client.EventSink,
 ) (*client.Session, error) {
+	// Connected computers advertise an exact adapter that is already present
+	// in their Runtime PATH. Never run registry lookups or a floating npx
+	// launcher on a user's host as part of an ACP session start.
+	if strings.EqualFold(strings.TrimSpace(workspaceInfo.Backend), bridge.WorkspaceBackendRemote) {
+		return nil, nil
+	}
 	packageName := strings.TrimSpace(profile.DynamicPackage)
 	if strings.TrimSpace(profile.DynamicCommand) == "" || packageName == "" {
 		return nil, nil
