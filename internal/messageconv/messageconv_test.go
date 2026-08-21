@@ -65,6 +65,109 @@ func TestSDKMessagesToModelMessagesPreservesUsage(t *testing.T) {
 	}
 }
 
+func TestSDKMessagesToModelMessagesPreservesMultipartContent(t *testing.T) {
+	t.Parallel()
+
+	want := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.ReasoningPart{
+				Text:             "thinking",
+				ProviderMetadata: map[string]any{"provider": map[string]any{"signature": "sig"}},
+			},
+			sdk.TextPart{Text: "answer"},
+			sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"},
+			sdk.FilePart{Data: "JVBERi0=", MediaType: "application/pdf", Filename: "report.pdf"},
+			sdk.ToolCallPart{
+				ToolCallID: "call-1",
+				ToolName:   "lookup",
+				Input:      map[string]any{"query": "memoh"},
+			},
+		},
+	}
+
+	model := SDKMessagesToModelMessages([]sdk.Message{want})
+	if len(model) != 1 {
+		t.Fatalf("got %d model messages, want 1", len(model))
+	}
+	got := ModelMessageToSDKMessage(model[0])
+	assertSameJSON(t, got, want)
+}
+
+func TestModelMessageToSDKMessageRestoresLegacyToolResultFields(t *testing.T) {
+	t.Parallel()
+
+	model := turn.ModelMessage{
+		Role:       "tool",
+		Content:    mustJSON(t, map[string]any{"status": "ok"}),
+		ToolCallID: "legacy-call-id",
+		Name:       "legacy-tool",
+	}
+
+	got := ModelMessageToSDKMessage(model)
+	want := sdk.Message{
+		Role:    sdk.MessageRoleTool,
+		Content: []sdk.MessagePart{sdk.ToolResultPart{ToolCallID: "legacy-call-id", ToolName: "legacy-tool", Result: map[string]any{"status": "ok"}}},
+	}
+	assertSameJSON(t, got, want)
+	if got.Usage != nil {
+		t.Fatalf("usage = %#v, want nil: ModelMessage usage is not written into SDK messages", got.Usage)
+	}
+}
+
+func TestModelMessageToSDKMessageRestoresLegacyToolCalls(t *testing.T) {
+	t.Parallel()
+
+	got := ModelMessageToSDKMessage(turn.ModelMessage{
+		Role:    "assistant",
+		Content: json.RawMessage(`""`),
+		ToolCalls: []turn.ToolCall{{
+			ID:   "legacy-call",
+			Type: "function",
+			Function: turn.ToolCallFunction{
+				Name:      "lookup",
+				Arguments: `{"query":"memoh"}`,
+			},
+		}},
+	})
+
+	want := sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+		sdk.ToolCallPart{ToolCallID: "legacy-call", ToolName: "lookup", Input: map[string]any{"query": "memoh"}},
+	}}
+	assertSameJSON(t, got, want)
+}
+
+func TestModelMessageToSDKMessageDoesNotDuplicateModernToolParts(t *testing.T) {
+	t.Parallel()
+
+	got := ModelMessageToSDKMessage(turn.ModelMessage{
+		Role:    "assistant",
+		Content: mustJSON(t, []map[string]any{{"type": "tool-call", "toolCallId": "call-1", "toolName": "lookup", "input": map[string]any{"q": "memoh"}}}),
+		ToolCalls: []turn.ToolCall{{
+			ID: "call-1", Function: turn.ToolCallFunction{Name: "lookup", Arguments: `{"q":"memoh"}`},
+		}},
+	})
+	if len(got.Content) != 1 {
+		t.Fatalf("content parts = %d, want 1: %#v", len(got.Content), got.Content)
+	}
+}
+
+func TestModelMessageToSDKMessageDoesNotDuplicateModernToolResult(t *testing.T) {
+	t.Parallel()
+
+	model := turn.ModelMessage{
+		Role:       "tool",
+		Content:    mustJSON(t, []map[string]any{{"type": "tool-result", "toolCallId": "call-1", "toolName": "lookup", "result": "ok"}}),
+		ToolCallID: "legacy-call",
+		Name:       "legacy-lookup",
+	}
+	got := ModelMessageToSDKMessage(model)
+	if len(got.Content) != 1 {
+		t.Fatalf("content parts = %d, want 1: %#v", len(got.Content), got.Content)
+	}
+	assertSameJSON(t, got.Content[0], sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: "ok"})
+}
+
 func TestModelMessageToSDKMessageInvalidLegacyContentKeepsRole(t *testing.T) {
 	t.Parallel()
 
