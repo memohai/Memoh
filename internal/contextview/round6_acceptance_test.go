@@ -7,6 +7,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
@@ -240,6 +242,188 @@ func TestOversizedHookSystemSectionPrunesWithExplicitMarker(t *testing.T) {
 	}
 }
 
+func TestOversizedDynamicSystemSourcesPruneWithExplicitMarker(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		build func(*testing.T) ([]contextfrag.ContextFrag, []string)
+	}{
+		{
+			name: "skills catalog",
+			build: func(t *testing.T) ([]contextfrag.ContextFrag, []string) {
+				t.Helper()
+				params := agentpkg.SystemPromptParams{
+					SessionType: sessionmode.Chat,
+					Timezone:    "UTC",
+					Skills: []agentpkg.SkillEntry{
+						{Name: "alpha", Description: strings.Repeat("猫😺", 2000)},
+						{Name: "技能", Description: strings.Repeat("界🌏", 2000)},
+					},
+				}
+				return agentpkg.SystemSectionFrags(
+						agentpkg.GenerateSystemSections(params),
+						contextfrag.Scope{},
+					),
+					[]string{"system.skill.alpha", "system.skill.技能", "system.skills.header"}
+			},
+		},
+		{
+			name: "platform identities",
+			build: func(t *testing.T) ([]contextfrag.ContextFrag, []string) {
+				t.Helper()
+				items := []agentpkg.SystemPromptItem{
+					{
+						ID:   "telegram-large",
+						Text: `<identity channel="telegram" username="` + strings.Repeat("猫😺", 2000) + `"/>`,
+					},
+					{
+						ID:   "微信-海量",
+						Text: `<identity channel="wechat" username="` + strings.Repeat("界🌏", 2000) + `"/>`,
+					},
+				}
+				params := agentpkg.SystemPromptParams{
+					SessionType: sessionmode.Chat,
+					Timezone:    "UTC",
+					PlatformIdentitiesSection: "## Platform Identities\n\n" +
+						items[0].Text + "\n" + items[1].Text,
+					PlatformIdentities: items,
+				}
+				return agentpkg.SystemSectionFrags(
+						agentpkg.GenerateSystemSections(params),
+						contextfrag.Scope{},
+					),
+					[]string{
+						"system.platform_identity.telegram-large",
+						"system.platform_identity.微信-海量",
+						"system.platform_identity.header",
+					}
+			},
+		},
+		{
+			name: "workspace file",
+			build: func(t *testing.T) ([]contextfrag.ContextFrag, []string) {
+				t.Helper()
+				params := agentpkg.SystemPromptParams{
+					SessionType:   sessionmode.Chat,
+					Timezone:      "UTC",
+					MaxFilesBytes: 1024,
+					Files: []agentpkg.SystemFile{{
+						Filename: "AGENTS.md",
+						Content:  strings.Repeat("规则猫😺\n", 1000),
+					}},
+				}
+				frags := agentpkg.SystemSectionFrags(
+					agentpkg.GenerateSystemSections(params),
+					contextfrag.Scope{},
+				)
+				id := "system.workspace_file.AGENTS.md"
+				workspace := round6PR7FragByID(frags, id)
+				if workspace == nil ||
+					!utf8.ValidString(workspace.Parts[0].Text) ||
+					!strings.Contains(workspace.Parts[0].Text, "[memoh pruned]") {
+					t.Fatalf("locally pruned workspace fragment = %#v", workspace)
+				}
+				return frags, []string{id}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			frags, droppedIDs := tt.build(t)
+			base := round6WithoutFragIDs(frags, droppedIDs)
+			marker := systemBudgetMarkerFrag(droppedIDs, contextfrag.Scope{})
+			const toolDefsCost = 1
+			window := contextWindowForDefaultOutputReserve(
+				systemFragCost(appendClone(base, marker)) + toolDefsCost,
+			)
+
+			out, err := ProviderRunConfigApplier(nil)(context.Background(), agentpkg.RunConfig{
+				SessionType:             sessionmode.Chat,
+				ContextSourceFrags:      frags,
+				ContextBudgetMaxTokens:  window,
+				ContextToolDefsResolved: true,
+				ContextToolDefs: []contextfrag.ToolDefAccounting{{
+					Provider:      "native",
+					Name:          "use_skill",
+					TokenEstimate: toolDefsCost,
+				}},
+			})
+			if err != nil {
+				t.Fatalf("ApplyProviderRunConfig() error = %v", err)
+			}
+			for _, id := range droppedIDs {
+				decision, ok := decisionByID(out.ContextManifest.SelectionDecisions, id)
+				if !ok ||
+					decision.Decision != contextfrag.DecisionDropped ||
+					decision.Reason != systemBudgetDropReason {
+					t.Fatalf("decision for %s = %#v, %v; want dropped/system_budget", id, decision, ok)
+				}
+			}
+			markerFrag := round6PR7FragByID(out.ContextFrags, systemBudgetMarkerID)
+			markerItem := manifestItemByID(out.ContextManifest.Items, systemBudgetMarkerID)
+			if markerFrag == nil || markerItem == nil ||
+				!utf8.ValidString(markerFrag.Parts[0].Text) ||
+				!strings.Contains(markerFrag.Parts[0].Text, "[System Notice]") ||
+				markerItem.TokenEstimate != contextfrag.ResolveFragTokens(*markerFrag) {
+				t.Fatalf("marker frag/item = %#v/%#v", markerFrag, markerItem)
+			}
+			plan := out.ContextManifest.BudgetPlan
+			if plan == nil || plan.ActualSystemCost > plan.SystemBudget {
+				t.Fatalf("budget plan = %#v", plan)
+			}
+		})
+	}
+}
+
+func TestFragBudgetMaxTokensTrimsUnicodeWithMarkerAndEstimate(t *testing.T) {
+	t.Parallel()
+
+	source := contextfrag.TextFrag(contextfrag.TextFragInput{
+		ID:            "unicode.max_tokens",
+		Kind:          contextfrag.KindHookContext,
+		Role:          sdk.MessageRoleSystem,
+		Slot:          contextfrag.SlotSystem,
+		Text:          strings.Repeat("猫😺", 80),
+		Priority:      80,
+		RetentionTier: contextfrag.RetentionOptional,
+		CacheClass:    contextfrag.CacheDynamic,
+		Trust:         contextfrag.TrustWorkspace,
+		Budget: contextfrag.BudgetPolicy{
+			MaxTokens: 32,
+			Overflow:  contextfrag.OverflowTrim,
+		},
+	})
+	source = contextfrag.NormalizeContextRefs([]contextfrag.ContextFrag{source})[0]
+
+	selector := &FragmentSelector{}
+	result := selector.Select(
+		[]contextfrag.ContextFrag{source},
+		selector.ProfileFor(contextfrag.IntentRunConfigPreProvider),
+		BudgetEnvelope{},
+	)
+	if result.FatalError != nil || len(result.Selected) != 1 {
+		t.Fatalf("Select() error/selected = %v/%v", result.FatalError, fragIDs(result.Selected))
+	}
+	text := result.Selected[0].Parts[0].Text
+	if !utf8.ValidString(text) ||
+		!strings.Contains(text, "[trimmed from ") ||
+		len(text) > source.Budget.MaxTokens*fragBudgetTokenByteFactor ||
+		contextfrag.ResolveFragTokens(result.Selected[0]) > source.Budget.MaxTokens {
+		t.Fatalf("trimmed Unicode text/estimate = %q/%d", text, contextfrag.ResolveFragTokens(result.Selected[0]))
+	}
+	decisions := selectionDecisions([]contextfrag.ContextFrag{source}, result)
+	if len(decisions) != 1 ||
+		decisions[0].Decision != contextfrag.DecisionTrimmed ||
+		decisions[0].Reason != "frag_budget:max_tokens" {
+		t.Fatalf("selection decisions = %#v", decisions)
+	}
+}
+
 func round6StaticSystemFrags(mode string, scope contextfrag.Scope) []contextfrag.ContextFrag {
 	return agentpkg.SystemSectionFrags(agentpkg.GenerateSystemSections(agentpkg.SystemPromptParams{
 		SessionType: mode,
@@ -254,6 +438,29 @@ func round6ProtectedOverflowSourceFrags(mode string) []contextfrag.ContextFrag {
 func appendClone(frags []contextfrag.ContextFrag, extra contextfrag.ContextFrag) []contextfrag.ContextFrag {
 	out := append([]contextfrag.ContextFrag(nil), frags...)
 	return append(out, extra)
+}
+
+func round6WithoutFragIDs(frags []contextfrag.ContextFrag, ids []string) []contextfrag.ContextFrag {
+	dropped := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		dropped[id] = struct{}{}
+	}
+	out := make([]contextfrag.ContextFrag, 0, len(frags))
+	for _, frag := range frags {
+		if _, ok := dropped[frag.ID]; !ok {
+			out = append(out, frag)
+		}
+	}
+	return out
+}
+
+func round6PR7FragByID(frags []contextfrag.ContextFrag, id string) *contextfrag.ContextFrag {
+	for i := range frags {
+		if frags[i].ID == id {
+			return &frags[i]
+		}
+	}
+	return nil
 }
 
 func manifestItemByID(items []contextfrag.ManifestItem, id string) *contextfrag.ManifestItem {
