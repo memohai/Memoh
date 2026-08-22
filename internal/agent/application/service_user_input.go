@@ -416,11 +416,30 @@ func (s *Service) continueUserInputSession(
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	stream := s.agent.Stream(ctx, cfg)
+	// Guard against a silent provider stall (issue #1010 family): if no stream
+	// events arrive within the adaptive idle timeout, cancel the underlying
+	// context so the continuation terminates instead of hanging forever with no
+	// message to the user.
+	idleCtx, idleCancel := withIdleTimeout(ctx)
+	defer idleCancel.Stop()
+
+	stream := s.agent.Stream(idleCtx, cfg)
 	stored := false
+	var hasVisibleOutput bool
+	var visibleText strings.Builder
+	var providerTimedOut bool
 	for event := range stream {
-		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
-			lifecycleCause = eventErr
+		idleCancel.Reset() // each event resets the idle timer
+		if event.Type == native.EventToolCallStart {
+			idleCancel.RecordToolCall()
+		}
+		if eventErr := agentStreamEventError(event); eventErr != nil {
+			if native.IsTimeoutStreamError(eventErr) {
+				providerTimedOut = true
+			}
+			if lifecycleCause == nil {
+				lifecycleCause = eventErr
+			}
 		}
 		if event.IsTerminal() {
 			terminalEventSeen = true
@@ -429,6 +448,7 @@ func (s *Service) continueUserInputSession(
 				switch event.Type {
 				case native.EventAgentEnd:
 					lifecycleCause = nil
+					providerTimedOut = false
 				case native.EventAgentAbort:
 					if context.Cause(ctx) != nil || lifecycleCause == nil {
 						lifecycleCause = agentAbortCause(ctx)
@@ -436,27 +456,34 @@ func (s *Service) continueUserInputSession(
 				}
 			}
 		}
+		recordVisibleAgentText(&visibleText, event)
+		if hasVisibleAgentStreamOutput(event) {
+			hasVisibleOutput = true
+		}
 		data, err := json.Marshal(event)
 		if err != nil {
 			continue
 		}
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
+		if !stored && shouldPersistTerminalEvent(event, idleCancel, hasVisibleOutput, providerTimedOut) {
 			if snap, ok := extractTerminalSnapshot(data); ok {
+				snap.visibleOutput = hasVisibleOutput
+				restoreVisibleTextSnapshot(&snap, visibleText.String())
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
 				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
 					lifecycleCause = agentAbortCause(ctx)
 				}
-				if storeErr := s.persistTerminalSnapshot(
+				persisted, storeErr := s.persistTerminalSnapshotResult(
 					context.WithoutCancel(ctx),
 					chatReq,
 					resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}},
 					snap,
-				); storeErr != nil {
+				)
+				if storeErr != nil {
 					lifecycleCause = storeErr
 					lifecycleDeferred = false
 					return storeErr
 				}
-				stored = true
+				stored = len(persisted) > 0
 			}
 		}
 		if eventCh != nil {
@@ -471,6 +498,13 @@ func (s *Service) continueUserInputSession(
 	if ctx.Err() != nil {
 		lifecycleCause = context.Cause(ctx)
 		return lifecycleCause
+	}
+	// The stream produced no events within the adaptive idle window and was
+	// cancelled by the watchdog backstop. Record the true cause (a deadline)
+	// so the terminal lifecycle reflects the stall rather than a generic
+	// "no terminal event" error.
+	if idleCancel.DidFire() && lifecycleCause == nil && !lifecycleDeferred {
+		lifecycleCause = context.DeadlineExceeded
 	}
 	if lifecycleCause == nil && !lifecycleDeferred && !terminalEventSeen {
 		lifecycleCause = errors.New("agent continuation ended without a terminal event")

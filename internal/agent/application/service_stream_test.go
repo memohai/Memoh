@@ -2,8 +2,10 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -306,7 +308,7 @@ func TestPersistTerminalSnapshotSkipsEmptyAssistantSnapshot(t *testing.T) {
 	}
 }
 
-func TestPersistTerminalSnapshotSkipsAbortedSnapshotBeforeVisibleOutput(t *testing.T) {
+func TestPersistTerminalSnapshotPersistsInterruptedMarkerWhenAbortedBeforeVisibleOutput(t *testing.T) {
 	t.Parallel()
 
 	messages := &recordingMessageService{}
@@ -326,13 +328,107 @@ func TestPersistTerminalSnapshotSkipsAbortedSnapshotBeforeVisibleOutput(t *testi
 		terminalSnapshot{
 			sdkMessages: []sdk.Message{sdk.AssistantMessage("partial answer")},
 			aborted:     true,
+			// visibleOutput defaults to false: the turn produced nothing visible
+			// before being interrupted.
 		},
 	); err != nil {
 		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
 	}
 
-	if len(messages.persisted) != 0 {
-		t.Fatalf("expected pre-output abort not to persist, got %#v", messages.persisted)
+	// Issue #1010 family: an aborted turn with no visible output must leave a
+	// trace instead of silently vanishing from history.
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted messages = %d, want user + interrupted marker, got %#v", len(messages.persisted), messages.persisted)
+	}
+	if messages.persisted[0].Role != "user" {
+		t.Fatalf("unexpected first persisted role: %q", messages.persisted[0].Role)
+	}
+	if messages.persisted[1].Role != "assistant" {
+		t.Fatalf("unexpected second persisted role: %q", messages.persisted[1].Role)
+	}
+	markerText := persistedTextContent(t, messages.persisted[1].Content)
+	if !strings.Contains(markerText, "[turn-interrupted]") {
+		t.Fatalf("persisted marker content %q missing [turn-interrupted] prefix", markerText)
+	}
+}
+
+func TestExtractTerminalSnapshotAcceptsEmptyAbortedMessages(t *testing.T) {
+	t.Parallel()
+
+	data, err := json.Marshal(native.StreamEvent{
+		Type:     native.EventAgentAbort,
+		Messages: json.RawMessage("[]"),
+	})
+	if err != nil {
+		t.Fatalf("marshal aborted event: %v", err)
+	}
+
+	snapshot, ok := extractTerminalSnapshot(data)
+	if !ok {
+		t.Fatal("extractTerminalSnapshot returned ok=false for an empty aborted event")
+	}
+	if !snapshot.aborted {
+		t.Fatal("empty aborted snapshot was not marked aborted")
+	}
+	if len(snapshot.sdkMessages) != 0 {
+		t.Fatalf("snapshot messages = %d, want 0", len(snapshot.sdkMessages))
+	}
+}
+
+func TestPersistTerminalSnapshotPersistsInterruptedMarkerWithoutMessages(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	if err := resolver.persistTerminalSnapshot(
+		context.Background(),
+		ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "hello"},
+		resolvedContext{},
+		terminalSnapshot{aborted: true},
+	); err != nil {
+		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
+	}
+
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted messages = %d, want user + interrupted marker", len(messages.persisted))
+	}
+	markerText := persistedTextContent(t, messages.persisted[1].Content)
+	if markerText != interruptedTurnMarker {
+		t.Fatalf("persisted marker = %q, want %q", markerText, interruptedTurnMarker)
+	}
+}
+
+func TestPersistTerminalSnapshotKeepsVisiblePartialOutputAfterAbort(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	if err := resolver.persistTerminalSnapshot(
+		context.Background(),
+		ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "hello"},
+		resolvedContext{},
+		terminalSnapshot{
+			sdkMessages:   []sdk.Message{sdk.AssistantMessage("partial answer")},
+			aborted:       true,
+			visibleOutput: true,
+		},
+	); err != nil {
+		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
+	}
+
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted messages = %d, want user + partial assistant", len(messages.persisted))
+	}
+	if got := persistedTextContent(t, messages.persisted[1].Content); got != "partial answer" {
+		t.Fatalf("persisted assistant content = %q, want partial answer", got)
 	}
 }
 
