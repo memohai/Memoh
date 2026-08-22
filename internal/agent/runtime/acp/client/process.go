@@ -72,16 +72,17 @@ type processOptions struct {
 }
 
 type bridgeProcess struct {
-	stream   *bridge.ExecStream
-	stdin    *io.PipeWriter
-	stdout   *io.PipeReader
-	tail     *stderrTail
-	done     chan struct{}
-	env      []string
-	toolEnv  []string
-	unsetEnv []string
-	lease    *runtimeLease
-	logger   *slog.Logger
+	stream       *bridge.ExecStream
+	stdin        *io.PipeWriter
+	stdout       *io.PipeReader
+	tail         *stderrTail
+	done         chan struct{}
+	lifecycleCtx context.Context
+	env          []string
+	toolEnv      []string
+	unsetEnv     []string
+	lease        *runtimeLease
+	logger       *slog.Logger
 
 	stateMu      sync.Mutex
 	activated    bool
@@ -158,6 +159,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		stdout:       stdoutR,
 		tail:         &stderrTail{},
 		done:         make(chan struct{}),
+		lifecycleCtx: ctx,
 		env:          append([]string(nil), env...),
 		toolEnv:      append([]string(nil), lease.toolEnv...),
 		unsetEnv:     append([]string(nil), lease.unsetEnv...),
@@ -416,23 +418,28 @@ func (p *bridgeProcess) Activate() {
 	p.stateMu.Lock()
 	if !p.activated {
 		p.activated = true
-		go p.syncLoop()
+		go p.syncLoop(runtimeSyncInterval)
 	}
 	p.stateMu.Unlock()
 }
 
-func (p *bridgeProcess) syncLoop() {
-	if p == nil || p.lease == nil {
+func (p *bridgeProcess) syncLoop(interval time.Duration) {
+	if p == nil || p.lease == nil || p.lifecycleCtx == nil {
 		return
 	}
-	ticker := time.NewTicker(runtimeSyncInterval)
+	if interval <= 0 {
+		interval = runtimeSyncInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-p.done:
 			return
+		case <-p.lifecycleCtx.Done():
+			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(p.lifecycleCtx, 10*time.Second)
 			err := p.lease.syncLiveState(ctx)
 			cancel()
 			if errors.Is(err, ErrRuntimeSyncGenerationStale) {

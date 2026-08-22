@@ -142,6 +142,7 @@ type Session struct {
 	imagePromptSupported      bool
 	closeSessionSupported     bool
 	defaultSink               EventSink
+	lifecycleCtx              context.Context
 	cancel                    context.CancelFunc
 	reverseHTTPStop           func()
 
@@ -403,6 +404,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		imagePromptSupported:      initResp.AgentCapabilities.PromptCapabilities.Image,
 		closeSessionSupported:     initResp.AgentCapabilities.SessionCapabilities.Close != nil,
 		defaultSink:               sink,
+		lifecycleCtx:              lifecycleCtx,
 		cancel:                    cancel,
 		reverseHTTPStop:           toolHTTPStop,
 	}
@@ -1096,6 +1098,7 @@ func (s *Session) close(force bool) error {
 	cancel := s.cancel
 	reverseHTTPStop := s.reverseHTTPStop
 	closeSessionSupported := s.closeSessionSupported
+	lifecycleCtx := s.lifecycleCtx
 	promptCancel := s.promptCancel
 	promptDone := s.promptDone
 	s.mu.Unlock()
@@ -1135,7 +1138,10 @@ func (s *Session) close(force bool) error {
 		return closeErr
 	}
 	if closeSessionSupported && conn != nil && sessionID != "" {
-		ctx, cancelClose := context.WithTimeout(context.Background(), 2*time.Second)
+		if lifecycleCtx == nil {
+			lifecycleCtx = context.Background()
+		}
+		ctx, cancelClose := context.WithTimeout(context.WithoutCancel(lifecycleCtx), 2*time.Second)
 		_, _ = conn.CloseSession(ctx, acp.CloseSessionRequest{SessionId: sessionID})
 		cancelClose()
 	}

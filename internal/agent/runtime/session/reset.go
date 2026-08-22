@@ -123,7 +123,7 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 			close(stopRenew)
 			<-renewDone
 			cancelReset(context.Canceled)
-			releaseCtx, cancel := context.WithTimeout(context.Background(), ttl/3)
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(resetCtx), ttl/3)
 			defer cancel()
 			if liveHeld {
 				if resetBackend, hasLive := m.backend.(HistoryResetBackend); hasLive {

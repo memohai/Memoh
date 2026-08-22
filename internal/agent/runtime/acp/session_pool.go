@@ -174,6 +174,9 @@ type runtimeHandle struct {
 	sessionStateLocator   acpprofile.RuntimeSessionLocator
 	sessionStateCursor    client.SessionStateCursor
 	runtimeConfigEpoch    RuntimeConfigEpoch
+	// ownerCtx is a value-only context retained for detached runtime cleanup.
+	// Its cancellation and deadline do not describe request liveness.
+	ownerCtx context.Context
 
 	// op serializes operations (start, prompt, runtime config, bind, close).
 	op sync.Mutex
@@ -194,9 +197,12 @@ type runtimeHandle struct {
 	hadPrompt                bool
 	decisionPreCleanupOnce   sync.Once
 	decisionFinalCleanupOnce sync.Once
-	closeStarted             bool
-	closeDone                chan struct{}
-	closeErr                 error
+	// decisionFallbackOnce keeps the malformed-handle report to one log line
+	// even though closeHandle and teardown both reach the cleanup path.
+	decisionFallbackOnce sync.Once
+	closeStarted         bool
+	closeDone            chan struct{}
+	closeErr             error
 	// nativeHead names the publication head this process's native conversation
 	// corresponds to. It advances locally the moment a turn's state is staged
 	// (checkpoint) or a snapshot-incapable turn completes (reset). The database
@@ -415,7 +421,7 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 		return RuntimeStatus{}, runtimeOwnerMissingError()
 	}
 
-	p.reapIdle(time.Now()) //nolint:contextcheck // reaper close uses its own background ctx.
+	p.reapIdle(time.Now()) //nolint:contextcheck // reaper uses each handle's owner context.
 
 	h := &runtimeHandle{
 		id:                    newRuntimeID(),
@@ -424,6 +430,7 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 		agentID:               agentID,
 		projectPath:           projectPath,
 		runtimeOwnerAccountID: runtimeOwnerAccountID,
+		ownerCtx:              context.WithoutCancel(ctx),
 		status:                stateStarting,
 		lastActive:            time.Now(),
 	}
@@ -458,7 +465,7 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 	for _, victim := range victims {
 		p.logger.Info("evicting oldest unbound ACP runtime",
 			slog.String("runtime_id", victim.id), slog.String("bot_id", botID))
-		p.tryCloseIdle(victim, 0) //nolint:contextcheck // lifecycle close uses background ctx.
+		p.tryCloseIdle(victim, 0) //nolint:contextcheck // lifecycle close uses the handle owner context.
 	}
 
 	h.op.Lock()
@@ -515,7 +522,10 @@ func (p *SessionPool) unboundBudgetLocked(botID string) ([]*runtimeHandle, error
 // session's prompts reuse the warm process. Returns ErrRuntimeBindRejected
 // when the runtime cannot serve this session; callers fall back to a cold
 // start and must not treat that as fatal.
-func (p *SessionPool) BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+	if ctx == nil {
+		return errors.New("runtime bind context is required")
+	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return errors.New("session_id is required")
@@ -524,10 +534,13 @@ func (p *SessionPool) BindRuntime(botID, runtimeID, sessionID, agentID, projectP
 	if bindTimeout <= 0 {
 		bindTimeout = 30 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), bindTimeout)
+	// Binding is part of the synchronous create-session request: cancellation
+	// should stop reset/config waits. The stored owner context below detaches
+	// cancellation separately so later runtime cleanup can retain its values.
+	opCtx, cancel := context.WithTimeout(ctx, bindTimeout)
 	defer cancel()
 	if p.sessionRuntime != nil {
-		if err := p.sessionRuntime.WaitForHistoryReset(ctx, botID, sessionID); err != nil {
+		if err := p.sessionRuntime.WaitForHistoryReset(opCtx, botID, sessionID); err != nil {
 			return err
 		}
 	}
@@ -548,7 +561,7 @@ func (p *SessionPool) BindRuntime(botID, runtimeID, sessionID, agentID, projectP
 	// Waits out an in-flight model change on the runtime.
 	h.op.Lock()
 	defer h.op.Unlock()
-	actualEpoch, err := p.loadRuntimeConfigEpoch(ctx, h.botID, sessionID)
+	actualEpoch, err := p.loadRuntimeConfigEpoch(opCtx, h.botID, sessionID)
 	if err != nil {
 		return err
 	}
@@ -566,6 +579,7 @@ func (p *SessionPool) BindRuntime(botID, runtimeID, sessionID, agentID, projectP
 		// half-bound handle.
 		h.boundSession = sessionID
 		h.runtimeConfigEpoch = actualEpoch
+		h.ownerCtx = context.WithoutCancel(ctx)
 		h.lastActive = time.Now()
 	}
 	h.state.Unlock()
@@ -736,7 +750,7 @@ func (p *SessionPool) updateConfigOnHandle(
 	// accepted the value even though Memoh never received its new config
 	// snapshot. The cached state is no longer trustworthy, so rebuild rather
 	// than allowing the per-turn equality check to skip a required setter.
-	_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses background ctx.
+	_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 	return RuntimeStatus{}, fmt.Errorf("%w: %w", ErrRuntimeConfigUpdateFailed, err)
 }
 
@@ -753,7 +767,7 @@ func (p *SessionPool) CloseRuntime(botID, runtimeID string) error {
 	if err != nil {
 		return err
 	}
-	return p.closeHandle(h) //nolint:contextcheck // lifecycle close uses background ctx.
+	return p.closeHandle(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 }
 
 // ResolveRuntimeToolContext resolves the trusted MCP tool context for a
@@ -801,7 +815,7 @@ func (p *SessionPool) prepareInput(ctx context.Context, input PromptInput) (Prom
 // Prompt sends a prompt to the runtime bound to input.SessionID, cold
 // starting (and binding) one when the session has no live runtime.
 //
-//nolint:contextcheck // lifecycle close intentionally uses background ctx.
+//nolint:contextcheck // lifecycle close uses the handle owner context.
 func (p *SessionPool) Prompt(ctx context.Context, input PromptInput) (client.PromptResult, error) {
 	input, err := p.prepareInput(ctx, input)
 	if err != nil {
@@ -818,7 +832,7 @@ func (p *SessionPool) Prompt(ctx context.Context, input PromptInput) (client.Pro
 
 	p.reapIdle(time.Now())
 	if input.ForceFreshRuntime {
-		_ = p.CloseSession(input.SessionID) //nolint:contextcheck // lifecycle close uses background ctx.
+		_ = p.CloseSession(input.SessionID) //nolint:contextcheck // lifecycle close uses the handle owner context.
 		// Discuss turns inject a complete bounded context into a fresh process.
 		// Resuming or checkpointing that temporary native session would duplicate
 		// context and could replace a normal chat checkpoint. Note the full
@@ -878,6 +892,7 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	h.lastActive = time.Now()
 	toolCtx := toolSessionContext(ctx, input, h)
 	h.active = &toolCtx
+	h.ownerCtx = context.WithoutCancel(ctx)
 	h.hadPrompt = true
 	if toolCtx.RuntimeFence.Valid() {
 		h.persistenceFence = toolCtx.RuntimeFence
@@ -901,7 +916,7 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		// A transport/protocol failure while mutating session config leaves the
 		// agent's effective state unknown. Drop the runtime so the next turn
 		// starts from a clean session.
-		_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses background ctx.
+		_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 		return client.PromptResult{}, false, fmt.Errorf("%w: %w", ErrRuntimeConfigUpdateFailed, err)
 	}
 
@@ -981,14 +996,14 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 				// graceful teardown would otherwise block trying session/close behind
 				// that same writer and never reach the process close.
 				_ = sess.ForceClose() //nolint:contextcheck // forced lifecycle teardown must outlive the cancelled turn.
-				_ = p.teardown(h)     //nolint:contextcheck // lifecycle close uses background ctx.
+				_ = p.teardown(h)     //nolint:contextcheck // lifecycle close uses the handle owner context.
 			}
 			return result, false, err
 		}
 		// Prompt failures usually indicate the ACP process is in a bad state
 		// (transport hang, agent crash); drop the runtime so the next call
 		// starts fresh.
-		_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses background ctx.
+		_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 		return result, false, err
 	}
 	staged, persistErr := p.persistSessionState(ctx, h, sess, input.RunID, toolCtx.RuntimeFence, result.StateReceipt)
@@ -1294,7 +1309,7 @@ func isPromptConfigSelectionError(err error) bool {
 
 // Ensure starts (or reuses) the runtime for a session without prompting it.
 //
-//nolint:contextcheck // lifecycle close intentionally uses background ctx.
+//nolint:contextcheck // lifecycle close uses the handle owner context.
 func (p *SessionPool) Ensure(ctx context.Context, input PromptInput) (RuntimeStatus, error) {
 	input, err := p.prepareInput(ctx, input)
 	if err != nil {
@@ -1311,7 +1326,7 @@ func (p *SessionPool) Ensure(ctx context.Context, input PromptInput) (RuntimeSta
 // SetModel switches the model of the runtime bound to a session, cold
 // starting one when needed.
 //
-//nolint:contextcheck // lifecycle close intentionally uses background ctx.
+//nolint:contextcheck // lifecycle close uses the handle owner context.
 func (p *SessionPool) SetModel(ctx context.Context, input PromptInput, modelID string) (RuntimeStatus, error) {
 	if strings.TrimSpace(modelID) == "" {
 		return RuntimeStatus{}, client.ErrModelIDRequired
@@ -1331,7 +1346,7 @@ func (p *SessionPool) SetModel(ctx context.Context, input PromptInput, modelID s
 // SetReasoning switches the reasoning effort of the runtime bound to a
 // session, cold starting one when needed.
 //
-//nolint:contextcheck // lifecycle close intentionally uses background ctx.
+//nolint:contextcheck // lifecycle close uses the handle owner context.
 func (p *SessionPool) SetReasoning(ctx context.Context, input PromptInput, effort string) (RuntimeStatus, error) {
 	if strings.TrimSpace(effort) == "" {
 		return RuntimeStatus{}, client.ErrReasoningEffortRequired
@@ -1351,7 +1366,7 @@ func (p *SessionPool) SetReasoning(ctx context.Context, input PromptInput, effor
 // SetMode switches the agent-declared mode of the runtime bound to a session,
 // cold starting one when needed. The mode remains process/session local.
 //
-//nolint:contextcheck // lifecycle close intentionally uses background ctx.
+//nolint:contextcheck // lifecycle close uses the handle owner context.
 func (p *SessionPool) SetMode(ctx context.Context, input PromptInput, modeID string) (RuntimeStatus, error) {
 	if strings.TrimSpace(modeID) == "" {
 		return RuntimeStatus{}, client.ErrModeIDRequired
@@ -1453,6 +1468,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 				agentID:               agentID,
 				projectPath:           projectPath,
 				runtimeOwnerAccountID: runtimeOwnerAccountID,
+				ownerCtx:              context.WithoutCancel(ctx),
 				disableSessionState:   input.disableSessionState,
 				status:                stateStarting,
 				lastActive:            time.Now(),
@@ -1514,7 +1530,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 			return h, nil
 		}
 		// Agent or project changed for this session: replace the runtime.
-		_ = p.closeHandle(h) //nolint:contextcheck // lifecycle close uses background ctx.
+		_ = p.closeHandle(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 		attempt++
 	}
 	return nil, errors.New("ACP runtime is restarting, retry the request")
@@ -1529,11 +1545,14 @@ type startOptions struct {
 // called with h.op held. On failure the handle is fully torn down (process,
 // maps, context) before returning.
 //
-//nolint:contextcheck // startup failure cleanup intentionally uses background ctx.
+//nolint:contextcheck // startup failure cleanup uses the handle owner context.
 func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts startOptions) error {
 	startCtx, cancelStart := context.WithCancel(ctx)
 	defer cancelStart()
 	h.state.Lock()
+	if h.ownerCtx == nil {
+		h.ownerCtx = context.WithoutCancel(ctx)
+	}
 	if h.closed {
 		h.state.Unlock()
 		return errors.New("ACP runtime was closed during startup")
@@ -1908,7 +1927,7 @@ func (p *SessionPool) StartReaper(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				p.reapIdle(time.Now()) //nolint:contextcheck // reaper close uses its own background ctx.
+				p.reapIdle(time.Now()) //nolint:contextcheck // reaper uses each handle's owner context.
 			case <-ctx.Done():
 				return
 			}
@@ -1920,7 +1939,7 @@ func (p *SessionPool) StartReaper(ctx context.Context) {
 // session is deleted or its agent changes). Session IDs reaching this path
 // are database-validated by the caller.
 //
-//nolint:contextcheck // lifecycle close intentionally uses background ctx so cleanup runs after caller cancels.
+//nolint:contextcheck // lifecycle cleanup uses owner values after the caller cancels.
 func (p *SessionPool) CloseSession(sessionID string) error {
 	if p == nil {
 		return nil
@@ -2106,8 +2125,12 @@ func (p *SessionPool) closeHandle(h *runtimeHandle) error {
 	bound := h.boundSession
 	activeSession := ""
 	fence := h.persistenceFence
+	cleanupParent := h.ownerCtx
 	if h.active != nil {
 		activeSession = strings.TrimSpace(h.active.SessionID)
+		if h.active.RunContext != nil {
+			cleanupParent = h.active.RunContext
+		}
 		if h.active.RuntimeFence.Valid() {
 			fence = h.active.RuntimeFence
 		}
@@ -2141,7 +2164,10 @@ func (p *SessionPool) closeHandle(h *runtimeHandle) error {
 	if sessionID == "" {
 		sessionID = activeSession
 	}
-	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	if cleanupParent == nil && sessionID != "" {
+		cleanupParent = p.fallbackDecisionCleanupRoot(h, sessionID)
+	}
+	p.cancelHandlePendingDecisions(cleanupParent, h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
 	h.op.Lock()
 	closeErr := p.teardown(h)
 	h.op.Unlock()
@@ -2206,8 +2232,12 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	bound := h.boundSession
 	activeSession := ""
 	fence := h.persistenceFence
+	cleanupParent := h.ownerCtx
 	if h.active != nil {
 		activeSession = strings.TrimSpace(h.active.SessionID)
+		if h.active.RunContext != nil {
+			cleanupParent = h.active.RunContext
+		}
 		if h.active.RuntimeFence.Valid() {
 			fence = h.active.RuntimeFence
 		}
@@ -2225,7 +2255,10 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	if sessionID == "" {
 		sessionID = activeSession
 	}
-	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	if cleanupParent == nil && sessionID != "" {
+		cleanupParent = p.fallbackDecisionCleanupRoot(h, sessionID)
+	}
+	p.cancelHandlePendingDecisions(cleanupParent, h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
 
 	if cancel != nil {
 		cancel()
@@ -2234,7 +2267,7 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	if sess != nil {
 		closeErr = sess.Close()
 	}
-	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupFinal, "decision cancelled: ACP runtime closed before a response arrived")
+	p.cancelHandlePendingDecisions(cleanupParent, h, sessionID, fence, decisionCleanupFinal, "decision cancelled: ACP runtime closed before a response arrived")
 
 	if !closing {
 		p.mu.Lock()
@@ -2254,7 +2287,19 @@ const (
 	decisionCleanupFinal
 )
 
-func (p *SessionPool) cancelHandlePendingDecisions(h *runtimeHandle, sessionID string, fence runtimefence.Fence, phase decisionCleanupPhase, reason string) {
+// fallbackDecisionCleanupRoot is the single fail-open boundary for a malformed
+// handle that has pending decisions but no owner context. The cleanup loses
+// values, but skipping it would leave approvals or questions stranded in the
+// UI. The report is logged once per handle.
+func (p *SessionPool) fallbackDecisionCleanupRoot(h *runtimeHandle, sessionID string) context.Context {
+	h.decisionFallbackOnce.Do(func() {
+		p.logger.Error("pending ACP decision cleanup without runtime context",
+			slog.String("bot_id", h.botID), slog.String("session_id", sessionID))
+	})
+	return context.Background()
+}
+
+func (p *SessionPool) cancelHandlePendingDecisions(parent context.Context, h *runtimeHandle, sessionID string, fence runtimefence.Fence, phase decisionCleanupPhase, reason string) {
 	if p == nil || h == nil {
 		return
 	}
@@ -2283,7 +2328,12 @@ func (p *SessionPool) cancelHandlePendingDecisions(h *runtimeHandle, sessionID s
 	default:
 		return
 	}
-	cleanupCtx := context.Background()
+	if parent == nil {
+		p.logger.Error("skip pending ACP decision cleanup without normalized context",
+			slog.String("bot_id", h.botID), slog.String("session_id", sessionID))
+		return
+	}
+	cleanupCtx := context.WithoutCancel(parent)
 	if fence.Valid() {
 		cleanupCtx = runtimefence.WithContext(cleanupCtx, fence)
 	}
@@ -2300,7 +2350,9 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 		return
 	}
 	if parent == nil {
-		parent = context.Background()
+		p.logger.Error("skip pending ACP decision cleanup without normalized parent context",
+			slog.String("bot_id", botID), slog.String("session_id", sessionID))
+		return
 	}
 	var cleanup sync.WaitGroup
 	if approval, ok := p.approval.(interface {

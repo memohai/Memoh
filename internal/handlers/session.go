@@ -43,7 +43,7 @@ type sessionWorkdirService interface {
 // warm agent process and binding a session to a runtime.
 type acpSessionRuntimeService interface {
 	CloseSession(sessionID string) error
-	BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error
+	BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error
 }
 
 // sessionResetService is the runtime-agnostic history reset boundary. It is a
@@ -209,6 +209,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	// session — the first prompt simply cold starts a runtime.
 	if runtimeID := strings.TrimSpace(req.ACPRuntimeID); runtimeID != "" && session.IsACPRuntime(sess) && h.acpRuntimes != nil {
 		if bindErr := h.acpRuntimes.BindRuntime(
+			c.Request().Context(),
 			bot.ID,
 			runtimeID,
 			sess.ID,

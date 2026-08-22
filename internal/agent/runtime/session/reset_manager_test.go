@@ -25,6 +25,7 @@ type fakeResetLedger struct {
 	renewResults    []fakeRenewResult
 	renews          int
 	released        []ledger.ResetLease
+	releaseCtx      context.Context
 	// activeRunsByBot is consumed one call at a time; when exhausted the bot
 	// has no active runs left.
 	activeRunsByBot [][]ledger.Run
@@ -72,9 +73,10 @@ func (f *fakeResetLedger) RenewReset(_ context.Context, lease ledger.ResetLease,
 	return lease, true, nil
 }
 
-func (f *fakeResetLedger) ReleaseReset(_ context.Context, lease ledger.ResetLease) (bool, error) {
+func (f *fakeResetLedger) ReleaseReset(ctx context.Context, lease ledger.ResetLease) (bool, error) {
 	f.resetMu.Lock()
 	defer f.resetMu.Unlock()
+	f.releaseCtx = ctx
 	f.released = append(f.released, lease)
 	return true, nil
 }
@@ -128,10 +130,12 @@ func newResetTestManager(t *testing.T, runs ledger.Store) (*Manager, *MemoryBack
 
 func TestBeginSessionHistoryResetAcquiresFencesAndReleases(t *testing.T) {
 	t.Parallel()
+	type contextKey struct{}
 	runs := newFakeResetLedger()
 	manager, backend := newResetTestManager(t, runs)
 
-	resetCtx, release, err := manager.BeginSessionHistoryReset(context.Background(), "bot-1", "session-1")
+	ctx := context.WithValue(context.Background(), contextKey{}, "reset-scope")
+	resetCtx, release, err := manager.BeginSessionHistoryReset(ctx, "bot-1", "session-1")
 	if err != nil {
 		t.Fatalf("BeginSessionHistoryReset() error = %v", err)
 	}
@@ -151,6 +155,12 @@ func TestBeginSessionHistoryResetAcquiresFencesAndReleases(t *testing.T) {
 	released := runs.releasedLeases()
 	if len(released) != 1 || released[0].Token != fence.Token || released[0].Scope != ledger.ResetScopeSession {
 		t.Fatalf("durable release = %#v, want the acquired token", released)
+	}
+	runs.resetMu.Lock()
+	releaseCtx := runs.releaseCtx
+	runs.resetMu.Unlock()
+	if got := releaseCtx.Value(contextKey{}); got != "reset-scope" {
+		t.Fatalf("release context value = %v, want reset-scope", got)
 	}
 	if _, blocked, err := backend.EffectiveHistoryReset(context.Background(), ResetScope{BotID: "bot-1", SessionID: "session-1"}); err != nil || blocked {
 		t.Fatalf("live mirror after release = (%v, %v)", blocked, err)

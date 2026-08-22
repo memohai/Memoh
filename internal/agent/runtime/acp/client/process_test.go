@@ -477,6 +477,45 @@ func TestStartBridgeProcessCanRunWithoutBridgeHardTimeout(t *testing.T) {
 	assertEnvHas(t, processRecord.Env, "CODEX_HOME="+path.Join(proc.lease.root, "state"))
 }
 
+func TestSyncLoopKeepsContext(t *testing.T) {
+	type contextKey struct{}
+
+	lifeCtx, cancel := context.WithCancel(
+		context.WithValue(context.Background(), contextKey{}, "runtime-scope"),
+	)
+	observed := make(chan context.Context, 1)
+	var observeOnce sync.Once
+	proc := &bridgeProcess{
+		done:         make(chan struct{}),
+		lifecycleCtx: lifeCtx,
+		lease: &runtimeLease{runtimeSyncGuard: func(ctx context.Context, sync func(context.Context) error) error {
+			observeOnce.Do(func() { observed <- ctx })
+			return sync(ctx)
+		}},
+	}
+	loopDone := make(chan struct{})
+	go func() {
+		proc.syncLoop(time.Millisecond)
+		close(loopDone)
+	}()
+
+	select {
+	case ctx := <-observed:
+		if got := ctx.Value(contextKey{}); got != "runtime-scope" {
+			t.Fatalf("periodic sync context value = %v, want runtime-scope", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("periodic sync did not run")
+	}
+
+	cancel()
+	select {
+	case <-loopDone:
+	case <-time.After(time.Second):
+		t.Fatal("periodic sync did not stop with the process lifecycle")
+	}
+}
+
 func TestStartBridgeProcessUsesContainerToolkitFallback(t *testing.T) {
 	client, server := newRecordingBridgeClient(t)
 	server.setExitCode("command -v codex-acp >/dev/null 2>&1", 127)

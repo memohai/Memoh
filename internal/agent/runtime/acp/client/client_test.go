@@ -322,12 +322,15 @@ func TestSessionCloseRequiresAdvertisedCapability(t *testing.T) {
 }
 
 func TestSessionCloseUsesAdvertisedCapability(t *testing.T) {
+	type contextKey struct{}
+
 	runner, agentPath := newSessionResumeTestRunner(t)
 	capturePath := filepath.Join(t.TempDir(), "close")
 	t.Setenv("MEMOH_ACP_FAKE_AGENT_CLOSE", "1")
 	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_CLOSE_FILE", capturePath)
 
-	sess, err := runner.StartSession(context.Background(), StartRequest{
+	startCtx := context.WithValue(context.Background(), contextKey{}, "session-scope")
+	sess, err := runner.StartSession(startCtx, StartRequest{
 		AgentID:     acpprofile.AgentCodexID,
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
@@ -336,6 +339,9 @@ func TestSessionCloseUsesAdvertisedCapability(t *testing.T) {
 	}, nil)
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
+	}
+	if got := sess.lifecycleCtx.Value(contextKey{}); got != "session-scope" {
+		t.Fatalf("session lifecycle context value = %v, want session-scope", got)
 	}
 	if err := sess.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
