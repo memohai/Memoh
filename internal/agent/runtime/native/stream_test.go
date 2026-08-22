@@ -9,6 +9,8 @@ import (
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	agenttools "github.com/memohai/memoh/internal/agent/tool"
 )
 
 type agentStreamTestProvider func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error)
@@ -154,6 +156,35 @@ func TestAgentStreamCancellationDoesNotWaitForProviderToClose(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("stream did not close after its terminal abort")
 	}
+}
+
+func TestStreamEmitterGateRejectsLateEventsAndWaitsForInFlightSend(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := make(chan StreamEvent)
+	gate := newStreamEmitterGate(ctx, ch)
+
+	sendDone := make(chan struct{})
+	go func() {
+		gate.emit(agenttools.ToolStreamEvent{Type: agenttools.StreamEventSpawnHeartbeat})
+		close(sendDone)
+	}()
+
+	select {
+	case <-sendDone:
+		t.Fatal("emitter returned before a receiver or cancellation")
+	case <-time.After(10 * time.Millisecond):
+	}
+
+	cancel()
+	gate.close()
+	select {
+	case <-sendDone:
+	case <-time.After(time.Second):
+		t.Fatal("gate did not wait for in-flight emitter")
+	}
+
+	gate.emit(agenttools.ToolStreamEvent{Type: agenttools.StreamEventSpawnHeartbeat})
+	close(ch)
 }
 
 func TestAgentStreamPersistsInterruptedInferenceStep(t *testing.T) {
